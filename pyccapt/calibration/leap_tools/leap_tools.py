@@ -348,271 +348,213 @@ def volvis(pos, size=2, alpha=1):
 
 
 
-class RelType(Enum):
-    REL_UNKNOWN = 0
-    ONE_TO_ONE = 1
+class RelationKind(Enum):
+    UNSPECIFIED = 0
+    SINGLE = 1
     INDEXED = (2,)
-    UNRELATED = 3
-    ONE_TO_MANY = 4
+    INDEPENDENT = 3
+    MULTIPLE = 4
 
+class DataCategory(Enum):
+    UNSPECIFIED = 0
+    CONSTANT = 1
+    VARIABLE = 2
+    INDEXED_VARIABLE = 3
 
-class RecordType(Enum):
-    RT_UNKNOWN = 0
-    FIXED_SIZE = 1
-    VARIABLE_SIZE = 2
-    VARIABLE_INDEXED = 3
+class DataFormat(Enum):
+    UNSPECIFIED = 0
+    INTEGER = 1
+    UNSIGNED_INT = 2
+    DECIMAL = 3
+    TEXT = 4
+    CUSTOM = 5
 
+class ByteFormat(Enum):
+    INT_32 = 4
+    INT_64 = 8
+    CHAR = 1
+    WIDE_CHAR = 2
+    TIME_STAMP = 8
 
-class RecordDataType(Enum):
-    DT_UNKNOWN = 0
-    INT = 1
-    UINT = 2
-    FLOAT = 3
-    CHARSTRING = 4
-    OTHER = 5
-
-
-class Dtype(Enum):
-    int32 = 4
-    int64 = 8
-    char = 1
-    wchar_t = 2
-    filetime = 8
-
-
-class RelType(Enum):
-    REL_UNKNOWN = 0
-    ONE_TO_ONE = 1
-    INDEXED = (2,)
-    UNRELATED = 3
-    ONE_TO_MANY = 4
-
-
-class RecordType(Enum):
-    RT_UNKNOWN = 0
-    FIXED_SIZE = 1
-    VARIABLE_SIZE = 2
-    VARIABLE_INDEXED = 3
-
-
-class RecordDataType(Enum):
-    DT_UNKNOWN = 0
-    INT = 1
-    UINT = 2
-    FLOAT = 3
-    CHARSTRING = 4
-    OTHER = 5
-
-
-class Dtype(Enum):
-    int32 = 4
-    int64 = 8
-    char = 1
-    wchar_t = 2
-    filetime = 8
-
-
-def read_apt(filepath: str, verbose: bool = False):
+def read_apt(file_path: str, debug: bool = False) -> pd.DataFrame:
     """
-    Read apt file into a pandas DataFrame
+    Load data from an APT file into a pandas DataFrame.
 
     Args:
-        filepath (str): Path to apt file
-        verbose (bool): Print the structure of the apt file as it is read (for debug purposes)
+        file_path (str): The path to the APT file.
+        debug (bool): If True, print detailed information during loading.
 
     Returns:
-        pandas.DataFrame: A DataFrame containing the apt file data
-
+        pd.DataFrame: A DataFrame containing the loaded data.
     """
 
-    def record_dtype2numpy_dtype(rec_dtype: RecordDataType, size: int):
+    def map_data_type(data_format: DataFormat, bit_size: int):
         """
-        Map a section's record data type to its equivalent numpy dtype
+        Convert a data format and size to the corresponding numpy data type.
         """
-        if rec_dtype in (RecordDataType.UINT, RecordDataType.CHARSTRING):
-            raise ValueError("Cannot map to UINT or CHARSTRING")
+        int_types = {8: np.int8, 16: np.int16, 32: np.int32, 64: np.int64}
+        uint_types = {8: np.uint8, 16: np.uint16, 32: np.uint32, 64: np.uint64}
+        float_types = {32: np.float32, 64: np.float64}
 
-        int_map = {8: np.int8, 16: np.int16, 32: np.int32, 64: np.int64}
-
-        float_map = {32: np.float32, 64: np.float64}
-
-        if rec_dtype == RecordDataType.INT:
-            return int_map[size]
-        elif rec_dtype == RecordDataType.FLOAT:
-            return float_map[size]
+        if data_format == DataFormat.INTEGER:
+            return int_types[bit_size]
+        elif data_format == DataFormat.UNSIGNED_INT:
+            return uint_types[bit_size]
+        elif data_format == DataFormat.DECIMAL:
+            return float_types[bit_size]
         else:
-            raise ValueError(f"Unexpected record data type {rec_dtype}")
+            raise ValueError(f"Unsupported data format: {data_format}")
 
-    # Maps the apt format data type to str format needed for struct.unpack
-    dtype2fmt = {Dtype.int32: "i", Dtype.int64: "q", Dtype.char: "c", Dtype.filetime: "Q", Dtype.wchar_t: "c"}
-
-    # Maps the apt format data type to python data type
-    dtype2constr = {
-        Dtype.int32: int,
-        Dtype.int64: int,
-        Dtype.char: lambda x: x.decode("utf-8"),
-        Dtype.wchar_t: lambda x: x.decode("utf-16"),
-        Dtype.filetime: int,
+    format_map = {
+        ByteFormat.INT_32: "i",
+        ByteFormat.INT_64: "q",
+        ByteFormat.CHAR: "c",
+        ByteFormat.TIME_STAMP: "Q",
+        ByteFormat.WIDE_CHAR: "c",
     }
 
-    with open(filepath, "rb") as dat:
+    type_constructors = {
+        ByteFormat.INT_32: int,
+        ByteFormat.INT_64: int,
+        ByteFormat.CHAR: lambda x: x.decode("utf-8"),
+        ByteFormat.WIDE_CHAR: lambda x: x.decode("utf-16"),
+        ByteFormat.TIME_STAMP: int,
+    }
 
-        def read_chunk(dtype: Dtype, count: int = 1, start: Union[None, int] = None) -> Union[Tuple[Any], Any]:
-            if isinstance(start, int):
-                dat.seek(start)
+    with open(file_path, "rb") as file:
 
-            fmt = dtype2fmt[dtype] * count
-            constructor = dtype2constr[dtype]
-            dtype_size = dtype.value
+        def extract_data(data_type: ByteFormat, num_items: int = 1, position: Union[None, int] = None) -> Union[Tuple[Any], Any]:
+            if isinstance(position, int):
+                file.seek(position)
 
-            if dtype in (Dtype.wchar_t, Dtype.char):
-                return constructor(dat.read(dtype_size * count)).replace("\x00", "")
+            fmt = format_map[data_type] * num_items
+            constructor = type_constructors[data_type]
+            data_size = data_type.value
+
+            if data_type in (ByteFormat.WIDE_CHAR, ByteFormat.CHAR):
+                return constructor(file.read(data_size * num_items)).replace("\x00", "")
             else:
-                retn = struct.unpack("<" + fmt, dat.read(dtype_size * count))
+                result = struct.unpack("<" + fmt, file.read(data_size * num_items))
 
-            if len(retn) == 1:
-                return constructor(retn[0])
+            if len(result) == 1:
+                return constructor(result[0])
             else:
-                return tuple(constructor(i) for i in retn)
+                return tuple(constructor(i) for i in result)
 
-        cSignature = read_chunk(Dtype.char, 4)
+        signature = extract_data(ByteFormat.CHAR, 4)
 
-        # Read the APT file header --------------------------------------------------------------------------------
-        iHeaderSize = read_chunk(Dtype.int32)
-        iHeaderVersion = read_chunk(Dtype.int32)
-        wcFileName = read_chunk(Dtype.wchar_t, 256)
-        ftCreationTime = read_chunk(Dtype.filetime)
-        llIonCount = read_chunk(Dtype.int64)
+        header_size = extract_data(ByteFormat.INT_32)
+        header_version = extract_data(ByteFormat.INT_32)
+        file_name = extract_data(ByteFormat.WIDE_CHAR, 256)
+        creation_time = extract_data(ByteFormat.TIME_STAMP)
+        ion_count = extract_data(ByteFormat.INT_64)
 
-        if verbose:
-            print(f"\nReading header of {filepath}")
-            print(f"\tcSignature: " + cSignature)
-            print(f"\tiHeaderSize: {iHeaderSize}")
-            print(f"\tiHeaderVersion: {iHeaderVersion}")
-            print(f"\twcFileName: {wcFileName}")
-            print(f"\tftCreationTime: {ftCreationTime}")
-            print(f"\t11IonCount: {llIonCount}")
+        if debug:
+            print(f"\nLoading header from {file_path}")
+            print(f"\tSignature: {signature}")
+            print(f"\tHeader Size: {header_size}")
+            print(f"\tHeader Version: {header_version}")
+            print(f"\tFile Name: {file_name}")
+            print(f"\tCreation Time: {creation_time}")
+            print(f"\tIon Count: {ion_count}")
 
-        # Read the APT sections ----------------------------------------------------------------------------
-        section_start = iHeaderSize
-        section_data = {}
+        current_position = header_size
+        data_sections = {}
 
         while True:
-            sec_sig = read_chunk(Dtype.char, 4, section_start)
+            section_signature = extract_data(ByteFormat.CHAR, 4, current_position)
 
-            if sec_sig == "":
-                # EOF reached
+            if section_signature == "":
                 break
 
-            # Flag used to not include a section in the Roi when a configuration
-            # situation is not implemented or handled
-            skip_sec = False
+            skip_section = False
 
-            sec_header_size = read_chunk(Dtype.int32)
-            sec_header_ver = read_chunk(Dtype.int32)
-            sec_type = read_chunk(Dtype.wchar_t, 32)
-            sec_ver = read_chunk(Dtype.int32)
+            section_header_size = extract_data(ByteFormat.INT_32)
+            section_header_version = extract_data(ByteFormat.INT_32)
+            section_name = extract_data(ByteFormat.WIDE_CHAR, 32)
+            section_version = extract_data(ByteFormat.INT_32)
 
-            sec_rel_type = RelType(read_chunk(Dtype.int32))
-            is_one_to_one = sec_rel_type == RelType.ONE_TO_ONE
-            if not is_one_to_one:
-                warn(f'APAV does not handle REL_TYPE != ONE_TO_ONE, section "{sec_type}" will be ignored')
-                skip_sec = True
+            section_relation = RelationKind(extract_data(ByteFormat.INT_32))
+            if section_relation != RelationKind.SINGLE:
+                warn(f'Unsupported relation type: {section_relation}, section "{section_name}" will be skipped')
+                skip_section = True
 
-            sec_rec_type = RecordType(read_chunk(Dtype.int32))
-            is_fixed_size = sec_rec_type == RecordType.FIXED_SIZE
-            if not is_fixed_size:
-                warn(f'APAV does not handle RECORD_TYPE != FIXED_SIZE, section "{sec_type}" will be ignored')
-                skip_sec = True
+            section_category = DataCategory(extract_data(ByteFormat.INT_32))
+            if section_category != DataCategory.CONSTANT:
+                warn(f'Unsupported data category: {section_category}, section "{section_name}" will be skipped')
+                skip_section = True
 
-            sec_rec_dtype = RecordDataType(read_chunk(Dtype.int32))
-            if sec_rec_dtype in (RecordDataType.DT_UNKNOWN, RecordDataType.OTHER, RecordDataType.CHARSTRING):
-                warn(f'APAV does not handle RECORD_TYPE == {sec_rec_dtype}, section "{sec_type}" will be ignored')
-                skip_sec = True
+            section_format = DataFormat(extract_data(ByteFormat.INT_32))
+            if section_format in (DataFormat.UNSPECIFIED, DataFormat.CUSTOM, DataFormat.TEXT):
+                warn(f'Unsupported data format: {section_format}, section "{section_name}" will be skipped')
+                skip_section = True
 
-            sec_dtype_size = read_chunk(Dtype.int32)
-            sec_rec_size = read_chunk(Dtype.int32)
-            sec_data_unit = read_chunk(Dtype.wchar_t, 16)
-            sec_rec_count = read_chunk(Dtype.int64)
-            sec_byte_count = read_chunk(Dtype.int64)
+            section_bit_size = extract_data(ByteFormat.INT_32)
+            section_record_size = extract_data(ByteFormat.INT_32)
+            section_unit = extract_data(ByteFormat.WIDE_CHAR, 16)
+            section_record_count = extract_data(ByteFormat.INT_64)
+            section_byte_count = extract_data(ByteFormat.INT_64)
 
-            if verbose:
-                print("\nReading new section")
-                print(f"\tSection header sig: {sec_sig}")
-                print(f"\tSection header size: {sec_header_size}")
-                print(f"\tSection header version: {sec_header_ver}")
-                print(f"\tSection type: {sec_type}")
-                print(f"\tSection version: {sec_ver}")
-                print(f"\tSection relative type: {sec_rel_type}")
-                print(f"\tSection record type: {sec_rec_type}")
-                print(f"\tSection record data type: {sec_rec_dtype}")
-                print(f"\tSection data type size (bits): {sec_dtype_size}")
-                print(f"\tSection record size: {sec_rec_size}")
-                print(f"\tSection data type unit: {sec_data_unit}")
-                print(f"\tSection record count: {sec_rec_count}")
-                print(f"\tSection byte count: {sec_byte_count}")
+            if debug:
+                print("\nLoading new section")
+                print(f"\tSection Signature: {section_signature}")
+                print(f"\tSection Header Size: {section_header_size}")
+                print(f"\tSection Header Version: {section_header_version}")
+                print(f"\tSection Name: {section_name}")
+                print(f"\tSection Version: {section_version}")
+                print(f"\tSection Relation: {section_relation}")
+                print(f"\tSection Category: {section_category}")
+                print(f"\tSection Format: {section_format}")
+                print(f"\tSection Bit Size: {section_bit_size}")
+                print(f"\tSection Record Size: {section_record_size}")
+                print(f"\tSection Unit: {section_unit}")
+                print(f"\tSection Record Count: {section_record_count}")
+                print(f"\tSection Byte Count: {section_byte_count}")
 
-            if not skip_sec:
-                columns = int(sec_rec_size / (sec_dtype_size / 8))
-                records = int(sec_rec_count)
-                count = records * columns
-                in_data = np.fromfile(
-                    filepath,
-                    record_dtype2numpy_dtype(sec_rec_dtype, sec_dtype_size),
-                    count,
-                    offset=section_start + sec_header_size,
+            if not skip_section:
+                num_columns = int(section_record_size / (section_bit_size / 8))
+                num_records = int(section_record_count)
+                total_items = num_records * num_columns
+                section_data = np.fromfile(
+                    file_path,
+                    map_data_type(section_format, section_bit_size),
+                    total_items,
+                    offset=current_position + section_header_size,
                 )
-                if columns > 1:
-                    section_data[sec_type] = in_data.reshape(records, columns)
+                if num_columns > 1:
+                    data_sections[section_name] = section_data.reshape(num_records, num_columns)
                 else:
-                    section_data[sec_type] = in_data
+                    data_sections[section_name] = section_data
 
-            section_start = section_start + sec_byte_count + sec_header_size
+            current_position = current_position + section_byte_count + section_header_size
 
-    has_mass_data = "Mass" in section_data.keys()
-    has_pos_data = "Position" in section_data.keys()
+    has_mass = "Mass" in data_sections.keys()
+    has_position = "Position" in data_sections.keys()
 
-    # Map some APT section names to those that APAV expects, otherwise the provided name is retained
-    name_map = {
-        "Multiplicity": "ipp",
-        "Time of Flight": "tof",
-        "XDet_mm": "det_x",
-        "YDet_mm": "det_y",
-        "Voltage": "dc_voltage",
-        "Pulse Voltage": "pulse_voltage",
-    }
+    if not has_mass:
+        raise AttributeError("APT file must include a mass section")
+    elif not has_position:
+        raise AttributeError("APT file must include a position section")
 
-    # Require mass and position data, clean up some sections, and account for possible duplicate sections (i.e.
-    # XDet_mm + YDet_mm combined with Detector Coordinates
-    if not has_mass_data:
-        raise AttributeError("APT file must have include a mass section")
-    elif not has_pos_data:
-        raise AttributeError("APT file must have include a position section")
+    if "Detector Coordinates" in data_sections.keys():
+        temp = data_sections.pop("Detector Coordinates")
+        if "XDet_mm" not in data_sections.keys():
+            data_sections["XDet_mm"] = temp[:, 0]
+        if "YDet_mm" not in data_sections.keys():
+            data_sections["YDet_mm"] = temp[:, 1]
 
-    # There are 2 difference ways that detector space coordinates can be included in an apt file, as a single
-    # section containing both x/y or the x and y in separate sections. Only when the separate x/y sections are not
-    # present we will load the combined x/y data (which we separate into different x and y arrays).
-    if "Detector Coordinates" in section_data.keys():
-        temp = section_data.pop("Detector Coordinates")
-        if "XDet_mm" not in section_data.keys():
-            section_data["det_x"] = temp[:, 0]
-        if "YDet_mm" not in section_data.keys():
-            section_data["det_y"] = temp[:, 1]
+    if "Position" in data_sections.keys():
+        temp = data_sections.pop("Position")
+        if "x" not in data_sections.keys():
+            data_sections["x"] = temp[:, 0]
+        if "y" not in data_sections.keys():
+            data_sections["y"] = temp[:, 1]
+        if "z" not in data_sections.keys():
+            data_sections["z"] = -1 * temp[:, 2]
 
-    if "Position" in section_data.keys():
-        temp = section_data.pop("Position")
-        if "x" not in section_data.keys():
-            section_data["x"] = temp[:, 0]
-        if "y" not in section_data.keys():
-            section_data["y"] = temp[:, 1]
-        if "z" not in section_data.keys():
-            section_data["z"] = temp[:, 2]
-
-    if "Position" in section_data.keys():
-        pos = section_data.pop("Position")
-    if "Detector Coordinates" in section_data.keys():
-        detector_coordinates = section_data.pop("Detector Coordinates")
-
-    df = pd.DataFrame(section_data)
+    if debug:
+        for section in data_sections.keys():
+            print(f"Section: {section} - {data_sections[section].shape} - {data_sections[section].dtype} - {data_sections[section]}")
+    df = pd.DataFrame(data_sections)
 
     return df

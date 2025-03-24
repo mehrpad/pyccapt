@@ -35,24 +35,29 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld') -> pd.DataFram
                 raise FileNotFoundError
             dld_highVoltage = hdf5Data['dld/high_voltage'].to_numpy()
             if 'dld/pulse' in hdf5Data:
-                dld_voltage_pulse = hdf5Data['dld/pulse'].to_numpy()
+                dld_pulse_v = hdf5Data['dld/pulse'].to_numpy()
             elif 'dld/voltage_pulse' in hdf5Data:
-                dld_voltage_pulse = hdf5Data['dld/voltage_pulse'].to_numpy()
+                dld_pulse_v = hdf5Data['dld/voltage_pulse'].to_numpy()
             elif 'dld/pulse_voltage' in hdf5Data:
-                dld_voltage_pulse = hdf5Data['dld/pulse_voltage'].to_numpy()
+                dld_pulse_v = hdf5Data['dld/pulse_voltage'].to_numpy()
             else:
-                raise KeyError('Neither dld/pulse nor dld/voltage_pulse exists in the dataset')
-            if 'dld/laser_pulse' in hdf5Data:
-                dld_laser_pulse = hdf5Data['dld/laser_pulse'].to_numpy()
+                dld_pulse_v = np.zeros(len(dld_highVoltage))
+                dld_pulse_v = np.expand_dims(dld_pulse_v, axis=1)
+            if 'dld/laser_intensity' in hdf5Data:
+                dld_pulse_l = hdf5Data['dld/laser_intensity'].to_numpy()
             else:
-                dld_laser_pulse = np.expand_dims(np.zeros(len(dld_highVoltage)), axis=1)
-
-            dld_startCounter = hdf5Data['dld/start_counter'].to_numpy()
+                dld_pulse_l = np.zeros(len(dld_highVoltage))
+                dld_pulse_l = np.expand_dims(dld_pulse_l, axis=1)
+            if 'dld/start_counter' in hdf5Data:
+                dld_startCounter = hdf5Data['dld/start_counter'].to_numpy()
+            else:
+                dld_startCounter = np.zeros(len(dld_highVoltage))
+                dld_startCounter = np.expand_dims(dld_startCounter, axis=1)
             dld_t = hdf5Data['dld/t'].to_numpy()
             dld_x = hdf5Data['dld/x'].to_numpy()
             dld_y = hdf5Data['dld/y'].to_numpy()
             dldGroupStorage = np.concatenate(
-                (dld_highVoltage, dld_voltage_pulse, dld_startCounter, dld_t, dld_x, dld_y),
+                (dld_highVoltage, dld_pulse_v, dld_pulse_l, dld_startCounter, dld_t, dld_x, dld_y),
                                              axis=1)
             dld_group_storage = create_pandas_dataframe(dldGroupStorage, mode='dld')
             return dld_group_storage
@@ -149,7 +154,10 @@ def plot_crop_experiment_history(data: pd.DataFrame, variables, max_tof, frac=1.
     tof = dldGroupStorage['t (ns)'].to_numpy()
     high_voltage = data['high_voltage (V)'].to_numpy()
     high_voltage = high_voltage / 1000  # change to kV
-    pulse = dldGroupStorage['pulse'].to_numpy()
+    if pulse_mode == 'laser':
+        pulse = dldGroupStorage['pulse_l (pJ)'].to_numpy()
+    elif pulse_mode == 'voltage':
+        pulse = dldGroupStorage['pulse_v (V)'].to_numpy()
 
     xaxis = np.arange(len(tof))
 
@@ -498,14 +506,15 @@ def create_pandas_dataframe(data_crop, mode='dld'):
     """
     if mode == 'dld':
         hdf_dataframe = pd.DataFrame(data=data_crop,
-                                     columns=['high_voltage (V)', 'pulse', 'start_counter', 't (ns)',
+                                     columns=['high_voltage (V)', 'pulse_v (V)',
+                                              'pulse_l (pJ)', 'start_counter', 't (ns)',
                                               'x_det (cm)', 'y_det (cm)'])
 
         hdf_dataframe['start_counter'] = hdf_dataframe['start_counter'].astype('uint32')
     elif mode == 'tdc_sc':
         hdf_dataframe = pd.DataFrame(data=data_crop,
-                                     columns=['channel', 'start_counter', 'high_voltage (V)', 'pulse',
-                                              'time_data'])
+                                     columns=['channel', 'start_counter', 'high_voltage (V)', 'pulse_v (V)',
+                                              'pulse_l (pJ)', 'time_data'])
 
         hdf_dataframe['channel'] = hdf_dataframe['channel'].astype('uint32')
         hdf_dataframe['start_counter'] = hdf_dataframe['start_counter'].astype('uint32')

@@ -100,7 +100,7 @@ def store_df_to_hdf(dataframe: "dataframe which is to be stored in h5 file",
     """
         This function stores dataframe to hdf5 file.
 
-        Atrributes:
+        Attributes:
             filename: filename of hdf5 where dataframes needs to stored
             dataframe: dataframe that needs to be stored.
             key: Key that defines hierarchy of the hdf5
@@ -114,7 +114,7 @@ def store_df_to_csv(data, path):
     """
         This function stores dataframe to csv file.
 
-        Atrributes:
+        Attributes:
             path: filename of hdf5 where dataframes needs to stored
             data: data that needs to be stored.
         Returns:
@@ -237,6 +237,12 @@ def load_data(dataset_path, data_type, mode='processed'):
         data = data_loadcrop.fetch_dataset_from_dld_grp(dataset_path)
     elif data_type == 'pyccapt' and mode == 'processed':
         data = pd.read_hdf(dataset_path, mode='r')
+        if 'pulse_v (V)' not in data.columns:
+            # create a new colum at the index of 'pulse' and remove the old one
+            data.insert(data.columns.get_loc('pulse') + 1, 'pulse_v (V)', data['pulse'])
+            data.drop('pulse', axis=1, inplace=True)
+        if 'pulse_l (pJ)' not in data.columns:
+            data.insert(data.columns.get_loc('pulse_v (V)') + 1, 'pulse_l (pJ)', np.zeros_like(data['high_voltage (V)']))
     return data
 
 
@@ -255,7 +261,14 @@ def extract_data(data, variables, flightPathLength_d, max_mc):
     """
 
     variables.dld_high_voltage = data['high_voltage (V)'].to_numpy()
-    variables.dld_pulse = data['pulse'].to_numpy()
+    if 'pulse_v (V)' not in data.columns:
+        variables.dld_pulse_v = data['pulse'].to_numpy()
+    else:
+        variables.dld_pulse_v = data['pulse_v (V)'].to_numpy()
+    if 'pulse_l (pJ)' not in data.columns:
+        variables.dld_pulse_l = np.zeros_like(variables.dld_high_voltage)
+    else:
+        variables.dld_pulse_l = data['pulse_l (pJ)'].to_numpy()
     variables.dld_t = data['t (ns)'].to_numpy()
     variables.dld_x_det = data['x_det (cm)'].to_numpy()
     variables.dld_y_det = data['y_det (cm)'].to_numpy()
@@ -298,7 +311,8 @@ def pyccapt_raw_to_processed(data):
     data_processed['mc (Da)'] = np.zeros(len(data))
     data_processed['mc_uc (Da)'] = np.zeros(len(data))
     data_processed['high_voltage (V)'] = data['high_voltage (V)'].to_numpy()
-    data_processed['pulse'] = data['pulse'].to_numpy()
+    data_processed['pulse_v (V)'] = data['pulse_v (V)'].to_numpy()
+    data_processed['pulse_l (pJ)'] = data['pulse_l (pJ)'].to_numpy()
     data_processed['t (ns)'] = data['t (ns)'].to_numpy()
     data_processed['t_c (ns)'] = np.zeros(len(data))
     data_processed['x_det (cm)'] = data['x_det (cm)'].to_numpy()

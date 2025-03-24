@@ -19,7 +19,7 @@ def plot_density_map(x, y, z_weigth=False, log=True, bins=(256, 256), frac=1.0, 
                      save=False, figname='disparity_map', cmap='plasma',
                      normalize=False, normalize_axes=False):
     """
-    Plot and crop the FDM with the option to select a region of interest.
+    Plot and crop the density map with the option to select a region of interest.
 
     Args:
         x: x-axis data

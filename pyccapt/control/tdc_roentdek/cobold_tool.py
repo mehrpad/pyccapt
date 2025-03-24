@@ -42,17 +42,22 @@ def copy_xytof_from_cobold_txt_to_hdf5(txt_path, save_path):
         del file['dld/x']
         del file['dld/y']
         del file['dld/t']
-        del file['dld/start_counter']
+        # del file['dld/start_counter']
+        del file['dld/AbsoluteTimeStamp']
+        laser_intensity =  file['dld/laser_intensity'][:]
+        del file['dld/laser_intensity']
 
         file.create_dataset('dld/x', data=xx)
         file.create_dataset('dld/y', data=yy)
         file.create_dataset('dld/t', data=tof)
         file.create_dataset('dld/start_counter', data=np.arange(len(xx)), dtype='i')
+        file.create_dataset('dld/pulse', data=laser_intensity, dtype='i')
 
         x = file['dld/x'][:]
         y = file['dld/y'][:]
         t = file['dld/t'][:]
         dc_v = file['dld/high_voltage'][:]
+        # pulse = file['dld/pulse'][:]
         pulse = file['dld/pulse'][:]
         sc = file['dld/start_counter'][:]
     print('multi event length:', len(tof_2[tof_2 != 0]) + len(tof_3[tof_3 != 0]) + len(tof_4[tof_4 != 0]))
@@ -165,8 +170,8 @@ def laser_pulse_energy_from_mat_file(mat_path, source_file, target_file):
 
 
 if __name__ == "__main__":
-    txt_path = '../../../tests/data/physics_experiment/data_204_Feb-01-2024_11-51_Constant_power_W.txt'
-    save_path = '../../../tests/data/physics_experiment/data_204_Feb-01-2024_11-51_Constant_power_W.h5'
+    txt_path = 'E:/Jonas/227_Feb-18-2025_08-57_W_poly/output_DAn.txt'
+    save_path = 'E:/Jonas/227_Feb-18-2025_08-57_W_poly/data_227_Feb-18-2025_08-57_W_poly.h5'
     copy_xytof_from_cobold_txt_to_hdf5(txt_path, save_path)
     # mat_path = 'T:/Monajem/physics_atom_probe_data/Backup_data/Power_vals_calibration.mat'
     # source_file = ('T:/Monajem/physics_atom_probe_data/Backup_data/Measurements_2024_02_01/'

@@ -52,7 +52,7 @@ def pol2cart(rho, phi):
 
 def atom_probe_recons_from_detector_Gault_et_al(detx, dety, hv, flight_path_length, kf, det_eff, icf, field_evap, avg_dens):
     """
-    Perform atom probe reconstruction using Gault et al.'s method.
+    Perform atom probe reconstruction using Geiser et al.'s method.
 
     Args:
         detx (float): Hit position on the detector (x-coordinate).
@@ -70,17 +70,26 @@ def atom_probe_recons_from_detector_Gault_et_al(detx, dety, hv, flight_path_leng
         float: y-coordinates of reconstructed atom positions in nm.
         float: z-coordinates of reconstructed atom positions in nm.
     """
+    print(kf)
+    print(field_evap)
+    print(icf)
+    print(flight_path_length)
+    print(avg_dens)
+    print(det_eff)
+    print(detx)
+    print(dety)
+    print(hv)
     # Convert detector coordinates to polar form
-    rad, ang = cart2pol(detx * 1E-2, dety * 1E-2)
+    rad, ang = cart2pol(detx * 1E1, dety * 1E1)
 
     # Calculate effective detector area
     det_area = (np.max(rad) ** 2) * np.pi
 
     # Calculate radius evolution
-    radius_evolution = hv / (kf * (field_evap / 1E-9))
+    radius_evolution = hv / (kf * field_evap)
 
     # Calculate launch angle relative to specimen axis
-    theta_p = np.arctan(rad / (flight_path_length * 1E-3))
+    theta_p = np.arctan(rad / flight_path_length)
 
     # Calculate theta normal (image compression correction)
     theta_a = theta_p + np.arcsin((icf - 1) * np.sin(theta_p))
@@ -93,19 +102,32 @@ def atom_probe_recons_from_detector_Gault_et_al(detx, dety, hv, flight_path_leng
     # the z shift with respect to the top of the cap is Rspec - zP
     # z_p = radius_evolution * (1 - np.cos(theta_a))
     z_p = radius_evolution - z_p
-    omega = 1E-9 ** 3 / avg_dens
+    omega = 1 / avg_dens
+    omega = omega / det_eff
 
+    M = flight_path_length / (icf * radius_evolution)
+
+    spec_area = det_area / M ** 2
+
+    dz = omega / spec_area
     # icf_2 = theta_a / theta_p
     # dz = (omega * ((flight_path_length * 1E-3) ** 2) * (kf ** 2) * ((field_evap / 1E-9) ** 2)) / (
     #         det_area * det_eff * (icf_2 ** 2) * (hv ** 2))
 
-    dz = (omega * ((flight_path_length * 1E-3) ** 2) * (kf ** 2) * ((field_evap / 1E-9) ** 2)) / (
-            det_area * det_eff * (icf ** 2) * (hv ** 2))
+    # dz_o = (omega * ((flight_path_length * 1E-3) ** 2) * (kf ** 2) * ((field_evap / 1E-9) ** 2)) / (
+    #         det_area * det_eff * (icf ** 2) * (hv ** 2))
+
+    # dz = avg_dens * flight_path_length ** 2 * kf ** 2 * field_evap ** 2 / (det_area * det_eff * icf ** 2 * hv ** 2)
+
+    # assert dz.any() != dz_o.any(), 'dz is not equal to dz_o'
+    # check if dz has any NaN of inf values
+    assert not np.isnan(dz).any(), 'dz has NaN values'
+    assert not np.isinf(dz).any(), 'dz has inf values'
 
     cum_z = np.cumsum(dz)
     z = cum_z + z_p
 
-    return x * 1E9, y * 1E9, z * 1E9
+    return x, y, z
 
 
 def atom_probe_recons_Bas_et_al(detx, dety, hv, flight_path_length, kf, det_eff, icf, field_evap, avg_dens):
@@ -460,12 +482,27 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
         }
     )
 
+    # x_range = [min(variables.x), max(variables.x)]
+    # y_range = [min(variables.y), max(variables.y)]
+    # z_range = [min(variables.z), max(variables.z)]
+    #
+    # x_len = x_range[1] - x_range[0]
+    # y_len = y_range[1] - y_range[0]
+    # z_len = z_range[1] - z_range[0]
+    #
+    # aspect_ratio = dict(x=x_len, y=y_len, z=z_len)
+    #
+    # fig.update_layout(scene=dict(aspectratio=aspect_ratio))
+
+    fig.update_layout(scene=dict(aspectmode='data', aspectratio=dict(x=1, y=1, z=1)))
     # Show the plot in the Jupyter cell output
     variables.plotly_3d_reconstruction = go.FigureWidget(fig)
 
-    fig.show(config=config)
+
     if not colab:
         pio.renderers.default = 'browser'
+        fig.show(config=config)
+    else:
         fig.show(config=config)
 
     if save:

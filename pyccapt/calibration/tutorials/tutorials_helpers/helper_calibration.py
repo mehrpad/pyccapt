@@ -230,7 +230,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                 elif calibration_mode.value == 'mc_calib':
                     calibration_mode_t = 'mc'
                 if pulse_mode == 'voltage':
-                    voltage = variables.dld_high_voltage + (0.7 * variables.dld_pulse)
+                    voltage = variables.dld_high_voltage + (0.7 * variables.dld_pulse_v)
                 elif pulse_mode == 'laser':
                     voltage = variables.dld_high_voltage
 
@@ -320,7 +320,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                 elif calibration_mode.value == 'mc_calib':
                     calibration_mode_t = 'mc'
                 if pulse_mode == 'voltage':
-                    voltage = variables.dld_high_voltage + (0.7 * variables.dld_pulse)
+                    voltage = variables.dld_high_voltage + (0.7 * variables.dld_pulse_v)
                 elif pulse_mode == 'laser':
                     voltage = variables.dld_high_voltage
                 print('------------------Bowl Calibration---------------------')

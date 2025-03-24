@@ -53,7 +53,7 @@ def call_fine_tune_t_0(variables, flightPathLength, pulse_mode, t0):
             figure_size = (figure_size_x.value, figure_size_y.value)
             variables.mc_uc = mc_tools.tof2mc(variables.dld_t, t0_d_value, variables.dld_high_voltage,
                                                  variables.dld_x_det, variables.dld_y_det, flightPathLength_value,
-                                                 variables.dld_pulse, mode=pulse_mode.value)
+                                                 variables.dld_pulse_v, mode=pulse_mode.value)
             if target_value == 'mc':
                 mc_hist = mc_plot.AptHistPlotter(variables.mc_uc[variables.mc_uc < lim_value], variables)
                 mc_hist.plot_histogram(bin_width=bin_size_value, normalize=mode_value, label='mc', steps='stepfilled',

@@ -134,60 +134,67 @@ def copy_npy_to_hdf_surface_concept(path, hdf5_file_name):
 
 
 def load_and_copy_chunks_to_hdf(path, hdf5_file_path, chunk_id):
-    def load_data(attr_name):
-        all_data = []
-        for i in range(1, chunk_id + 1):
-            chunk_file = path + f"/{attr_name}_chunk_{i}.npy"
-            if os.path.exists(chunk_file):
-                all_data.extend(np.load(chunk_file).tolist())
-            else:
-                print(f"File '{chunk_file}' not found.")
-        print(f"Loaded {attr_name} data from {len(all_data)} chunks")
-        return all_data
+    with h5py.File(hdf5_file_path, 'r+') as hdf_file:
+        # Delete existing datasets (if needed)
+        for group in ['dld', 'tdc']:
+            if group in hdf_file:
+                for name in list(hdf_file[group].keys()):
+                    del hdf_file[f'{group}/{name}']
 
-    xx_list = load_data("x_data")
-    yy_list = load_data("y_data")
-    tt_list = load_data("t_data")
-    voltage_data = load_data("voltage_data")
-    voltage_pulse_data = load_data("voltage_pulse_data")
-    laser_pulse_data = load_data("laser_pulse_data")
-    start_counter = load_data("start_counter")
+        # Create empty datasets with appropriate shapes and dtypes
+        def create_empty_dataset(group_name, chunk_name, dataset_name, dtype):
+            total_size = 0
+            for i in range(1, chunk_id + 1):
+                chunk_file = path + f"/{chunk_name}_chunk_{i}.npy"
+                if os.path.exists(chunk_file):
+                    chunk_data = np.load(chunk_file)
+                    total_size += chunk_data.shape[0]
+            if total_size > 0:
+                hdf_file.create_dataset(f'{group_name}/{dataset_name}', (total_size,), dtype=dtype)
 
-    channel_data = load_data("channel_data")
-    time_data = load_data("time_data")
-    tdc_start_counter = load_data("tdc_start_counter")
-    voltage_data_tdc = load_data("voltage_data_tdc")
-    voltage_pulse_data_tdc = load_data("voltage_pulse_data_tdc")
-    laser_pulse_data_tdc = load_data("laser_pulse_data_tdc")
+        create_empty_dataset('dld', 't_data', 't', np.float64)
+        create_empty_dataset('dld', 'x_data', 'x', np.float64)
+        create_empty_dataset('dld', 'y_data', 'y', np.float64)
+        create_empty_dataset('dld', 'voltage_pulse_data', 'voltage_pulse', np.float64)
+        create_empty_dataset('dld', 'laser_pulse_data', 'laser_pulse', np.float64)
+        create_empty_dataset('dld', 'voltage_data', 'high_voltage', np.float64)
+        create_empty_dataset('dld', 'start_counter', 'start_counter', np.uint64)
 
-    with h5py.File(hdf5_file_path, 'r+') as file:
-        del file['dld/t']
-        del file['dld/x']
-        del file['dld/y']
-        del file['dld/voltage_pulse']
-        del file['dld/laser_pulse']
-        del file['dld/high_voltage']
-        del file['dld/start_counter']
-        file.create_dataset('dld/t', data=tt_list, dtype=np.float64)
-        file.create_dataset('dld/x', data=xx_list, dtype=np.float64)
-        file.create_dataset('dld/y', data=yy_list, dtype=np.float64)
-        file.create_dataset('dld/voltage_pulse', data=voltage_pulse_data, dtype=np.float64)
-        file.create_dataset('dld/laser_pulse', data=laser_pulse_data, dtype=np.float64)
-        file.create_dataset('dld/high_voltage', data=voltage_data, dtype=np.float64)
-        file.create_dataset('dld/start_counter', data=start_counter, dtype=np.uint64)
+        create_empty_dataset('tdc', 'channel_data', 'channel', np.uint32)
+        create_empty_dataset('tdc', 'voltage_data_tdc', 'high_voltage', np.float64)
+        create_empty_dataset('tdc', 'voltage_pulse_data_tdc', 'voltage_pulse', np.float64)
+        create_empty_dataset('tdc', 'laser_pulse_data_tdc', 'laser_pulse', np.float64)
+        create_empty_dataset('tdc', 'tdc_start_counter', 'start_counter', np.uint64)
+        create_empty_dataset('tdc', 'time_data', 'time_data', np.uint64)
 
-        del file['tdc/channel']
-        del file['tdc/high_voltage']
-        del file['tdc/voltage_pulse']
-        del file['tdc/laser_pulse']
-        del file['tdc/start_counter']
-        del file['tdc/time_data']
-        file.create_dataset('tdc/channel', data=channel_data, dtype=np.uint32)
-        file.create_dataset('tdc/high_voltage', data=voltage_data_tdc, dtype=np.float64)
-        file.create_dataset('tdc/voltage_pulse', data=voltage_pulse_data_tdc, dtype=np.float64)
-        file.create_dataset('tdc/laser_pulse', data=laser_pulse_data_tdc, dtype=np.float64)
-        file.create_dataset('tdc/start_counter', data=tdc_start_counter, dtype=np.uint64)
-        file.create_dataset('tdc/time_data', data=time_data, dtype=np.uint64)
+        # Write data chunk by chunk
+        def write_chunked_data(group_name, dataset_name, dataset_name_new):
+            offset = 0
+            for i in range(1, chunk_id + 1):
+                chunk_file = path + f"/{dataset_name_new}_chunk_{i}.npy"
+                if os.path.exists(chunk_file):
+                    chunk_data = np.load(chunk_file)
+                    chunk_size = chunk_data.shape[0]
+                    hdf_file[f'{group_name}/{dataset_name}'][offset:offset + chunk_size] = chunk_data
+                    offset += chunk_size
+                else:
+                    print(f"File '{chunk_file}' not found.")
+            print(f"Written {dataset_name} data.")
+
+        write_chunked_data('dld', 't', 't_data')
+        write_chunked_data('dld', 'x', 'x_data')
+        write_chunked_data('dld', 'y', 'y_data')
+        write_chunked_data('dld', 'voltage_pulse', 'voltage_pulse_data')
+        write_chunked_data('dld', 'laser_pulse', 'laser_pulse_data')
+        write_chunked_data('dld', 'high_voltage', 'voltage_data')
+        write_chunked_data('dld', 'start_counter', 'start_counter')
+
+        write_chunked_data('tdc', 'channel', 'channel_data')
+        write_chunked_data('tdc', 'high_voltage', 'voltage_data_tdc')
+        write_chunked_data('tdc', 'voltage_pulse', 'voltage_pulse_data_tdc')
+        write_chunked_data('tdc', 'start_counter', 'tdc_start_counter')
+        write_chunked_data('tdc', 'time_data', 'time_data')
+        write_chunked_data('tdd', 'laser_pulse', 'laser_pulse_data_tdc')
 
 
 def crop_dataset_to_new_file(original_path, new_path, num_of_samples):
@@ -243,8 +250,8 @@ def crop_dataset_to_new_file(original_path, new_path, num_of_samples):
 
 
 if __name__ == '__main__':
-    name = '2382_Jan-10-2025_15-12_NiC9_Al.h5'
-    path = 'C:/Users/LokalAdmin/Downloads//%s' % name
+    name = '2423_Mar-14-2025_14-52_NiC9_Al2'
+    path = 'T:/Ott/APT_Measurements/Oxcart/%s/' % name
     new_path = 'C:/Users/LokalAdmin/Downloads//%s' % 'cropped_' + name
     name = '%s.h5' % name
     # copy_npy_to_hdf(path, name)
@@ -252,6 +259,6 @@ if __name__ == '__main__':
     # rename_subcategory(path + name, old_name='dld', new_name='dld_1')
     # copy_npy_to_hdf_surface_concept(path+'/temp_data/', name)
     # rename_subcategory(path + name, old_name='tdc/voltage_laser', new_name='tdc/laser_pulse')
-    # load_and_copy_chunks_to_hdf(path + '/temp_data/chunks/', path + name, 389)
-    crop_dataset_to_new_file(path, new_path, 500000)
+    load_and_copy_chunks_to_hdf(path + '/temp_data/chunks/', path + name, 1220)
+    # crop_dataset_to_new_file(path, new_path, 500000)
     print('Done')

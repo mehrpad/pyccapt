@@ -112,10 +112,10 @@ def save_chunk_worker(save_queue):
 
 def load_and_concatenate_chunks(path, chunk_id):
     attr_names = [
-        "x_bin", "x_data", "y_bin", "y_data", "t_bin", "t_data",
-        "voltage_data", "voltage_pulse_data", "laser_pulse_data",
-        "start_counter", "channel_data", "time_data", "tdc_start_counter",
-        "voltage_data_tdc", "voltage_pulse_data_tdc", "laser_pulse_data_tdc"
+        "x_bin", "x", "y_bin", "y", "t_bin", "t",
+        "voltage", "voltage_pulse", "laser_pulse",
+        "start_counter", "channel", "time", "tdc_start_counter",
+        "voltage_tdc", "voltage_pulse_tdc", "laser_pulse_tdc"
     ]
 
     all_data = {attr: [] for attr in attr_names}  # Initialize storage
@@ -318,21 +318,21 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
             chunk_id += 1
             chunk_data = {
                 "x_bin": xx_list_bin[:CHUNK_SIZE],
-                "x_data": xx[:CHUNK_SIZE],
+                "x": xx[:CHUNK_SIZE],
                 "y_bin": yy_list_bin[:CHUNK_SIZE],
-                "y_data": yy[:CHUNK_SIZE],
+                "y": yy[:CHUNK_SIZE],
                 "t_bin": tt_list_bin[:CHUNK_SIZE],
-                "t_data": tt[:CHUNK_SIZE],
-                "voltage_data": voltage_data[:CHUNK_SIZE],
-                "voltage_pulse_data": voltage_pulse_data[:CHUNK_SIZE],
-                "laser_pulse_data": laser_pulse_data[:CHUNK_SIZE],
+                "t": tt[:CHUNK_SIZE],
+                "voltage": voltage_data[:CHUNK_SIZE],
+                "voltage_pulse": voltage_pulse_data[:CHUNK_SIZE],
+                "laser_pulse": laser_pulse_data[:CHUNK_SIZE],
                 "start_counter": start_counter[:CHUNK_SIZE],
-                "channel_data": channel_data[:CHUNK_SIZE],
-                "time_data": time_data[:CHUNK_SIZE],
+                "channel": channel_data[:CHUNK_SIZE],
+                "time": time_data[:CHUNK_SIZE],
                 "tdc_start_counter": tdc_start_counter[:CHUNK_SIZE],
-                "voltage_data_tdc": voltage_data_tdc[:CHUNK_SIZE],
-                "voltage_pulse_data_tdc": voltage_pulse_data_tdc[:CHUNK_SIZE],
-                "laser_pulse_data_tdc": laser_pulse_data_tdc[:CHUNK_SIZE],
+                "voltage_tdc": voltage_data_tdc[:CHUNK_SIZE],
+                "voltage_pulse_tdc": voltage_pulse_data_tdc[:CHUNK_SIZE],
+                "laser_pulse_tdc": laser_pulse_data_tdc[:CHUNK_SIZE],
             }
 
             # Send chunk data to saving process (non-blocking)
@@ -360,21 +360,21 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
         chunk_id += 1
         chunk_data = {
             "x_bin": xx_list_bin[:CHUNK_SIZE],
-            "x_data": xx[:CHUNK_SIZE],
+            "x": xx[:CHUNK_SIZE],
             "y_bin": yy_list_bin[:CHUNK_SIZE],
-            "y_data": yy[:CHUNK_SIZE],
+            "y": yy[:CHUNK_SIZE],
             "t_bin": tt_list_bin[:CHUNK_SIZE],
-            "t_data": tt[:CHUNK_SIZE],
-            "voltage_data": voltage_data[:CHUNK_SIZE],
-            "voltage_pulse_data": voltage_pulse_data[:CHUNK_SIZE],
-            "laser_pulse_data": laser_pulse_data[:CHUNK_SIZE],
+            "t": tt[:CHUNK_SIZE],
+            "voltage": voltage_data[:CHUNK_SIZE],
+            "voltage_pulse": voltage_pulse_data[:CHUNK_SIZE],
+            "laser_pulse": laser_pulse_data[:CHUNK_SIZE],
             "start_counter": start_counter[:CHUNK_SIZE],
-            "channel_data": channel_data[:CHUNK_SIZE],
+            "channel": channel_data[:CHUNK_SIZE],
             "time_data": time_data[:CHUNK_SIZE],
             "tdc_start_counter": tdc_start_counter[:CHUNK_SIZE],
-            "voltage_data_tdc": voltage_data_tdc[:CHUNK_SIZE],
-            "voltage_pulse_data_tdc": voltage_pulse_data_tdc[:CHUNK_SIZE],
-            "laser_pulse_data_tdc": laser_pulse_data_tdc[:CHUNK_SIZE],
+            "voltage_tdc": voltage_data_tdc[:CHUNK_SIZE],
+            "voltage_pulse_tdc": voltage_pulse_data_tdc[:CHUNK_SIZE],
+            "laser_pulse_tdc": laser_pulse_data_tdc[:CHUNK_SIZE],
         }
         save_queue.put((chunk_id, path, chunk_data))
         save_queue.put(None)  # Signal the save process to end
@@ -390,12 +390,12 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
     save_process.join()  # Wait for the save process to finish
 
     # save DLD data
-    np.save(variables.path + "/temp_data/x_data.npy", np.array(xx))
-    np.save(variables.path + "/temp_data/y_data.npy", np.array(yy))
-    np.save(variables.path + "/temp_data/t_data.npy", np.array(tt))
-    np.save(variables.path + "/temp_data/voltage_data.npy", np.array(voltage_data))
-    np.save(variables.path + "/temp_data/voltage_pulse_data.npy", np.array(voltage_pulse_data))
-    np.save(variables.path + "/temp_data/laser_pulse_data.npy", np.array(laser_pulse_data))
+    np.save(variables.path + "/temp_data/x.npy", np.array(xx))
+    np.save(variables.path + "/temp_data/y.npy", np.array(yy))
+    np.save(variables.path + "/temp_data/t.npy", np.array(tt))
+    np.save(variables.path + "/temp_data/voltage.npy", np.array(voltage_data))
+    np.save(variables.path + "/temp_data/voltage_pulse.npy", np.array(voltage_pulse_data))
+    np.save(variables.path + "/temp_data/laser_pulse.npy", np.array(laser_pulse_data))
     np.save(variables.path + "/temp_data/start_counter.npy", np.array(start_counter))
 
     # save DLD data binning
@@ -404,12 +404,12 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
     np.save(variables.path + "/temp_data/t_bin.npy", np.array(tt_list_bin))
 
     # save TDC data
-    np.save(variables.path + "/temp_data/channel_data.npy", np.array(channel_data))
-    np.save(variables.path + "/temp_data/time_data.npy", np.array(time_data))
+    np.save(variables.path + "/temp_data/channel.npy", np.array(channel_data))
+    np.save(variables.path + "/temp_data/time.npy", np.array(time_data))
     np.save(variables.path + "/temp_data/main_raw_counter.npy", np.array(tdc_start_counter))
-    np.save(variables.path + "/temp_data/voltage_data_tdc.npy", np.array(voltage_data_tdc))
-    np.save(variables.path + "/temp_data/voltage_pulse_data_tdc.npy", np.array(voltage_pulse_data_tdc))
-    np.save(variables.path + "/temp_data/laser_pulse_data_tdc.npy", np.array(laser_pulse_data_tdc))
+    np.save(variables.path + "/temp_data/voltage_tdc.npy", np.array(voltage_data_tdc))
+    np.save(variables.path + "/temp_data/voltage_pulse_tdc.npy", np.array(voltage_pulse_data_tdc))
+    np.save(variables.path + "/temp_data/laser_pulse_tdc.npy", np.array(laser_pulse_data_tdc))
 
     variables.extend_to('x', xx)
     variables.extend_to('y', yy)

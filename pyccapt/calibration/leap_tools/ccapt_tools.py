@@ -33,36 +33,48 @@ def ccapt_to_pos(data, path=None, name=None):
     return pos
 
 
-def ccapt_to_epos(data, path=None, name=None):
+def ccapt_to_epos(data, path=None, name=None, chunk_size=1_000_000):
     """
-    Convert CCAPT data to EPOS format.
+    Convert CCAPT data to EPOS format, processing in chunks to avoid memory errors.
 
     Args:
         data (pandas.DataFrame): CCAPT data.
         path (str): Optional. Path to save the EPOS file.
         name (str): Optional. Name of the EPOS file.
+        chunk_size (int): Number of rows to process in each chunk.
 
     Returns:
-        bytes: EPOS data.
-
+        None: Writes EPOS data to file if path and name are provided.
     """
+
     dd = data[
-        ['x (nm)', 'y (nm)', 'z (nm)', 'mc (Da)', 't (ns)', 'high_voltage (V)', 'pulse', 'x_det (cm)',
+        ['x (nm)', 'y (nm)', 'z (nm)', 'mc (Da)', 't (ns)', 'high_voltage (V)', 'pulse_v (V)', 'x_det (cm)',
          'y_det (cm)', 'delta_p', 'multi']]
 
     dd = dd.astype(np.single)
     dd = dd.astype({'delta_p': np.uintc})
     dd = dd.astype({'multi': np.uintc})
 
-    records = dd.to_records(index=False)
-    list_records = list(records)
-    d = tuple(chain(*list_records))
-    epos = struct.pack('>' + 'fffffffffII' * len(dd), *d)
     if name is not None:
         with open(path + name, 'w+b') as f:
-            f.write(epos)
+            for i in range(0, len(dd), chunk_size):
+                chunk = dd.iloc[i:i + chunk_size]
+                records = chunk.to_records(index=False)
+                list_records = list(records)
+                d = tuple(chain(*list_records))
+                epos_chunk = struct.pack('>' + 'fffffffffII' * len(chunk), *d)
+                f.write(epos_chunk)
+    else:
+        epos = b''
+        for i in range(0, len(dd), chunk_size):
+            chunk = dd.iloc[i:i + chunk_size]
+            records = chunk.to_records(index=False)
+            list_records = list(records)
+            d = tuple(chain(*list_records))
+            epos_chunk = struct.pack('>' + 'fffffffffII' * len(chunk), *d)
+            epos += epos_chunk
+        return epos
 
-    return epos
 
 
 def pos_to_ccapt(file_path):
@@ -115,7 +127,8 @@ def epos_to_ccapt(file_path):
                           'mc (Da)': epos['m/n (Da)'].to_numpy(),
                           'mc_uc (Da)': np.zeros(length),
                           'high_voltage (V)': epos['HV_DC (V)'].to_numpy(),
-                          'pulse': epos['pulse (V)'].to_numpy(),
+                          'pulse_v (V)': epos['pulse (V)'].to_numpy(),
+                          'pulse_l (pJ)': np.zeros(length),
                           't (ns)': epos['TOF (ns)'].to_numpy(),
                           't_c (ns)': np.zeros(length),
                           'x_det (cm)': epos['det_x (mm)'].to_numpy() / 10,
@@ -140,21 +153,25 @@ def apt_to_ccapt(file_path):
 
     data = leap_tools.read_apt(file_path)
 
+    data['zs'] = data['zs'] * -1 # Invert z-axis
     length_data = len(data["Mass"])
 
     # Define the keys and corresponding column names
     key_mappings = {
-        'x': 'x (nm)',
-        'y': 'y (nm)',
-        'z': 'z (nm)',
+        'xs': 'x (nm)',
+        'ys': 'y (nm)',
+        'zs': 'z (nm)',
         'Mass': 'mc (Da)',
         'Voltage': 'high_voltage (V)',
-        'Vap': 'pulse',
+        'Vap': 'pulse_v (V)',
+        'laserpower': 'pulse_l (pJ)',
         'Epos ToF': 't (ns)',
+        'tofc': 't_c (ns)',
         'XDet_mm': 'x_det (cm)',
         'YDet_mm': 'y_det (cm)',
         'Delta Pulse': 'delta_p',
         'Multiplicity': 'multi',
+        'tElapsed': 'start_counter'
     }
 
     # Create a dictionary with zero-filled arrays for missing keys
@@ -163,7 +180,7 @@ def apt_to_ccapt(file_path):
 
     df = pd.DataFrame(data_dict)
     df.insert(loc=4, column='mc_uc (Da)', value=np.zeros(length_data))
-    df.insert(loc=8, column='t_c (ns)', value=np.zeros(length_data))
+    # df.insert(loc=8, column='t_c (ns)', value=data['tofc '].to_numpy())
     df['x_det (cm)'] = df['x_det (cm)'] / 10
     df['y_det (cm)'] = df['y_det (cm)'] / 10
 

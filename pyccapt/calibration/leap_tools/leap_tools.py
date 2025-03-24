@@ -539,9 +539,9 @@ def read_apt(file_path: str, debug: bool = False) -> pd.DataFrame:
     if "Detector Coordinates" in data_sections.keys():
         temp = data_sections.pop("Detector Coordinates")
         if "XDet_mm" not in data_sections.keys():
-            data_sections["det_x"] = temp[:, 0]
+            data_sections["XDet_mm"] = temp[:, 0]
         if "YDet_mm" not in data_sections.keys():
-            data_sections["det_y"] = temp[:, 1]
+            data_sections["YDet_mm"] = temp[:, 1]
 
     if "Position" in data_sections.keys():
         temp = data_sections.pop("Position")

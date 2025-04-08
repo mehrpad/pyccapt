@@ -13,7 +13,7 @@
   "detector_diameter": 80,
   "bin_size": 0.1,
   "max_mass": 400,
-  "max_tof": 10000,
+  "max_tof": 12000,
   "max_voltage_pulse_frequency": 200000,
   "min_voltage_pulse_frequency": 1,
   "max_laser_pulse_frequency": 10000,

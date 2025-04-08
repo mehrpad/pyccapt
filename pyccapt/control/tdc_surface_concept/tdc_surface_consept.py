@@ -370,7 +370,7 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
             "laser_pulse": laser_pulse_data[:CHUNK_SIZE],
             "start_counter": start_counter[:CHUNK_SIZE],
             "channel": channel_data[:CHUNK_SIZE],
-            "time_data": time_data[:CHUNK_SIZE],
+            "time": time_data[:CHUNK_SIZE],
             "tdc_start_counter": tdc_start_counter[:CHUNK_SIZE],
             "voltage_tdc": voltage_data_tdc[:CHUNK_SIZE],
             "voltage_pulse_tdc": voltage_pulse_data_tdc[:CHUNK_SIZE],

@@ -70,15 +70,6 @@ def atom_probe_recons_from_detector_Gault_et_al(detx, dety, hv, flight_path_leng
         float: y-coordinates of reconstructed atom positions in nm.
         float: z-coordinates of reconstructed atom positions in nm.
     """
-    print(kf)
-    print(field_evap)
-    print(icf)
-    print(flight_path_length)
-    print(avg_dens)
-    print(det_eff)
-    print(detx)
-    print(dety)
-    print(hv)
     # Convert detector coordinates to polar form
     rad, ang = cart2pol(detx * 1E1, dety * 1E1)
 
@@ -495,6 +486,22 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
     # fig.update_layout(scene=dict(aspectratio=aspect_ratio))
 
     fig.update_layout(scene=dict(aspectmode='data', aspectratio=dict(x=1, y=1, z=1)))
+    fig.update_layout(
+        scene=dict(  # Target the 3D scene
+            bgcolor='white',  # Set scene background to white
+            xaxis=dict(
+                backgroundcolor="rgb(255,255,255)",
+                gridcolor="lightgrey",
+            ),
+            yaxis=dict(
+                backgroundcolor="rgb(255,255,255)",
+                gridcolor="lightgrey"
+            ),
+            zaxis=dict(
+                backgroundcolor="rgb(255,255,255)",
+                gridcolor="lightgrey"
+            )))
+
     # Show the plot in the Jupyter cell output
     variables.plotly_3d_reconstruction = go.FigureWidget(fig)
 
@@ -1181,6 +1188,7 @@ def x_y_z_calculation_and_plot(variables, element_percentage, kf, det_eff, icf, 
             field_evap (float): The field evaporation efficiency.
             avg_dens (float): The average density of the atoms.
             flight_path_length (float): The flight path length.
+            pulse_mode (str):
             rotary_fig_save (bool): True to save the rotary plot, False to display it.
             mode (str): The reconstruction mode.
             opacity (float): The opacity of the markers.
@@ -1192,15 +1200,18 @@ def x_y_z_calculation_and_plot(variables, element_percentage, kf, det_eff, icf, 
             None
 
     """
-    dld_highVoltage = variables.dld_high_voltage
+    if variables.pulse_mode == 'laser':
+        dld_Voltage = variables.dld_high_voltage
+    elif variables.pulse_mode == 'voltage':
+        dld_Voltage = variables.dld_high_voltage + variables.dld_pulse_v
     dld_x = variables.dld_x_det
     dld_y = variables.dld_y_det
     if mode == 'Gault':
-        px, py, pz = atom_probe_recons_from_detector_Gault_et_al(dld_x, dld_y, dld_highVoltage,
+        px, py, pz = atom_probe_recons_from_detector_Gault_et_al(dld_x, dld_y, dld_Voltage,
                                                                  flight_path_length, kf, det_eff, icf,
                                                                  field_evap, avg_dens)
     elif mode == 'Bas':
-        px, py, pz = atom_probe_recons_Bas_et_al(dld_x, dld_y, dld_highVoltage, flight_path_length, kf, det_eff,
+        px, py, pz = atom_probe_recons_Bas_et_al(dld_x, dld_y, dld_Voltage, flight_path_length, kf, det_eff,
                                                  icf, field_evap, avg_dens)
     variables.x = px
     variables.y = py

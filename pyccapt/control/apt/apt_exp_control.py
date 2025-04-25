@@ -555,7 +555,7 @@ class APT_Exp_Control:
             % (int(1000 / self.variables.ex_freq), index_time, steps))
 
         print('Waiting for TDC process to be finished for maximum 60 seconds...')
-        for i in range(10):
+        for i in range(900):
             if self.variables.flag_finished_tdc:
                 print('TDC process is finished')
                 break
@@ -563,7 +563,7 @@ class APT_Exp_Control:
             time.sleep(1)
             if i == 599:
                 print('TDC process is not finished')
-                self.log_apt.warning('TDC process is not finished')
+                self.log_apt.warning('TDC process is not finished after 15 minutes')
 
         if self.conf['tdc'] == "on":
             # Stop the TDC process
@@ -582,7 +582,6 @@ class APT_Exp_Control:
                     f"{initialize_devices.bcolors.WARNING}Warning: The TDC or HSD process cannot be terminated "
                     f"properly{initialize_devices.bcolors.ENDC}")
                 print(e)
-
 
         self.variables.extend_to('main_counter', self.main_counter)
         self.variables.extend_to('main_raw_counter', self.main_raw_counter)

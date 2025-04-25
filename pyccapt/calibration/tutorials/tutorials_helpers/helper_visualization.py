@@ -575,8 +575,8 @@ def call_visualization(variables, colab=False):
     composition_sdm_list_i = []
     composition_sdm_list_j = []
     for ion in unique_ions:
-        composition_sdm_list_i.append(widgets.Checkbox(value=True, description=ion))
-        composition_sdm_list_j.append(widgets.Checkbox(value=True, description=ion))
+        composition_sdm_list_i.append(widgets.Checkbox(value=False, description=ion))
+        composition_sdm_list_j.append(widgets.Checkbox(value=False, description=ion))
 
     i_composition_sdm = composition_sdm_list_i
     j_composition_sdm = composition_sdm_list_j

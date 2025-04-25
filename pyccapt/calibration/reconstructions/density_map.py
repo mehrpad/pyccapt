@@ -104,15 +104,18 @@ def plot_density_map(x, y, z_weigth=False, log=True, bins=(256, 256), frac=1.0, 
     if variables is not None:
         if composition and isinstance(composition, list):
             if 'element' in variables.data.columns:
-                pass
+                data = variables.data
             else:
                 if variables.range_data is None:
                     raise ValueError('Range data is not provided')
-                variables.data = merge_by_range(variables.data, variables.range_data, full=True)
+                data = merge_by_range(variables.data, variables.range_data, full=True)
             mask_comp = np.zeros(len(x), dtype=bool)
             # Create a mask from the composition list of variables.data
             for comp in composition:
-                mask_comp = mask_comp | variables.data['element'].apply(lambda x: comp in x)
+                mask_comp = mask_comp | data['element'].apply(lambda x: comp in x)
+            if not mask_comp.any():
+                print('No composition found - using all data')
+                mask_comp = np.ones(len(x), dtype=bool)
         else:
             mask_comp = np.ones(len(x), dtype=bool)
     else:

@@ -83,15 +83,14 @@ def sdm(particles, bin_size, variables=None, roi=[0,0,0.5], z_cut=True, normaliz
 	edges : list of np.array
 		Bin edges for each histogram.
 	"""
-    if range_sequence or range_mc or range_detx or range_dety or range_x or range_y or range_z:
+    if range_sequence or range_mc or range_detx or range_dety or range_x or range_y or range_z or range_vol:
         if range_sequence:
-            if range_sequence is list:
-                mask_sequence = np.zeros_like(len(particles), dtype=bool)
+            if range_sequence:
+                mask_sequence = np.zeros(len(particles), dtype=bool)
                 if range_sequence[0] < 1 and range_sequence[1] < 1:
                     mask_sequence[int(len(particles)*range_sequence[0]):int(len(particles)*range_sequence[1])]=True
                 else:
                     mask_sequence[range_sequence[0]:range_sequence[1]] = True
-                mask_sequence[range_sequence[0]:range_sequence[1]] = True
             else:
                 mask_sequence = np.zeros(len(particles), dtype=bool)
                 mask_sequence[:int(len(particles)*range_sequence)] = True
@@ -126,9 +125,11 @@ def sdm(particles, bin_size, variables=None, roi=[0,0,0.5], z_cut=True, normaliz
         print('The number of data mc:', len(mask_mc[mask_mc == True]))
         print('The number of data det:', len(mask_det[mask_det == True]))
         print('The number of data 3d:', len(mask_3d[mask_3d == True]))
-        print('The number of data after cropping:', len(mask[mask == True]))
+        print('The number of data vol:', len(mask_vol[mask_vol == True]))
     else:
         mask = np.ones(len(particles), dtype=bool)
+
+    len_true_mask = len(mask[mask == True])
 
     if frac < 1:
         # set axis limits based on fraction of x and y data based on fraction
@@ -136,11 +137,25 @@ def sdm(particles, bin_size, variables=None, roi=[0,0,0.5], z_cut=True, normaliz
         num_set_to_flase = int(len(true_indices) * (1 - frac))
         indices_to_set_false = np.random.choice(true_indices, num_set_to_flase, replace=False)
         mask[indices_to_set_false] = False
+        print('The number of data cropping due to fraction:', len_true_mask - len(mask[mask == True]))
 
     if variables is not None:
+        dist_temp = np.sqrt((variables.dld_x_det - roi[0]) ** 2 + (variables.dld_y_det - roi[1]) ** 2)
+        mask_roi = dist_temp <= roi[2]
+    else:
+        print('Variables is None. ROI selection needs detector coordinates. Only use radius')
+        dist_temp = np.sqrt((particles[:, 0]) ** 2 + (particles[:, 1]) ** 2)
+        mask_roi = dist_temp <= roi[2]
+
+    print('The number of data ROI:', len(mask_roi[mask_roi == True]))
+
+    mask = mask & mask_roi
+
+    print('The number of data after cropping:', len(mask[mask == True]))
+    if variables is not None and i_composition and j_composition:
         if i_composition and isinstance(i_composition, list):
             if 'name' in variables.data.columns:
-                pass
+                data = variables.data
             else:
                 if variables.range_data is None:
                     raise ValueError('Range data is not provided')
@@ -165,15 +180,13 @@ def sdm(particles, bin_size, variables=None, roi=[0,0,0.5], z_cut=True, normaliz
         else:
             raise ValueError('No list of j composition is provided')
 
-    dist_temp = np.sqrt((particles[:, 0] - roi[0]) ** 2 + (particles[:, 1] - roi[1]) ** 2)
-    mask_roi = dist_temp <= roi[2]
-
-    mask = mask & mask_roi
-
     if variables is not None:
-        if i_composition and isinstance(i_composition, list):
+        if i_composition and isinstance(i_composition, list) and j_composition and isinstance(j_composition, list):
             mask_i = mask & mask_i_comp
             mask_j = mask & mask_j_comp
+        else:
+            mask_i = mask
+            mask_j = mask
     else:
         mask_i = mask
         mask_j = mask
@@ -183,25 +196,32 @@ def sdm(particles, bin_size, variables=None, roi=[0,0,0.5], z_cut=True, normaliz
     theta = np.radians(theta_x)
     phi = np.radians(phi_y)
 
-    print('The number of ions in ROI is:', len(particles[mask]))
-    print('The number of ions in ROI and i composition is:', len(particles[mask_i]))
-    print('The number of ions in ROI and j composition is:', len(particles[mask_j]))
+    print('The number of ions in is:', len(particles[mask]))
+    print('The number of ions in i composition is:', len(particles[mask_i]))
+    print('The number of ions in j composition is:', len(particles[mask_j]))
     # Calculate relative positions based on user choices
     dx, dy, dz = None, None, None
     histograms = []
-    if 'x' in axes and 'y' in axes and 'z' in axes:
-        dx = np.subtract.outer(particles[:, 0][mask_i], particles[:, 0][mask_j])
-        dy = np.subtract.outer(particles[:, 1][mask_i], particles[:, 1][mask_j])
-        dz = np.subtract.outer(particles[:, 2][mask_i], particles[:, 2][mask_j])
-    elif 'x' in axes and 'y' in axes:
-        dx = np.subtract.outer(particles[:, 0][mask_i], particles[:, 0][mask_j])
-        dy = np.subtract.outer(particles[:, 1][mask_i], particles[:, 1][mask_j])
-    elif 'x' in axes and 'z' in axes:
-        dx = np.subtract.outer(particles[:, 0][mask_i], particles[:, 0][mask_j])
-        dz = np.subtract.outer(particles[:, 2][mask_i], particles[:, 2][mask_j])
-    elif 'y' in axes and 'z' in axes:
-        dy = np.subtract.outer(particles[:, 1][mask_i], particles[:, 1][mask_j])
-        dz = np.subtract.outer(particles[:, 2][mask_i], particles[:, 2][mask_j])
+    if theta_x == 0 and phi_y == 0:
+        if 'x' in axes and 'y' in axes and 'z' in axes:
+            dx = np.subtract.outer(particles[:, 0][mask_i], particles[:, 0][mask_j])
+            dy = np.subtract.outer(particles[:, 1][mask_i], particles[:, 1][mask_j])
+            dz = np.subtract.outer(particles[:, 2][mask_i], particles[:, 2][mask_j])
+        elif 'x' in axes and 'y' in axes:
+            dx = np.subtract.outer(particles[:, 0][mask_i], particles[:, 0][mask_j])
+            dy = np.subtract.outer(particles[:, 1][mask_i], particles[:, 1][mask_j])
+        elif 'x' in axes and 'z' in axes:
+            dx = np.subtract.outer(particles[:, 0][mask_i], particles[:, 0][mask_j])
+            dz = np.subtract.outer(particles[:, 2][mask_i], particles[:, 2][mask_j])
+        elif 'y' in axes and 'z' in axes:
+            dy = np.subtract.outer(particles[:, 1][mask_i], particles[:, 1][mask_j])
+            dz = np.subtract.outer(particles[:, 2][mask_i], particles[:, 2][mask_j])
+        elif 'x' in axes:
+            dx = np.subtract.outer(particles[:, 0][mask_i], particles[:, 0][mask_j])
+        elif 'y' in axes:
+            dy = np.subtract.outer(particles[:, 1][mask_i], particles[:, 1][mask_j])
+        elif 'z' in axes:
+            dz = np.subtract.outer(particles[:, 2][mask_i], particles[:, 2][mask_j])
     else:
         particles_i_masked = particles[mask_i]
         particles_j_masked = particles[mask_j]

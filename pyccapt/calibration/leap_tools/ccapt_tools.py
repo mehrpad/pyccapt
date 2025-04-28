@@ -50,6 +50,8 @@ def ccapt_to_epos(data, path=None, name=None, chunk_size=1_000_000):
     dd = data[
         ['x (nm)', 'y (nm)', 'z (nm)', 'mc (Da)', 't (ns)', 'high_voltage (V)', 'pulse_v (V)', 'x_det (cm)',
          'y_det (cm)', 'delta_p', 'multi']]
+    dd['x_det (cm)'] = dd['x_det (cm)'] * 10
+    dd['y_det (cm)'] = dd['y_det (cm)'] * 10
 
     dd = dd.astype(np.single)
     dd = dd.astype({'delta_p': np.uintc})

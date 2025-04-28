@@ -151,6 +151,7 @@ def load_and_copy_chunks_to_hdf(path, hdf5_file_path, chunk_id):
                     total_size += chunk_data.shape[0]
             if total_size > 0:
                 hdf_file.create_dataset(f'{group_name}/{dataset_name}', (total_size,), dtype=dtype)
+            print(f"Created empty dataset '{group_name}/{dataset_name}' with shape {total_size}.")
 
         create_empty_dataset('dld', 't', 't', np.float64)
         create_empty_dataset('dld', 'x', 'x', np.float64)
@@ -273,9 +274,9 @@ def concatenate_datasets(hdf5_file_path_1, hdf_file_path_2, index_2):
 
 
 if __name__ == '__main__':
-    name = '2464_Apr-11-2025_15-17_NiC2_Nimonic_HPCF_2'
-    path = 'T:/Ott/APT_Measurements/Oxcart/%s/' % name
-    name = '2464_Apr-11-2025_15-17_NiC2_Nimonic_HPCF_2.h5'
+    name = '2469_Apr-16-2025_10-44_NiC9_6060_93min'
+    path = 'T:/Ortner/03_APT/Oxcart/%s/' % name
+    name = name + '.h5'
     # new_path = 'C:/Users/LokalAdmin/Downloads//%s' % 'cropped_' + name
     # name = '%s.h5' % name
     # # copy_npy_to_hdf(path, name)
@@ -283,7 +284,7 @@ if __name__ == '__main__':
     # # rename_subcategory(path + name, old_name='dld', new_name='dld_1')
     # # copy_npy_to_hdf_surface_concept(path+'/temp_data/', name)
     # # rename_subcategory(path + name, old_name='tdc/voltage_laser', new_name='tdc/laser_pulse')
-    load_and_copy_chunks_to_hdf(path + '/temp_data/chunks/', path + name, 236)
+    load_and_copy_chunks_to_hdf(path + '/temp_data/chunks/', path + name, 900) #1273
     # crop_dataset_to_new_file(path, new_path, 500000)
 
     # data_path_1 = 'E://2440-2441//2440_Mar-27-2025_09-15_NiC9_Pd_HPCF_4.h5'

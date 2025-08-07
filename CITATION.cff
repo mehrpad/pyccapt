@@ -1,0 +1,26 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: PyCCAPT
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Mehrpad
+    family-names: Monajem
+    email: mehrpad.monajem@fau.de
+    name-particle: Mehrpad
+    orcid: 'https://orcid.org/0009-0002-6746-2835'
+  - given-names: harsh
+    family-names: Pandey
+    email: harsh020596@gmail.com
+identifiers:
+  - type: url
+    value: 'https://doi.org/10.5281/zenodo.14718616'
+repository-code: 'https://github.com/mmonajem/pyccapt'
+url: 'https://pyccapt.readthedocs.io/'
+license: AGPL-3.0
+version: 0.1.11
+date-released: '2025-01-22'

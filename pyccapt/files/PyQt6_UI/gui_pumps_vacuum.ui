@@ -6,662 +6,724 @@
             <rect>
                 <x>0</x>
                 <y>0</y>
-                <width>784</width>
-                <height>422</height>
+                <width>807</width>
+                <height>385</height>
             </rect>
         </property>
         <property name="windowTitle">
             <string>Form</string>
         </property>
-        <layout class="QGridLayout" name="gridLayout_4">
+        <layout class="QGridLayout" name="gridLayout_9">
             <item row="0" column="0">
-                <layout class="QGridLayout" name="gridLayout_2">
-                    <item row="2" column="0">
-                        <widget class="QLabel" name="label_219">
-                            <property name="font">
-                                <font>
-                                    <bold>true</bold>
-                                </font>
-                            </property>
-                            <property name="text">
-                                <string>LL Temp (°C)</string>
-                            </property>
-                        </widget>
-                    </item>
-                    <item row="4" column="4" alignment="Qt::AlignHCenter">
-                        <widget class="QPushButton" name="superuser">
-                            <property name="sizePolicy">
-                                <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-                                    <horstretch>0</horstretch>
-                                    <verstretch>0</verstretch>
-                                </sizepolicy>
-                            </property>
-                            <property name="minimumSize">
-                                <size>
-                                    <width>0</width>
-                                    <height>25</height>
-                                </size>
-                            </property>
-                            <property name="styleSheet">
-                                <string notr="true">QPushButton{
-                                    background: rgb(193, 193, 193)
+                <layout class="QVBoxLayout" name="verticalLayout">
+                    <item>
+                        <layout class="QGridLayout" name="gridLayout_4">
+                            <item row="0" column="0" rowspan="2">
+                                <layout class="QGridLayout" name="gridLayout">
+                                    <item row="0" column="0">
+                                        <widget class="QLabel" name="label_212">
+                                            <property name="font">
+                                                <font>
+                                                    <bold>true</bold>
+                                                </font>
+                                            </property>
+                                            <property name="text">
+                                                <string>Main Chamber (mBar)</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item row="0" column="1" colspan="2">
+                                        <widget class="QLCDNumber" name="vacuum_main">
+                                            <property name="sizePolicy">
+                                                <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                                                    <horstretch>0</horstretch>
+                                                    <verstretch>0</verstretch>
+                                                </sizepolicy>
+                                            </property>
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>200</width>
+                                                    <height>50</height>
+                                                </size>
+                                            </property>
+                                            <property name="font">
+                                                <font>
+                                                    <pointsize>9</pointsize>
+                                                </font>
+                                            </property>
+                                            <property name="styleSheet">
+                                                <string notr="true">QLCDNumber{
+                                                    border: 2px solid green;
+                                                    border-radius: 10px;
+                                                    padding: 0 8px;
                                     }
                                 </string>
-                            </property>
-                            <property name="text">
-                                <string>Override Access</string>
-                            </property>
-                        </widget>
-                    </item>
-                    <item row="4" column="0" alignment="Qt::AlignHCenter">
-                        <widget class="QPushButton" name="set_temperature_ll">
-                            <property name="sizePolicy">
-                                <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-                                    <horstretch>0</horstretch>
-                                    <verstretch>0</verstretch>
-                                </sizepolicy>
-                            </property>
-                            <property name="minimumSize">
-                                <size>
-                                    <width>0</width>
-                                    <height>25</height>
-                                </size>
-                            </property>
-                            <property name="styleSheet">
-                                <string notr="true">QPushButton{
-                                    background: rgb(193, 193, 193)
-                                    }
-                                </string>
-                            </property>
-                            <property name="text">
-                                <string>Set T LL (°C)</string>
-                            </property>
-                        </widget>
-                    </item>
-                    <item row="1" column="3" rowspan="4">
-                        <layout class="QGridLayout" name="gridLayout_3">
-                            <item row="0" column="0" alignment="Qt::AlignHCenter">
-                                <widget class="QLabel" name="led_pump_load_lock">
-                                    <property name="minimumSize">
-                                        <size>
-                                            <width>50</width>
-                                            <height>50</height>
-                                        </size>
-                                    </property>
-                                    <property name="maximumSize">
-                                        <size>
-                                            <width>50</width>
-                                            <height>50</height>
-                                        </size>
-                                    </property>
-                                    <property name="text">
-                                        <string>pump</string>
-                                    </property>
-                                    <property name="alignment">
-                                        <set>Qt::AlignCenter</set>
-                                    </property>
-                                </widget>
-                            </item>
-                            <item row="0" column="1" alignment="Qt::AlignHCenter">
-                                <widget class="QLabel" name="led_pump_cryo_load_lock">
-                                    <property name="minimumSize">
-                                        <size>
-                                            <width>50</width>
-                                            <height>50</height>
-                                        </size>
-                                    </property>
-                                    <property name="maximumSize">
-                                        <size>
-                                            <width>50</width>
-                                            <height>50</height>
-                                        </size>
-                                    </property>
-                                    <property name="text">
-                                        <string>pump</string>
-                                    </property>
-                                    <property name="alignment">
-                                        <set>Qt::AlignCenter</set>
-                                    </property>
-                                </widget>
-                            </item>
-                            <item row="1" column="0">
-                                <widget class="QPushButton" name="pump_load_lock_switch">
-                                    <property name="sizePolicy">
-                                        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-                                            <horstretch>0</horstretch>
-                                            <verstretch>0</verstretch>
-                                        </sizepolicy>
-                                    </property>
-                                    <property name="minimumSize">
-                                        <size>
-                                            <width>0</width>
-                                            <height>25</height>
-                                        </size>
-                                    </property>
-                                    <property name="styleSheet">
-                                        <string notr="true">QPushButton{
-                                            background: rgb(193, 193, 193)
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item row="1" column="0" colspan="2">
+                                        <widget class="QLabel" name="label_211">
+                                            <property name="font">
+                                                <font>
+                                                    <bold>true</bold>
+                                                </font>
+                                            </property>
+                                            <property name="text">
+                                                <string>Buffer Chamber (mBar)</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item row="1" column="2">
+                                        <widget class="QLCDNumber" name="vacuum_buffer">
+                                            <property name="sizePolicy">
+                                                <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                                                    <horstretch>0</horstretch>
+                                                    <verstretch>0</verstretch>
+                                                </sizepolicy>
+                                            </property>
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>150</width>
+                                                    <height>50</height>
+                                                </size>
+                                            </property>
+                                            <property name="font">
+                                                <font>
+                                                    <pointsize>8</pointsize>
+                                                </font>
+                                            </property>
+                                            <property name="styleSheet">
+                                                <string notr="true">QLCDNumber{
+                                                    border: 2px solid brown;
+                                                    border-radius: 10px;
+                                                    padding: 0 8px;
                                             }
                                         </string>
-                                    </property>
-                                    <property name="text">
-                                        <string>Vent LL</string>
-                                    </property>
-                                </widget>
-                            </item>
-                            <item row="1" column="1">
-                                <widget class="QPushButton" name="pump_cryo_load_lock_switch">
-                                    <property name="sizePolicy">
-                                        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-                                            <horstretch>0</horstretch>
-                                            <verstretch>0</verstretch>
-                                        </sizepolicy>
-                                    </property>
-                                    <property name="minimumSize">
-                                        <size>
-                                            <width>0</width>
-                                            <height>25</height>
-                                        </size>
-                                    </property>
-                                    <property name="styleSheet">
-                                        <string notr="true">QPushButton{
-                                            background: rgb(193, 193, 193)
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item row="2" column="0" colspan="2">
+                                        <widget class="QLabel" name="label_216">
+                                            <property name="font">
+                                                <font>
+                                                    <bold>true</bold>
+                                                </font>
+                                            </property>
+                                            <property name="text">
+                                                <string>Cryo Load Lock (mBar)</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item row="2" column="2">
+                                        <widget class="QLCDNumber" name="vacuum_cryo_load_lock">
+                                            <property name="sizePolicy">
+                                                <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                                                    <horstretch>0</horstretch>
+                                                    <verstretch>0</verstretch>
+                                                </sizepolicy>
+                                            </property>
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>150</width>
+                                                    <height>50</height>
+                                                </size>
+                                            </property>
+                                            <property name="styleSheet">
+                                                <string notr="true">QLCDNumber{
+                                                    border: 2px solid magenta;
+                                                    border-radius: 10px;
+                                                    padding: 0 8px;
                                             }
                                         </string>
-                                    </property>
-                                    <property name="text">
-                                        <string>Vent CLL</string>
-                                    </property>
-                                </widget>
-                            </item>
-                        </layout>
-                    </item>
-                    <item row="5" column="0" colspan="6">
-                        <widget class="QLabel" name="Error">
-                            <property name="minimumSize">
-                                <size>
-                                    <width>600</width>
-                                    <height>30</height>
-                                </size>
-                            </property>
-                            <property name="font">
-                                <font>
-                                    <pointsize>13</pointsize>
-                                    <bold>true</bold>
-                                    <strikeout>false</strikeout>
-                                </font>
-                            </property>
-                            <property name="text">
-                                <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;br/&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
-                            </property>
-                            <property name="alignment">
-                                <set>Qt::AlignCenter</set>
-                            </property>
-                            <property name="textInteractionFlags">
-                                <set>Qt::LinksAccessibleByMouse</set>
-                            </property>
-                        </widget>
-                    </item>
-                    <item row="1" column="5" rowspan="4">
-                        <widget class="QLCDNumber" name="vacuum_main">
-                            <property name="sizePolicy">
-                                <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
-                                    <horstretch>0</horstretch>
-                                    <verstretch>0</verstretch>
-                                </sizepolicy>
-                            </property>
-                            <property name="minimumSize">
-                                <size>
-                                    <width>200</width>
-                                    <height>50</height>
-                                </size>
-                            </property>
-                            <property name="font">
-                                <font>
-                                    <pointsize>9</pointsize>
-                                </font>
-                            </property>
-                            <property name="styleSheet">
-                                <string notr="true">QLCDNumber{
-                                    border: 2px solid green;
-                                    border-radius: 10px;
-                                    padding: 0 8px;
-                                    }
-                                </string>
-                            </property>
-                        </widget>
-                    </item>
-                    <item row="1" column="0" alignment="Qt::AlignHCenter">
-                        <widget class="QPushButton" name="set_temperature_cryo">
-                            <property name="sizePolicy">
-                                <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-                                    <horstretch>0</horstretch>
-                                    <verstretch>0</verstretch>
-                                </sizepolicy>
-                            </property>
-                            <property name="minimumSize">
-                                <size>
-                                    <width>0</width>
-                                    <height>25</height>
-                                </size>
-                            </property>
-                            <property name="styleSheet">
-                                <string notr="true">QPushButton{
-                                    background: rgb(193, 193, 193)
-                                    }
-                                </string>
-                            </property>
-                            <property name="text">
-                                <string>Set T Cryo (K)</string>
-                            </property>
-                        </widget>
-                    </item>
-                    <item row="2" column="4">
-                        <widget class="QLabel" name="label_212">
-                            <property name="font">
-                                <font>
-                                    <bold>true</bold>
-                                </font>
-                            </property>
-                            <property name="text">
-                                <string>Main Chamber (mBar)</string>
-                            </property>
-                        </widget>
-                    </item>
-                    <item row="1" column="1">
-                        <widget class="QSpinBox" name="target_tempreature_cryo">
-                            <property name="maximumSize">
-                                <size>
-                                    <width>70</width>
-                                    <height>16777215</height>
-                                </size>
-                            </property>
-                            <property name="styleSheet">
-                                <string notr="true">QSpinBox{
-                                    background: rgb(223,223,233)
-                                    }
-                                </string>
-                            </property>
-                        </widget>
-                    </item>
-                    <item row="0" column="0" colspan="6">
-                        <layout class="QGridLayout" name="gridLayout">
-                            <item row="0" column="0">
-                                <widget class="QLabel" name="label_215">
-                                    <property name="font">
-                                        <font>
-                                            <bold>true</bold>
-                                        </font>
-                                    </property>
-                                    <property name="text">
-                                        <string>Temp. Stage (K)</string>
-                                    </property>
-                                </widget>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item row="3" column="0" colspan="2">
+                                        <widget class="QLabel" name="label_210">
+                                            <property name="font">
+                                                <font>
+                                                    <bold>true</bold>
+                                                </font>
+                                            </property>
+                                            <property name="text">
+                                                <string>Load Lock (mBar)</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item row="3" column="2">
+                                        <widget class="QLCDNumber" name="vacuum_load_lock">
+                                            <property name="sizePolicy">
+                                                <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                                                    <horstretch>0</horstretch>
+                                                    <verstretch>0</verstretch>
+                                                </sizepolicy>
+                                            </property>
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>150</width>
+                                                    <height>50</height>
+                                                </size>
+                                            </property>
+                                            <property name="styleSheet">
+                                                <string notr="true">QLCDNumber{
+                                                    border: 2px solid blue;
+                                                    border-radius: 10px;
+                                                    padding: 0 8px;
+                                                    }
+                                                </string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                </layout>
                             </item>
                             <item row="0" column="1">
-                                <widget class="QLCDNumber" name="temp_stage">
-                                    <property name="sizePolicy">
-                                        <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
-                                            <horstretch>0</horstretch>
-                                            <verstretch>0</verstretch>
-                                        </sizepolicy>
+                                <spacer name="horizontalSpacer">
+                                    <property name="orientation">
+                                        <enum>Qt::Horizontal</enum>
                                     </property>
-                                    <property name="minimumSize">
+                                    <property name="sizeHint" stdset="0">
                                         <size>
-                                            <width>100</width>
-                                            <height>50</height>
+                                            <width>40</width>
+                                            <height>20</height>
                                         </size>
                                     </property>
-                                    <property name="styleSheet">
-                                        <string notr="true">QLCDNumber{
-                                                            border: 2px solid orange;
-                                                            border-radius: 10px;
-                                                            padding: 0 8px;
-                                                            }
-                                        </string>
-                                    </property>
-                                </widget>
+                                </spacer>
                             </item>
                             <item row="0" column="2">
-                                <widget class="QLabel" name="label_218">
-                                    <property name="font">
-                                        <font>
-                                            <bold>true</bold>
-                                        </font>
+                                <spacer name="verticalSpacer_2">
+                                    <property name="orientation">
+                                        <enum>Qt::Vertical</enum>
                                     </property>
-                                    <property name="text">
-                                        <string>Temp. Cryo Head (K)</string>
-                                    </property>
-                                </widget>
-                            </item>
-                            <item row="0" column="3">
-                                <widget class="QLCDNumber" name="temp_cryo_head">
-                                    <property name="sizePolicy">
-                                        <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
-                                            <horstretch>0</horstretch>
-                                            <verstretch>0</verstretch>
-                                        </sizepolicy>
-                                    </property>
-                                    <property name="minimumSize">
+                                    <property name="sizeHint" stdset="0">
                                         <size>
-                                            <width>100</width>
-                                            <height>50</height>
+                                            <width>20</width>
+                                            <height>40</height>
                                         </size>
                                     </property>
-                                    <property name="styleSheet">
-                                        <string notr="true">QLCDNumber{
-                                            border: 2px solid orange;
+                                </spacer>
+                            </item>
+                            <item row="1" column="1" colspan="2">
+                                <layout class="QGridLayout" name="gridLayout_2">
+                                    <item row="0" column="0">
+                                        <widget class="QLabel" name="label_214">
+                                            <property name="font">
+                                                <font>
+                                                    <bold>true</bold>
+                                                </font>
+                                            </property>
+                                            <property name="text">
+                                                <string>Buffer Chamber Pre (mBar)</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item row="0" column="1">
+                                        <widget class="QLCDNumber" name="vacuum_buffer_back">
+                                            <property name="sizePolicy">
+                                                <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                                                    <horstretch>0</horstretch>
+                                                    <verstretch>0</verstretch>
+                                                </sizepolicy>
+                                            </property>
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>150</width>
+                                                    <height>50</height>
+                                                </size>
+                                            </property>
+                                            <property name="font">
+                                                <font>
+                                                    <pointsize>8</pointsize>
+                                                </font>
+                                            </property>
+                                            <property name="styleSheet">
+                                                <string notr="true">QLCDNumber{
+                                                    border: 2px solid brown;
                                                             border-radius: 10px;
                                                             padding: 0 8px;
                                                             }
+                                                </string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item row="1" column="0">
+                                        <widget class="QLabel" name="label_217">
+                                            <property name="font">
+                                                <font>
+                                                    <bold>true</bold>
+                                                </font>
+                                            </property>
+                                            <property name="text">
+                                                <string>CryoLoad Lock Pre(mBar)</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item row="1" column="1">
+                                        <widget class="QLCDNumber" name="vacuum_cryo_load_lock_back">
+                                            <property name="sizePolicy">
+                                                <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                                                    <horstretch>0</horstretch>
+                                                    <verstretch>0</verstretch>
+                                                </sizepolicy>
+                                            </property>
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>150</width>
+                                                    <height>50</height>
+                                                </size>
+                                            </property>
+                                            <property name="styleSheet">
+                                                <string notr="true">QLCDNumber{
+                                                    border: 2px solid magenta;
+                                                    border-radius: 10px;
+                                                    padding: 0 8px;
+                                                    }
                                         </string>
-                                    </property>
-                                </widget>
-                            </item>
-                            <item row="1" column="0">
-                                <widget class="QLabel" name="label_214">
-                                    <property name="font">
-                                        <font>
-                                            <bold>true</bold>
-                                        </font>
-                                    </property>
-                                    <property name="text">
-                                        <string>Buffer Chamber Pre (mBar)</string>
-                                    </property>
-                                </widget>
-                            </item>
-                            <item row="1" column="1">
-                                <widget class="QLCDNumber" name="vacuum_buffer_back">
-                                    <property name="sizePolicy">
-                                        <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
-                                            <horstretch>0</horstretch>
-                                            <verstretch>0</verstretch>
-                                        </sizepolicy>
-                                    </property>
-                                    <property name="minimumSize">
-                                        <size>
-                                            <width>100</width>
-                                            <height>50</height>
-                                        </size>
-                                    </property>
-                                    <property name="font">
-                                        <font>
-                                            <pointsize>8</pointsize>
-                                        </font>
-                                    </property>
-                                    <property name="styleSheet">
-                                        <string notr="true">QLCDNumber{
-                                            border: 2px solid brown;
-                                                            border-radius: 10px;
-                                                            padding: 0 8px;
-                                                            }
-                                                        </string>
-                                    </property>
-                                </widget>
-                            </item>
-                            <item row="1" column="2">
-                                <widget class="QLabel" name="label_211">
-                                    <property name="font">
-                                        <font>
-                                            <bold>true</bold>
-                                        </font>
-                                    </property>
-                                    <property name="text">
-                                        <string>Buffer Chamber (mBar)</string>
-                                    </property>
-                                </widget>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item row="2" column="0">
+                                        <widget class="QLabel" name="label_213">
+                                            <property name="font">
+                                                <font>
+                                                    <bold>true</bold>
+                                                </font>
+                                            </property>
+                                            <property name="text">
+                                                <string>Load Lock Pre(mBar)</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item row="2" column="1">
+                                        <widget class="QLCDNumber" name="vacuum_load_lock_back">
+                                            <property name="sizePolicy">
+                                                <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                                                    <horstretch>0</horstretch>
+                                                    <verstretch>0</verstretch>
+                                                </sizepolicy>
+                                            </property>
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>150</width>
+                                                    <height>50</height>
+                                                </size>
+                                            </property>
+                                            <property name="styleSheet">
+                                                <string notr="true">QLCDNumber{
+                                                    border: 2px solid blue;
+                                                    border-radius: 10px;
+                                                    padding: 0 8px;
+                                                    }
+                                                </string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                </layout>
                             </item>
                             <item row="1" column="3">
-                                <widget class="QLCDNumber" name="vacuum_buffer">
-                                    <property name="sizePolicy">
-                                        <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
-                                            <horstretch>0</horstretch>
-                                            <verstretch>0</verstretch>
-                                        </sizepolicy>
-                                    </property>
-                                    <property name="minimumSize">
-                                        <size>
-                                            <width>100</width>
-                                            <height>50</height>
-                                        </size>
-                                    </property>
-                                    <property name="font">
-                                        <font>
-                                            <pointsize>8</pointsize>
-                                        </font>
-                                    </property>
-                                    <property name="styleSheet">
-                                        <string notr="true">QLCDNumber{
-                                            border: 2px solid brown;
-                                            border-radius: 10px;
-                                            padding: 0 8px;
+                                <layout class="QGridLayout" name="gridLayout_3">
+                                    <item row="0" column="0" colspan="2">
+                                        <widget class="QPushButton" name="superuser">
+                                            <property name="sizePolicy">
+                                                <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+                                                    <horstretch>0</horstretch>
+                                                    <verstretch>0</verstretch>
+                                                </sizepolicy>
+                                            </property>
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>0</width>
+                                                    <height>25</height>
+                                                </size>
+                                            </property>
+                                            <property name="styleSheet">
+                                                <string notr="true">QPushButton{
+                                                    background: rgb(193, 193, 193)
+                                                    }
+                                                </string>
+                                            </property>
+                                            <property name="text">
+                                                <string>Override Access</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item row="1" column="0">
+                                        <widget class="QPushButton" name="pump_cryo_load_lock_switch">
+                                            <property name="sizePolicy">
+                                                <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+                                                    <horstretch>0</horstretch>
+                                                    <verstretch>0</verstretch>
+                                                </sizepolicy>
+                                            </property>
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>0</width>
+                                                    <height>25</height>
+                                                </size>
+                                            </property>
+                                            <property name="styleSheet">
+                                                <string notr="true">QPushButton{
+                                                    background: rgb(193, 193, 193)
                                             }
                                         </string>
-                                    </property>
-                                </widget>
-                            </item>
-                            <item row="2" column="0">
-                                <widget class="QLabel" name="label_217">
-                                    <property name="font">
-                                        <font>
-                                            <bold>true</bold>
-                                        </font>
-                                    </property>
-                                    <property name="text">
-                                        <string>CryoLoad Lock Pre(mBar)</string>
-                                    </property>
-                                </widget>
-                            </item>
-                            <item row="2" column="1">
-                                <widget class="QLCDNumber" name="vacuum_cryo_load_lock_back">
-                                    <property name="sizePolicy">
-                                        <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
-                                            <horstretch>0</horstretch>
-                                            <verstretch>0</verstretch>
-                                        </sizepolicy>
-                                    </property>
-                                    <property name="minimumSize">
-                                        <size>
-                                            <width>100</width>
-                                            <height>50</height>
-                                        </size>
-                                    </property>
-                                    <property name="styleSheet">
-                                        <string notr="true">QLCDNumber{
-                                            border: 2px solid magenta;
-                                            border-radius: 10px;
-                                            padding: 0 8px;
+                                            </property>
+                                            <property name="text">
+                                                <string>Vent CLL</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item row="1" column="1">
+                                        <widget class="QLabel" name="led_pump_cryo_load_lock">
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>50</width>
+                                                    <height>50</height>
+                                                </size>
+                                            </property>
+                                            <property name="maximumSize">
+                                                <size>
+                                                    <width>50</width>
+                                                    <height>50</height>
+                                                </size>
+                                            </property>
+                                            <property name="text">
+                                                <string>pump</string>
+                                            </property>
+                                            <property name="alignment">
+                                                <set>Qt::AlignCenter</set>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item row="2" column="0">
+                                        <widget class="QPushButton" name="pump_load_lock_switch">
+                                            <property name="sizePolicy">
+                                                <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+                                                    <horstretch>0</horstretch>
+                                                    <verstretch>0</verstretch>
+                                                </sizepolicy>
+                                            </property>
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>0</width>
+                                                    <height>25</height>
+                                                </size>
+                                            </property>
+                                            <property name="styleSheet">
+                                                <string notr="true">QPushButton{
+                                                    background: rgb(193, 193, 193)
                                             }
                                         </string>
-                                    </property>
-                                </widget>
-                            </item>
-                            <item row="2" column="2">
-                                <widget class="QLabel" name="label_216">
-                                    <property name="font">
-                                        <font>
-                                            <bold>true</bold>
-                                        </font>
-                                    </property>
-                                    <property name="text">
-                                        <string>Cryo Load Lock (mBar)</string>
-                                    </property>
-                                </widget>
-                            </item>
-                            <item row="2" column="3">
-                                <widget class="QLCDNumber" name="vacuum_cryo_load_lock">
-                                    <property name="sizePolicy">
-                                        <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
-                                            <horstretch>0</horstretch>
-                                            <verstretch>0</verstretch>
-                                        </sizepolicy>
-                                    </property>
-                                    <property name="minimumSize">
-                                        <size>
-                                            <width>100</width>
-                                            <height>50</height>
-                                        </size>
-                                    </property>
-                                    <property name="styleSheet">
-                                        <string notr="true">QLCDNumber{
-                                            border: 2px solid magenta;
-                                            border-radius: 10px;
-                                            padding: 0 8px;
-                                            }
-                                        </string>
-                                    </property>
-                                </widget>
-                            </item>
-                            <item row="3" column="0">
-                                <widget class="QLabel" name="label_213">
-                                    <property name="font">
-                                        <font>
-                                            <bold>true</bold>
-                                        </font>
-                                    </property>
-                                    <property name="text">
-                                        <string>Load Lock Pre(mBar)</string>
-                                    </property>
-                                </widget>
-                            </item>
-                            <item row="3" column="1">
-                                <widget class="QLCDNumber" name="vacuum_load_lock_back">
-                                    <property name="sizePolicy">
-                                        <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
-                                            <horstretch>0</horstretch>
-                                            <verstretch>0</verstretch>
-                                        </sizepolicy>
-                                    </property>
-                                    <property name="minimumSize">
-                                        <size>
-                                            <width>100</width>
-                                            <height>50</height>
-                                        </size>
-                                    </property>
-                                    <property name="styleSheet">
-                                        <string notr="true">QLCDNumber{
-                                            border: 2px solid blue;
-                                            border-radius: 10px;
-                                            padding: 0 8px;
-                                            }
-                                        </string>
-                                    </property>
-                                </widget>
-                            </item>
-                            <item row="3" column="2">
-                                <widget class="QLabel" name="label_210">
-                                    <property name="font">
-                                        <font>
-                                            <bold>true</bold>
-                                        </font>
-                                    </property>
-                                    <property name="text">
-                                        <string>Load Lock (mBar)</string>
-                                    </property>
-                                </widget>
-                            </item>
-                            <item row="3" column="3">
-                                <widget class="QLCDNumber" name="vacuum_load_lock">
-                                    <property name="sizePolicy">
-                                        <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
-                                            <horstretch>0</horstretch>
-                                            <verstretch>0</verstretch>
-                                        </sizepolicy>
-                                    </property>
-                                    <property name="minimumSize">
-                                        <size>
-                                            <width>100</width>
-                                            <height>50</height>
-                                        </size>
-                                    </property>
-                                    <property name="styleSheet">
-                                        <string notr="true">QLCDNumber{
-                                            border: 2px solid blue;
-                                                            border-radius: 10px;
-                                                            padding: 0 8px;
-                                                            }
-                                        </string>
-                                    </property>
-                                </widget>
+                                            </property>
+                                            <property name="text">
+                                                <string>Vent LL</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item row="2" column="1">
+                                        <widget class="QLabel" name="led_pump_load_lock">
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>50</width>
+                                                    <height>50</height>
+                                                </size>
+                                            </property>
+                                            <property name="maximumSize">
+                                                <size>
+                                                    <width>50</width>
+                                                    <height>50</height>
+                                                </size>
+                                            </property>
+                                            <property name="text">
+                                                <string>pump</string>
+                                            </property>
+                                            <property name="alignment">
+                                                <set>Qt::AlignCenter</set>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                </layout>
                             </item>
                         </layout>
                     </item>
-                    <item row="4" column="1">
-                        <widget class="QSpinBox" name="target_tempreature_ll">
-                            <property name="maximumSize">
-                                <size>
-                                    <width>70</width>
-                                    <height>16777215</height>
-                                </size>
-                            </property>
-                            <property name="styleSheet">
-                                <string notr="true">QSpinBox{
+                    <item>
+                        <layout class="QGridLayout" name="gridLayout_8">
+                            <item row="0" column="0">
+                                <layout class="QGridLayout" name="gridLayout_6">
+                                    <item row="0" column="0">
+                                        <widget class="QLabel" name="label_215">
+                                            <property name="font">
+                                                <font>
+                                                    <bold>true</bold>
+                                                </font>
+                                            </property>
+                                            <property name="text">
+                                                <string>Temp. Stage (K)</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item row="0" column="1" colspan="2">
+                                        <widget class="QLCDNumber" name="temp_stage">
+                                            <property name="sizePolicy">
+                                                <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                                                    <horstretch>0</horstretch>
+                                                    <verstretch>0</verstretch>
+                                                </sizepolicy>
+                                            </property>
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>150</width>
+                                                    <height>50</height>
+                                                </size>
+                                            </property>
+                                            <property name="styleSheet">
+                                                <string notr="true">QLCDNumber{
+                                                    border: 2px solid orange;
+                                                    border-radius: 10px;
+                                                    padding: 0 8px;
+                                                    }
+                                        </string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item row="1" column="0" colspan="2">
+                                        <widget class="QPushButton" name="set_temperature_cryo">
+                                            <property name="sizePolicy">
+                                                <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+                                                    <horstretch>0</horstretch>
+                                                    <verstretch>0</verstretch>
+                                                </sizepolicy>
+                                            </property>
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>0</width>
+                                                    <height>25</height>
+                                                </size>
+                                            </property>
+                                            <property name="styleSheet">
+                                                <string notr="true">QPushButton{
+                                                    background: rgb(193, 193, 193)
+                                                    }
+                                                </string>
+                                            </property>
+                                            <property name="text">
+                                                <string>Set T Cryo (K)</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item row="1" column="2">
+                                        <widget class="QSpinBox" name="target_tempreature_cryo">
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>150</width>
+                                                    <height>0</height>
+                                                </size>
+                                            </property>
+                                            <property name="maximumSize">
+                                                <size>
+                                                    <width>70</width>
+                                                    <height>16777215</height>
+                                                </size>
+                                            </property>
+                                            <property name="styleSheet">
+                                                <string notr="true">QSpinBox{
                                                     background: rgb(223,223,233)
                                                     }
                                                 </string>
-                            </property>
-                        </widget>
-                    </item>
-                    <item row="3" column="0">
-                        <widget class="QLabel" name="label_220">
-                            <property name="font">
-                                <font>
-                                    <bold>true</bold>
-                                </font>
-                            </property>
-                            <property name="text">
-                                <string>LL Backing Time (min)</string>
-                            </property>
-                        </widget>
-                    </item>
-                    <item row="2" column="1">
-                        <widget class="QLCDNumber" name="temp_ll">
-                            <property name="sizePolicy">
-                                <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
-                                    <horstretch>0</horstretch>
-                                    <verstretch>0</verstretch>
-                                </sizepolicy>
-                            </property>
-                            <property name="minimumSize">
-                                <size>
-                                    <width>100</width>
-                                    <height>50</height>
-                                </size>
-                            </property>
-                            <property name="styleSheet">
-                                <string notr="true">QLCDNumber{
-                                    border: 2px solid orange;
-                                    border-radius: 10px;
-                                    padding: 0 8px;
-                                    }
-                                </string>
-                            </property>
-                        </widget>
-                    </item>
-                    <item row="3" column="1">
-                        <widget class="QLineEdit" name="ll_baking_time">
-                            <property name="sizePolicy">
-                                <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
-                                    <horstretch>0</horstretch>
-                                    <verstretch>0</verstretch>
-                                </sizepolicy>
-                            </property>
-                            <property name="minimumSize">
-                                <size>
-                                    <width>0</width>
-                                    <height>0</height>
-                                </size>
-                            </property>
-                            <property name="styleSheet">
-                                <string notr="true">QLineEdit{
+                                            </property>
+                                        </widget>
+                                    </item>
+                                </layout>
+                            </item>
+                            <item row="0" column="1">
+                                <layout class="QGridLayout" name="gridLayout_5">
+                                    <item row="0" column="0">
+                                        <widget class="QLabel" name="label_219">
+                                            <property name="font">
+                                                <font>
+                                                    <bold>true</bold>
+                                                </font>
+                                            </property>
+                                            <property name="text">
+                                                <string>LL Temp (°C)</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item row="0" column="1" colspan="2">
+                                        <widget class="QLCDNumber" name="temp_ll">
+                                            <property name="sizePolicy">
+                                                <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                                                    <horstretch>0</horstretch>
+                                                    <verstretch>0</verstretch>
+                                                </sizepolicy>
+                                            </property>
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>150</width>
+                                                    <height>50</height>
+                                                </size>
+                                            </property>
+                                            <property name="styleSheet">
+                                                <string notr="true">QLCDNumber{
+                                                    border: 2px solid orange;
+                                                    border-radius: 10px;
+                                                    padding: 0 8px;
+                                                    }
+                                                </string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item row="1" column="0" colspan="2">
+                                        <widget class="QPushButton" name="set_temperature_ll">
+                                            <property name="sizePolicy">
+                                                <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+                                                    <horstretch>0</horstretch>
+                                                    <verstretch>0</verstretch>
+                                                </sizepolicy>
+                                            </property>
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>0</width>
+                                                    <height>25</height>
+                                                </size>
+                                            </property>
+                                            <property name="styleSheet">
+                                                <string notr="true">QPushButton{
+                                                    background: rgb(193, 193, 193)
+                                                    }
+                                                </string>
+                                            </property>
+                                            <property name="text">
+                                                <string>Set T LL (°C)</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item row="1" column="2">
+                                        <widget class="QSpinBox" name="target_tempreature_ll">
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>150</width>
+                                                    <height>0</height>
+                                                </size>
+                                            </property>
+                                            <property name="maximumSize">
+                                                <size>
+                                                    <width>70</width>
+                                                    <height>16777215</height>
+                                                </size>
+                                            </property>
+                                            <property name="styleSheet">
+                                                <string notr="true">QSpinBox{
+                                                    background: rgb(223,223,233)
+                                                    }
+                                                </string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                </layout>
+                            </item>
+                            <item row="0" column="2">
+                                <layout class="QGridLayout" name="gridLayout_7">
+                                    <item row="0" column="0">
+                                        <widget class="QLabel" name="label_218">
+                                            <property name="font">
+                                                <font>
+                                                    <bold>true</bold>
+                                                </font>
+                                            </property>
+                                            <property name="text">
+                                                <string>Temp. Cryo Head (K)</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item row="0" column="1">
+                                        <widget class="QLCDNumber" name="temp_cryo_head">
+                                            <property name="sizePolicy">
+                                                <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                                                    <horstretch>0</horstretch>
+                                                    <verstretch>0</verstretch>
+                                                </sizepolicy>
+                                            </property>
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>150</width>
+                                                    <height>50</height>
+                                                </size>
+                                            </property>
+                                            <property name="styleSheet">
+                                                <string notr="true">QLCDNumber{
+                                                    border: 2px solid orange;
+                                                    border-radius: 10px;
+                                                    padding: 0 8px;
+                                                    }
+                                                </string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item row="1" column="0">
+                                        <widget class="QLabel" name="label_220">
+                                            <property name="font">
+                                                <font>
+                                                    <bold>true</bold>
+                                                </font>
+                                            </property>
+                                            <property name="text">
+                                                <string>LL Backing Time (min)</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item row="1" column="1">
+                                        <widget class="QLineEdit" name="ll_baking_time">
+                                            <property name="sizePolicy">
+                                                <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+                                                    <horstretch>0</horstretch>
+                                                    <verstretch>0</verstretch>
+                                                </sizepolicy>
+                                            </property>
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>0</width>
+                                                    <height>0</height>
+                                                </size>
+                                            </property>
+                                            <property name="styleSheet">
+                                                <string notr="true">QLineEdit{
                                     background: rgb(223,223,233)
                                     }
                                 </string>
-                            </property>
-                            <property name="text">
-                                <string>60</string>
-                            </property>
-                        </widget>
+                                            </property>
+                                            <property name="text">
+                                                <string>60</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                </layout>
+                            </item>
+                            <item row="1" column="0" colspan="3">
+                                <widget class="QLabel" name="Error">
+                                    <property name="minimumSize">
+                                        <size>
+                                            <width>600</width>
+                                            <height>30</height>
+                                        </size>
+                                    </property>
+                                    <property name="font">
+                                        <font>
+                                            <pointsize>13</pointsize>
+                                            <bold>true</bold>
+                                            <strikeout>false</strikeout>
+                                        </font>
+                                    </property>
+                                    <property name="text">
+                                        <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;br/&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                                    </property>
+                                    <property name="alignment">
+                                        <set>Qt::AlignCenter</set>
+                                    </property>
+                                    <property name="textInteractionFlags">
+                                        <set>Qt::LinksAccessibleByMouse</set>
+                                    </property>
+                                </widget>
+                            </item>
+                        </layout>
                     </item>
                 </layout>
             </item>
@@ -670,9 +732,9 @@
     <tabstops>
         <tabstop>set_temperature_cryo</tabstop>
         <tabstop>target_tempreature_cryo</tabstop>
-        <tabstop>ll_baking_time</tabstop>
         <tabstop>set_temperature_ll</tabstop>
         <tabstop>target_tempreature_ll</tabstop>
+        <tabstop>ll_baking_time</tabstop>
         <tabstop>pump_load_lock_switch</tabstop>
         <tabstop>pump_cryo_load_lock_switch</tabstop>
         <tabstop>superuser</tabstop>

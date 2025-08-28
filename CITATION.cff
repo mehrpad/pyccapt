@@ -11,9 +11,9 @@ authors:
   - given-names: Mehrpad
     family-names: Monajem
     email: mehrpad.monajem@fau.de
-    name-particle: Mehrpad
+    name-particle:
     orcid: 'https://orcid.org/0009-0002-6746-2835'
-  - given-names: harsh
+  - given-names: Harsh
     family-names: Pandey
     email: harsh020596@gmail.com
 identifiers:

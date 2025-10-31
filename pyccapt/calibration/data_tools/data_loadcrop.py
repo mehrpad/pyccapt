@@ -28,6 +28,7 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld') -> pd.DataFram
     Returns:
         DataFrame: Contains relevant information from the dld group.
     """
+    flag_old_pyccpat_data = False
     if extract_mode == 'dld':
         try:
             hdf5Data = data_tools.read_hdf5(filename)
@@ -38,8 +39,10 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld') -> pd.DataFram
                 dld_pulse_v = hdf5Data['dld/pulse'].to_numpy()
             elif 'dld/voltage_pulse' in hdf5Data:
                 dld_pulse_v = hdf5Data['dld/voltage_pulse'].to_numpy()
+                print('The data is loaded in dld mode')
             elif 'dld/pulse_voltage' in hdf5Data:
                 dld_pulse_v = hdf5Data['dld/pulse_voltage'].to_numpy()
+                flag_old_pyccpat_data = True
             else:
                 dld_pulse_v = np.zeros(len(dld_highVoltage))
                 dld_pulse_v = np.expand_dims(dld_pulse_v, axis=1)
@@ -59,7 +62,8 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld') -> pd.DataFram
             dldGroupStorage = np.concatenate(
                 (dld_highVoltage, dld_pulse_v, dld_pulse_l, dld_startCounter, dld_t, dld_x, dld_y),
                                              axis=1)
-            dld_group_storage = create_pandas_dataframe(dldGroupStorage, mode='dld')
+            dld_group_storage = create_pandas_dataframe(dldGroupStorage, mode='dld',
+                                                        flag_old_pyccpat_data=flag_old_pyccpat_data)
             return dld_group_storage
         except KeyError as error:
             print(error)
@@ -490,7 +494,7 @@ def crop_data_after_selection(data_crop, variables):
     return data_crop
 
 
-def create_pandas_dataframe(data_crop, mode='dld'):
+def create_pandas_dataframe(data_crop, mode='dld', flag_old_pyccpat_data=False):
     """
     Create a pandas dataframe from the cropped data.
 
@@ -499,12 +503,24 @@ def create_pandas_dataframe(data_crop, mode='dld'):
         mode: Mode of extraction
                 dld: Extracts data from dld group
                 tdc_sc: Extracts data from tdc for Surface Consept
-                tdc_ro: Extracts data from tdc for Roentdek detector
+                tdc_ro: Extracts data from tdc for RoentDek detector
+        flag_old_pyccpat_data: Flag to determine if data is already convert from bin to ns and mm (old pyccapt datas)
 
     Returns:
         hdf_dataframe: Dataframe to be inserted in the HDF file
     """
     if mode == 'dld':
+        if flag_old_pyccpat_data:
+            TOFFACTOR = 27.432 / (1000 * 4)  # 27.432 ps/bin, tof in ns, data is TDC time sum
+            DETBINS = 4900
+            BINNINGFAC = 2
+            XYFACTOR = 80 / DETBINS * BINNINGFAC  # XXX mm/bin
+            XYBINSHIFT = DETBINS / BINNINGFAC / 2  # to center detector
+
+            data_crop[:, 4] = data_crop[:, 4] * TOFFACTOR  # in ns
+            data_crop[:, 5] = ((data_crop[:, 5] - XYBINSHIFT) * XYFACTOR) * 0.1  # from mm to in cm by dividing by 10
+            data_crop[:, 6] = ((data_crop[:, 6] - XYBINSHIFT) * XYFACTOR) * 0.1  # from mm to in cm by dividing by 10
+
         hdf_dataframe = pd.DataFrame(data=data_crop,
                                      columns=['high_voltage (V)', 'pulse_v (V)',
                                               'pulse_l (pJ)', 'start_counter', 't (ns)',

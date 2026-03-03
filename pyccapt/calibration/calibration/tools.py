@@ -8,7 +8,11 @@ from scipy.optimize import curve_fit
 from scipy.signal import find_peaks, peak_widths
 
 from pyccapt.calibration.calibration import intractive_point_identification
+from pyccapt.calibration.calibration.background import fit_background
+from pyccapt.calibration.calibration.exceptions import CalibrationInputError
+from pyccapt.calibration.calibration.validation import ensure_positive
 from pyccapt.calibration.data_tools import data_loadcrop, plot_vline_draw, selectors_data
+from pyccapt.calibration.path_utils import save_figure
 
 
 def hist_plot(mc_tof, variables, bin, label, range_data=None, adjust_label=False, ranging=False, hist_color_range=False,
@@ -49,6 +53,11 @@ def hist_plot(mc_tof, variables, bin, label, range_data=None, adjust_label=False
         ValueError: If an invalid mode or selector is provided.
     """
 
+    mc_tof = np.asarray(mc_tof)
+    if mc_tof.size == 0:
+        raise CalibrationInputError("mc_tof cannot be empty")
+    bin = ensure_positive(bin, field_name="bin")
+
     bins = np.linspace(np.min(mc_tof), np.max(mc_tof), round(np.max(mc_tof) / bin))
 
     if fast_hist:
@@ -67,6 +76,8 @@ def hist_plot(mc_tof, variables, bin, label, range_data=None, adjust_label=False
         y, x = np.histogram(mc_tof, bins=bins)
         # y = np.log(y)
         # med = median(y);
+    else:
+        raise CalibrationInputError("Unsupported histogram mode: %r" % mode)
 
     try:
         if peaks_find:
@@ -275,11 +286,15 @@ def hist_plot(mc_tof, variables, bin, label, range_data=None, adjust_label=False
             if label == 'mc':
                 # Enable rendering for text elements
                 rcParams['svg.fonttype'] = 'none'
-                plt.savefig(variables.result_path + "//mc_%s.svg" % fig_name, format="svg", dpi=300)
-                plt.savefig(variables.result_path + "//mc_%s.png" % fig_name, format="png", dpi=300)
+                save_figure(fig1, directory=variables.result_path, stem=f"mc_{fig_name}", formats=("svg", "png"), dpi=300)
             elif label == 'tof':
-                plt.savefig(variables.result_path + "//tof_%s.svg" % fig_name, format="svg", dpi=300)
-                plt.savefig(variables.result_path + "//tof_%s.png" % fig_name, format="png", dpi=300)
+                save_figure(
+                    fig1,
+                    directory=variables.result_path,
+                    stem=f"tof_{fig_name}",
+                    formats=("svg", "png"),
+                    dpi=300,
+                )
         if ranging and hist_color_range:
             plt.legend(loc='center right')
 
@@ -313,21 +328,6 @@ def hist_plot(mc_tof, variables, bin, label, range_data=None, adjust_label=False
     return x_peaks, y_peaks, peaks_widths, mask
 
 
-def fit_background(x, a, b):
-    """
-    Calculate the fit function value for the given parameters.
-
-    Args:
-        x (array-like): Input array of values.
-        a (float): Parameter a.
-        b (float): Parameter b.
-
-    Returns:
-        array-like: Fit function values corresponding to the input array.
-    """
-    yy = (a / (2 * np.sqrt(b))) * 1 / (np.sqrt(x))
-    return yy
-
 
 def mc_hist_plot(variables, bin_size, mode, prominence, distance, percent, selector, plot, figname, lim,
                  peaks_find_plot):
@@ -349,18 +349,15 @@ def mc_hist_plot(variables, bin_size, mode, prominence, distance, percent, selec
         None
 
     """
-    if mode == 'mc':
-        hist = variables.mc_calib
-        label = 'mc'
-    elif mode == 'mc_c':
-        hist = variables.mc_uc
-        label = 'mc'
-    elif mode == 'tof':
-        hist = variables.dld_t_calib
-        label = 'tof'
-    elif mode == 'tof_c':
-        hist = variables.dld_t_c
-        label = 'tof'
+    mode_map = {
+        'mc': (variables.mc_calib, 'mc'),
+        'mc_c': (variables.mc_uc, 'mc'),
+        'tof': (variables.dld_t_calib, 'tof'),
+        'tof_c': (variables.dld_t_c, 'tof'),
+    }
+    if mode not in mode_map:
+        raise CalibrationInputError(f"Unsupported mode: {mode!r}")
+    hist, label = mode_map[mode]
     if selector == 'peak_x':
         variables.peaks_x_selected = []
     peaks_ini, peaks_y_ini, peak_widths_p_ini, _ = hist_plot(hist[hist < lim], variables, bin_size,
@@ -379,5 +376,4 @@ def mc_hist_plot(variables, bin_size, mode, prominence, distance, percent, selec
                   'peak_x window sides ({:.1f}-maximum) are: ({:.2f}, {:.2f})'.format(percent, peak_widths_p_ini[i][1],
                                                                                       peak_widths_p_ini[i][2]),
                   '-> {:.2f}'.format(peak_widths_p_ini[i][2] - peak_widths_p_ini[i][1]))
-
 

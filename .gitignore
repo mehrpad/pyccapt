@@ -131,3 +131,8 @@ dmypy.json
 # to not update the congiguration files
 *.txt
 !/pyccapt/config.json
+
+# IDE / temp
+.idea/
+.virtual_documents/
+

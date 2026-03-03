@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import plotly
+from pathlib import Path
 
 from pyccapt.calibration.leap_tools import leap_tools
 
@@ -70,6 +71,8 @@ def cloud_plotter(data, phases, result_path, filename, plot_type='cloud', open_n
     """
     if plot_type == 'projection':
         # Plot static images with matplotlib.
+        output_dir = Path(result_path).expanduser()
+        output_dir.mkdir(parents=True, exist_ok=True)
         ax = plt.figure().add_subplot(111)
         for element in phases:
             px, py, pz, color = decompose(data, element)
@@ -80,7 +83,7 @@ def cloud_plotter(data, phases, result_path, filename, plot_type='cloud', open_n
         ax.xaxis.set_label_position('top')
         ax.set_ylabel('Z')
         plt.legend()
-        plt.savefig(result_path + 'output_{fn}.png'.format(fn=filename))
+        plt.savefig(output_dir / f"output_{filename}.png")
 
     elif plot_type == 'cloud':
         # Adjust fig parameters in def_function.py
@@ -106,7 +109,9 @@ def cloud_plotter(data, phases, result_path, filename, plot_type='cloud', open_n
 
         fig = dict(data=plotly_data, layout=layout)
         if open_new_window:
-            plotly.offline.plot(fig, filename=result_path + '{fn}.html'.format(fn=filename), show_link=False)
+            output_dir = Path(result_path).expanduser()
+            output_dir.mkdir(parents=True, exist_ok=True)
+            plotly.offline.plot(fig, filename=str(output_dir / f"{filename}.html"), show_link=False)
         else:
             return fig
 

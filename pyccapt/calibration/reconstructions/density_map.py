@@ -10,6 +10,7 @@ from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
 
 from pyccapt.calibration.data_tools.data_loadcrop import elliptical_shape_selector
 from pyccapt.calibration.data_tools.merge_range import merge_by_range
+from pyccapt.calibration.reconstructions.io_utils import save_matplotlib_figure
 
 
 def plot_density_map(x, y, z_weigth=False, log=True, bins=(256, 256), frac=1.0, axis_mode='normal', figure_size=(5, 4),
@@ -229,5 +230,4 @@ def plot_density_map(x, y, z_weigth=False, log=True, bins=(256, 256), frac=1.0, 
     if save and variables is not None:
         # Enable rendering for text elements
         rcParams['svg.fonttype'] = 'none'
-        plt.savefig("%s.png" % (variables.result_path + figname), format="png", dpi=600)
-        plt.savefig("%s.svg" % (variables.result_path + figname), format="svg", dpi=600)
+        save_matplotlib_figure(fig1, variables, stem=figname, formats=("png", "svg"), dpi=600)

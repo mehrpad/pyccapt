@@ -1,8 +1,7 @@
-import os
+from pathlib import Path
 
 import numpy as np
 
-from pyccapt.calibration.calibration import share_variables
 from pyccapt.calibration.data_tools import data_tools
 from pyccapt.calibration.mc import tof_tools
 
@@ -26,7 +25,7 @@ def load_data(dataset_path, max_mc, flightPathLength, pulse_mode, tdc, variables
 			raise ValueError('The dataset should be a valid leap_apt dataset with .apt extension')
 	elif tdc == 'ato_v6':
 		# Check that the dataset is a valid ato_v6 dataset with .ato extension
-		if not dataset_path.endswith('.ato', '.ATO'):
+		if not dataset_path.endswith(('.ato', '.ATO')):
 			raise ValueError('The dataset should be a valid ato_v6 dataset with .ato extension')
 
 	if processing_mode:
@@ -35,15 +34,12 @@ def load_data(dataset_path, max_mc, flightPathLength, pulse_mode, tdc, variables
 		print('The maximum possible TOF is:', max_tof, 'ns')
 		print('=============================')
 		variables.pulse_mode = pulse_mode
-		dataset_main_path = os.path.dirname(dataset_path)
-		dataset_name_with_extention = os.path.basename(dataset_path)
-		variables.dataset_name = os.path.splitext(dataset_name_with_extention)[0]
-		variables.result_data_path = dataset_main_path + '/' + variables.dataset_name + '/data_processing/'
+		dataset_path_obj = Path(dataset_path)
+		variables.dataset_name = dataset_path_obj.stem
+		output_dir = dataset_path_obj.parent / variables.dataset_name / 'data_processing'
+		variables.set_result_data_directory(output_dir)
 		variables.result_data_name = variables.dataset_name
-		variables.result_path = dataset_main_path + '/' + variables.dataset_name + '/data_processing/'
-
-		if not os.path.isdir(variables.result_path):
-			os.makedirs(variables.result_path, mode=0o777, exist_ok=True)
+		variables.set_result_directory(output_dir)
 
 		print('The data will be saved on the path:', variables.result_data_path)
 		print('=============================')
@@ -58,7 +54,7 @@ def load_data(dataset_path, max_mc, flightPathLength, pulse_mode, tdc, variables
 				dld_group_storage = data_tools.load_data(dataset_path, tdc, mode='raw')
 				print('The data is loaded in raw mode')
 				mode = 'raw'
-			except:
+			except Exception:
 				dld_group_storage = data_tools.load_data(dataset_path, tdc, mode='processed')
 				print('The data is loaded in processed mode')
 				if 'x (nm)' not in dld_group_storage:
@@ -66,7 +62,8 @@ def load_data(dataset_path, max_mc, flightPathLength, pulse_mode, tdc, variables
 				else:
 					mode = 'processed'
 		else:
-			dld_group_storage = data_tools.load_data(dataset_path, tdc)
+			load_data_type = 'leap_pos' if tdc == 'pos' else tdc
+			dld_group_storage = data_tools.load_data(dataset_path, load_data_type)
 
 		if tdc == 'pyccapt' and mode == 'raw':
 			data = data_tools.remove_invalid_data(dld_group_storage, max_tof)
@@ -77,15 +74,12 @@ def load_data(dataset_path, max_mc, flightPathLength, pulse_mode, tdc, variables
 	elif not processing_mode:
 		max_tof = int(tof_tools.mc2tof(max_mc, 1000, 0, 0, flightPathLength))
 		variables.pulse_mode = pulse_mode
-		dataset_main_path = os.path.dirname(dataset_path)
-		dataset_name_with_extention = os.path.basename(dataset_path)
-		variables.dataset_name = os.path.splitext(dataset_name_with_extention)[0]
-		variables.result_data_path = dataset_main_path + '/' + variables.dataset_name + '/visualization/'
+		dataset_path_obj = Path(dataset_path)
+		variables.dataset_name = dataset_path_obj.stem
+		output_dir = dataset_path_obj.parent / variables.dataset_name / 'visualization'
+		variables.set_result_data_directory(output_dir)
 		variables.result_data_name = variables.dataset_name
-		variables.result_path = dataset_main_path + '/' + variables.dataset_name + '/visualization/'
-
-		if not os.path.isdir(variables.result_path):
-			os.makedirs(variables.result_path, mode=0o777, exist_ok=True)
+		variables.set_result_directory(output_dir)
 
 		print('The data will be saved on the path:', variables.result_data_path)
 		print('=============================')
@@ -98,7 +92,8 @@ def load_data(dataset_path, max_mc, flightPathLength, pulse_mode, tdc, variables
 		if tdc == 'pyccapt':
 			data = data_tools.load_data(dataset_path, tdc, mode='processed')
 		else:
-			data = data_tools.load_data(dataset_path, tdc)
+			load_data_type = 'leap_pos' if tdc == 'pos' else tdc
+			data = data_tools.load_data(dataset_path, load_data_type)
 
 	print('Total number of Ions:', len(data))
 

@@ -7,6 +7,7 @@ from matplotlib import cm
 from scipy.signal import find_peaks
 
 from pyccapt.calibration.data_tools.merge_range import merge_by_range
+from pyccapt.calibration.reconstructions.io_utils import save_matplotlib_figure
 
 
 def sdm(particles, bin_size, variables=None, roi=[0,0,0.5], z_cut=True, normalize=False, plot_mode='bar', plot=False,
@@ -420,8 +421,7 @@ def sdm(particles, bin_size, variables=None, roi=[0,0,0.5], z_cut=True, normaliz
         if save and variables is not None:
             # Enable rendering for text elements
             rcParams['svg.fonttype'] = 'none'
-            plt.savefig(variables.result_path + '\\sdm_{fn}.png'.format(fn=figname), format="png", dpi=600)
-            plt.savefig(variables.result_path + '\\sdm_{fn}.svg'.format(fn=figname), format="svg", dpi=600)
+            save_matplotlib_figure(fig, variables, stem=f"sdm_{figname}", formats=("png", "svg"), dpi=600)
 
         if plot:
             plt.show()
@@ -451,10 +451,13 @@ def sdm(particles, bin_size, variables=None, roi=[0,0,0.5], z_cut=True, normaliz
             if save and variables is not None:
                 # Enable rendering for text elements
                 rcParams['svg.fonttype'] = 'none'
-                plt.savefig(variables.result_path + '\\disparity_roi_{fn}.png'.format(fn=figname),
-                            format="png", dpi=600)
-                plt.savefig(variables.result_path + '\\disparity_roi_{fn}.svg'.format(fn=figname),
-                            format="svg", dpi=600)
+                save_matplotlib_figure(
+                    fig1,
+                    variables,
+                    stem=f"disparity_roi_{figname}",
+                    formats=("png", "svg"),
+                    dpi=600,
+                )
             if plot:
                 plt.show()
 

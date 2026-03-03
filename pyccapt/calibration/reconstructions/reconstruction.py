@@ -1,10 +1,8 @@
 import io
 from copy import copy
 
-import imageio
 import matplotlib.pyplot as plt
 import numpy as np
-import plotly
 import plotly.graph_objects as go
 import plotly.io as pio
 from matplotlib import rcParams, colors
@@ -14,6 +12,14 @@ from plotly.subplots import make_subplots
 
 # Local module and scripts
 from pyccapt.calibration.data_tools import data_loadcrop, selectors_data
+from pyccapt.calibration.reconstructions.io_utils import (
+    resolve_result_file,
+    save_gif,
+    save_matplotlib_figure,
+    save_plotly_animation,
+    write_plotly_html,
+    write_plotly_image,
+)
 
 
 def cart2pol(x, y):
@@ -447,7 +453,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
         print('The images are ready for the GIF')
 
         # Save the images as a GIF using imageio
-        imageio.mimsave(variables.result_path + '\\rota_evaporation_{fn}.gif'.format(fn=figname), images, fps=2)
+        save_gif(images, variables, f"rota_evaporation_{figname}.gif", fps=2)
 
     fig.update_layout(
         legend=dict(
@@ -520,7 +526,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                     eye=dict(x=4, y=4, z=4),  # Adjust the camera position for zooming
                 )
             )
-            pio.write_html(fig, variables.result_path + "/%s_3d.html" % figname, include_mathjax='cdn')
+            write_plotly_html(fig, variables, f"{figname}_3d.html", include_mathjax='cdn')
             fig.update_layout(showlegend=False)
             layout = go.Layout(
                 margin=go.layout.Margin(
@@ -531,16 +537,16 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                 )
             )
             fig.update_layout(layout)
-            pio.write_image(fig, variables.result_path + "/%s_3d.png" % figname, scale=3, format='png')
-            pio.write_image(fig, variables.result_path + "/%s_3d.svg" % figname, scale=3, format='svg')
+            write_plotly_image(fig, variables, f"{figname}_3d.png", scale=3, image_format='png')
+            write_plotly_image(fig, variables, f"{figname}_3d.svg", scale=3, image_format='svg')
             fig.update_layout(showlegend=True)
 
             fig.update_scenes(xaxis_visible=False, yaxis_visible=False, zaxis_visible=False)
             fig.update_layout(showlegend=False)
-            pio.write_image(fig, variables.result_path + "/%s_3d_o.png" % figname, scale=3, format='png')
-            pio.write_image(fig, variables.result_path + "/%s_3d_o.svg" % figname, scale=3, format='svg')
+            write_plotly_image(fig, variables, f"{figname}_3d_o.png", scale=3, image_format='png')
+            write_plotly_image(fig, variables, f"{figname}_3d_o.svg", scale=3, image_format='svg')
             fig.update_layout(showlegend=True)
-            pio.write_html(fig, variables.result_path + "/%s_3d_o.html" % figname, include_mathjax='cdn')
+            write_plotly_html(fig, variables, f"{figname}_3d_o.html", include_mathjax='cdn')
             fig.update_scenes(xaxis_visible=True, yaxis_visible=True, zaxis_visible=True)
         except Exception as e:
             print('The figure could not be saved')
@@ -631,7 +637,7 @@ def rotary_fig(fig, variables, rotary_fig_save, make_gif, figname):
         print('The images are ready for the GIF')
 
         # Save the images as a GIF using imageio
-        imageio.mimsave(variables.result_path + '\\rota_{fn}.gif'.format(fn=figname), images, fps=2)
+        save_gif(images, variables, f"rota_{figname}.gif", fps=2)
 
         fig.update_layout(showlegend=True)
 
@@ -673,12 +679,13 @@ def rotary_fig(fig, variables, rotary_fig_save, make_gif, figname):
             frames.append(go.Frame(layout=dict(scene_camera_eye=dict(x=xe, y=ye, z=ze))))
         fig.frames = frames
 
-        plotly.offline.plot(
+        save_plotly_animation(
             fig,
-            filename=variables.result_path + '\\rota_{fn}.html'.format(fn=figname),
+            variables,
+            filename=f"rota_{figname}.html",
             show_link=True,
             auto_open=False,
-            include_mathjax='cdn'
+            include_mathjax='cdn',
         )
 
 
@@ -745,8 +752,7 @@ def scatter_plot(data, range_data, variables, element_percentage, selected_area,
     if save:
         # Enable rendering for text elements
         rcParams['svg.fonttype'] = 'none'
-        plt.savefig(variables.result_path + '\\projection_{fn}.png'.format(fn=figname))
-        plt.savefig(variables.result_path + '\\projection_{fn}.svg'.format(fn=figname))
+        save_matplotlib_figure(fig, variables, stem=f"projection_{figname}", formats=("png", "svg"), dpi=600)
     plt.show()
 
 
@@ -862,8 +868,7 @@ def projection(variables, element_percentage, range_sequence=[], range_mc=[], ra
     if save:
         # Enable rendering for text elements
         rcParams['svg.fonttype'] = 'none'
-        plt.savefig(variables.result_path + '\\projection_{fn}.png'.format(fn=figname), format="png", dpi=600)
-        plt.savefig(variables.result_path + '\\projection_{fn}.svg'.format(fn=figname), format="svg", dpi=600)
+        save_matplotlib_figure(fig, variables, stem=f"projection_{figname}", formats=("png", "svg"), dpi=600)
     plt.show()
 
 
@@ -972,8 +977,7 @@ def heatmap(variables, element_percentage, range_sequence=[], range_mc=[], range
     if save:
         # Enable rendering for text elements
         rcParams['svg.fonttype'] = 'none'
-        plt.savefig(variables.result_path + figure_name + "heatmap.png", format="png", dpi=600)
-        plt.savefig(variables.result_path + figure_name + "heatmap.svg", format="svg", dpi=600)
+        save_matplotlib_figure(fig, variables, stem=f"{figure_name}heatmap", formats=("png", "svg"), dpi=600)
     plt.show()
 
 
@@ -1077,8 +1081,7 @@ def reconstruction_2d_histogram(variables, x, y, bins, percentage, range_sequenc
     if save:
         # Enable rendering for text elements
         rcParams['svg.fonttype'] = 'none'
-        plt.savefig(variables.result_path + figure_name + ".png", format="png", dpi=600)
-        plt.savefig(variables.result_path + figure_name + ".svg", format="svg", dpi=600)
+        save_matplotlib_figure(fig, variables, stem=figure_name, formats=("png", "svg"), dpi=600)
     # Show the plot
     plt.show()
 
@@ -1171,7 +1174,7 @@ def detector_animation(variables, points_per_frame, ranged, selected_area_specia
     if save:
         # Enable rendering for text elements
         rcParams['svg.fonttype'] = 'none'
-        animation.save(variables.result_path + figure_name + ".gif", writer='imagemagick')
+        animation.save(resolve_result_file(variables, f"{figure_name}.gif"), writer='imagemagick')
     plt.close()
 def x_y_z_calculation_and_plot(variables, element_percentage, kf, det_eff, icf, field_evap,
                                avg_dens, flight_path_length, rotary_fig_save, mode, opacity, figname, save,

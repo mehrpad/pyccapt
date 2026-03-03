@@ -11,23 +11,10 @@ from scipy.optimize import curve_fit
 from scipy.signal import find_peaks, peak_widths, peak_prominences
 
 from pyccapt.calibration.calibration import intractive_point_identification
+from pyccapt.calibration.calibration.background import fit_background
 from pyccapt.calibration.data_tools import data_loadcrop, plot_vline_draw
+from pyccapt.calibration.path_utils import save_figure
 
-
-def fit_background(x, a, b):
-    """
-    Calculate the fit function value for the given parameters.
-
-    Args:
-        x (array-like): Input array of values.
-        a (float): Parameter a.
-        b (float): Parameter b.
-
-    Returns:
-        array-like: Fit function values corresponding to the input array.
-    """
-    yy = (a / (2 * np.sqrt(b))) * 1 / (np.sqrt(x))
-    return yy
 
 
 class AptHistPlotter:
@@ -967,11 +954,21 @@ class AptHistPlotter:
         """
         rcParams['svg.fonttype'] = 'none'
         if label == 'mc' or label == 'mc_c':
-            self.fig.savefig(self.variables.result_path + "//mc_%s.svg" % fig_name, format="svg", dpi=600)
-            self.fig.savefig(self.variables.result_path + "//mc_%s.png" % fig_name, format="png", dpi=600)
+            save_figure(
+                self.fig,
+                directory=self.variables.result_path,
+                stem=f"mc_{fig_name}",
+                formats=("svg", "png"),
+                dpi=600,
+            )
         elif label == 'tof' or label == 'tof_c':
-            self.fig.savefig(self.variables.result_path + "//tof_%s.svg" % fig_name, format="svg", dpi=600)
-            self.fig.savefig(self.variables.result_path + "//tof_%s.png" % fig_name, format="png", dpi=600)
+            save_figure(
+                self.fig,
+                directory=self.variables.result_path,
+                stem=f"tof_{fig_name}",
+                formats=("svg", "png"),
+                dpi=600,
+            )
 
 
 def hist_plot(variables, bin_size, log, target, normalize, prominence, distance, percent, selector, figname, lim,
@@ -1183,3 +1180,4 @@ def hist_plot(variables, bin_size, log, target, normalize, prominence, distance,
             print('------------------------------')
 
     return mrp_list
+

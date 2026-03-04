@@ -1,18 +1,26 @@
 import copy
 import datetime
 import multiprocessing
-import os
 import time
 
 import serial.tools.list_ports
 from simple_pid import PID
 
 from pyccapt.control.apt import apt_exp_control_func
-from pyccapt.control.control import experiment_statistics, hdf5_creator, loggi
+from pyccapt.control.apt.detector_runtime import (
+    DetectorRuntime,
+    join_detector_processes,
+    start_detector_processes,
+)
+from pyccapt.control.apt.experiment_state import (
+    append_main_loop_results,
+    ensure_output_directories,
+    prepare_experiment_output_paths,
+    reset_runtime_variables,
+    validate_detector_data_lengths,
+)
+from pyccapt.control.control import experiment_statistics, hdf5_creator, loggi, runtime
 from pyccapt.control.devices import initialize_devices, signal_generator
-from pyccapt.control.drs import drs
-from pyccapt.control.tdc_roentdek import tdc_roentdek
-from pyccapt.control.tdc_surface_concept import tdc_surface_consept
 
 
 class APT_Exp_Control:
@@ -65,6 +73,7 @@ class APT_Exp_Control:
         self.main_chamber_vacuum = []
 
         self.initialization_error = False
+        self.detector_runtime = DetectorRuntime()
 
     def initialize_detector_process(self):
         """
@@ -78,34 +87,20 @@ class APT_Exp_Control:
         Returns:
            None
         """
-        if self.conf['tdc'] == "on" and self.conf['tdc_model'] == 'Surface_Consept' \
-                and self.variables.counter_source == 'TDC':
-
-            # Initialize and initiate a process(Refer to imported file 'tdc_new' for process function declaration )
-            # Module used: multiprocessing
-            self.stop_event = multiprocessing.Event()
-            self.tdc_process = multiprocessing.Process(target=tdc_surface_consept.experiment_measure,
-                                                       args=(self.variables, self.x_plot, self.y_plot, self.t_plot,
-                                                             self.main_v_dc_plot, self.stop_event))
-
-            self.tdc_process.start()
-
-        elif self.conf['tdc'] == "on" and self.conf[
-            'tdc_model'] == 'RoentDek' and self.variables.counter_source == 'TDC':
-
-            self.tdc_process = multiprocessing.Process(target=tdc_roentdek.experiment_measure,
-                                                       args=(self.variables,))
-            self.tdc_process.start()
-
-        elif self.conf['tdc'] == "on" and self.conf['tdc_model'] == 'HSD' and self.variables.counter_source == 'HSD':
-
-            # Initialize and initiate a process(Refer to imported file 'drs' for process function declaration)
-            # Module used: multiprocessing
-            self.hsd_process = multiprocessing.Process(target=drs.experiment_measure,
-                                                       args=(self.variables,))
-            self.hsd_process.start()
-
-        else:
+        self.detector_runtime = start_detector_processes(
+            self.conf,
+            self.variables,
+            self.x_plot,
+            self.y_plot,
+            self.t_plot,
+            self.main_v_dc_plot,
+            process_factory=multiprocessing.Process,
+            event_factory=multiprocessing.Event,
+        )
+        self.stop_event = self.detector_runtime.stop_event
+        self.tdc_process = self.detector_runtime.tdc_process
+        self.hsd_process = self.detector_runtime.hsd_process
+        if self.tdc_process is None and self.hsd_process is None:
             print("No counter source selected")
 
     def main_ex_loop(self, ):
@@ -216,32 +211,15 @@ class APT_Exp_Control:
         #     # create a new txt file
         #     with open('./files/counter_experiments.txt', 'w') as f:
         #         f.write(str(1))  # Current time and date
-        now = datetime.datetime.now()
-        self.variables.exp_name = "%s_" % self.variables.counter + \
-                                  now.strftime("%b-%d-%Y_%H-%M") + "_%s" % self.variables.electrode + "_%s" % \
-                                  self.variables.hdf5_data_name
-        p = os.path.abspath(os.path.join(__file__, "../../.."))
-        self.variables.path = os.path.join(p, 'data\\%s' % self.variables.exp_name)
-        self.variables.path_meta = self.variables.path + '\\meta_data\\'
-
-        self.variables.log_path = self.variables.path_meta
+        data_path, path_meta = prepare_experiment_output_paths(self.variables)
         # Create folder to save the data
-        if not os.path.isdir(self.variables.path):
-            try:
-                os.makedirs(self.variables.path, mode=0o777, exist_ok=True)
-            except Exception as e:
-                print('Can not create the directory for saving the data')
-                print(e)
-                self.variables.stop_flag = True
-                self.initialization_error = True
-        if not os.path.isdir(self.variables.path_meta):
-            try:
-                os.makedirs(self.variables.path_meta, mode=0o777, exist_ok=True)
-            except Exception as e:
-                print('Can not create the directory for saving the data')
-                print(e)
-                self.variables.stop_flag = True
-                self.initialization_error = True
+        try:
+            ensure_output_directories(data_path, path_meta)
+        except Exception as exc:
+            print('Can not create the directory for saving the data')
+            print(exc)
+            self.variables.stop_flag = True
+            self.initialization_error = True
 
         if self.conf['tdc'] == 'on' and not self.initialization_error:
             self.variables.flag_tdc_failure = False
@@ -565,28 +543,22 @@ class APT_Exp_Control:
                 print('TDC process is not finished')
                 self.log_apt.warning('TDC process is not finished after 15 minutes')
 
-        if self.conf['tdc'] == "on":
-            # Stop the TDC process
-            try:
-                if self.variables.counter_source == 'TDC':
-                    self.tdc_process.join(2)
-                    if self.tdc_process.is_alive():
-                        self.tdc_process.join(1)
-                elif self.variables.counter_source == 'HSD':
-                    self.hsd_process.join(2)
-                    if self.hsd_process.is_alive():
-                        self.hsd_process.join(1)
+        try:
+            join_detector_processes(self.conf, self.variables, self.detector_runtime)
+        except Exception as exc:
+            print(
+                f"{initialize_devices.bcolors.WARNING}Warning: The TDC or HSD process cannot be terminated "
+                f"properly{initialize_devices.bcolors.ENDC}"
+            )
+            print(exc)
 
-            except Exception as e:
-                print(
-                    f"{initialize_devices.bcolors.WARNING}Warning: The TDC or HSD process cannot be terminated "
-                    f"properly{initialize_devices.bcolors.ENDC}")
-                print(e)
-
-        self.variables.extend_to('main_counter', self.main_counter)
-        self.variables.extend_to('main_raw_counter', self.main_raw_counter)
-        self.variables.extend_to('main_temperature', self.main_temperature)
-        self.variables.extend_to('main_chamber_vacuum', self.main_chamber_vacuum)
+        append_main_loop_results(
+            self.variables,
+            self.main_counter,
+            self.main_raw_counter,
+            self.main_temperature,
+            self.main_chamber_vacuum,
+        )
 
         if self.conf['tdc'] == "off":
             if self.variables.counter_source == 'TDC':
@@ -596,29 +568,7 @@ class APT_Exp_Control:
 
         # This flag set to True to save the last screenshot of the experiment in the GUI visualization
         self.variables.last_screen_shot = True
-        # Check the length of arrays to be equal
-        if self.variables.counter_source == 'TDC':
-            if all(len(lst) == len(self.variables.x) for lst in [self.variables.x, self.variables.y,
-                                                                 self.variables.t, self.variables.dld_start_counter,
-                                                                 self.variables.main_v_dc_dld,
-                                                                 self.variables.main_v_p_dld,
-                                                                 self.variables.main_l_p_dld]):
-                self.log_apt.warning('dld data have not same length')
-
-            if all(len(lst) == len(self.variables.channel) for lst in [self.variables.channel, self.variables.time_data,
-                                                                       self.variables.tdc_start_counter,
-                                                                       self.variables.main_v_dc_tdc,
-                                                                       self.variables.main_v_p_tdc,
-                                                                       self.variables.main_l_p_tdc]):
-                self.log_apt.warning('tdc data have not same length')
-        elif self.variables.counter_source == 'DRS':
-            if all(len(lst) == len(self.variables.ch0_time) for lst in
-                   [self.variables.ch0_wave, self.variables.ch1_time,
-                    self.variables.ch1_wave, self.variables.ch2_time,
-                    self.variables.ch2_wave, self.variables.ch3_time,
-                    self.variables.ch3_wave,
-                    self.variables.main_v_dc_drs, self.variables.main_v_p_drs, self.variables.main_l_p_drs]):
-                self.log_apt.warning('tdc data have not same length')
+        validate_detector_data_lengths(self.variables, self.log_apt)
 
         self.variables.end_time = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
         # save data in hdf5 file
@@ -636,11 +586,10 @@ class APT_Exp_Control:
             apt_exp_control_func.send_info_email(self.log_apt, self.variables)
 
         # Save new value of experiment counter
-        if os.path.exists("./files/counter_experiments.txt"):
-            self.variables.counter += 1
-            with open('./files/counter_experiments.txt', 'w') as f:
-                f.write(str(self.variables.counter))
-                self.log_apt.info('Experiment counter is increased')
+        counter_path = runtime.ensure_counter_file()
+        self.variables.counter += 1
+        counter_path.write_text(str(self.variables.counter), encoding="utf-8")
+        self.log_apt.info('Experiment counter is increased')
 
         self.experiment_finished_event.set()
         # Clear up all the variables and deinitialize devices
@@ -661,73 +610,6 @@ class APT_Exp_Control:
         Returns:
             None
         """
-
-        def cleanup_variables():
-            """
-            Reset all the global variables.
-            """
-            self.variables.flag_finished_tdc = False
-            self.variables.detection_rate_current = 0.0
-            self.variables.count = 0
-            self.variables.index_plot = 0
-            self.variables.index_save_image = 0
-            self.variables.index_wait_on_plot_start = 0
-            self.variables.index_plot_save = 0
-            self.variables.index_plot = 0
-            self.variables.specimen_voltage = 0
-            self.variables.specimen_voltage_plot = 0
-            self.variables.pulse_voltage = 0
-
-            while not self.x_plot.empty() or not self.y_plot.empty() or not self.t_plot.empty() or \
-                    not self.main_v_dc_plot.empty():
-                dumy = self.x_plot.get()
-                dumy = self.y_plot.get()
-                dumy = self.t_plot.get()
-                dumy = self.main_v_dc_plot.get()
-
-            self.variables.clear_to('x')
-            self.variables.clear_to('y')
-            self.variables.clear_to('t')
-
-            self.variables.clear_to('channel')
-            self.variables.clear_to('time_data')
-            self.variables.clear_to('tdc_start_counter')
-            self.variables.clear_to('dld_start_counter')
-
-            self.variables.clear_to('time_stamp')
-            self.variables.clear_to('ch0')
-            self.variables.clear_to('ch1')
-            self.variables.clear_to('ch2')
-            self.variables.clear_to('ch3')
-            self.variables.clear_to('ch4')
-            self.variables.clear_to('ch5')
-            self.variables.clear_to('ch6')
-            self.variables.clear_to('ch7')
-            self.variables.clear_to('laser_intensity')
-
-            self.variables.clear_to('ch0_time')
-            self.variables.clear_to('ch0_wave')
-            self.variables.clear_to('ch1_time')
-            self.variables.clear_to('ch1_wave')
-            self.variables.clear_to('ch2_time')
-            self.variables.clear_to('ch2_wave')
-            self.variables.clear_to('ch3_time')
-            self.variables.clear_to('ch3_wave')
-
-            self.variables.clear_to('main_v_p')
-            self.variables.clear_to('main_counter')
-            self.variables.clear_to('main_raw_counter')
-            self.variables.clear_to('main_temperature')
-            self.variables.clear_to('main_chamber_vacuum')
-            self.variables.clear_to('main_v_dc_dld')
-            self.variables.clear_to('main_v_p_dld')
-            self.variables.clear_to('main_l_p_dld')
-            self.variables.clear_to('main_v_dc_tdc')
-            self.variables.clear_to('main_v_p_tdc')
-            self.variables.clear_to('main_l_p_tdc')
-            self.variables.clear_to('main_v_dc_drs')
-            self.variables.clear_to('main_v_p_drs')
-            self.variables.clear_to('main_l_p_drs')
 
         self.log_apt.info('Starting cleanup')
 
@@ -757,7 +639,13 @@ class APT_Exp_Control:
             print(e)
 
         # Reset variables
-        cleanup_variables()
+        reset_runtime_variables(
+            self.variables,
+            self.x_plot,
+            self.y_plot,
+            self.t_plot,
+            self.main_v_dc_plot,
+        )
         self.log_apt.info('Cleanup is finished')
 
 

@@ -11,7 +11,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import QTimer
 
 # Local module and scripts
-from pyccapt.control.control import share_variables, read_files, tof2mc_simple
+from pyccapt.control.control import runtime, tof2mc_simple
 from pyccapt.control.devices import initialize_devices
 
 
@@ -1218,27 +1218,24 @@ def run_visualization_window(variables, conf, visualization_closed_event, visual
 
 if __name__ == "__main__":
 	try:
-		# Load the JSON file
-		configFile = 'config.json'
-		p = os.path.abspath(os.path.join(__file__, "../../.."))
-		os.chdir(p)
-		conf = read_files.read_json_file(configFile)
-	except Exception as e:
+		conf, _ = runtime.load_project_config()
+	except Exception as exc:
 		print('Can not load the configuration file')
-		print(e)
+		print(exc)
 		sys.exit()
-	manager = multiprocessing.Manager()
-	ns = manager.Namespace()
-	variables = share_variables.Variables(conf, ns)
+	shared = runtime.create_shared_context(conf)
 
 	app = QtWidgets.QApplication(sys.argv)
 	app.setStyle('Fusion')
 	Visualization = QtWidgets.QWidget()
-	x_plot = multiprocessing.Queue()
-	y_plot = multiprocessing.Queue()
-	t_plot = multiprocessing.Queue()
-	main_v_dc_plot = multiprocessing.Queue()
-	ui = Ui_Visualization(variables, conf, x_plot, y_plot, t_plot, main_v_dc_plot)
+	ui = Ui_Visualization(
+		shared.variables,
+		conf,
+		shared.x_plot,
+		shared.y_plot,
+		shared.t_plot,
+		shared.main_v_dc_plot,
+	)
 	ui.setupUi(Visualization)
 	Visualization.show()
 	sys.exit(app.exec())

@@ -1,18 +1,21 @@
-import json
 import multiprocessing
-import os
-import re
 import sys
+from pathlib import Path
 
 import pkg_resources
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import Qt
 
 # Local module and scripts
-from pyccapt.control.apt import apt_exp_control
-from pyccapt.control.control import share_variables, read_files
-from pyccapt.control.gui import gui_baking, gui_cameras, gui_gates, gui_laser_control, gui_pumps_vacuum, \
-    gui_stage_control, gui_visualization
+from pyccapt.control.control import runtime
+from pyccapt.control.gui import main_parameters, process_coordinator
+from pyccapt.control.gui import (
+    gui_baking,
+    gui_gates,
+    gui_laser_control,
+    gui_pumps_vacuum,
+    gui_stage_control,
+)
 
 
 class Ui_PyCCAPT(object):
@@ -44,6 +47,7 @@ class Ui_PyCCAPT(object):
         self.visualization_closed_event = multiprocessing.Event()
         self.camera_win_front = multiprocessing.Event()
         self.visualization_win_front = multiprocessing.Event()
+        self.process_coordinator = process_coordinator.ProcessCoordinator()
 
     def setupUi(self, PyCCAPT):
         PyCCAPT.setObjectName("PyCCAPT")
@@ -1005,19 +1009,16 @@ class Ui_PyCCAPT(object):
 
         self.original_button_style = self.superuser.styleSheet()
 
-        if os.path.exists("./files/counter_experiments.txt"):
-            # Read the experiment counter
-            with open('./files/counter_experiments.txt') as f:
-                self.variables.counter = int(f.readlines()[0])
-
-        else:
-            # create a new txt file
-            with open('./files/counter_experiments.txt', 'w') as f:
-                f.write(str(1))  # Current time and date
+        counter_path = runtime.ensure_counter_file()
+        try:
+            self.variables.counter = int(counter_path.read_text(encoding="utf-8").splitlines()[0].strip())
+        except (IndexError, ValueError):
+            counter_path.write_text("1", encoding="utf-8")
+            self.variables.counter = 1
 
         self.ex_number.setEnabled(False)
         self.ex_number.setText(str(self.variables.counter))
-        self.load_items_from_json('./control/electrode.json')
+        self.load_items_from_json(str(runtime.project_path("control", "electrode.json")))
 
     def retranslateUi(self, PyCCAPT):
         """
@@ -1034,7 +1035,7 @@ class Ui_PyCCAPT(object):
         # PyCCAPT.setWindowTitle(_translate("PyCCAPT", "OXCART"))
         _translate = QtCore.QCoreApplication.translate
         PyCCAPT.setWindowTitle(_translate("PyCCAPT", "PyCCAPT APT Experiment Control"))
-        PyCCAPT.setWindowIcon(QtGui.QIcon('./files/logo.png'))
+        PyCCAPT.setWindowIcon(QtGui.QIcon(str(runtime.project_path("files", "logo.png"))))
         ###
         self.gates_control.setText(_translate("PyCCAPT", "Gates Control"))
         self.pumps_vaccum.setText(_translate("PyCCAPT", "Pumps & Vacuum"))
@@ -1155,12 +1156,9 @@ class Ui_PyCCAPT(object):
             self.timer.start(8000)
 
     def load_items_from_json(self, file_path):
-        with open(file_path, 'r') as file:
-            data = json.load(file)
-            # Extracting values from the JSON dictionary and adding to combo box
-            items = [value for key, value in sorted(data.items(), key=lambda item: int(item[0])) if value]
-            self.electrode.clear()
-            self.electrode.addItems(items)
+        items = main_parameters.load_electrode_items(file_path)
+        self.electrode.clear()
+        self.electrode.addItems(items)
 
     def update_elapsed_time(self, value):
         """
@@ -1232,92 +1230,16 @@ class Ui_PyCCAPT(object):
         Return:
                 None
         """
-
-        def convert_value(value):
-            """
-            Convert the value to the correct type
-
-            Args:
-                value (str): The value to convert
-
-            Return:
-                None
-            """
-            # Try to convert to integer
-            try:
-                return int(value)
-            except ValueError:
-                # If not an integer, check if it's a boolean value
-                if value.lower() == 'true':
-                    return True
-                elif value.lower() == 'false':
-                    return False
-                else:
-                    # If not a boolean, return the original value as string
-                    return value
-
-        lines = self.text_line.toPlainText()
-        pattern = r"{(.*?)}"
-        matches = re.findall(pattern, lines, re.DOTALL)
-
-        # Define the required keys for each dictionary
-        required_keys = [
-            'ex_user', 'ex_name', 'electrode', 'ex_time', 'max_ions', 'ex_freq', 'vdc_min', 'vdc_max',
-            'vdc_steps_up', 'vdc_steps_down', 'control_algorithm', 'pulse_mode', 'vp_min', 'vp_max',
-            'pulse_fraction', 'pulse_frequency', 'detection_rate_init', 'hit_displayed',
-            'email', 'counter_source', 'criteria_time', 'criteria_ions', 'criteria_vdc'
-        ]
-
-        # Process each match and create a dictionary for each item
-        for match in matches:
-            item_dict = {}
-            elements = match.split(";")
-            for element in elements:
-                key, value = element.split("=")
-                item_dict[key.strip()] = convert_value(value.strip())
-
-            # Check if all the required keys are present in the dictionary
-            assert all(
-                key in item_dict for key in required_keys), f"Missing keys in dictionary: {item_dict}"
-            self.result_list.append(item_dict)
+        self.result_list = main_parameters.parse_textline_experiments(self.text_line.toPlainText())
         self.variables.number_of_experiment_in_text_line = len(self.result_list)
         if self.variables.index_experiment_in_text_line < len(self.result_list):
             index_line = self.variables.index_experiment_in_text_line
-            self.variables.ex_user = self.result_list[index_line]['ex_user']
-            self.variables.ex_name = self.result_list[index_line]['ex_name']
-            self.variables.electrode = self.result_list[index_line]['electrode']
-            self.variables.ex_time = self.result_list[index_line]['ex_time']
-            self.variables.max_ions = self.result_list[index_line]['max_ions']
-            self.variables.ex_freq = self.result_list[index_line]['ex_freq']
-            self.variables.vdc_min = self.result_list[index_line]['vdc_min']
-            if self.result_list[index_line]['vdc_max'] < self.conf['max_vdc']:
-                self.variables.vdc_max = self.result_list[index_line]['vdc_max']
-            elif self.result_list[index_line]['vdc_max'] > self.conf['max_vdc']:
-                self.error_message("Maximum possible Vdc is " + str(self.conf['max_vdc']))
-            self.variables.vdc_steps_up = self.result_list[index_line]['vdc_steps_up']
-            self.variables.vdc_steps_down = self.result_list[index_line]['vdc_steps_down']
-            self.variables.control_algorithm = self.result_list[index_line]['control_algorithm']
-            self.variables.pulse_mode = self.result_list[index_line]['pulse_mode']
-            if self.result_list[index_line]['vp_min'] < self.conf['min_vp']:
-                self.variables.vp_min = self.conf['min_vp']
-                self.error_message("Minimum possible V_p is " + str(self.conf['min_vp']))
-            elif self.result_list[index_line]['vp_min'] > self.conf['max_vp']:
-                self.error_message("Maximum possible V_p is " + str(self.conf['max_vp']))
-            else:
-                self.variables.vp_min = self.result_list[index_line]['vp_min']
-            if self.result_list[index_line]['vp_max'] < self.conf['max_vp']:
-                self.variables.vp_max = self.result_list[index_line]['vp_max']
-            elif self.result_list[index_line]['vp_max'] > self.conf['max_vp']:
-                self.error_message("Maximum possible V_p is " + str(self.conf['max_vp']))
-            self.variables.pulse_fraction = self.result_list[index_line]['pulse_fraction']
-            self.variables.pulse_frequency = self.result_list[index_line]['pulse_frequency']
-            self.variables.detection_rate_init = self.result_list[index_line]['detection_rate_init']
-            self.variables.hit_display = self.result_list[index_line]['hit_displayed']
-            self.variables.email = self.result_list[index_line]['email']
-            self.variables.counter_source = self.result_list[index_line]['counter_source']
-            self.variables.criteria_time = self.result_list[index_line]['criteria_time']
-            self.variables.criteria_ions = self.result_list[index_line]['criteria_ions']
-            self.variables.criteria_vdc = self.result_list[index_line]['criteria_vdc']
+            main_parameters.apply_textline_item(
+                self.variables,
+                self.conf,
+                self.result_list[index_line],
+                self.error_message,
+            )
 
     def setup_parameters_changes(self):
         """
@@ -1329,112 +1251,51 @@ class Ui_PyCCAPT(object):
         Return:
             None
         """
-        # with self.variables.lock_setup_parameters:
-        if self.parameters_source.currentText() == 'TextLine':
-            self.read_text_lines()
-        else:
-            try:
-                self.variables.user_name = self.ex_user.text()
-                self.variables.ex_name = self.ex_name.text()
-                self.variables.electrode = self.electrode.currentText()
-                self.variables.ex_time = int(float(self.ex_time.text()))
-                self.variables.ex_freq = int(float(self.ex_freq.text()))
-                self.variables.max_ions = int(float(self.max_ions.text()))
-                self.variables.vdc_min = int(float(self.vdc_min.text()))
-                self.variables.detection_rate = float(self.detection_rate_init.text())
-                self.variables.pulse_fraction = int(float(self.pulse_fraction.text())) / 100
-                self.variables.hdf5_data_name = self.ex_name.text()
-                self.variables.email = self.email.text()
-                self.variables.vdc_step_up = float(self.vdc_steps_up.text())
-                self.variables.vdc_step_down = float(self.vdc_steps_down.text())
-                self.variables.control_algorithm = str(self.control_algorithm.currentText())
-                self.variables.pulse_mode = str(self.pulse_mode.currentText())
-                self.variables.v_p_min = int(float(self.vp_min.text()))
-                self.variables.v_p_max = int(float(self.vp_max.text()))
-                self.variables.counter_source = str(self.counter_source.currentText())
+        try:
+            if self.parameters_source.currentText() == 'TextLine':
+                self.read_text_lines()
+                return
 
-                if int(float(self.pulse_fraction.text())) > self.conf['pulse_fraction_max']:
-                    self.error_message(
-                        "Maximum possible number is " + str(self.conf['pulse_fraction_max']))
-                    _translate = QtCore.QCoreApplication.translate
-                    self.pulse_fraction.setText(
-                        _translate("PyCCAPT", str(self.conf['pulse_fraction_max'])))
-                else:
-                    self.variables.pulse_fraction = int(float(self.pulse_fraction.text()))
-
-                if float(self.vp_max.text()) > self.conf['max_vp']:
-                    self.error_message.setText("Maximum possible number is " + str(self.conf['max_vp']))
-                    _translate = QtCore.QCoreApplication.translate
-                    self.vp_max.setText(_translate("PyCCAPT", self.conf['max_vp']))
-                else:
-                    self.variables.v_p_max = int(float(self.vp_max.text()))
-
-                if int(float(self.vdc_max.text())) > self.conf['max_vdc']:
-                    self.error_message("Maximum possible number is " + str(self.conf['max_vdc']))
-                    _translate = QtCore.QCoreApplication.translate
-                    self.vdc_max.setText(_translate("PyCCAPT", str(self.conf['max_vdc'])))
-                else:
-                    self.variables.vdc_max = int(float(self.vdc_max.text()))
-
-                if self.variables.pulse_mode == 'Voltage':
-                    if int(self.pulse_frequency.text()) > self.conf['max_voltage_pulse_frequency']:
-                        self.error_message(
-                            "Maximum possible number is " + str(
-                                self.conf['max_voltage_pulse_frequency']))
-                        self.pulse_frequency.setText(str(self.conf['max_voltage_pulse_frequency']))
-                        self.variables.pulse_frequency = int(self.pulse_frequency.text())
-                    elif int(self.pulse_frequency.text()) < self.conf['min_voltage_pulse_frequency']:
-                        self.error_message(
-                            "Minimum possible number is " + str(
-                                self.conf['min_voltage_pulse_frequency']))
-                        self.pulse_frequency.setText(str(self.conf['min_voltage_pulse_frequency']))
-                        self.variables.pulse_frequency = int(self.pulse_frequency.text())
-                    else:
-                        self.variables.pulse_frequency = int(self.pulse_frequency.text())
-                elif self.variables.pulse_mode == 'Laser':
-                    if int(self.pulse_frequency.text()) > self.conf['max_laser_pulse_frequency']:
-                        self.error_message("Maximum possible number is " + str(
-                            self.conf['max_laser_pulse_frequency']))
-                        self.pulse_frequency.setText(str(self.conf['max_laser_pulse_frequency']))
-                        self.variables.pulse_frequency = int(self.pulse_frequency.text())
-                    elif int(self.pulse_frequency.text()) < self.conf['min_laser_pulse_frequency']:
-                        self.error_message("Minimum possible number is " + str(
-                            self.conf['min_laser_pulse_frequency']))
-                        self.pulse_frequency.setText(str(self.conf['min_laser_pulse_frequency']))
-                        self.variables.pulse_frequency = int(self.pulse_frequency.text())
-                    else:
-                        self.variables.pulse_frequency = int(self.pulse_frequency.text())
-                elif self.variables.pulse_mode == 'VoltageLaser':
-                    max_pulse_frequency = min(self.conf['max_voltage_pulse_frequency'],
-                                              self.conf['max_laser_pulse_frequency'])
-                    min_pulse_frequency = max(self.conf['min_voltage_pulse_frequency'],
-                                              self.conf['min_laser_pulse_frequency'])
-
-                    if int(self.pulse_frequency.text()) > max_pulse_frequency:
-                        self.error_message("Maximum possible number is " + str(max_pulse_frequency))
-                        self.pulse_frequency.setText(str(max_pulse_frequency))
-                        self.variables.pulse_frequency = int(self.pulse_frequency.text())
-                    elif int(self.pulse_frequency.text()) < min_pulse_frequency:
-                        self.error_message("Minimum possible number is " + str(min_pulse_frequency))
-                        self.pulse_frequency.setText(str(min_pulse_frequency))
-                        self.variables.pulse_frequency = int(self.pulse_frequency.text())
-                    else:
-                        self.variables.pulse_frequency = int(self.pulse_frequency.text())
-
-                if self.criteria_time.isChecked():
-                    self.variables.criteria_time = True
-                elif not self.criteria_time.isChecked():
-                    self.variables.criteria_time = False
-                if self.criteria_ions.isChecked():
-                    self.variables.criteria_ions = True
-                elif not self.criteria_ions.isChecked():
-                    self.variables.criteria_ions = False
-                if self.criteria_vdc.isChecked():
-                    self.variables.criteria_vdc = True
-                elif not self.criteria_vdc.isChecked():
-                    self.variables.criteria_vdc = False
-            except ValueError:
-                self.error_message("Please enter a valid number")
+            values = main_parameters.FormValues(
+                user_name=self.ex_user.text(),
+                ex_name=self.ex_name.text(),
+                electrode=self.electrode.currentText(),
+                ex_time=self.ex_time.text(),
+                ex_freq=self.ex_freq.text(),
+                max_ions=self.max_ions.text(),
+                vdc_min=self.vdc_min.text(),
+                vdc_max=self.vdc_max.text(),
+                detection_rate_init=self.detection_rate_init.text(),
+                pulse_fraction=self.pulse_fraction.text(),
+                email=self.email.text(),
+                vdc_steps_up=self.vdc_steps_up.text(),
+                vdc_steps_down=self.vdc_steps_down.text(),
+                control_algorithm=str(self.control_algorithm.currentText()),
+                pulse_mode=str(self.pulse_mode.currentText()),
+                vp_min=self.vp_min.text(),
+                vp_max=self.vp_max.text(),
+                pulse_frequency=self.pulse_frequency.text(),
+                counter_source=str(self.counter_source.currentText()),
+                criteria_time=self.criteria_time.isChecked(),
+                criteria_ions=self.criteria_ions.isChecked(),
+                criteria_vdc=self.criteria_vdc.isChecked(),
+            )
+            corrections = main_parameters.apply_form_values(
+                self.variables,
+                self.conf,
+                values,
+                self.error_message,
+            )
+            if "pulse_fraction" in corrections:
+                self.pulse_fraction.setText(corrections["pulse_fraction"])
+            if "vp_max" in corrections:
+                self.vp_max.setText(corrections["vp_max"])
+            if "vdc_max" in corrections:
+                self.vdc_max.setText(corrections["vdc_max"])
+            if "pulse_frequency" in corrections:
+                self.pulse_frequency.setText(corrections["pulse_frequency"])
+        except (ValueError, main_parameters.ParameterError):
+            self.error_message("Please enter a valid number")
 
     def start_experiment_clicked(self):
         """
@@ -1520,11 +1381,15 @@ class Ui_PyCCAPT(object):
                                             Return:
                                                     None
                                     """
-        self.experiment_process = multiprocessing.Process(target=apt_exp_control.run_experiment,
-                                                          args=(self.variables, self.conf,
-                                                                self.experimetn_finished_event, self.x_plot,
-                                                                self.y_plot, self.t_plot, self.main_v_dc_plot,))
-        self.experiment_process.start()
+        self.experiment_process = self.process_coordinator.start_experiment(
+            self.variables,
+            self.conf,
+            self.experimetn_finished_event,
+            self.x_plot,
+            self.y_plot,
+            self.t_plot,
+            self.main_v_dc_plot,
+        )
         self.statistics_timer.start()
 
     def about(self):
@@ -1544,8 +1409,7 @@ class Ui_PyCCAPT(object):
         # Create the about dialog
         about_win = QtWidgets.QDialog()
         about_win.setWindowTitle("PyCCAPT APT Experiment Control")
-        print(os.path.dirname(__file__))
-        about_win.setWindowIcon(QtGui.QIcon('./files/logo.png'))
+        about_win.setWindowIcon(QtGui.QIcon(str(runtime.project_path("files", "logo.png"))))
 
         # Add version information
         package_version = get_package_version('pyccapt')
@@ -1588,8 +1452,8 @@ class Ui_PyCCAPT(object):
         w = self.centralwidget
         screenshot = screen.grabWindow(w.winId())
         try:
-            screenshot.save(self.variables.path + '\screenshot.png', 'png')
-        except:
+            screenshot.save(str(Path(self.variables.path) / "screenshot.png"), 'png')
+        except Exception:
             pass
 
     def on_stop_experiment_worker(self):
@@ -1624,7 +1488,7 @@ class Ui_PyCCAPT(object):
             w = self.centralwidget
             screenshot = screen.grabWindow(w.winId())
             # with self.variables.lock_setup_parameters:
-            screenshot.save(self.variables.path + '\screenshot.png', 'png')
+            screenshot.save(str(Path(self.variables.path) / "screenshot.png"), 'png')
 
             self.variables.flag_cameras_take_screenshot = True
 
@@ -1687,11 +1551,12 @@ class Ui_PyCCAPT(object):
 
     def wins_init(self):
         # GUI Cameras
-        self.camera_process = multiprocessing.Process(target=gui_cameras.run_camera_window,
-                                                      args=(self.variables, self.conf,
-                                                            self.camera_closed_event,
-                                                            self.camera_win_front))
-        self.camera_process.start()
+        self.camera_process = self.process_coordinator.start_camera(
+            self.variables,
+            self.conf,
+            self.camera_closed_event,
+            self.camera_win_front,
+        )
         # GUI gate
         self.gui_gates = gui_gates.Ui_Gates(self.variables, self.conf)
         self.Gates = gui_gates.GatesWindow(self.gui_gates, flags=QtCore.Qt.WindowType.Tool)
@@ -1722,13 +1587,16 @@ class Ui_PyCCAPT(object):
         self.gui_stage_control.setupUi(self.Stage_control)
 
         # GUI Visualization
-        self.visualization_process = multiprocessing.Process(target=gui_visualization.run_visualization_window,
-                                                             args=(self.variables, self.conf,
-                                                                   self.visualization_closed_event,
-                                                                   self.visualization_win_front, self.x_plot,
-                                                                   self.y_plot,
-                                                                   self.t_plot, self.main_v_dc_plot))
-        self.visualization_process.start()
+        self.visualization_process = self.process_coordinator.start_visualization(
+            self.variables,
+            self.conf,
+            self.visualization_closed_event,
+            self.visualization_win_front,
+            self.x_plot,
+            self.y_plot,
+            self.t_plot,
+            self.main_v_dc_plot,
+        )
 
     def open_cameras_win(self):
         """
@@ -1987,30 +1855,24 @@ class MyPyCCAPT(QtWidgets.QMainWindow):
 
 if __name__ == "__main__":
     try:
-        # Load the JSON file
-        configFile = 'config.json'
-        p = os.path.abspath(os.path.join(__file__, "../../.."))
-        os.chdir(p)
-        conf = read_files.read_json_file(configFile)
-    except Exception as e:
+        conf, project_root = runtime.load_project_config()
+    except Exception as exc:
         print('Can not load the configuration file')
-        print(e)
+        print(exc)
         sys.exit()
 
-    # Initialize global experiment variables
-    manager = multiprocessing.Manager()
-    ns = manager.Namespace()
-    variables = share_variables.Variables(conf, ns)
-    x_plot = multiprocessing.Queue()
-    y_plot = multiprocessing.Queue()
-    t_plot = multiprocessing.Queue()
-    main_v_dc_plot = multiprocessing.Queue()
-
-    # variables = share_variables.Variables(conf)
-    variables.log_path = p
+    shared = runtime.create_shared_context(conf)
+    shared.variables.log_path = str(project_root)
 
     app = QtWidgets.QApplication(sys.argv)
     app.setStyle('Fusion')
-    window = MyPyCCAPT(variables, conf, x_plot, y_plot, t_plot, main_v_dc_plot)
+    window = MyPyCCAPT(
+        shared.variables,
+        conf,
+        shared.x_plot,
+        shared.y_plot,
+        shared.t_plot,
+        shared.main_v_dc_plot,
+    )
     window.show()
     sys.exit(app.exec())

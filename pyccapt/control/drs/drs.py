@@ -1,5 +1,5 @@
 import ctypes
-import os
+from pathlib import Path
 
 import numpy as np
 from numpy.ctypeslib import ndpointer
@@ -24,12 +24,12 @@ class DRS:
 
         """
         try:
-            p = os.path.abspath(os.path.join(__file__, "../../drs"))
-            os.chdir(p)
-            self.drs_lib = ctypes.CDLL("./drs_lib.dll")
-        except Exception as e:
+            module_dir = Path(__file__).resolve().parent
+            self.drs_lib = ctypes.CDLL(str(module_dir / "drs_lib.dll"))
+        except Exception as exc:
             print("DRS DLL was not found")
-            print(e)
+            print(exc)
+            raise
 
         self.drs_lib.Drs_new.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_float]
         self.drs_lib.Drs_new.restype = ctypes.c_void_p
@@ -90,7 +90,7 @@ def experiment_measure(variables):
         voltage_data = np.tile(variables.specimen_voltage, len(ch0_time))
         pulse_data = np.tile(variables.pulse_voltage, len(ch0_time))
         variables.extend_to('main_v_dc_drs', voltage_data.tolist())
-        variables.extend_to('main_p_drs', pulse_data.tolist())
+        variables.extend_to('main_v_p_drs', pulse_data.tolist())
 
         # with self.variables.lock_data_plot:
         variables.extend_to('main_v_dc_plot', voltage_data.tolist())

@@ -1,6 +1,5 @@
-import multiprocessing
-import os
 import sys
+from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
@@ -9,7 +8,7 @@ from PyQt6.QtCore import pyqtSignal, QObject, QThread
 from PyQt6.QtGui import QPixmap
 
 # Local module and scripts
-from pyccapt.control.control import share_variables, read_files
+from pyccapt.control.control import runtime
 from pyccapt.control.devices import camera
 from pyccapt.control.usb_switch import usb_switch
 
@@ -655,7 +654,7 @@ class Ui_Cameras_Alignment(object):
 	def cameras_screenshot(self):
 		if self.variables.flag_cameras_take_screenshot:
 			screenshot = QtWidgets.QApplication.primaryScreen().grabWindow(self.Cameras_Alignment.winId())
-			screenshot.save(self.variables.path_meta + '\cameras_screenshot.png', 'png')
+			screenshot.save(str(Path(self.variables.path_meta) / "cameras_screenshot.png"), 'png')
 
 
 class SignalEmitter(QObject):
@@ -739,26 +738,19 @@ def run_camera_window(variables, conf, camera_closed_event, camera_win_front):
 
 if __name__ == "__main__":
 	try:
-		# Load the JSON file
-		configFile = 'config.json'
-		p = os.path.abspath(os.path.join(__file__, "../../.."))
-		os.chdir(p)
-		conf = read_files.read_json_file(configFile)
-	except Exception as e:
+		conf, _ = runtime.load_project_config()
+	except Exception as exc:
 		print('Can not load the configuration file')
-		print(e)
+		print(exc)
 		sys.exit()
 
-	# Initialize global experiment variables
-	manager = multiprocessing.Manager()
-	ns = manager.Namespace()
-	variables = share_variables.Variables(conf, ns)
+	shared = runtime.create_shared_context(conf)
 
 	app = QtWidgets.QApplication(sys.argv)
 	app.setStyle('Fusion')
 	Cameras_Alignment = QtWidgets.QWidget()
 	signal_emitter = SignalEmitter()
-	ui = Ui_Cameras_Alignment(variables, conf, signal_emitter)
+	ui = Ui_Cameras_Alignment(shared.variables, conf, signal_emitter)
 	ui.setupUi(Cameras_Alignment)
 	Cameras_Alignment.show()
 	sys.exit(app.exec())

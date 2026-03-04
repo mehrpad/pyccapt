@@ -19,7 +19,7 @@ except Exception as e:
 	print(e)
 
 # Local module and scripts
-from pyccapt.control.control import share_variables, read_files
+from pyccapt.control.control import runtime
 from pyccapt.control.gui import gui_pumps_vacuum
 from pyccapt.control.devices import initialize_devices
 
@@ -413,26 +413,19 @@ class BakingWindow(QtWidgets.QWidget):
 
 if __name__ == "__main__":
 	try:
-		# Load the JSON file
-		configFile = 'config.json'
-		p = os.path.abspath(os.path.join(__file__, "../../.."))
-		os.chdir(p)
-		conf = read_files.read_json_file(configFile)
-	except Exception as e:
+		conf, _ = runtime.load_project_config()
+	except Exception as exc:
 		print('Can not load the configuration file')
-		print(e)
+		print(exc)
 		sys.exit()
 
-	# Initialize global experiment variables
-	manager = multiprocessing.Manager()
-	ns = manager.Namespace()
-	variables = share_variables.Variables(conf, ns)
+	shared = runtime.create_shared_context(conf)
 
 	app = QtWidgets.QApplication(sys.argv)
 	app.setStyle('Fusion')
 	Baking = QtWidgets.QWidget()
 	SignalEmitter_Pumps_Vacuum = gui_pumps_vacuum.SignalEmitter()
-	ui = Ui_Baking(variables, conf, SignalEmitter_Pumps_Vacuum)
+	ui = Ui_Baking(shared.variables, conf, SignalEmitter_Pumps_Vacuum)
 	ui.setupUi(Baking)
 	Baking.show()
 	sys.exit(app.exec())

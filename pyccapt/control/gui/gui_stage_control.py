@@ -5,7 +5,7 @@ import sys
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 # Local module and scripts
-from pyccapt.control.control import share_variables, read_files
+from pyccapt.control.control import runtime
 
 
 class Ui_Stage_Control(object):
@@ -277,24 +277,17 @@ class StageControlWindow(QtWidgets.QWidget):
 
 if __name__ == "__main__":
 	try:
-		# Load the JSON file
-		configFile = 'config.json'
-		p = os.path.abspath(os.path.join(__file__, "../../.."))
-		os.chdir(p)
-		conf = read_files.read_json_file(configFile)
-	except Exception as e:
+		conf, _ = runtime.load_project_config()
+	except Exception as exc:
 		print('Can not load the configuration file')
-		print(e)
+		print(exc)
 		sys.exit()
-	# Initialize global experiment variables
-	manager = multiprocessing.Manager()
-	ns = manager.Namespace()
-	variables = share_variables.Variables(conf, ns)
+	shared = runtime.create_shared_context(conf)
 
 	app = QtWidgets.QApplication(sys.argv)
 	app.setStyle('Fusion')
 	stage_control = QtWidgets.QWidget()
-	ui = Ui_Stage_Control(variables, conf)
+	ui = Ui_Stage_Control(shared.variables, conf)
 	ui.setupUi(stage_control)
 	stage_control.show()
 	sys.exit(app.exec())

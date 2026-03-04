@@ -1,4 +1,4 @@
-# PyCCAPT (APT_PyControl)
+﻿# PyCCAPT (APT_PyControl)
 
 # A modular, FAIR open-source python atom probe tomography software package for experiment control and data calibration
 
@@ -24,7 +24,7 @@ analysis.
 # Overview
 
 PyCCAPT was initially developed and tested on the OXCART atom probe, an in-house atom probe system situated
-within the Department of Materials Science & Engineering at the University of Erlangen-Nürnberg. The OXCART atom probe boasts a titanium-based measuring chamber that facilitates an ultra-low hydrogen 
+within the Department of Materials Science & Engineering at the University of Erlangen-NÃ¼rnberg. The OXCART atom probe boasts a titanium-based measuring chamber that facilitates an ultra-low hydrogen 
 vacuum environment. This system also features a state-of-the-art detector with a high detection
 efficiency of approximately 80%. While tailor-made for the OXCART, the PyCCAPT package offers versatility, extending its
 capabilities to effectively control atom probe systems.
@@ -75,16 +75,16 @@ Bowl and voltage calibration:
 </div>
 
 
-A ranged mass spectrum for a Nimonic® 90 sample:
+A ranged mass spectrum for a NimonicÂ® 90 sample:
 
 <div align="center">
   <img width = "90%" src="https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/mc.png?raw=True">
 </div>
 
 
-Html link below can be used to show a 3d reconstruction of Nimonic® 90 sample: [Nimonic® 3D reconstruction](https://rawcdn.githack.com/mmonajem/pyccapt/52835bc47735ef12bffcf7e18ce90b556b07d12f/pyccapt/files/readme_images/3d_o.html)
+Html link below can be used to show a 3d reconstruction of NimonicÂ® 90 sample: [NimonicÂ® 3D reconstruction](https://rawcdn.githack.com/mmonajem/pyccapt/52835bc47735ef12bffcf7e18ce90b556b07d12f/pyccapt/files/readme_images/3d_o.html)
 
-The 3d reconstruction of Nimonic® 90 and precipitates can be seen in the following Gifs:
+The 3d reconstruction of NimonicÂ® 90 and precipitates can be seen in the following Gifs:
 
 
 <div align="center">
@@ -101,28 +101,29 @@ calibrating data.
 # Directory structure
 ```
 pyccapt/
-├── pyccapt/
-│   ├── __init__.py
-│   ├── config.json   
-│   ├── calibration/
-│   │   ├── __init__.py
-│   │   └── module_folders   
-│   ├── control/
-│   │   ├── __init__.py
-│   │   └── module_folders
-│   └── files/
-├── docs/
-├── setup.py
-├── README.md
-├── CONTRIBUTION.md
-├── MANIFEST.in
-├── Licence
-└── tox.ini
-└── tests/
-    ├── __init__.py
-    ├── data/
-    └── tests
+â”œâ”€â”€ pyccapt/
+â”‚   â”œâ”€â”€ __init__.py
+â”‚   â”œâ”€â”€ config.toml   
+â”‚   â”œâ”€â”€ calibration/
+â”‚   â”‚   â”œâ”€â”€ __init__.py
+â”‚   â”‚   â””â”€â”€ module_folders   
+â”‚   â”œâ”€â”€ control/
+â”‚   â”‚   â”œâ”€â”€ __init__.py
+â”‚   â”‚   â””â”€â”€ module_folders
+â”‚   â””â”€â”€ files/
+â”œâ”€â”€ docs/
+â”œâ”€â”€ setup.py
+â”œâ”€â”€ README.md
+â”œâ”€â”€ CONTRIBUTION.md
+â”œâ”€â”€ MANIFEST.in
+â”œâ”€â”€ Licence
+â””â”€â”€ tox.ini
+â””â”€â”€ tests/
+    â”œâ”€â”€ __init__.py
+    â”œâ”€â”€ data/
+    â””â”€â”€ tests
 ```
+Control configuration is provided via `config.toml` (comment-friendly). `config.json` is no longer accepted.
  ---------------------
 
 # Installation
@@ -236,3 +237,4 @@ policy can be found [here](CONTRIBUTING.md).
 
 This project is licensed under the GNU General Public License v3.0. See
 the [LICENSE](LICENSE) file for details.
+

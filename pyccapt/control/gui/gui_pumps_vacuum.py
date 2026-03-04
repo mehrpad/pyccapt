@@ -9,7 +9,7 @@ from PyQt6.QtCore import QTimer, pyqtSignal, QObject
 from PyQt6.QtGui import QFont, QPixmap
 
 # Local module and scripts
-from pyccapt.control.control import share_variables, read_files
+from pyccapt.control.control import runtime
 from pyccapt.control.devices import initialize_devices
 
 
@@ -978,25 +978,18 @@ class PumpsVacuumWindow(QtWidgets.QWidget):
 
 if __name__ == "__main__":
     try:
-        # Load the JSON file
-        configFile = 'config.json'
-        p = os.path.abspath(os.path.join(__file__, "../../.."))
-        os.chdir(p)
-        conf = read_files.read_json_file(configFile)
-    except Exception as e:
+        conf, _ = runtime.load_project_config()
+    except Exception as exc:
         print('Can not load the configuration file')
-        print(e)
+        print(exc)
         sys.exit()
-    # Initialize global experiment variables
-    manager = multiprocessing.Manager()
-    ns = manager.Namespace()
-    variables = share_variables.Variables(conf, ns)
+    shared = runtime.create_shared_context(conf)
 
     app = QtWidgets.QApplication(sys.argv)
     app.setStyle('Fusion')
     Pumps_vacuum = QtWidgets.QWidget()
     signal_emitter = SignalEmitter()
-    ui = Ui_Pumps_Vacuum(variables, conf, signal_emitter)
+    ui = Ui_Pumps_Vacuum(shared.variables, conf, signal_emitter)
     ui.setupUi(Pumps_vacuum)
     Pumps_vacuum.show()
     sys.exit(app.exec())

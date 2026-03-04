@@ -1,5 +1,5 @@
 import ctypes
-import os
+from pathlib import Path
 
 import numpy as np
 from numpy.ctypeslib import ndpointer
@@ -81,12 +81,12 @@ def experiment_measure(variables):
 	"""
 	try:
 		# Load the library
-		p = os.path.abspath(os.path.join(__file__, "../../..", "control", "tdc_roentdek"))
-		os.chdir(p)
-		tdc_lib = ctypes.CDLL("./wrapper_read_TDC8HP_x64.dll")
-	except Exception as e:
+		module_dir = Path(__file__).resolve().parent
+		tdc_lib = ctypes.CDLL(str(module_dir / "wrapper_read_TDC8HP_x64.dll"))
+	except Exception as exc:
 		print("TDC DLL was not found")
-		print(e)
+		print(exc)
+		return 1
 
 	tdc = TDC(tdc_lib, buf_size=30000, time_out=100)
 

@@ -9,7 +9,7 @@ from PyQt6.QtCore import QThread
 from PyQt6.QtGui import QPixmap
 
 # Local module and scripts
-from pyccapt.control.control import share_variables, read_files
+from pyccapt.control.control import runtime
 from pyccapt.control.nkt_photonics import origamiClassCLI
 
 
@@ -981,24 +981,17 @@ class LaserControlWindow(QtWidgets.QWidget):
 
 if __name__ == "__main__":
     try:
-        # Load the Json file
-        configFile = 'config.json'
-        p = os.path.abspath(os.path.join(__file__, "../../.."))
-        os.chdir(p)
-        conf = read_files.read_json_file(configFile)
-    except Exception as e:
+        conf, _ = runtime.load_project_config()
+    except Exception as exc:
         print('Can not load the configuration file')
-        print(e)
+        print(exc)
         sys.exit()
-    # Initialize global experiment variables
-    manager = multiprocessing.Manager()
-    ns = manager.Namespace()
-    variables = share_variables.Variables(conf, ns)
+    shared = runtime.create_shared_context(conf)
 
     app = QtWidgets.QApplication(sys.argv)
     app.setStyle('Fusion')
     Laser_Control = QtWidgets.QWidget()
-    ui = Ui_Laser_Control(variables, conf)
+    ui = Ui_Laser_Control(shared.variables, conf)
     ui.setupUi(Laser_Control)
     Laser_Control.show()
     sys.exit(app.exec())

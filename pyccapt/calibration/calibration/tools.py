@@ -7,7 +7,7 @@ from pybaselines import Baseline
 from scipy.optimize import curve_fit
 from scipy.signal import find_peaks, peak_widths
 
-from pyccapt.calibration.calibration import intractive_point_identification
+from pyccapt.calibration.calibration import interactive_point_identification
 from pyccapt.calibration.calibration.background import fit_background
 from pyccapt.calibration.calibration.exceptions import CalibrationInputError
 from pyccapt.calibration.calibration.validation import ensure_positive
@@ -248,7 +248,7 @@ def hist_plot(mc_tof, variables, bin, label, range_data=None, adjust_label=False
                 plt.connect('key_press_event', selectors_data.toggle_selector(variables))
             elif selector == 'peak_x':
                 # connect peak_x selector
-                af = intractive_point_identification.AnnoteFinder(x[peaks], y[peaks], annotes, variables, ax=ax1)
+                af = interactive_point_identification.AnnoteFinder(x[peaks], y[peaks], annotes, variables, ax=ax1)
                 fig1.canvas.mpl_connect('button_press_event', lambda event: af.annotates_plotter(event))
                 zoom_manager = plot_vline_draw.HorizontalZoom(ax1, fig1)
                 fig1.canvas.mpl_connect('key_press_event', lambda event: zoom_manager.on_key_press(event))

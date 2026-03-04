@@ -1,4 +1,3 @@
-import io
 from copy import copy
 
 import matplotlib.pyplot as plt
@@ -7,7 +6,6 @@ import plotly.graph_objects as go
 import plotly.io as pio
 from matplotlib import rcParams, colors
 from matplotlib.animation import FuncAnimation
-from PIL import Image
 from plotly.subplots import make_subplots
 
 # Local module and scripts
@@ -20,7 +18,11 @@ from pyccapt.calibration.reconstructions.io_utils import (
     write_plotly_html,
     write_plotly_image,
 )
-
+from pyccapt.calibration.reconstructions.rotation_tools import (
+    plotly_fig2array,
+    rotary_fig,
+    rotate_z,
+)
 
 def cart2pol(x, y):
     """
@@ -554,141 +556,6 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
 
 
 
-def rotate_z(x, y, z, theta):
-    """
-    Rotate coordinates around the z-axis.
-
-    Args:
-        x (float): x-coordinate.
-        y (float): y-coordinate.
-        z (float): z-coordinate.
-        theta (float): Rotation angle.
-
-    Returns:
-        tuple: Rotated coordinates (x, y, z).
-    """
-    w = x + 1j * y
-    return np.real(np.exp(1j * theta) * w), np.imag(np.exp(1j * theta) * w), z
-
-
-def plotly_fig2array(fig):
-    """
-    convert Plotly fig to  an array
-
-    Args:
-        fig (plotly.graph_objects.Figure): The base figure.
-
-    Returns:
-        array: The array representation of the figure.
-    """
-    # convert Plotly fig to  an array
-    fig_bytes = pio.to_image(fig, format="jpeg", scale=5, engine="kaleido")
-    buf = io.BytesIO(fig_bytes)
-    img = Image.open(buf)
-    return np.asarray(img)
-
-
-def rotary_fig(fig, variables, rotary_fig_save, make_gif, figname):
-    """
-    Generate a rotating figure using Plotly.
-
-    Args:
-        fig (plotly.graph_objects.Figure): The base figure.
-        variables (object): The variables object.
-        rotary_fig_save (bool): Whether to save the rotary figure.
-        make_gif (bool): Whether to make a GIF.
-        figname (str): The name of the figure.
-
-    Returns:
-        None
-    """
-    x_eye = -1.25
-    y_eye = 2
-    z_eye = 0.5
-    fig = go.Figure(fig)
-
-    fig.update_scenes(xaxis_visible=False, yaxis_visible=False, zaxis_visible=False)
-
-    if make_gif:
-        fig.update_layout(showlegend=False)
-        layout = go.Layout(
-            margin=go.layout.Margin(
-                l=0,  # left margin
-                r=0,  # right margin
-                b=0,  # bottom margin
-                t=0,  # top margin
-            )
-        )
-        fig.update_layout(layout)
-
-        figures = []
-        for t in np.arange(0, 4, 0.2):
-            xe, ye, ze = rotate_z(x_eye, y_eye, z_eye, t)
-            rotated_fig = go.Figure(fig)
-            rotated_fig.update_layout(scene_camera_eye=dict(x=xe, y=ye, z=ze))
-            figures.append(rotated_fig)
-
-        images = []
-        print('Starting to process the frames for the GIF')
-        print('The total number of frames is:', len(figures))
-        for index, frame in enumerate(figures):
-            images.append(plotly_fig2array(frame))
-            print('frame', index, 'is being processed')
-        print('The images are ready for the GIF')
-
-        # Save the images as a GIF using imageio
-        save_gif(images, variables, f"rota_{figname}.gif", fps=2)
-
-        fig.update_layout(showlegend=True)
-
-    if rotary_fig_save:
-        fig.update_layout(
-            scene_camera_eye=dict(x=x_eye, y=y_eye, z=z_eye),
-            updatemenus=[
-                dict(
-                    type='buttons',
-                    showactive=False,
-                    y=1.2,
-                    x=0.8,
-                    xanchor='left',
-                    yanchor='bottom',
-                    pad=dict(t=45, r=10),
-                    buttons=[
-                        dict(
-                            label='Play',
-                            method='animate',
-                            args=[
-                                None,
-                                dict(
-                                    frame=dict(duration=15, redraw=True),
-                                    transition=dict(duration=0),
-                                    fromcurrent=True,
-                                    mode='immediate'
-                                )
-                            ]
-                        )
-                    ]
-                )
-            ]
-        )
-
-        frames = []
-
-        for t in np.arange(0, 50, 0.1):
-            xe, ye, ze = rotate_z(x_eye, y_eye, z_eye, -t)
-            frames.append(go.Frame(layout=dict(scene_camera_eye=dict(x=xe, y=ye, z=ze))))
-        fig.frames = frames
-
-        save_plotly_animation(
-            fig,
-            variables,
-            filename=f"rota_{figname}.html",
-            show_link=True,
-            auto_open=False,
-            include_mathjax='cdn',
-        )
-
-
 def scatter_plot(data, range_data, variables, element_percentage, selected_area, x_or_y, figname, figure_size,
                  save=False):
     """
@@ -1220,3 +1087,7 @@ def x_y_z_calculation_and_plot(variables, element_percentage, kf, det_eff, icf, 
     variables.y = py
     variables.z = pz
     reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save, figname, save, colab=colab)
+
+
+
+

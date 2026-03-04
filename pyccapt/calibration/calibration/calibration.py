@@ -23,25 +23,21 @@ from pyccapt.calibration.calibration.validation import (
     normalize_voltage_model,
 )
 from pyccapt.calibration.path_utils import save_figure
+from pyccapt.calibration.calibration.correction_models import (
+    _predict_bowl_model,
+    _predict_voltage_model,
+    bowl_corr,
+    hybrid_calibration_model,
+    robust_fit,
+    robust_voltage_fit,
+    voltage_corr,
+)
+from pyccapt.calibration.calibration.diagnostics import (
+    initial_calibration,
+    plot_fdm,
+    plot_selected_statistic,
+)
 
-
-def voltage_corr(x, a, b, c):
-    """
-    Returns the voltage correction value for a given x using a quadratic equation.
-
-    Parameters:
-    - x (array): The input array.
-    - a (float): Coefficient of x^0.
-    - b (float): Coefficient of x^1.
-    - c (float): Coefficient of x^2.
-
-    Returns:
-    - array: The voltage correction value.
-
-    """
-    y = a + b * x + c * (x ** 2)
-    # y = a / ((b * x) + c)
-    return y
 
 def _extract_peak_mask_and_values(variables, calibration_mode):
     """Return the selected peak mask and values for the requested calibration mode."""
@@ -83,32 +79,6 @@ def _resolve_peak_location(values, method, bin_size, fast_calibration=False):
         return float(np.mean(data))
     index_peak_max_ini = np.argmax(properties["peak_heights"])
     return float(bins[peaks[index_peak_max_ini]])
-
-
-def _predict_voltage_model(model_name, fitresult, voltage_values):
-    """Predict voltage correction values for the selected model."""
-    if model_name == "curve_fit":
-        return voltage_corr(voltage_values, *fitresult)
-    return fitresult.predict(voltage_values.reshape(-1, 1))
-
-
-def _predict_bowl_model(fit_mode, parameters, dld_x, dld_y):
-    """Predict bowl correction values for the selected fitting mode."""
-    if fit_mode == "curve_fit":
-        return bowl_corr([dld_x, dld_y], *parameters)
-    return parameters.predict(np.column_stack((dld_x, dld_y)))
-
-def robust_voltage_fit(dld_highVoltage, dld_t):
-    """Perform robust polynomial fitting using a RANSAC pipeline."""
-    from sklearn.linear_model import RANSACRegressor
-    from sklearn.pipeline import make_pipeline
-    from sklearn.preprocessing import PolynomialFeatures
-
-    X = dld_highVoltage.reshape(-1, 1)
-    y = dld_t
-    model = make_pipeline(PolynomialFeatures(degree=2), RANSACRegressor())
-    model.fit(X, y)
-    return model
 
 
 def voltage_correction(dld_highVoltage_peak, dld_t_peak, variables, maximum_location, index_fig, figname, sample_size,
@@ -443,50 +413,6 @@ def voltage_corr_main(dld_highVoltage, variables, sample_size, mode, calibration
     return f_v
 
 
-def bowl_corr(data_xy, a, b, c, d, e, f):
-    """
-    Compute the result of a quadratic equation based on the input data.
-
-    Args:
-        data_xy (list): Tuple containing the x and y data points.
-        a, b, c, d, e, f (float): Coefficients of the quadratic equation.
-
-    Returns:
-        result (numpy.ndarray): Result of the quadratic equation.
-    """
-    x = data_xy[0]
-    y = data_xy[1]
-    result = a + b * x + c * y + d * (x ** 2) + e * x * y + f * (y ** 2)
-    return result
-
-
-def hybrid_calibration_model(dld_x, dld_y, dld_t):
-    """Train a random-forest regression model for bowl correction."""
-    from sklearn.ensemble import RandomForestRegressor
-    from sklearn.model_selection import train_test_split
-
-    X = np.column_stack((dld_x, dld_y))
-    y = 1 / dld_t
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-    model = RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42)
-    model.fit(X_train, y_train)
-
-    score = model.score(X_test, y_test)
-    print(f"Machine learning model R� score: {score:.3f}")
-    return model
-def robust_fit(dld_x, dld_y, dld_t, degree=2):
-    """Perform robust polynomial fitting using a RANSAC pipeline."""
-    from sklearn.linear_model import RANSACRegressor
-    from sklearn.pipeline import make_pipeline
-    from sklearn.preprocessing import PolynomialFeatures
-
-    X = np.column_stack((dld_x, dld_y))
-    y = dld_t
-
-    model = make_pipeline(PolynomialFeatures(degree=degree), RANSACRegressor())
-    model.fit(X, y)
-    return model
 def compute_sample(i, j, d, dld_x_bowl, dld_y_bowl, dld_t_bowl, maximum_location, sample_range_max, bin_size):
     """
     Compute the sample for the given data.
@@ -907,163 +833,5 @@ def bowl_correction_main(dld_x, dld_y, dld_highVoltage, variables, det_diam, sam
         elif calibration_mode == 'mc':
             variables.mc_calib = calibration_mc_tof
     return f_bowl
-
-def plot_fdm(x, y, variables, save, bins_s, index_fig, figure_size=(5, 4)):
-    """
-    Plot the File Desorption Map (FDM) based on the given x and y data and tof vs high voltage and x_det, and y_det.
-
-    Args:
-        x (array-like): The x-coordinates of the data points.
-        y (array-like): The y-coordinates of the data points.
-        variables (object): The variables object.
-        save (bool): Flag indicating whether to save the plot.
-        bins_s (int or array-like): The number of bins or bin edges for histogram2d.
-        figure_size (tuple, optional): The size of the figure in inches (width, height)
-    """
-
-    fig1, ax1 = plt.subplots(figsize=figure_size, constrained_layout=True)
-
-    FDM, xedges, yedges = np.histogram2d(x, y, bins=bins_s)
-
-    extent = [xedges[0], xedges[-1], yedges[0], yedges[-1]]
-    ax1.set_xlabel(r"$X_{det} (cm)$", fontsize=10)
-    ax1.set_ylabel(r"$Y_{det} (cm)$", fontsize=10)
-
-    cmap = copy(plt.cm.plasma)
-    cmap.set_bad(cmap(0))
-    pcm = ax1.pcolormesh(xedges, yedges, FDM.T, cmap=cmap, norm=colors.LogNorm(), rasterized=True)
-    fig1.colorbar(pcm, ax=ax1, pad=0)
-
-    if save:
-        # Enable rendering for text elements
-        rcParams['svg.fonttype'] = 'none'
-        save_figure(
-            fig1,
-            directory=variables.result_path,
-            stem=f"fdm_{index_fig}",
-            formats=("png", "svg"),
-            dpi=600,
-        )
-    plt.show()
-
-
-def initial_calibration(data, flight_path_length):
-    """
-    Perform the initial calibration based on the given variables and flight path length
-    Args:
-        data: The data frame containing the data
-        flight_path_length:  The flight path length.
-
-    Returns:
-        dld_t_calib: The calibrated time-of-flight values.
-    """
-    v_dc = data['high_voltage (V)'].to_numpy()
-    t = data['t (ns)'].to_numpy()
-    xDet = data['x_det (cm)'].to_numpy() * 10
-    yDet = data['y_det (cm)'].to_numpy() * 10
-    d = xDet ** 2 + yDet ** 2 + flight_path_length ** 2
-
-    ini_calib_factor_flight_path = np.mean(d) / d
-    # ini_calib_factor_flight_path = flight_path_length / d
-
-    ini_calib_factor_voltage = np.sqrt(v_dc / np.mean(v_dc))
-    dld_t_calib = t * ini_calib_factor_flight_path * ini_calib_factor_voltage
-    return dld_t_calib
-
-def plot_selected_statistic(variables, bin_fdm, index_fig, calibration_mode, save, fig_size=(5, 4)):
-    """
-    Plot the selected statistic based on the selected peak_x.
-
-        Args:
-            variables (object): The variables object.
-            bin_fdm (int or array-like): The number of bins or bin edges for histogram2d.
-            index_fig (int): The index of the figure.
-            calibration_mode (str): The calibration mode.
-            save (bool): Flag indicating whether to save the plot.
-            fig_size (tuple, optional): The size of the figure in inches (width, height)
-
-        Return:
-            None
-    """
-    ensure_choice(calibration_mode, field_name="calibration_mode", allowed=["tof", "mc"])
-    ensure_positive(bin_fdm, field_name="bin_fdm")
-
-    print('Selected tof are: (%s, %s)' % (variables.selected_x1, variables.selected_x2))
-    mask_temporal = variables.build_calibration_mask(calibration_mode)
-
-    x = variables.dld_x_det[mask_temporal]
-    y = variables.dld_y_det[mask_temporal]
-    dld_high_voltage = variables.dld_high_voltage[mask_temporal]
-    t = variables.get_calibration_array(calibration_mode)[mask_temporal]
-    bins = [bin_fdm, bin_fdm]
-
-    if len(x) == 0:
-        raise CalibrationInputError("Selected peak contains no detector points")
-
-    plot_fdm(x, y, variables, save, bins, index_fig)
-
-    fig1, ax1 = plt.subplots(figsize=fig_size, constrained_layout=True)
-    sample_count = min(len(x), 1000)
-    mask = np.random.randint(0, len(x), sample_count)
-    plt.scatter(dld_high_voltage[mask], t[mask], color="blue", label=r"$t$", s=1)
-    if calibration_mode == 'tof':
-        label = 'tof'
-    else:
-        label = 'mc'
-    ax1.set_ylabel(label, fontsize=10)
-    ax1.set_xlabel("Voltage (V)", fontsize=10)
-    plt.grid(color='aqua', alpha=0.3, linestyle='-.', linewidth=0.4)
-    if save:
-        rcParams['svg.fonttype'] = 'none'
-        save_figure(
-            fig1,
-            directory=variables.result_path,
-            stem=f"v_t_{index_fig}",
-            formats=("png", "svg"),
-            dpi=600,
-        )
-    plt.show()
-
-    fig1, ax1 = plt.subplots(figsize=fig_size, constrained_layout=True)
-    plt.scatter(x[mask], t[mask], color="blue", label=r"$t$", s=1)
-    ax1.set_xlabel(r"$X_{det} (cm)$", fontsize=10)
-    ax1.set_ylabel(label, fontsize=10)
-    plt.grid(color='aqua', alpha=0.3, linestyle='-.', linewidth=0.4)
-    if save:
-        rcParams['svg.fonttype'] = 'none'
-        save_figure(
-            fig1,
-            directory=variables.result_path,
-            stem=f"x_t_{index_fig}",
-            formats=("png", "svg"),
-            dpi=600,
-        )
-    plt.show()
-
-    fig1, ax1 = plt.subplots(figsize=fig_size, constrained_layout=True)
-    plt.scatter(y[mask], t[mask], color="blue", label=r"$t$", s=1)
-    ax1.set_xlabel(r"$Y_{det} (cm)$", fontsize=10)
-    ax1.set_ylabel(label, fontsize=10)
-    plt.grid(alpha=0.3, linestyle='-.', linewidth=0.4)
-    if save:
-        save_figure(
-            fig1,
-            directory=variables.result_path,
-            stem=f"y_t_{index_fig}",
-            formats=("png", "svg"),
-            dpi=600,
-        )
-    plt.show()
-
-
-
-
-
-
-
-
-
-
-
 
 

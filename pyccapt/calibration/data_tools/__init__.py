@@ -1,1 +1,1 @@
-name = 'calibration'
+"""Data loading, cropping, and format conversion utilities."""

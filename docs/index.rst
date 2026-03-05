@@ -1,32 +1,31 @@
-PyCCAPT: A Modular, FAIR Open-Source Python Package for Atom Probe Control and Calibration
+﻿PyCCAPT: A Modular, FAIR Open-Source Python Package for Atom Probe Control and Calibration
 =============================================================================================
 
-Historically, atom probe tomography (APT) detection systems have often relied on compiled
-software with tight hardware-software co-design to handle high detector data rates.
-With continued advances in compute hardware, higher-level programming approaches are now
-practical for many control and analysis workflows [1].
+PyCCAPT is an open-source Python package for atom probe tomography (APT) experiment control,
+calibration, reconstruction, and data processing.
 
-PyCCAPT is an open-source Python package for APT experiment control, calibration, and data
-processing. The package stores data in a FAIR (findable, accessible, interoperable, reusable)
-HDF5-based format that can include full experiment context and detector raw data.
+The project follows FAIR data principles and uses an HDF5-based storage model that can include
+experiment context, detector streams, and calibration outputs in a single interoperable format.
 
 Documentation
 =============
 
-This documentation includes installation instructions, control and calibration modules,
-configuration guidance, tutorials, and API references.
+This documentation covers:
 
-Most PyCCAPT outputs are represented as
+- installation and environment setup
+- control runtime architecture and configuration
+- calibration workflows and data structures
+- tutorials for common processing pipelines
+- API reference pages
+
+Most PyCCAPT tabular outputs are represented as
 `Pandas DataFrames <https://pandas.pydata.org/pandas-docs/stable/reference/frame.html>`_,
-which helps interoperability and downstream analysis.
+which supports integration with scientific Python workflows.
 
 Control and calibration data structures are documented here:
 
 - `Control data structure <https://github.com/mmonajem/pyccapt/blob/main/pyccapt/control/DATA_STRUCTURE.md>`_
 - `Calibration data structure <https://github.com/mmonajem/pyccapt/blob/main/pyccapt/calibration/DATA_STRUCTURE.md>`_
-
-HDF5 is used as the primary storage format because it is widely supported across languages
-and can store large, heterogeneous datasets together with metadata.
 
 Contents
 ========

@@ -1,60 +1,112 @@
-# Contributing to PyCCAPT
+﻿# Contributing to PyCCAPT
 
-Welcome to the PyCCAPT contribution guide! We appreciate your interest in making our project better. There are several
-ways you can contribute to PyCCAPT's development.
+Thank you for contributing to PyCCAPT. This guide describes the expected workflow for issues, documentation updates, and code contributions.
 
-## Types of Contributions
+## Ways to Contribute
 
-### Reporting Bugs
+- Report bugs or regressions
+- Propose and implement new features
+- Improve tutorials and documentation
+- Add tests and reliability improvements
 
-If you encounter any bugs or issues with PyCCAPT, please report them by opening
-an [issue on GitHub](https://github.com/mmonajem/pyccapt/issues). Be sure to provide a detailed description of the
-problem, steps to reproduce it, and any relevant information.
+## Report an Issue
 
-### Fixing Issues
+Open an issue at [GitHub Issues](https://github.com/mmonajem/pyccapt/issues) and include:
 
-Browse our GitHub issues to find bugs and enhancements that need attention. If you'd like to fix an issue, fork the
-repository, make your changes, and submit a pull request. Make sure to reference the issue number in your pull request.
+- a clear problem description
+- steps to reproduce
+- expected behavior and observed behavior
+- environment details (OS, Python version, install method)
+- relevant logs, stack traces, or screenshots
 
-### Writing Documentation
+## Development Setup
 
-Well-documented projects are easier to understand and use. If you're knowledgeable about certain features or have useful
-tips, consider contributing to our documentation. Documentation files can be found in
-the [`docs`](https://github.com/mmonajem/pyccapt/tree/main/docs) directory.
+1. Fork and clone the repository:
 
-## Getting Started
+```bash
+git clone https://github.com/<your-username>/pyccapt.git
+cd pyccapt
+```
 
-Follow these steps to set up your local development environment:
+2. Create and activate an environment:
 
-1. Fork the [pyccapt repository](https://github.com/mmonajem/pyccapt) on GitHub.
-2. Clone your forked repository locally:
-   ```bash
-   $ git clone https://github.com/YourUsername/pyccapt.git
-   $ cd pyccapt
-    ```
+```bash
+conda create -n apt_env python=3.11
+conda activate apt_env
+python -m pip install --upgrade pip
+```
 
-3. Install your local copy into a virtual environment:
-   bash
-    ```bash
-    $ conda create -n apt_env python=3.9
-    $ conda activate apt_env
-    $ pip install -e .
-    ```
+3. Install an editable development build:
 
-4. Create a new branch for your development work:
-    ```bash
-    $ git checkout -b my-new-feature
-    ```
-5. Make your changes and commit them:
-    ```bash
-   $ git add .
-   $ git commit -m "Detailed description of your changes."
-   $ git push origin name-of-your-branch
-    ```
+```bash
+pip install -e ".[full]"
+```
 
-6. Submit a Merge Request on GitHub.
+If you only need one module:
 
-Thank you for your contributions to PyCCAPT. Your efforts help improve the project for everyone!
-I appreciate your patience, and I hope this properly formatted Markdown text meets your requirements.
+```bash
+pip install -e ".[control]"
+pip install -e ".[calibration]"
+```
 
+## Branching and Commits
 
+1. Create a feature branch:
+
+```bash
+git checkout -b <short-descriptive-branch-name>
+```
+
+2. Make focused changes with clear commit messages.
+
+3. Push your branch:
+
+```bash
+git push origin <short-descriptive-branch-name>
+```
+
+## Testing
+
+Run tests from the repository root before opening a pull request:
+
+```bash
+pytest -q --run-control
+pytest -q --run-calibration
+```
+
+You can also run:
+
+```bash
+pytest -q
+```
+
+This runs whichever test groups have their optional dependencies installed.
+
+## Documentation
+
+If your change affects behavior, configuration, public APIs, or user workflows, update the relevant documentation in:
+
+- `README.md`
+- `docs/`
+- module docs under `pyccapt/control` or `pyccapt/calibration`
+
+To build documentation locally:
+
+```bash
+pip install -r docs/requirements.txt
+sphinx-build -b html docs docs/_build/html
+```
+
+## Pull Request Checklist
+
+Before submitting a pull request, confirm that:
+
+- the change is scoped and well described
+- tests pass locally for affected areas
+- documentation is updated where needed
+- backward-incompatible behavior is called out explicitly
+- related issues are linked in the pull request description
+
+## Code of Conduct
+
+Be respectful and constructive in all project interactions.

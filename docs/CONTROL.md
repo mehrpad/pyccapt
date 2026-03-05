@@ -1,20 +1,40 @@
-# Control
+﻿# Control Module
 
+The `pyccapt.control` package provides instrument control, live monitoring, and experiment data acquisition workflows for open-source atom probe tomography systems.
 
-PyCCAPT provides Python-based control software for atom probe tomography instruments. It includes
-data acquisition workflows and device integration for systems such as Surface Concept and RoentDek
-time-to-digital converter (TDC) hardware.
+## Responsibilities
 
-The control module is designed for experiment execution, live monitoring, and structured data capture.
-Its modular structure supports extension to additional devices and control backends.
+The control module is responsible for:
 
-## Editable electrode configuration
+- experiment orchestration and control loops
+- communication with detector and auxiliary hardware
+- GUI-based runtime operation and monitoring
+- synchronized shared state across cooperating processes
+- writing experiment metadata and acquisition streams
 
-The electrode list used by the control GUI is stored in:
+Calibration and reconstruction are implemented in `pyccapt.calibration`.
 
-- `pyccapt/control/electrode.toml`
+## Runtime Architecture
 
-This file is TOML-based and comment-friendly, so users can directly edit labels and keep notes:
+The application runs as multiple processes, typically including:
+
+- main GUI process
+- experiment/control process
+- detector backend process (for example, Surface Concept, RoentDek, or DRS)
+- optional sub-GUI processes
+
+Shared state is handled via `pyccapt/control/core/share_variables.py`.
+
+## Configuration
+
+Control runtime configuration is loaded from `pyccapt/config.toml`.
+
+- supported format: TOML
+- legacy `config.json` is not supported
+
+Electrode labels used in the GUI are configured in `pyccapt/control/electrode.toml`.
+
+Example:
 
 ```toml
 [electrodes]
@@ -25,45 +45,30 @@ names = [
 ]
 ```
 
-## Startup device validation
+## Startup Device Validation
 
-- Devices can be enabled or disabled in `config.toml` with `"on"` / `"off"` switches.
-- At experiment start, enabled startup-critical devices are checked.
-- If a required device is not reachable, experiment start is stopped and the reason is shown in:
+- Device switches in `config.toml` (`"on"` / `"off"`) define whether a device is required.
+- Startup-critical enabled devices are validated at experiment start.
+- If a required device cannot be opened, startup is blocked and the failure is reported in:
   - the main GUI warning/error area
   - terminal output
-- If a device is intentionally disconnected, set it to `"off"` in `config.toml`.
 
-## Main Control GUI Overview
-![plot](../pyccapt/files/readme_images/main_gui.png)
+To proceed without a disconnected device, set that device to `"off"` in `config.toml`.
 
-The following sections show the primary control sub-GUIs.
+## Data Output
 
-## Gates Control GUI
-![plot](../pyccapt/files/readme_images/gates_gui.png)
+Control-side HDF5 schema details are documented in [Control_DATA_STRUCTURE.md](Control_DATA_STRUCTURE.md).
 
-## Pumps, Vacuum, and Temperature GUI
-![plot](../pyccapt/files/readme_images/pumps_gui.png)
+## GUI Overview
 
-## Cameras Control GUI
-![plot](../pyccapt/files/readme_images/cameras_gui.png)
+![Main GUI](../pyccapt/files/readme_images/main_gui.png)
 
-## Laser Control GUI
-![plot](../pyccapt/files/readme_images/laser_gui.png)
+Sub-GUI views:
 
-## Stage Control GUI
-![plot](../pyccapt/files/readme_images/stage_gui.png)
-
-## Visualization GUI
-![plot](../pyccapt/files/readme_images/visualization_gui.png)
-
-## Baking Process GUI
-![plot](../pyccapt/files/readme_images/baking_gui.png)
-
-
-
-
-
-
-
-
+- Gates: ![Gates GUI](../pyccapt/files/readme_images/gates_gui.png)
+- Pumps/Vacuum: ![Pumps GUI](../pyccapt/files/readme_images/pumps_gui.png)
+- Cameras: ![Cameras GUI](../pyccapt/files/readme_images/cameras_gui.png)
+- Laser: ![Laser GUI](../pyccapt/files/readme_images/laser_gui.png)
+- Stage: ![Stage GUI](../pyccapt/files/readme_images/stage_gui.png)
+- Visualization: ![Visualization GUI](../pyccapt/files/readme_images/visualization_gui.png)
+- Baking: ![Baking GUI](../pyccapt/files/readme_images/baking_gui.png)

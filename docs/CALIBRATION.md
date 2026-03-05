@@ -1,70 +1,51 @@
-# Calibration Module
+﻿# Calibration Module
 
-The PyCCAPT calibration module provides workflows for calibrating, processing, and analyzing
-atom probe tomography (APT) data.
+The `pyccapt.calibration` package provides workflows for atom probe tomography data preparation, calibration, reconstruction, and visualization.
 
+## Core Workflows
 
-## Jupyter Data Processing Workflows
+Typical calibration workflows include:
 
-The calibration workflows are designed to streamline the following APT tasks:
+1. Import and crop datasets (HDF5, EPOS, POS, ATO, CSV).
+2. Correct time-of-flight and estimate `t0`/flight-path parameters.
+3. Convert time-of-flight to mass-to-charge (`m/c`).
+4. Apply voltage and bowl corrections.
+5. Perform 3D reconstruction.
+6. Define and apply ranging windows.
+7. Generate 2D/3D visualizations and analysis plots.
 
-### 1. Data Cropping
+## Package Structure
 
-- *Description*: Crop atom probe datasets collected with PyCCAPT or imported from formats such
-  as EPOS, POS, ATO, and CSV.
-- *Usage*: Define the region of interest (ROI) to focus on specific areas of the dataset.
+- `core`: validation, shared state, and primary calibration logic
+- `data_tools`: loading, conversion, and preprocessing utilities
+- `mc`: mass-to-charge and time-of-flight helper functions
+- `reconstructions`: reconstruction and structural analysis tools
+- `clustering`: clustering and isosurface workflows
+- `leap_tools`: LEAP/POS/EPOS/RRNG import and helper tools
+- `tutorials`: notebooks and notebook helper modules
 
-### 2. Time of Flight Calibration
+## Shared State and Validation
 
-- *Description*: Perform time-of-flight (TOF) calibration to correct flight-time distortions.
-- *Usage*: Improve the accuracy of spatial information in the APT dataset.
+Calibration workflows use shared mutable state through `Variables` in `pyccapt.calibration.core.share_variables`.
+Validation and state-related errors should raise explicit calibration exceptions.
 
-### 3. Convert Time-of-Flight to Mass-to-Charge Ratio
+## Cross-Platform Paths
 
-- *Description*: Calibrate the mass-to-charge ratio (m/c) of ions in the dataset.
-- *Usage*: Enhance the accuracy of quantitative analysis by ensuring precise MC values.
+Use `pyccapt.calibration.path_utils` helpers for output and figure paths:
 
-### 4. 3D Reconstruction
-
-- *Description*: Reconstruct the 3D spatial distribution from atom probe data.
-- *Usage*: Visualize the spatial distribution of atoms within the material.
-
-### 5. Range the Mass-to-Charge Ratio
-
-- *Description*: Define a range for the mass-to-charge ratio to filter ions based on specific MC values.
-- *Usage*: Focus on ions within a specific MC range for analysis.
-
-### 6. Visualization
-
-- *Description*: Visualize the atom probe data using various plotting and visualization techniques.
-- *Usage*: Gain insights into the data through 2D and 3D visualizations.
-
-### 7. T0 and Flight Path Calculation
-
-- *Description*: Calculate T0 and ion flight-path length.
-- *Usage*: Essential for precise quantitative analysis and data interpretation.
+- `ensure_directory`
+- `build_output_path`
+- `save_figure`
 
 ## Data Structures
 
-For calibration data structures, see [Calibration_DATA_STRUCTURE.md](Calibration_DATA_STRUCTURE.md).
-PyCCAPT also supports converting HDF5 data to EPOS, POS, and CSV outputs.
-Example workflows are available in
-[`tutorials`](https://github.com/mmonajem/pyccapt/tree/main/pyccapt/calibration/tutorials/jupyter_files).
+Calibration and range-file schema details are documented in [Calibration_DATA_STRUCTURE.md](Calibration_DATA_STRUCTURE.md).
 
-## Additional Features
+## Tutorials
 
-In addition to the core workflows listed above, the calibration module includes advanced features:
+Interactive examples are available in:
 
-- **Data Analysis**: Perform advanced analysis such as spatial distribution map (SDM), isosurface
-  generation, and radial distribution function (RDF) calculation.
-- **Data Export**: Export atom probe data to various file formats, including EPOS, POS, ATO, and CSV.
-- **Data Import**: Import atom probe data from various file formats, including EPOS, POS, ATO, and CSV.
-- **Data Filtering**: Filter atom probe data based on specific criteria, such as mass-to-charge ratio (MC) or spatial
-  coordinates.
+- `pyccapt/calibration/tutorials/jupyter_files`
+- `pyccapt/calibration/tutorials/colab`
 
-
-For usage examples and code snippets, explore the Jupyter notebooks in
-the [`tutorials`](https://github.com/mmonajem/pyccapt/tree/main/pyccapt/calibration/tutorials/jupyter_files)
-or [`colab`](https://github.com/mmonajem/pyccapt/tree/main/pyccapt/calibration/tutorials/colab)
-directories of the PyCCAPT repository.
-
+Related user-facing tutorial pages are listed under [tutorials](tutorials.rst) in this documentation set.

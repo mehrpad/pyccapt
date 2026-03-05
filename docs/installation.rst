@@ -1,94 +1,111 @@
-Installation
-===============================
+﻿Installation
+============
+
+PyCCAPT requires Python ``>=3.9``.
 
 PyPI Installation (Online)
 --------------------------
 
 Default installation (core dependencies only):
 
-``pip install pyccapt``
+.. code-block:: bash
 
-Calibration dependencies:
+   pip install pyccapt
 
-``pip install "pyccapt[calibration]"``
+Install optional dependency groups:
 
-Control dependencies:
+.. code-block:: bash
 
-``pip install "pyccapt[control]"``
+   pip install "pyccapt[calibration]"
+   pip install "pyccapt[control]"
+   pip install "pyccapt[full]"
 
-Full installation (control + calibration dependencies):
-
-``pip install "pyccapt[full]"``
-
-Note: pip extras are additive, and ``[full]`` installs both dependency groups.
+``[full]`` installs both control and calibration dependency sets.
 
 Local Development Installation
 ------------------------------
 
-Clone/download this repository and install from the project root:
+From the project root:
 
-``pip install -e ".[full]"``
+.. code-block:: bash
 
-For module-focused local installs:
+   pip install -e ".[full]"
 
-``pip install -e ".[control]"``
+Module-specific editable installs:
 
-``pip install -e ".[calibration]"``
+.. code-block:: bash
+
+   pip install -e ".[control]"
+   pip install -e ".[calibration]"
 
 Conda Installation
 ------------------
 
-If PyCCAPT is available in your conda channel (for example, conda-forge):
+If PyCCAPT is available on your selected conda channel:
 
-``conda install -c conda-forge pyccapt``
+.. code-block:: bash
 
-Local conda build + install from this repository:
+   conda install -c conda-forge pyccapt
 
-``conda install -c conda-forge conda-build``
+Build and install locally from this repository:
 
-``conda build conda-recipe``
+.. code-block:: bash
 
-``conda install --use-local pyccapt``
+   conda install -c conda-forge conda-build
+   conda build conda-recipe
+   conda install --use-local pyccapt
 
-If you also need control dependencies in that conda environment, add:
+If you need both optional dependency sets in that environment:
 
-``pip install "pyccapt[full]"``
+.. code-block:: bash
 
-Or create pre-defined conda environments:
+   pip install "pyccapt[full]"
 
-``conda env create -f environment.yml``
+You can also create predefined environments:
 
-``conda env create -f environment.full.yml``
+.. code-block:: bash
 
-Running PyCCAPT Control GUI
----------------------------
+   conda env create -f environment.yml
+   conda env create -f environment.full.yml
+
+Running PyCCAPT Control
+-----------------------
 
 After installation:
 
-``pyccapt``
+.. code-block:: bash
 
-or:
+   pyccapt
 
-``python -m pyccapt.control``
+Alternative entrypoint:
 
-Running PyCCAPT Tutorials
--------------------------
+.. code-block:: bash
 
-Run JupyterLab:
+   python -m pyccapt.control
 
-``jupyter lab``
+Running Tutorials
+-----------------
 
-Then open notebooks under ``pyccapt/calibration/tutorials``.
+Start JupyterLab:
+
+.. code-block:: bash
+
+   jupyter lab
+
+Then open notebooks under `pyccapt/calibration/tutorials`.
 
 Testing
 -------
 
-Run module-specific tests from the project root:
+Run module-specific test suites:
 
-``pytest -q --run-calibration``
+.. code-block:: bash
 
-``pytest -q --run-control``
+   pytest -q --run-calibration
+   pytest -q --run-control
 
-To run whichever groups have their optional dependencies installed:
+Run all discoverable tests with currently installed optional dependencies:
 
-``pytest -q``
+.. code-block:: bash
+
+   pytest -q

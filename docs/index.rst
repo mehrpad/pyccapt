@@ -52,6 +52,24 @@ Bibliography
 2. D. W. Saxey, *Correlated ion analysis and the interpretation of atom probe mass spectra*.
    Ultramicroscopy 111, 473-479 (2011).
 
+Citation
+========
+
+If you use PyCCAPT in your work, please cite:
+
+.. code-block:: bibtex
+
+   @article{monajem2025pyccapt,
+     title={PyCCAPT: A Python Package for Open-Source Atom Probe Instrument Control and Data Calibration},
+     author={Monajem, Mehrpad and Ott, Benedict and Heimerl, Jonas and Meier, Stefan and Hommelhoff, Peter and Felfer, Peter},
+     journal={Microscopy Research and Technique},
+     volume={88},
+     number={12},
+     pages={3199--3210},
+     year={2025},
+     publisher={Wiley Online Library}
+   }
+
 Indices and Tables
 ==================
 

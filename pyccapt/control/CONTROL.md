@@ -30,6 +30,15 @@ Shared state is managed through `core/share_variables.py` using a `multiprocessi
 Configuration is loaded from `config.toml` (supports comments).
 `config.json` is no longer accepted by the control runtime.
 
+## Startup Device Validation
+
+- Device switches in `config.toml` (`"on"` / `"off"`) control whether each device is required at experiment start.
+- When an enabled startup-critical device cannot be opened, experiment start is blocked.
+- The failure reason is reported in both:
+  - the main GUI warning/error area
+  - the terminal output
+- To continue without a disconnected device, set that device to `"off"` in `config.toml`.
+
 ## Data Structure
 
 HDF5 groups and dataset semantics are documented in [DATA_STRUCTURE.md](DATA_STRUCTURE.md).

@@ -25,6 +25,15 @@ names = [
 ]
 ```
 
+## Startup device validation
+
+- Devices can be enabled or disabled in `config.toml` with `"on"` / `"off"` switches.
+- At experiment start, enabled startup-critical devices are checked.
+- If a required device is not reachable, experiment start is stopped and the reason is shown in:
+  - the main GUI warning/error area
+  - terminal output
+- If a device is intentionally disconnected, set it to `"off"` in `config.toml`.
+
 ## Main Control GUI Overview
 ![plot](../pyccapt/files/readme_images/main_gui.png)
 

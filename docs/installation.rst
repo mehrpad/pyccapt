@@ -4,24 +4,23 @@ Installation
 PyPI Installation (Online)
 --------------------------
 
-Default installation (calibration profile):
+Default installation (core dependencies only):
 
 ``pip install pyccapt``
+
+Calibration dependencies:
+
+``pip install "pyccapt[calibration]"``
+
+Control dependencies:
+
+``pip install "pyccapt[control]"``
 
 Full installation (control + calibration dependencies):
 
 ``pip install "pyccapt[full]"``
 
-Calibration profile explicitly (same as default):
-
-``pip install "pyccapt[calibration]"``
-
-Add control dependencies on top of default calibration:
-
-``pip install "pyccapt[control]"``
-
-Note: pip extras are additive, so ``[control]`` adds control deps to the
-default calibration profile.
+Note: pip extras are additive, and ``[full]`` installs both dependency groups.
 
 Local Development Installation
 ------------------------------
@@ -84,6 +83,12 @@ Then open notebooks under ``pyccapt/calibration/tutorials``.
 Testing
 -------
 
-Run tests from the project root:
+Run module-specific tests from the project root:
+
+``pytest -q --run-calibration``
+
+``pytest -q --run-control``
+
+To run whichever groups have their optional dependencies installed:
 
 ``pytest -q``

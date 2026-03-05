@@ -141,10 +141,22 @@ python -m pip install --upgrade pip
 
 ## 2) Install from PyPI (online)
 
-Default install (calibration profile):
+Default install (core dependencies only):
 
 ```bash
 pip install pyccapt
+```
+
+Install calibration dependencies:
+
+```bash
+pip install "pyccapt[calibration]"
+```
+
+Install control dependencies:
+
+```bash
+pip install "pyccapt[control]"
 ```
 
 Install calibration + control dependencies (full installation):
@@ -153,19 +165,7 @@ Install calibration + control dependencies (full installation):
 pip install "pyccapt[full]"
 ```
 
-Install calibration profile explicitly (same as default):
-
-```bash
-pip install "pyccapt[calibration]"
-```
-
-Add control dependencies on top of default calibration:
-
-```bash
-pip install "pyccapt[control]"
-```
-
-Note: pip extras are additive. With one package, `control` is added to the default profile, so it results in calibration + control.
+Note: pip extras are additive. Use `[full]` to install both calibration and control dependencies together.
 
 ## 3) Install with Conda
 
@@ -223,7 +223,19 @@ If the console script is not available:
 python -m pyccapt.control
 ```
 
-## 6) Run tutorials
+## 6) Run tests by module
+
+```bash
+pytest -q --run-calibration
+pytest -q --run-control
+```
+
+To run whichever test groups have their optional dependencies installed:
+
+```bash
+pytest -q
+```
+## 7) Run tutorials
 
 ```bash
 jupyter lab
@@ -283,7 +295,21 @@ Questions/comments:
 
 -----------
 
-If you use PyCCAPT in your work, please cite the software DOI shown at the top of this README.
+If you use PyCCAPT in your work, please cite:
+
+```bibtex
+@article{monajem2025pyccapt,
+  title={PyCCAPT: A Python Package for Open-Source Atom Probe Instrument Control and Data Calibration},
+  author={Monajem, Mehrpad and Ott, Benedict and Heimerl, Jonas and Meier, Stefan and Hommelhoff, Peter and Felfer, Peter},
+  journal={Microscopy Research and Technique},
+  volume={88},
+  number={12},
+  pages={3199--3210},
+  year={2025},
+  publisher={Wiley Online Library}
+}
+```
+
 Citation metadata is available in [CITATION.cff](CITATION.cff).
 
 # Contributing

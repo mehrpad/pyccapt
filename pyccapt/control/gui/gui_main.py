@@ -7,7 +7,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import Qt
 
 # Local module and scripts
-from pyccapt.control.core import runtime
+from pyccapt.control.core import device_checks, runtime
 from pyccapt.control.gui import main_parameters, process_coordinator
 from pyccapt.control.gui import (
     gui_baking,
@@ -1308,27 +1308,7 @@ class Ui_PyCCAPT(object):
                             None
                     """
         if not self.variables.flag_main_gate or self.flag_super_user:
-            # with self.variables.lock_statistics:
-            self.variables.start_flag = True  # Set the start flag
-            self.variables.stop_flag = False  # Set the stop flag
-            self.variables.plot_clear_flag = True  # Change the flag to clear the plots in GUI
-            self.variables.clear_index_save_image = True
-            self.start_button.setEnabled(False)  # Disable the star button
-            self.counter_source.setEnabled(False)  # Disable the counter source
-            self.pulse_mode.setEnabled(False)  # Disable the pulse mode
-            self.parameters_source.setEnabled(False)  # Disable the parameters source
-            self.pulse_fraction.setEnabled(False)  # Disable the pulse fraction
-            self.ex_freq.setEnabled(False)
-            self.ex_name.setEnabled(False)
-            self.electrode.setEnabled(False)
-            self.control_algorithm.setEnabled(False)
             self.start_experiment_worker()
-
-            self.variables.elapsed_time = 0.0
-            self.variables.total_ions = 0
-            self.variables.specimen_voltage = 0.0
-            self.variables.pulse_voltage = 0.0
-            self.variables.detection_rate_current = 0.0
         else:
             self.error_message("Please close the main gate or activate the Access Override")
 
@@ -1381,15 +1361,61 @@ class Ui_PyCCAPT(object):
                                             Return:
                                                     None
                                     """
-        self.experiment_process = self.process_coordinator.start_experiment(
-            self.variables,
+        self.variables.start_flag = True
+        self.variables.stop_flag = False
+        self.variables.plot_clear_flag = True
+        self.variables.clear_index_save_image = True
+
+        issues = device_checks.collect_startup_device_issues(
             self.conf,
-            self.experimetn_finished_event,
-            self.x_plot,
-            self.y_plot,
-            self.t_plot,
-            self.main_v_dc_plot,
+            self.variables,
+            pulse_mode=self.variables.pulse_mode,
         )
+        if issues:
+            message = device_checks.format_startup_device_issue_message(issues)
+            print(message)
+            self.error_message(message)
+            self.variables.start_flag = False
+            self.variables.stop_flag = False
+            return
+
+        try:
+            self.experiment_process = self.process_coordinator.start_experiment(
+                self.variables,
+                self.conf,
+                self.experimetn_finished_event,
+                self.x_plot,
+                self.y_plot,
+                self.t_plot,
+                self.main_v_dc_plot,
+            )
+        except Exception as exc:
+            message = (
+                "Experiment process could not start: "
+                f"{exc.__class__.__name__}: {exc}"
+            )
+            print(message)
+            self.error_message(message)
+            self.variables.start_flag = False
+            self.variables.stop_flag = False
+            return
+
+        self.start_button.setEnabled(False)
+        self.counter_source.setEnabled(False)
+        self.pulse_mode.setEnabled(False)
+        self.parameters_source.setEnabled(False)
+        self.pulse_fraction.setEnabled(False)
+        self.ex_freq.setEnabled(False)
+        self.ex_name.setEnabled(False)
+        self.electrode.setEnabled(False)
+        self.control_algorithm.setEnabled(False)
+
+        self.variables.elapsed_time = 0.0
+        self.variables.total_ions = 0
+        self.variables.specimen_voltage = 0.0
+        self.variables.pulse_voltage = 0.0
+        self.variables.detection_rate_current = 0.0
+
         self.statistics_timer.start()
 
     def about(self):

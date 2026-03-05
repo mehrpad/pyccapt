@@ -1,0 +1,74 @@
+# PyCCAPT control configuration
+# This file uses TOML so users can add comments while editing.
+
+# Instrument identity
+device_name = "Oxcart"
+
+# Geometry and conversion constants
+flight_path_length = 110
+t_0_voltage = 38.0
+t_0_laser = 800.0
+detector_diameter = 80
+bin_size = 0.1
+max_mass = 400
+max_tof = 12000
+
+# Logging and metadata intervals (seconds)
+log_time_time_interval = 15
+save_meta_interval_visualization = 300
+save_meta_interval_camera = 300
+
+# Limits and control defaults
+max_vdc = 14000
+min_vp = 328
+max_vp = 3281
+pulse_amp_per_supply_voltage = 21.875
+max_laser_power = 5.2
+pulse_fraction_max = 20
+
+# Pulse frequency ranges (Hz)
+max_voltage_pulse_frequency = 200000
+min_voltage_pulse_frequency = 1
+max_laser_pulse_frequency = 10000
+min_laser_pulse_frequency = 1
+
+# Temperature limits (K)
+max_temperature_cryo = 80
+min_temperature_cryo = 10
+max_temperature_ll = 403.15
+min_temperature_ll = 273.15
+
+# Visualization mode
+visualization = "mc"
+
+# Hardware enable/disable switches: "on" or "off"
+tdc = "on"
+tdc_model = "Surface_Consept"
+camera = "on"
+pump_ll = "on"
+pump_cll = "on"
+gates = "on"
+v_dc = "on"
+v_p = "on"
+signal_generator = "on"
+cryo = "on"
+gauges = "on"
+stage = "on"
+laser = "on"
+DAQ = "on"
+usb_lamp_switch = "on"
+thorlab_motor = "off"
+baking = "on"
+
+# Device connection identifiers
+COM_PORT_laser = "COM9"
+COM_PORT_gates = "Dev2/port0/"
+COM_PORT_cryo = "COM7"
+COM_PORT_V_dc = "COM6"
+COM_PORT_V_p = "COM4"
+COM_PORT_gauge_mc = "COM5"
+COM_PORT_gauge_bc = "COM2"
+COM_PORT_gauge_ll = "COM1"
+COM_PORT_gauge_cll = "COM8"
+COM_PORT_signal_generator = "USB0::0xF4EC::0x1101::SDG6XBAD2R0601::INSTR"
+COM_PORT_thorlab_motor = "27261754"

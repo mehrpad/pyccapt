@@ -1,0 +1,17 @@
+# Electrode names shown in the control GUI.
+# You can edit this list and keep your own comments.
+[electrodes]
+names = [
+    "NiC1",  # Nickel capillary 1
+    "NiC2",
+    "NiC3",
+    "NiC4",
+    "NiC5",
+    "NiC6",
+    "NiC7",
+    "NiC8",
+    "NiC9",
+    "CuC1",  # Copper capillary 1
+    "CuC2",
+    "NC",    # Not categorized
+]

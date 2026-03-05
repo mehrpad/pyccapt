@@ -1,0 +1,65 @@
+{% set version = "0.2.0" %}
+
+package:
+  name: pyccapt
+  version: {{ version }}
+
+source:
+  path: ..
+
+build:
+  number: 0
+  script: "{{ PYTHON }} -m pip install . --no-deps --ignore-installed -vv"
+
+requirements:
+  host:
+    - python >=3.9
+    - pip
+    - setuptools
+    - wheel
+  run:
+    - python >=3.9
+    - adjusttext
+    - ase
+    - deepdiff
+    - faker
+    - fast-histogram
+    - h5py
+    - imageio
+    - ipympl
+    - ipywidgets
+    - jupyterlab
+    - matplotlib-base
+    - nglview
+    - numba
+    - numpy
+    - pandas
+    - plotly
+    - pybaselines
+    - pymatgen
+    - pyvista
+    - requests
+    - scikit-learn
+    - scipy
+    - tqdm
+    - vispy
+    - wget
+    - pytables
+
+test:
+  imports:
+    - pyccapt
+    - pyccapt.calibration
+
+about:
+  home: https://github.com/mmonajem/pyccapt
+  license: GPL-3.0-or-later
+  license_file: LICENSE
+  summary: Python package for atom probe control and calibration workflows.
+  description: |
+    PyCCAPT provides calibration and reconstruction workflows for APT data and
+    optional control tooling for APT instrumentation.
+
+extra:
+  recipe-maintainers:
+    - mmonajem

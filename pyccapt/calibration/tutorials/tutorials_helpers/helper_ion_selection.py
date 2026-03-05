@@ -1,10 +1,10 @@
-import ipywidgets as widgets
+﻿import ipywidgets as widgets
 import matplotlib.colors as mcolors
 import pandas as pd
 from IPython.display import display, clear_output
 from ipywidgets import Output
 
-from pyccapt.calibration.calibration import ion_selection, mc_plot
+from pyccapt.calibration.core import ion_selection, mc_plot
 
 
 def call_ion_selection(variables, colab=False):
@@ -400,3 +400,4 @@ def call_ion_selection(variables, colab=False):
 			display(tab_contents["Peak Finder"])  # Default to the first "tab" content
 		with output3:
 			display(variables.range_data)
+

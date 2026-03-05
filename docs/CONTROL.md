@@ -1,39 +1,54 @@
 # Control
 
 
-PyCCAPT is a powerful Python software designed for controlling atom probe tomography instruments, offering researchers
-and scientists an efficient means to interact with their equipment. With its capabilities, PyCCAPT is not only
-adept at reading surface concepts but also seamlessly interfaces with RoentDek time-to-digital converter (TDC) systems.
-This compatibility ensures that PyCCAPT can gather and process critical data from these instruments,
-facilitating precise analysis and investigation in the field of atom probe tomography. Whether you're exploring the
-nanoscale world of materials or conducting cutting-edge research, PyCCAPT proves to be an invaluable tool for instrument
-control and data management, enhancing the capabilities of atom probe tomography systems for a wide range of scientific
-applications.
+PyCCAPT provides Python-based control software for atom probe tomography instruments. It includes
+data acquisition workflows and device integration for systems such as Surface Concept and RoentDek
+time-to-digital converter (TDC) hardware.
 
-## Overview of the main GUI of the control module
+The control module is designed for experiment execution, live monitoring, and structured data capture.
+Its modular structure supports extension to additional devices and control backends.
+
+## Editable electrode configuration
+
+The electrode list used by the control GUI is stored in:
+
+- `pyccapt/control/electrode.toml`
+
+This file is TOML-based and comment-friendly, so users can directly edit labels and keep notes:
+
+```toml
+[electrodes]
+names = [
+  "NiC1", # Nickel capillary
+  "CuC1",
+  "NC",   # Not categorized
+]
+```
+
+## Main Control GUI Overview
 ![plot](../pyccapt/files/readme_images/main_gui.png)
 
-The following images show the GUI of the control module in detail.
+The following sections show the primary control sub-GUIs.
 
-## Gates control GUI
+## Gates Control GUI
 ![plot](../pyccapt/files/readme_images/gates_gui.png)
 
-## Pumps control, vacuum monitoring, temperature control GUI
+## Pumps, Vacuum, and Temperature GUI
 ![plot](../pyccapt/files/readme_images/pumps_gui.png)
 
-## Cameras control GUI
+## Cameras Control GUI
 ![plot](../pyccapt/files/readme_images/cameras_gui.png)
 
-## Laser control GUI
+## Laser Control GUI
 ![plot](../pyccapt/files/readme_images/laser_gui.png)
 
-## Stage control GUI
+## Stage Control GUI
 ![plot](../pyccapt/files/readme_images/stage_gui.png)
 
 ## Visualization GUI
 ![plot](../pyccapt/files/readme_images/visualization_gui.png)
 
-## Baking process GUI
+## Baking Process GUI
 ![plot](../pyccapt/files/readme_images/baking_gui.png)
 
 

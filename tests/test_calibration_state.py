@@ -1,9 +1,9 @@
-import numpy as np
+﻿import numpy as np
 import pytest
 from pathlib import Path
 
-from pyccapt.calibration.calibration.exceptions import CalibrationInputError, CalibrationStateError
-from pyccapt.calibration.calibration.share_variables import Variables
+from pyccapt.calibration.core.exceptions import CalibrationInputError, CalibrationStateError
+from pyccapt.calibration.core.share_variables import Variables
 
 
 def test_set_peak_range_validates_order():
@@ -70,3 +70,4 @@ def test_legacy_aliases_map_to_new_variable_names():
 
     assert variables.dld_high_voltage.tolist() == [1.0, 2.0]
     assert variables.dataset_name == "dataset_01"
+

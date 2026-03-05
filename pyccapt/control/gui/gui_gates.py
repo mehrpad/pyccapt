@@ -1,4 +1,4 @@
-import multiprocessing
+﻿import multiprocessing
 import os
 import sys
 import time
@@ -9,7 +9,7 @@ from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QPixmap
 
 # Local module and scripts
-from pyccapt.control.control import runtime
+from pyccapt.control.core import runtime
 
 
 class Ui_Gates(object):
@@ -448,3 +448,4 @@ if __name__ == "__main__":
     ui.setupUi(Gates)
     Gates.show()
     sys.exit(app.exec())
+

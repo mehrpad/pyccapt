@@ -1,4 +1,4 @@
-import sys
+﻿import sys
 from pathlib import Path
 
 import numpy as np
@@ -8,7 +8,7 @@ from PyQt6.QtCore import pyqtSignal, QObject, QThread
 from PyQt6.QtGui import QPixmap
 
 # Local module and scripts
-from pyccapt.control.control import runtime
+from pyccapt.control.core import runtime
 from pyccapt.control.devices import camera
 from pyccapt.control.usb_switch import usb_switch
 
@@ -754,3 +754,4 @@ if __name__ == "__main__":
 	ui.setupUi(Cameras_Alignment)
 	Cameras_Alignment.show()
 	sys.exit(app.exec())
+

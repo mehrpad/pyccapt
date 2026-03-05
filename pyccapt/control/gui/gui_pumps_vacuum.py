@@ -1,4 +1,4 @@
-import multiprocessing
+﻿import multiprocessing
 import os
 import sys
 import threading
@@ -9,7 +9,7 @@ from PyQt6.QtCore import QTimer, pyqtSignal, QObject
 from PyQt6.QtGui import QFont, QPixmap
 
 # Local module and scripts
-from pyccapt.control.control import runtime
+from pyccapt.control.core import runtime
 from pyccapt.control.devices import initialize_devices
 
 
@@ -541,8 +541,8 @@ class Ui_Pumps_Vacuum(object):
         self.led_pump_load_lock.setText(_translate("Pumps_Vacuum", "pump"))
         self.label_215.setText(_translate("Pumps_Vacuum", "Temp. Stage (K)"))
         self.set_temperature_cryo.setText(_translate("Pumps_Vacuum", "Set T Cryo (K)"))
-        self.label_219.setText(_translate("Pumps_Vacuum", "LL Temp (°C)"))
-        self.set_temperature_ll.setText(_translate("Pumps_Vacuum", "Set T LL (°C)"))
+        self.label_219.setText(_translate("Pumps_Vacuum", "LL Temp (Â°C)"))
+        self.set_temperature_ll.setText(_translate("Pumps_Vacuum", "Set T LL (Â°C)"))
         self.label_218.setText(_translate("Pumps_Vacuum", "Temp. Cryo Head (K)"))
         self.label_220.setText(_translate("Pumps_Vacuum", "LL Backing Time (min)"))
         self.ll_baking_time.setText(_translate("Pumps_Vacuum", "60"))
@@ -993,3 +993,4 @@ if __name__ == "__main__":
     ui.setupUi(Pumps_vacuum)
     Pumps_vacuum.show()
     sys.exit(app.exec())
+

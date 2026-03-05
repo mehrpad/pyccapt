@@ -1,107 +1,110 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from os.path import exists
+from __future__ import annotations
 
-from setuptools import setup
+import re
+from pathlib import Path
 
-try:
-    from pyccapt import version
-except BaseException:
-    version = "0.1.11"
+from setuptools import find_packages, setup
 
-colab_deps = [
-]
+ROOT = Path(__file__).parent.resolve()
+README_PATH = ROOT / "README.md"
+INIT_PATH = ROOT / "pyccapt" / "__init__.py"
+
+
+def read_version() -> str:
+    content = INIT_PATH.read_text(encoding="utf-8")
+    match = re.search(r'^__version__\s*=\s*"([^"]+)"', content, re.MULTILINE)
+    if match is None:
+        raise RuntimeError("Could not find __version__ in pyccapt/__init__.py")
+    return match.group(1)
+
+
+def unique(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for item in items:
+        if item not in seen:
+            ordered.append(item)
+            seen.add(item)
+    return ordered
+
+
 common_deps = [
-    "numpy",
-    "matplotlib",
-    "pandas",
-    "PyQt6",
-    "numba",
-    "requests",
-    "wget",
     "deepdiff",
+    "h5py",
+    "matplotlib",
+    "numba",
+    "numpy",
+    "pandas",
+    "requests",
+    "scipy",
+    "tables",
+    "wget",
 ]
 
 control_deps = [
-    "opencv-python",
+    "mcculw; platform_system == 'Windows'",
     "networkx",
-    "pyqt6-tools",
+    "nidaqmx; platform_system == 'Windows'",
+    "opencv-python",
+    "PyQt6",
     "pyqtgraph",
-    "nidaqmx",
-    "pypylon",
-    "pyvisa",
+    "pypylon; platform_system == 'Windows'",
     "pyserial",
-    "deepdiff",
-    "scipy",
-    "h5py",
-    "tables",
-    "mcculw",
+    "pyvisa",
     "simple-pid",
 ]
 
 calibration_deps = [
-    "ipywidgets",
-    "ipympl",
-    "scikit_learn",
-    "vispy",
-    "plotly",
-    "faker",
-    "scipy",
-    "nodejs",
     "adjustText",
-    "pybaselines ",
-    "kaleido",
-    "pymatgen",
     "ase",
-    "imageio",
-    "nglview",
-    "jupyterlab",
-    "tqdm",
+    "faker",
     "fast-histogram",
+    "imageio",
+    "ipympl",
+    "ipywidgets",
+    "jupyterlab",
+    "kaleido",
+    "nglview",
+    "plotly",
+    "pybaselines",
+    "pymatgen",
     "pyvista",
+    "scikit-learn",
+    "tqdm",
+    "vispy",
 ]
 
-package_list_control = ['pyccapt', 'tests', 'pyccapt.control', 'pyccapt.control.apt', 'pyccapt.control.control',
-                        'pyccapt.control.devices', 'pyccapt.control.devices_test', 'pyccapt.control.drs',
-                        'pyccapt.control.gui', 'pyccapt.control.nkt_photonics', 'pyccapt.control.tdc_roentdek',
-                        'pyccapt.control.tdc_surface_concept', 'pyccapt.control.thorlabs_apt',
-                        'pyccapt.control.usb_switch']
-
-package_list_calibration = ['pyccapt', 'tests', 'pyccapt.calibration', 'pyccapt.calibration.calibration',
-                            'pyccapt.calibration.clustering', 'pyccapt.calibration.data_tools',
-                            'pyccapt.calibration.leap_tools', 'pyccapt.calibration.mc',
-                            'pyccapt.calibration.reconstructions', 'pyccapt.calibration.tutorials',
-                            'pyccapt.calibration.tutorials.tutorials_helpers']
-
-dependency_list = control_deps + calibration_deps + common_deps
-package_list = package_list_control + package_list_calibration
 
 setup(
-    name='pyccapt',
-    author=u"Mehrpad Monajem",
-    author_email='mehrpad.monajem@fau.de',
-    url='https://github.com/mmonajem/pyccapt',
-    version=version,
-    entry_points={
-            'console_scripts': {
-                'pyccapt=pyccapt.control.__main__:main',
-                }
-    },
-    packages=package_list,
-    license="GPL v3",
-    description='A package for controlling APT experiment and calibrating the APT data',
-    long_description=open('README.md').read() if exists('README.md') else '',
+    name="pyccapt",
+    version=read_version(),
+    author="Mehrpad Monajem",
+    author_email="mehrpad.monajem@fau.de",
+    description="A Python package for atom probe control and data calibration.",
+    long_description=README_PATH.read_text(encoding="utf-8") if README_PATH.exists() else "",
     long_description_content_type="text/markdown",
-    install_requires=dependency_list,
-    # not to be confused with definitions in pyproject.toml [build-system]
-    setup_requires=["pytest-runner"],
+    url="https://github.com/mmonajem/pyccapt",
+    packages=find_packages(include=("pyccapt", "pyccapt.*"), exclude=("tests", "tests.*")),
+    include_package_data=True,
+    entry_points={"console_scripts": ["pyccapt=pyccapt.control.__main__:main"]},
     python_requires=">=3.9",
-    tests_require=["pytest", "pytest-mock"],
-    keywords=[],
-    classifiers=['Operating System :: Microsoft :: Windows',
-                 'Programming Language :: Python :: 3',
-                 'Topic :: Scientific/Engineering :: Visualization',
-                 'Intended Audience :: Science/Research',
-                 ],
-    platforms=['ALL'],
+    install_requires=unique(common_deps + calibration_deps),
+    extras_require={
+        "calibration": [],
+        "control": unique(control_deps),
+        "full": unique(control_deps),
+        "all": unique(control_deps),
+        "dev": ["build", "pytest", "pytest-mock", "twine"],
+    },
+    license="GPL-3.0-or-later",
+    classifiers=[
+        "Development Status :: 4 - Beta",
+        "Intended Audience :: Science/Research",
+        "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+        "Operating System :: Microsoft :: Windows",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3 :: Only",
+        "Topic :: Scientific/Engineering :: Visualization",
+    ],
+    keywords=["atom probe", "apt", "calibration", "instrument control"],
 )

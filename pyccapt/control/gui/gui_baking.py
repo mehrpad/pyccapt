@@ -1,4 +1,4 @@
-import multiprocessing
+﻿import multiprocessing
 import os
 import sys
 import threading
@@ -19,7 +19,7 @@ except Exception as e:
 	print(e)
 
 # Local module and scripts
-from pyccapt.control.control import runtime
+from pyccapt.control.core import runtime
 from pyccapt.control.gui import gui_pumps_vacuum
 from pyccapt.control.devices import initialize_devices
 
@@ -429,3 +429,4 @@ if __name__ == "__main__":
 	ui.setupUi(Baking)
 	Baking.show()
 	sys.exit(app.exec())
+

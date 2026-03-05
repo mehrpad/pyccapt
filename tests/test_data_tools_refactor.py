@@ -1,9 +1,9 @@
-from pathlib import Path
+﻿from pathlib import Path
 
 import pandas as pd
 import pytest
 
-from pyccapt.calibration.calibration.share_variables import Variables
+from pyccapt.calibration.core.share_variables import Variables
 from pyccapt.calibration.data_tools import data_tools
 
 
@@ -41,3 +41,4 @@ def test_save_range_uses_shared_variables_paths(tmp_path: Path):
 
     assert (tmp_path / "my_data_range.h5").exists()
     assert (tmp_path / "my_data_range.csv").exists()
+

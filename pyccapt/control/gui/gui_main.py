@@ -1,13 +1,13 @@
-import multiprocessing
+﻿import multiprocessing
 import sys
 from pathlib import Path
 
-import pkg_resources
+from importlib.metadata import PackageNotFoundError, version
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import Qt
 
 # Local module and scripts
-from pyccapt.control.control import runtime
+from pyccapt.control.core import runtime
 from pyccapt.control.gui import main_parameters, process_coordinator
 from pyccapt.control.gui import (
     gui_baking,
@@ -1018,7 +1018,7 @@ class Ui_PyCCAPT(object):
 
         self.ex_number.setEnabled(False)
         self.ex_number.setText(str(self.variables.counter))
-        self.load_items_from_json(str(runtime.project_path("control", "electrode.json")))
+        self.load_electrode_items(str(runtime.project_path("control", "electrode.toml")))
 
     def retranslateUi(self, PyCCAPT):
         """
@@ -1155,7 +1155,7 @@ class Ui_PyCCAPT(object):
             self.error_message("!!! Override Access deactivated !!!")
             self.timer.start(8000)
 
-    def load_items_from_json(self, file_path):
+    def load_electrode_items(self, file_path):
         items = main_parameters.load_electrode_items(file_path)
         self.electrode.clear()
         self.electrode.addItems(items)
@@ -1826,9 +1826,8 @@ class SignalEmitter(QtCore.QObject):
 
 def get_package_version(package_name):
     try:
-        version = pkg_resources.get_distribution(package_name).version
-        return version
-    except pkg_resources.DistributionNotFound:
+        return version(package_name)
+    except PackageNotFoundError:
         return None
 
 
@@ -1876,3 +1875,5 @@ if __name__ == "__main__":
     )
     window.show()
     sys.exit(app.exec())
+
+

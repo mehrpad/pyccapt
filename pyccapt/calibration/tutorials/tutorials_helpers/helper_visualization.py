@@ -1,4 +1,4 @@
-import ast
+﻿import ast
 import json
 import re
 
@@ -8,7 +8,7 @@ import numpy as np
 from IPython.display import display, clear_output, HTML
 from ipywidgets import Output
 
-from pyccapt.calibration.calibration import mc_plot, ion_selection
+from pyccapt.calibration.core import mc_plot, ion_selection
 from pyccapt.calibration.data_tools import data_loadcrop
 from pyccapt.calibration.reconstructions import reconstruction, sdm, rdf, density_map
 from pyccapt.calibration.reconstructions import iso_surface
@@ -1148,3 +1148,4 @@ def call_visualization(variables, colab=False):
         # Display buttons and the output widget
         display(widgets.HBox(buttons))
         display(out)
+

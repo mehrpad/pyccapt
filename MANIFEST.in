@@ -1,7 +1,11 @@
-global-include *.py
-include pyccapt/files/*
-include pyccapt/rdc_roentdec/*
-include pyccapt/rdc_surface_concept/*
-include pyccapt/tutorials/*
 include README.md
 include LICENSE
+include CHANGELOG.txt
+
+recursive-include pyccapt *.toml *.json *.txt *.md
+recursive-include pyccapt *.png *.jpg *.gif *.html *.ui *.xlsx
+recursive-include pyccapt *.h5 *.mat *.pos *.epos *.rrng *.ipynb
+recursive-include pyccapt *.dll *.lib *.exp *.ocx *.chm *.cfg *.ini *.bit *.exe *.obj
+recursive-include pyccapt *.h *.c *.cc *.cpp *.sln *.vcxproj *.filters *.user *.zip
+
+global-exclude __pycache__ *.py[cod]

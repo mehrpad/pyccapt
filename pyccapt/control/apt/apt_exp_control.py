@@ -1,4 +1,4 @@
-import copy
+﻿import copy
 import datetime
 import multiprocessing
 import time
@@ -19,7 +19,7 @@ from pyccapt.control.apt.experiment_state import (
     reset_runtime_variables,
     validate_detector_data_lengths,
 )
-from pyccapt.control.control import experiment_statistics, hdf5_creator, loggi, runtime
+from pyccapt.control.core import experiment_statistics, hdf5_creator, loggi, runtime
 from pyccapt.control.devices import initialize_devices, signal_generator
 
 
@@ -671,3 +671,4 @@ def run_experiment(variables, conf, experiment_finished_event, x_plot, y_plot, t
                                       main_v_dc_plot)
 
     apt_exp_control.run_experiment()
+

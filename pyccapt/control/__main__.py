@@ -1,8 +1,8 @@
-import sys
+﻿import sys
 
 from PyQt6 import QtWidgets
 
-from pyccapt.control.control import runtime
+from pyccapt.control.core import runtime
 from pyccapt.control.gui import gui_main
 
 
@@ -45,3 +45,4 @@ def main():
 
 if __name__ == '__main__':
 	main()
+

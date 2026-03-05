@@ -1,10 +1,10 @@
-from pathlib import Path
+﻿from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
 
-from pyccapt.calibration.calibration import calibration
-from pyccapt.calibration.calibration.share_variables import Variables
+from pyccapt.calibration.core import calibration
+from pyccapt.calibration.core.share_variables import Variables
 
 
 def test_plot_fdm_uses_shared_save_helper(tmp_path: Path):
@@ -13,8 +13,8 @@ def test_plot_fdm_uses_shared_save_helper(tmp_path: Path):
     x = np.array([0.1, 0.2, 0.3, 0.4])
     y = np.array([0.2, 0.1, 0.4, 0.3])
 
-    with patch("pyccapt.calibration.calibration.diagnostics.save_figure") as mock_save:
-        with patch("pyccapt.calibration.calibration.diagnostics.plt.show"):
+    with patch("pyccapt.calibration.core.diagnostics.save_figure") as mock_save:
+        with patch("pyccapt.calibration.core.diagnostics.plt.show"):
             calibration.plot_fdm(x, y, variables, save=True, bins_s=4, index_fig=7)
 
     mock_save.assert_called_once()
@@ -22,4 +22,5 @@ def test_plot_fdm_uses_shared_save_helper(tmp_path: Path):
     assert kwargs["directory"] == variables.result_path
     assert kwargs["stem"] == "fdm_7"
     assert kwargs["formats"] == ("png", "svg")
+
 

@@ -1,8 +1,8 @@
-import ipywidgets as widgets
+﻿import ipywidgets as widgets
 from IPython.display import display
 from ipywidgets import Output
 
-from pyccapt.calibration.calibration import mc_plot
+from pyccapt.calibration.core import mc_plot
 from pyccapt.calibration.mc import mc_tools
 
 # Define a layout for labels to make them a fixed width
@@ -97,3 +97,4 @@ def call_fine_tune_t_0(variables, flightPathLength, pulse_mode, t0):
 
     display(widget_container)
     display(out)
+

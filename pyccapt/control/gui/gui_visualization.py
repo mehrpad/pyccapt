@@ -1,4 +1,4 @@
-import multiprocessing
+﻿import multiprocessing
 import os
 import sys
 import time
@@ -11,7 +11,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import QTimer
 
 # Local module and scripts
-from pyccapt.control.control import runtime, tof2mc_simple
+from pyccapt.control.core import runtime, tof2mc_simple
 from pyccapt.control.devices import initialize_devices
 
 
@@ -75,7 +75,7 @@ class Ui_Visualization(object):
 
 		self.update_timer = QTimer()  # Create a QTimer for updating graphs
 		self.update_timer.timeout.connect(self.update_graphs)  # Connect it to the update_graphs slot
-		self.visualization_window = None  # In♠itialize the attribute
+		self.visualization_window = None  # Inâ™ itialize the attribute
 
 	def setupUi(self, Visualization):
 		"""
@@ -1239,3 +1239,4 @@ if __name__ == "__main__":
 	ui.setupUi(Visualization)
 	Visualization.show()
 	sys.exit(app.exec())
+

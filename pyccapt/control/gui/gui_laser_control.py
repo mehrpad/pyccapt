@@ -1,4 +1,4 @@
-import multiprocessing
+﻿import multiprocessing
 import os
 import re
 import sys
@@ -9,7 +9,7 @@ from PyQt6.QtCore import QThread
 from PyQt6.QtGui import QPixmap
 
 # Local module and scripts
-from pyccapt.control.control import runtime
+from pyccapt.control.core import runtime
 from pyccapt.control.nkt_photonics import origamiClassCLI
 
 
@@ -995,3 +995,4 @@ if __name__ == "__main__":
     ui.setupUi(Laser_Control)
     Laser_Control.show()
     sys.exit(app.exec())
+

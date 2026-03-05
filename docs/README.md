@@ -1,32 +1,34 @@
 # How to build the documentation
 
-The documentation uses `Sphinx` including some extensions. 
+The documentation is built with `Sphinx` and a set of extensions.
 
-## Install requirements
+## Install Requirements
 
-```
+```bash
 cd docs
 pip install -r requirements.txt
 ```
-## Create rst files
+
+## Create RST Files
+
 If there is no conf.py file, create one with `sphinx-quickstart`.
 
-Then create the rst files with `sphinx-apidoc`:
+Then generate the API `.rst` files with `sphinx-apidoc`:
 
-```
+```bash
 sphinx-apidoc -o .  ../pyccapt
 ```
 
 ## Build
 
-```
+```bash
 make clean html
 make html
 ```
 
-Starting point for output is found at 
+The generated documentation entrypoint is:
 
-```
+```text
 ./_build/html/index.html
 ```
 

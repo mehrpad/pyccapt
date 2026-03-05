@@ -25,7 +25,7 @@ The control application uses multiple processes:
 - detector process (Surface Concept, RoentDek, or DRS)
 - optional sub-GUI processes (cameras, visualization)
 
-Shared state is managed through `control/share_variables.py` using a `multiprocessing.Manager().Namespace()` wrapper.
+Shared state is managed through `core/share_variables.py` using a `multiprocessing.Manager().Namespace()` wrapper.
 
 Configuration is loaded from `config.toml` (supports comments).
 `config.json` is no longer accepted by the control runtime.
@@ -37,7 +37,7 @@ HDF5 groups and dataset semantics are documented in [DATA_STRUCTURE.md](DATA_STR
 ## Folder Responsibilities
 
 - `apt/`: experiment orchestration and control loop
-- `control/`: shared state, logging, HDF5 writing, runtime helpers
+- `core/`: shared state, logging, HDF5 writing, runtime helpers
 - `devices/`: hardware-specific device interfaces and initialization
 - `devices_test/`: standalone per-device diagnostic scripts
 - `drs/`: DRS digitizer wrapper and native libraries
@@ -71,4 +71,14 @@ Detailed sub-GUI snapshots:
 
 ## Electrode List
 
-`electrode.json` stores available electrode identifiers used for experiment metadata entry in the GUI.
+`electrode.toml` stores available electrode identifiers used for experiment metadata entry in the GUI.
+The file is comment-friendly and user-editable. Example:
+
+```toml
+[electrodes]
+names = [
+    "NiC1",  # Nickel capillary
+    "CuC1",
+    "NC",    # Not categorized
+]
+```

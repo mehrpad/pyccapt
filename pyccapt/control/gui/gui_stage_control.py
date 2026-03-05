@@ -1,11 +1,11 @@
-import multiprocessing
+﻿import multiprocessing
 import os
 import sys
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 # Local module and scripts
-from pyccapt.control.control import runtime
+from pyccapt.control.core import runtime
 
 
 class Ui_Stage_Control(object):
@@ -291,3 +291,4 @@ if __name__ == "__main__":
 	ui.setupUi(stage_control)
 	stage_control.show()
 	sys.exit(app.exec())
+

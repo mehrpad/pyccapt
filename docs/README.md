@@ -9,6 +9,12 @@ From the repository root, install documentation dependencies:
 ```bash
 pip install -r docs/requirements.txt
 ```
+cd docs
+pip install -r requirements.txt
+```
+## Create rst files
+
+If there is no conf.py file, create one with `sphinx-quickstart`.
 
 ## Build HTML (Recommended)
 

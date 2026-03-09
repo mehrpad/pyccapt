@@ -157,8 +157,8 @@ Processed calibration datasets can be exported as `HDF5`, `EPOS`, `POS`, and `AT
 
 The visualization helpers also include optional two-segment precipitate clustering with a Min-Max algorithm so a selected precipitate population can be segmented directly in the 3D and iso-surface views.
 
-Interactive 3D example:
-[Nimonic 90 reconstruction](https://rawcdn.githack.com/mmonajem/pyccapt/52835bc47735ef12bffcf7e18ce90b556b07d12f/pyccapt/files/readme_images/3d_o.html)
+For control part of the package you can follow the steps
+on [documentation](https://pyccapt.readthedocs.io/).
 
 <p align="center">
   <img width="40%" src="pyccapt/files/readme_images/roto.gif" alt="3D rotation">

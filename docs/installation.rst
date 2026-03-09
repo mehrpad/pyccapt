@@ -3,6 +3,27 @@
 
 PyCCAPT requires Python ``>=3.9``.
 
+Recommended Conda Workflow
+--------------------------
+
+For most users, the smoothest setup is a conda environment with a pip install:
+
+.. code-block:: bash
+
+   conda create -n pyccapt python=3.11
+   conda activate pyccapt
+   python -m pip install --upgrade pip
+   pip install "pyccapt[full]"
+
+For a local checkout of this repository:
+
+.. code-block:: bash
+
+   git clone https://github.com/mmonajem/pyccapt.git
+   cd pyccapt
+   conda activate pyccapt
+   pip install -e ".[full]"
+
 PyPI Installation (Online)
 --------------------------
 

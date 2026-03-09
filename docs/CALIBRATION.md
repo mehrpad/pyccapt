@@ -1,6 +1,8 @@
-﻿# Calibration Module
+# Calibration Module
 
 The `pyccapt.calibration` package provides workflows for atom probe tomography data preparation, calibration, reconstruction, and visualization.
+
+![Calibration visualization](../pyccapt/files/readme_images/visualization_gif.gif)
 
 ## Core Workflows
 
@@ -48,4 +50,35 @@ Interactive examples are available in:
 - `pyccapt/calibration/tutorials/jupyter_files`
 - `pyccapt/calibration/tutorials/colab`
 
+The tutorial save steps can export processed datasets as `HDF5`, `EPOS`, `POS`, and `ATO`.
+
 Related user-facing tutorial pages are listed under [tutorials](tutorials.rst) in this documentation set.
+
+## Workflow Snapshots
+
+![Mass spectrum](../pyccapt/files/readme_images/hist.png)
+
+<p align="center">
+  <img width="36%" src="../pyccapt/files/readme_images/fdm.png" alt="FDM">
+  <img width="32%" src="../pyccapt/files/readme_images/detector.gif" alt="Detector GIF">
+</p>
+
+<p align="center">
+  <img width="30%" src="../pyccapt/files/readme_images/vol_corr.png" alt="Voltage correction">
+  <img width="30%" src="../pyccapt/files/readme_images/bowl_corr.png" alt="Bowl correction">
+</p>
+
+<p align="center">
+  <img width="30%" src="../pyccapt/files/readme_images/tof_V_corr.png" alt="TOF versus voltage">
+  <img width="30%" src="../pyccapt/files/readme_images/tof_bowl_corr_y_det.png" alt="TOF bowl correction">
+</p>
+
+![Ranged mass spectrum](../pyccapt/files/readme_images/mc.png)
+
+Interactive 3D example:
+[Nimonic 90 reconstruction](https://rawcdn.githack.com/mmonajem/pyccapt/52835bc47735ef12bffcf7e18ce90b556b07d12f/pyccapt/files/readme_images/3d_o.html)
+
+<p align="center">
+  <img width="40%" src="../pyccapt/files/readme_images/roto.gif" alt="3D rotation">
+  <img width="40%" src="../pyccapt/files/readme_images/iso.gif" alt="3D isosurface">
+</p>

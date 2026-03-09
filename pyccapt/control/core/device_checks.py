@@ -226,7 +226,7 @@ def format_startup_device_issue_message(issues: Sequence[DeviceIssue]) -> str:
     details = "; ".join(f"{item.device}: {item.reason}" for item in issues)
     return (
         "Experiment start blocked. Device check failed for enabled devices: "
-        f"{details}. Turn on/fix these devices, or set them to 'off' in config.toml."
+        f"{details}. Turn on/fix these devices, or set them to 'disabled' (or 'off') in config.toml."
     )
 
 

@@ -54,12 +54,10 @@ class Ui_Baking(object):
 			columns=['data', 'Time', 'timestamp', 'MC_vacuum', 'BC_vacuum', 'LL_vacuum', 'CLL_vacuum', 'MC_NEG',
 			         'MC_Det', 'Mc_Top', 'MC_Gate', 'BC_Top', 'BC_Pump', 'CLL_gate', 'LL_pump'])
 		now_time = self.now.strftime("%d-%m-%Y_%H-%M-%S")
-		folders_above = os.path.abspath(os.path.join(os.getcwd(), "../"))
-		self.save_path = folders_above + '/pyccapt/files/baking_logging/%s/' % now_time
-		if not os.path.isdir(self.save_path):
-			os.makedirs(self.save_path, mode=0o777, exist_ok=True)
-		self.file_name = self.save_path + 'baking_logging_%s.csv' % now_time
-		self.file_name_backup = self.save_path + 'backup_baking_logging_%s.csv' % now_time
+		self.save_path = runtime.project_path("files", "logs", "baking", now_time)
+		os.makedirs(self.save_path, mode=0o777, exist_ok=True)
+		self.file_name = str(self.save_path / f'baking_logging_{now_time}.csv')
+		self.file_name_backup = str(self.save_path / f'backup_baking_logging_{now_time}.csv')
 
 
 	def setupUi(self, Baking):
@@ -144,7 +142,7 @@ class Ui_Baking(object):
 		###
 		#  Baking.setWindowTitle(_translate("Baking", "Form"))
 		Baking.setWindowTitle(_translate("Baking", "PyCCAPT Baking"))
-		Baking.setWindowIcon(QtGui.QIcon('../files/logo.png'))
+		Baking.setWindowIcon(QtGui.QIcon(str(runtime.project_path("files", "logo.png"))))
 		###
 		self.save_data.setText(_translate("Baking", "Save CSV"))
 
@@ -403,7 +401,7 @@ class Ui_Baking(object):
 		"""
 		now = datetime.now()
 		now_time = now.strftime("%d-%m-%Y_%H-%M-%S")
-		self.data.to_csv(self.save_path + '/manual_save_%s.csv' % now_time,
+		self.data.to_csv(str(self.save_path / f'manual_save_{now_time}.csv'),
 		                 sep=';', index=False)
 
 	def stop(self):

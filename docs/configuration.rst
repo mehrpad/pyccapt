@@ -5,7 +5,6 @@ PyCCAPT control runtime is configured with a TOML file:
 
 - default path: ``pyccapt/config.toml``
 - supported format: ``.toml`` only
-- JSON configuration is no longer supported
 
 Runtime loading follows this order:
 
@@ -25,8 +24,8 @@ Example:
 
    [electrodes]
    names = [
-       "NiC1", # Nickel capillary
-       "CuC1",
+       "NiC1", # Nickel electrode
+       "CuC1", # Copper electrode
        "NC",   # Not categorized
    ]
 
@@ -69,7 +68,8 @@ Examples:
 Device Enable Flags
 -------------------
 
-Hardware blocks can be enabled or disabled using ``"on"`` / ``"off"`` flags.
+Hardware blocks can be enabled or disabled using ``"enabled"`` / ``"disabled"``.
+Legacy ``"on"`` / ``"off"`` values still work.
 
 Examples:
 

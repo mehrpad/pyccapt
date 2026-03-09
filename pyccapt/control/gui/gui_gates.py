@@ -139,11 +139,12 @@ class Ui_Gates(object):
         self.Error = QtWidgets.QLabel(parent=Gates)
         self.Error.setMinimumSize(QtCore.QSize(400, 30))
         font = QtGui.QFont()
-        font.setPointSize(13)
+        font.setPointSize(10)
         font.setBold(True)
         font.setStrikeOut(False)
         self.Error.setFont(font)
         self.Error.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.Error.setWordWrap(True)
         self.Error.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.LinksAccessibleByMouse)
         self.Error.setObjectName("Error")
         self.gridLayout_2.addWidget(self.Error, 1, 1, 1, 1)
@@ -222,6 +223,19 @@ class Ui_Gates(object):
             None
         """
         if not self.flag_super_user:
+            warning = QtWidgets.QMessageBox(parent=self.superuser)
+            warning.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+            warning.setWindowTitle("Confirm Access Override")
+            warning.setText("Gate override can bypass interlocks and may be dangerous.")
+            warning.setInformativeText("Only continue if you really want to override gate access.")
+            warning.setStandardButtons(
+                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
+            )
+            warning.setDefaultButton(QtWidgets.QMessageBox.StandardButton.No)
+            if warning.exec() != QtWidgets.QMessageBox.StandardButton.Yes:
+                self.error_message("Override Access canceled.")
+                self.timer.start(8000)
+                return
             self.flag_super_user = True
             self.superuser.setStyleSheet("QPushButton{\n"
                                          "background: rgb(0, 255, 26)\n"

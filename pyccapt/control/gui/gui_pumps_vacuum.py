@@ -425,11 +425,12 @@ class Ui_Pumps_Vacuum(object):
         self.Error = QtWidgets.QLabel(parent=Pumps_Vacuum)
         self.Error.setMinimumSize(QtCore.QSize(600, 30))
         font = QtGui.QFont()
-        font.setPointSize(13)
+        font.setPointSize(10)
         font.setBold(True)
         font.setStrikeOut(False)
         self.Error.setFont(font)
         self.Error.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.Error.setWordWrap(True)
         self.Error.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.LinksAccessibleByMouse)
         self.Error.setObjectName("Error")
         self.gridLayout_8.addWidget(self.Error, 1, 0, 1, 3)
@@ -791,6 +792,19 @@ class Ui_Pumps_Vacuum(object):
                 None
         """
         if not self.flag_super_user:
+            warning = QtWidgets.QMessageBox(parent=self.superuser)
+            warning.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+            warning.setWindowTitle("Confirm Access Override")
+            warning.setText("Pump and vacuum override can bypass safety interlocks.")
+            warning.setInformativeText("Only continue if you really want to override access.")
+            warning.setStandardButtons(
+                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
+            )
+            warning.setDefaultButton(QtWidgets.QMessageBox.StandardButton.No)
+            if warning.exec() != QtWidgets.QMessageBox.StandardButton.Yes:
+                self.error_message("Override Access canceled.")
+                self.timer.start(8000)
+                return
             self.flag_super_user = True
             self.superuser.setStyleSheet("QPushButton{\n"
                                          "background: rgb(0, 255, 26)\n"

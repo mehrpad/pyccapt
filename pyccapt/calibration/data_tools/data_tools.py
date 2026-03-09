@@ -151,7 +151,7 @@ def remove_invalid_data(dld_group_storage: pd.DataFrame, max_tof: float) -> pd.D
     return dld_group_storage
 
 
-def save_data(data, variables, name=None, hdf=True, epos=False, pos=False, csv=False, temp=False):
+def save_data(data, variables, name=None, hdf=True, epos=False, pos=False, ato_6v=False, csv=False, temp=False):
     """Persist data in one or more supported export formats."""
     if name is not None:
         data_name = name
@@ -167,6 +167,8 @@ def save_data(data, variables, name=None, hdf=True, epos=False, pos=False, csv=F
         ccapt_tools.ccapt_to_epos(data, path=variables.result_path, name=f"{data_name}.epos")
     if pos:
         ccapt_tools.ccapt_to_pos(data, path=variables.result_path, name=f"{data_name}.pos")
+    if ato_6v:
+        ato_tools.ccapt_to_ato(data, path=variables.result_path, name=f"{data_name}.ato")
     if csv:
         output_csv = _resolve_variable_output_file(
             variables, filename=f"{variables.result_data_name}.csv", data_directory=False

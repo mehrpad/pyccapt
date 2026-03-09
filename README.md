@@ -1,4 +1,4 @@
-﻿# PyCCAPT
+# PyCCAPT
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.10210507.svg)](https://doi.org/10.5281/zenodo.10210507)
 [![Documentation Status](https://readthedocs.org/projects/pyccapt/badge/?version=latest)](https://pyccapt.readthedocs.io/en/latest/?badge=latest)
@@ -8,9 +8,9 @@ PyCCAPT is a modular, FAIR-oriented Python package for atom probe tomography (AP
 It provides:
 
 - experiment control and acquisition for APT hardware
-- calibration workflows (for example, `t0` and flight-path estimation, ROI selection, voltage/bowl correction)
+- calibration workflows such as `t0` and flight-path estimation, ROI selection, voltage and bowl correction, and ranging
 - reconstruction and visualization tooling
-- HDF5-based data handling for interoperable downstream analysis
+- interoperable data export for HDF5-based workflows and common APT exchange formats
 
 <img align="right" src="https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/logo2.png?raw=True" alt="PyCCAPT logo" width="220" height="220">
 
@@ -18,17 +18,17 @@ It provides:
 
 PyCCAPT was developed and validated on the OXCART atom probe platform and is designed to be adaptable to other APT systems through device-specific modules. Current integrations include detector backends such as Surface Concept and RoentDek, together with modular support for common laboratory hardware.
 
-![Main GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/main_gui.png?raw=True)
+![OXCART atom probe](pyccapt/files/readme_images/oxcart.jpg)
 
 ## Installation
 
 PyCCAPT requires Python `>=3.9`.
 
-1. Create and activate an environment:
+1. Create and activate a conda environment:
 
 ```bash
-conda create -n apt_env python=3.11
-conda activate apt_env
+conda create -n pyccapt python=3.11
+conda activate pyccapt
 python -m pip install --upgrade pip
 ```
 
@@ -46,17 +46,26 @@ pip install "pyccapt[control]"
 pip install "pyccapt[full]"
 ```
 
-3. Local development install (from repository root):
+3. Recommended repository install for development or lab deployment:
 
 ```bash
+git clone https://github.com/mmonajem/pyccapt.git
+cd pyccapt
 pip install -e ".[full]"
 ```
 
-Or module-specific editable installs:
+Module-specific editable installs:
 
 ```bash
 pip install -e ".[control]"
 pip install -e ".[calibration]"
+```
+
+Predefined conda environment files are also included:
+
+```bash
+conda env create -f environment.yml
+conda env create -f environment.full.yml
 ```
 
 ## Running PyCCAPT
@@ -91,17 +100,62 @@ Then open notebooks under `pyccapt/calibration/tutorials`.
 
 ## Configuration
 
-Control runtime configuration is stored in `pyccapt/config.toml` (comment-friendly). `config.json` is not supported.
+Control runtime configuration is stored in `pyccapt/config.toml`.
 
 Control GUI electrode labels are stored in `pyccapt/control/electrode.toml`:
 
 ```toml
 [electrodes]
 names = [
-  "NiC1", # Nickel capillary
-  "CuC1",
+  "NiC1", # Nickel electrode
+  "CuC1", # Copper electrode
 ]
 ```
+
+For device toggles, prefer `enabled` and `disabled`. Legacy `on` and `off` values still work.
+
+## Control Highlights
+
+![Main GUI](pyccapt/files/readme_images/main_gui.png)
+
+The control stack includes the main acquisition GUI together with dedicated windows for gates, pumps and vacuum, cameras, laser, stage control, visualization, and baking. Startup reports unavailable configured ports clearly, GUI error boxes wrap long messages, and `Access Override` now asks for confirmation before allowing a run to proceed with missing enabled devices.
+
+Vacuum logs are written under `pyccapt/files/logs/vacuum`, and baking logs are written under `pyccapt/files/logs/baking/<timestamp>`.
+
+## Calibration Highlights
+
+![Calibration visualization](pyccapt/files/readme_images/visualization_gif.gif)
+
+PyCCAPT calibration workflows cover detector hit maps, FDM views, mass-spectrum calibration, bowl and voltage correction, reconstruction, and downstream visualization.
+
+![Mass spectrum](pyccapt/files/readme_images/hist.png)
+
+<p align="center">
+  <img width="36%" src="pyccapt/files/readme_images/fdm.png" alt="FDM">
+  <img width="32%" src="pyccapt/files/readme_images/detector.gif" alt="Detector GIF">
+</p>
+
+<p align="center">
+  <img width="30%" src="pyccapt/files/readme_images/vol_corr.png" alt="Voltage correction">
+  <img width="30%" src="pyccapt/files/readme_images/bowl_corr.png" alt="Bowl correction">
+</p>
+
+<p align="center">
+  <img width="30%" src="pyccapt/files/readme_images/tof_V_corr.png" alt="TOF versus voltage">
+  <img width="30%" src="pyccapt/files/readme_images/tof_bowl_corr_y_det.png" alt="TOF bowl correction">
+</p>
+
+![Ranged mass spectrum](pyccapt/files/readme_images/mc.png)
+
+Processed calibration datasets can be exported as `HDF5`, `EPOS`, `POS`, and `ATO`.
+
+Interactive 3D example:
+[Nimonic 90 reconstruction](https://rawcdn.githack.com/mmonajem/pyccapt/52835bc47735ef12bffcf7e18ce90b556b07d12f/pyccapt/files/readme_images/3d_o.html)
+
+<p align="center">
+  <img width="40%" src="pyccapt/files/readme_images/roto.gif" alt="3D rotation">
+  <img width="40%" src="pyccapt/files/readme_images/iso.gif" alt="3D isosurface">
+</p>
 
 ## Documentation
 

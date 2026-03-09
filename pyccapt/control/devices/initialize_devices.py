@@ -5,6 +5,7 @@ from datetime import datetime
 
 import serial.tools.list_ports
 
+from pyccapt.control.core import runtime
 from pyccapt.control.devices.edwards_tic import EdwardsAGC
 from pyccapt.control.devices.pfeiffer_gauges import TPG362
 
@@ -489,11 +490,10 @@ def log_vacuum_levels(main_chamber, buffer_chamber, buffer_chamber_pre, load_loc
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     current_month = datetime.now().strftime("%Y-%m")
-    path = "./files/logs/"
-    if not os.path.isdir(path):
-        os.makedirs(path, mode=0o777, exist_ok=True)
-    txt_file_path = path + f"vacuum_log_{current_month}.txt"
-    csv_file_path = path + f"vacuum_log_{current_month}.csv"
+    path = runtime.project_path("files", "logs", "vacuum")
+    os.makedirs(path, mode=0o777, exist_ok=True)
+    txt_file_path = path / f"vacuum_log_{current_month}.txt"
+    csv_file_path = path / f"vacuum_log_{current_month}.csv"
 
     with open(txt_file_path, "a") as log_file:
         log_file.write(f"{timestamp}: Main Chamber={main_chamber}, Buffer Chamber={buffer_chamber}, "

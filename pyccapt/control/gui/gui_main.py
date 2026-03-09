@@ -844,11 +844,12 @@ class Ui_PyCCAPT(object):
         self.Error = QtWidgets.QLabel(parent=self.centralwidget)
         self.Error.setMinimumSize(QtCore.QSize(700, 30))
         font = QtGui.QFont()
-        font.setPointSize(13)
+        font.setPointSize(10)
         font.setBold(True)
         font.setStrikeOut(False)
         self.Error.setFont(font)
         self.Error.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.Error.setWordWrap(True)
         self.Error.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.LinksAccessibleByMouse)
         self.Error.setObjectName("Error")
         self.gridLayout_6.addWidget(self.Error, 3, 0, 2, 2)
@@ -1148,6 +1149,19 @@ class Ui_PyCCAPT(object):
         None
         """
         if not self.flag_super_user:
+            warning = QtWidgets.QMessageBox(parent=self.centralwidget)
+            warning.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+            warning.setWindowTitle("Confirm Access Override")
+            warning.setText("Access Override can bypass device and gate safety checks.")
+            warning.setInformativeText("Only continue if you understand the risk of running with missing hardware.")
+            warning.setStandardButtons(
+                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
+            )
+            warning.setDefaultButton(QtWidgets.QMessageBox.StandardButton.No)
+            if warning.exec() != QtWidgets.QMessageBox.StandardButton.Yes:
+                self.error_message("Access Override was canceled.")
+                self.timer.start(8000)
+                return
             self.flag_super_user = True
             self.superuser.setStyleSheet("QPushButton{\n"
                                          "background: rgb(0, 255, 26)\n"
@@ -1377,11 +1391,19 @@ class Ui_PyCCAPT(object):
         )
         if issues:
             message = device_checks.format_startup_device_issue_message(issues)
-            print(message)
-            self.error_message(message)
-            self.variables.start_flag = False
-            self.variables.stop_flag = False
-            return
+            if self.flag_super_user:
+                warning_message = (
+                    "Override active. Experiment is starting with unavailable enabled devices. "
+                    "Review the terminal log for the full device list."
+                )
+                print(f"Override active. {message}")
+                self.error_message(warning_message)
+            else:
+                print(message)
+                self.error_message(message)
+                self.variables.start_flag = False
+                self.variables.stop_flag = False
+                return
 
         try:
             self.experiment_process = self.process_coordinator.start_experiment(

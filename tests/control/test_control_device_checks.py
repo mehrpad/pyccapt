@@ -111,7 +111,7 @@ def test_format_startup_device_issue_message_contains_guidance():
 
     assert "Experiment start blocked" in message
     assert "v_dc: cannot open 'COM6'" in message
-    assert "set them to 'off' in config.toml" in message
+    assert "set them to 'disabled' (or 'off') in config.toml" in message
 
 
 def test_collect_configured_serial_port_issues_reports_missing_ports():

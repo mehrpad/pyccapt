@@ -44,6 +44,16 @@ def test_load_config_file_supports_toml(tmp_path):
     assert read_files.load_config_file(toml_path)["format"] == "toml"
 
 
+def test_load_config_file_normalizes_enabled_disabled_aliases(tmp_path):
+    toml_path = tmp_path / "config.toml"
+    toml_path.write_text('camera = "enabled"\nlaser = "disabled"\n', encoding="utf-8")
+
+    config = read_files.load_config_file(toml_path)
+
+    assert config["camera"] == "on"
+    assert config["laser"] == "off"
+
+
 def test_load_config_file_rejects_json(tmp_path):
     json_path = tmp_path / "config.json"
     json_path.write_text(json.dumps({"format": "json"}), encoding="utf-8")

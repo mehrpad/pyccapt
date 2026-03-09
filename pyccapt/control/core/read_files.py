@@ -12,6 +12,47 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for older Python
     import tomli as tomllib  # type: ignore[no-redef]
 
 
+_DEVICE_TOGGLE_KEYS = {
+    "tdc",
+    "camera",
+    "pump_ll",
+    "pump_cll",
+    "gates",
+    "v_dc",
+    "v_p",
+    "signal_generator",
+    "cryo",
+    "gauges",
+    "stage",
+    "laser",
+    "DAQ",
+    "usb_lamp_switch",
+    "thorlab_motor",
+    "baking",
+}
+
+_ENABLED_VALUES = {"on", "enabled", "enable", "true", "yes", "1"}
+_DISABLED_VALUES = {"off", "disabled", "disable", "false", "no", "0"}
+
+
+def normalize_control_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Normalize supported control config toggle aliases to legacy values."""
+    normalized = dict(config)
+    for key in _DEVICE_TOGGLE_KEYS:
+        value = normalized.get(key)
+        if isinstance(value, bool):
+            normalized[key] = "on" if value else "off"
+            continue
+        if value is None:
+            continue
+        lowered = str(value).strip().lower()
+        if lowered in _ENABLED_VALUES:
+            normalized[key] = "on"
+        elif lowered in _DISABLED_VALUES:
+            normalized[key] = "off"
+    return normalized
+
+
 def read_json_file(json_file_path: str | Path) -> dict[str, Any]:
     """Read a JSON file and return its content as a dictionary.
 
@@ -83,7 +124,7 @@ def load_config_file(config_file_path: str | Path) -> dict[str, Any]:
     path = Path(config_file_path).expanduser().resolve()
     suffix = path.suffix.lower()
     if suffix == ".toml":
-        return read_toml_file(path)
+        return normalize_control_config(read_toml_file(path))
     if suffix == ".json":
         raise ValueError(
             f"JSON config is no longer supported for control runtime: {path}. "

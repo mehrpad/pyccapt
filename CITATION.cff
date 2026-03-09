@@ -4,15 +4,16 @@
 cff-version: 1.2.0
 title: PyCCAPT
 message: >-
-  If you use this software, please cite the PyCCAPT journal article.
+  If you use this software, please cite it using the
+  metadata from this file.
 type: software
 authors:
   - given-names: Mehrpad
     family-names: Monajem
     email: mehrpad.monajem@fau.de
-    name-particle: Mehrpad
+    name-particle:
     orcid: 'https://orcid.org/0009-0002-6746-2835'
-  - given-names: harsh
+  - given-names: Harsh
     family-names: Pandey
     email: harsh020596@gmail.com
 identifiers:
@@ -23,26 +24,3 @@ url: 'https://pyccapt.readthedocs.io/'
 license: AGPL-3.0
 version: 0.1.11
 date-released: '2025-01-22'
-preferred-citation:
-  type: article
-  title: PyCCAPT: A Python Package for Open-Source Atom Probe Instrument Control and Data Calibration
-  authors:
-    - family-names: Monajem
-      given-names: Mehrpad
-    - family-names: Ott
-      given-names: Benedict
-    - family-names: Heimerl
-      given-names: Jonas
-    - family-names: Meier
-      given-names: Stefan
-    - family-names: Hommelhoff
-      given-names: Peter
-    - family-names: Felfer
-      given-names: Peter
-  journal: Microscopy Research and Technique
-  volume: 88
-  issue: 12
-  start: 3199
-  end: 3210
-  year: 2025
-  publisher: Wiley Online Library

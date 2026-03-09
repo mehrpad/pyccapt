@@ -489,19 +489,6 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
         }
     )
 
-    # x_range = [min(variables.x), max(variables.x)]
-    # y_range = [min(variables.y), max(variables.y)]
-    # z_range = [min(variables.z), max(variables.z)]
-    #
-    # x_len = x_range[1] - x_range[0]
-    # y_len = y_range[1] - y_range[0]
-    # z_len = z_range[1] - z_range[0]
-    #
-    # aspect_ratio = dict(x=x_len, y=y_len, z=z_len)
-    #
-    # fig.update_layout(scene=dict(aspectratio=aspect_ratio))
-
-    fig.update_layout(scene=dict(aspectmode='data', aspectratio=dict(x=1, y=1, z=1)))
     fig.update_layout(
         scene=dict(  # Target the 3D scene
             bgcolor='white',  # Set scene background to white

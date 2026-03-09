@@ -18,15 +18,14 @@
 # -- Project information -----------------------------------------------------
 
 import os
-import os.path as op
+from pathlib import Path
 import sys
 
-sys.path.insert(0, os.path.abspath('../..'))
+DOCS_DIR = Path(__file__).resolve().parent
+REPO_ROOT = DOCS_DIR.parent
 
-# include parent directory
-pdir = op.dirname(op.dirname(op.abspath(__file__)))
-# include extensions
-sys.path.append(op.abspath('extensions'))
+sys.path.insert(0, str(REPO_ROOT))
+sys.path.append(str(DOCS_DIR / "extensions"))
 
 project = 'PyCCAPT'
 copyright = '2022, Mehrpad Monajem'
@@ -57,7 +56,7 @@ extensions = [
     'sphinx.ext.mathjax',
     'sphinx.ext.viewcode',
     'nbsphinx',
-    'recommonmark',
+    'myst_parser',
     'sphinx_markdown_tables',
     'sphinxcontrib.bibtex',
     ]
@@ -78,6 +77,16 @@ templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
 myst_heading_anchors = 3  # Allows linking to headings in Markdown files
+
+autodoc_mock_imports = [
+    'mcculw',
+    'mcculw.enums',
+    'mcculw.ul',
+    'nidaqmx',
+    'pypylon',
+    'pypylon.genicam',
+    'pypylon.pylon',
+]
 
 # -- Options for HTML output -------------------------------------------------
 
@@ -105,7 +114,6 @@ html_context = {
 
 html_theme_options = {
     'logo_only': False,
-    'display_version': True,
     'titles_only': False,
 }
 
@@ -114,8 +122,9 @@ nbsphinx_allow_errors = True
 # Enable Markdown cross-references
 myst_enable_extensions = ["dollarmath", "amsmath", "deflist", "html_admonition", "html_image"]
 
-# Warn about unresolved references
-nitpicky = True
+# Keep the RTD build resilient even when optional GUI and hardware types
+# are unavailable in the docs environment.
+nitpicky = False
 nitpick_ignore = []
 
 # Add mappings for intersphinx to handle references to external libraries

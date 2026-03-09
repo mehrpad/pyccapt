@@ -53,7 +53,7 @@ def tof2mc(t: int, t0: int, V: float, xDet: int, yDet: int,
         xDet: Distance along the x-axis (unit: mm)
         yDet: Distance along the y-axis (unit: mm)
         flightPathLength: Length of the flight path (unit: mm)
-        mode: Type of mode ('voltage' or 'laser')
+        mode: Type of mode ('voltage' or 'laser').
 
     Returns:
         mc: Mass-to-charge ratio (unit: Dalton)

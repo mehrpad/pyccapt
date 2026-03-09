@@ -1392,15 +1392,19 @@ class Ui_PyCCAPT(object):
         )
         self.variables.override_disabled_devices = [issue.device for issue in issues] if self.flag_super_user else []
         if issues:
-            message = device_checks.format_startup_device_issue_message(issues)
             if self.flag_super_user:
+                details = "; ".join(f"{item.device}: {item.reason}" for item in issues)
                 warning_message = (
                     "Override active. Experiment is starting with unavailable enabled devices. "
                     "Review the terminal log for the full device list."
                 )
-                print(f"Override active. {message}")
+                print(
+                    "Override active. Device check found unavailable enabled devices: "
+                    f"{details}. Experiment will continue and skip unavailable hardware where possible."
+                )
                 self.error_message(warning_message)
             else:
+                message = device_checks.format_startup_device_issue_message(issues)
                 print(message)
                 self.error_message(message)
                 self.variables.start_flag = False

@@ -180,7 +180,7 @@ class APT_Exp_Control:
             specimen_voltage_temp = min(self.specimen_voltage + voltage_step, self.vdc_max)
             if specimen_voltage_temp > self.vdc_min:
                 if specimen_voltage_temp != self.specimen_voltage:
-                    if self.conf['v_dc'] != "off":
+                    if self._vdc_active():
                         apt_exp_control_func.command_v_dc(self.com_port_v_dc, ">S0 %s" % specimen_voltage_temp)
                         self.specimen_voltage = specimen_voltage_temp
                         self.variables.specimen_voltage = self.specimen_voltage
@@ -188,7 +188,7 @@ class APT_Exp_Control:
                     if self.pulse_mode in ['Voltage', 'VoltageLaser']:
                         new_vp = (self.specimen_voltage * (self.pulse_fraction / 100) /
                                   self.pulse_amp_per_supply_voltage)
-                        if self.pulse_voltage_max > new_vp > self.pulse_voltage_min and self.conf['v_p'] != "off":
+                        if self.pulse_voltage_max > new_vp > self.pulse_voltage_min and self._vp_active():
                             apt_exp_control_func.command_v_p(self.com_port_v_p, 'VOLT %s' % new_vp)
                             self.pulse_voltage = new_vp * self.pulse_amp_per_supply_voltage
                             self.variables.pulse_voltage = self.pulse_voltage

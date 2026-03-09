@@ -165,8 +165,13 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
         print("Error during init:", retcode, errmsg)
         print(f"{initialize_devices.bcolors.FAIL}Error: Restart the TDC manually "
               f"(Turn it On and Off){initialize_devices.bcolors.ENDC}")
-        # variables.flag_tdc_failure = True
-        return -1
+        variables.flag_finished_tdc = True
+        if not getattr(variables, "access_override_enabled", False):
+            variables.flag_tdc_failure = True
+            return -1
+        print("Access Override is active. Continuing without a Surface Concept detector.")
+        variables.flag_tdc_failure = False
+        return 0
 
     else:
         print("TDC is successfully initialized")
@@ -210,7 +215,13 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
         print("Error during read:", retcode, device.lib.sc_get_err_msg(retcode))
         print(f"{initialize_devices.bcolors.FAIL}Error: Restart the TDC manually "
               f"(Turn it On and Off){initialize_devices.bcolors.ENDC}")
-        return -1
+        variables.flag_finished_tdc = True
+        if not getattr(variables, "access_override_enabled", False):
+            variables.flag_tdc_failure = True
+            return -1
+        print("Access Override is active. Continuing without a Surface Concept detector.")
+        variables.flag_tdc_failure = False
+        return 0
 
     loop_time = 1 / variables.ex_freq
     events_detected = 0
@@ -356,7 +367,7 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
     variables.total_raw_signals = raw_signal_detected
     print("TDC Measurement stopped")
 
-    if chunk_id > 0:
+    if chunk_id > 0 and len(xx) > 0:
         chunk_id += 1
         chunk_data = {
             "x_bin": xx_list_bin[:CHUNK_SIZE],
@@ -377,55 +388,42 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
             "laser_pulse_tdc": laser_pulse_data_tdc[:CHUNK_SIZE],
         }
         save_queue.put((chunk_id, path, chunk_data))
-        save_queue.put(None)  # Signal the save process to end
-        save_process.join()  # Wait for the save process to finish
 
-        # Load all chunks and extend variables
-        (xx_list_bin, xx, yy_list_bin, yy, tt_list_bin, tt, voltage_data, voltage_pulse_data,
-         laser_pulse_data, start_counter, channel_data,
-         time_data, tdc_start_counter, voltage_data_tdc, voltage_pulse_data_tdc,
-         laser_pulse_data_tdc) = load_and_concatenate_chunks(path, chunk_id)
+    save_queue.put(None)
+    save_process.join()
 
-    save_queue.put(None)  # Signal the save process to end
-    save_process.join()  # Wait for the save process to finish
+    if chunk_id == 0:
+        np.save(variables.path + "/temp_data/x.npy", np.array(xx))
+        np.save(variables.path + "/temp_data/y.npy", np.array(yy))
+        np.save(variables.path + "/temp_data/t.npy", np.array(tt))
+        np.save(variables.path + "/temp_data/voltage.npy", np.array(voltage_data))
+        np.save(variables.path + "/temp_data/voltage_pulse.npy", np.array(voltage_pulse_data))
+        np.save(variables.path + "/temp_data/laser_pulse.npy", np.array(laser_pulse_data))
+        np.save(variables.path + "/temp_data/start_counter.npy", np.array(start_counter))
+        np.save(variables.path + "/temp_data/x_bin.npy", np.array(xx_list_bin))
+        np.save(variables.path + "/temp_data/y_bin.npy", np.array(yy_list_bin))
+        np.save(variables.path + "/temp_data/t_bin.npy", np.array(tt_list_bin))
+        np.save(variables.path + "/temp_data/channel.npy", np.array(channel_data))
+        np.save(variables.path + "/temp_data/time.npy", np.array(time_data))
+        np.save(variables.path + "/temp_data/main_raw_counter.npy", np.array(tdc_start_counter))
+        np.save(variables.path + "/temp_data/voltage_tdc.npy", np.array(voltage_data_tdc))
+        np.save(variables.path + "/temp_data/voltage_pulse_tdc.npy", np.array(voltage_pulse_data_tdc))
+        np.save(variables.path + "/temp_data/laser_pulse_tdc.npy", np.array(laser_pulse_data_tdc))
 
-    # save DLD data
-    np.save(variables.path + "/temp_data/x.npy", np.array(xx))
-    np.save(variables.path + "/temp_data/y.npy", np.array(yy))
-    np.save(variables.path + "/temp_data/t.npy", np.array(tt))
-    np.save(variables.path + "/temp_data/voltage.npy", np.array(voltage_data))
-    np.save(variables.path + "/temp_data/voltage_pulse.npy", np.array(voltage_pulse_data))
-    np.save(variables.path + "/temp_data/laser_pulse.npy", np.array(laser_pulse_data))
-    np.save(variables.path + "/temp_data/start_counter.npy", np.array(start_counter))
-
-    # save DLD data binning
-    np.save(variables.path + "/temp_data/x_bin.npy", np.array(xx_list_bin))
-    np.save(variables.path + "/temp_data/y_bin.npy", np.array(yy_list_bin))
-    np.save(variables.path + "/temp_data/t_bin.npy", np.array(tt_list_bin))
-
-    # save TDC data
-    np.save(variables.path + "/temp_data/channel.npy", np.array(channel_data))
-    np.save(variables.path + "/temp_data/time.npy", np.array(time_data))
-    np.save(variables.path + "/temp_data/main_raw_counter.npy", np.array(tdc_start_counter))
-    np.save(variables.path + "/temp_data/voltage_tdc.npy", np.array(voltage_data_tdc))
-    np.save(variables.path + "/temp_data/voltage_pulse_tdc.npy", np.array(voltage_pulse_data_tdc))
-    np.save(variables.path + "/temp_data/laser_pulse_tdc.npy", np.array(laser_pulse_data_tdc))
-
-    variables.extend_to('x', xx)
-    variables.extend_to('y', yy)
-    variables.extend_to('t', tt)
-    variables.extend_to('dld_start_counter', start_counter)
-    variables.extend_to('main_v_dc_dld', voltage_data)
-    variables.extend_to('main_v_p_dld', voltage_pulse_data)
-    variables.extend_to('main_l_p_dld', laser_pulse_data)
-
-    variables.extend_to('channel', channel_data)
-    variables.extend_to('time_data', time_data)
-    variables.extend_to('tdc_start_counter', tdc_start_counter)
-    variables.extend_to('main_v_dc_tdc', voltage_data_tdc)
-    variables.extend_to('main_v_p_tdc', voltage_pulse_data_tdc)
-    variables.extend_to('main_l_p_tdc', laser_pulse_data_tdc)
-    print("data save in share variables")
+        variables.extend_to('x', xx)
+        variables.extend_to('y', yy)
+        variables.extend_to('t', tt)
+        variables.extend_to('dld_start_counter', start_counter)
+        variables.extend_to('main_v_dc_dld', voltage_data)
+        variables.extend_to('main_v_p_dld', voltage_pulse_data)
+        variables.extend_to('main_l_p_dld', laser_pulse_data)
+        variables.extend_to('channel', channel_data)
+        variables.extend_to('time_data', time_data)
+        variables.extend_to('tdc_start_counter', tdc_start_counter)
+        variables.extend_to('main_v_dc_tdc', voltage_data_tdc)
+        variables.extend_to('main_v_p_tdc', voltage_pulse_data_tdc)
+        variables.extend_to('main_l_p_tdc', laser_pulse_data_tdc)
+        print("data save in share variables")
     time.sleep(0.1)
     bufdatacb.close()
     bufdatacb_raw.close()

@@ -266,10 +266,9 @@ class StageControlWindow(QtWidgets.QWidget):
 		Args:
 			event: Close event.
 		"""
-		self.gui_stage_control.stop()  # Call the stop method to stop any background activity
-		self.closed.emit()  # Emit the custom closed signal
-		# Additional cleanup code here if needed
-		super().closeEvent(event)
+		event.ignore()
+		self.hide()
+		self.closed.emit()
 
 	def setWindowStyleFusion(self):
 		# Set the Fusion style

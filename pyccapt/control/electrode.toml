@@ -13,5 +13,5 @@ names = [
     "NiC9",
     "CuC1",  # Copper electrode 1
     "CuC2",
-    "NC",    # Not categorized
+    "NC",    # No electrode
 ]

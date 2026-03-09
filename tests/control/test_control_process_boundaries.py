@@ -41,6 +41,8 @@ def test_surface_concept_detector_process_contract():
 def test_roentdek_detector_process_contract():
     process = Mock()
     process_factory = Mock(return_value=process)
+    event_obj = object()
+    event_factory = Mock(return_value=event_obj)
 
     conf = {"tdc": "on", "tdc_model": "RoentDek"}
     variables = _dummy_variables("TDC")
@@ -53,10 +55,11 @@ def test_roentdek_detector_process_contract():
         t_plot=None,
         main_v_dc_plot=None,
         process_factory=process_factory,
+        event_factory=event_factory,
     )
 
     assert runtime_state.tdc_process is process
-    assert runtime_state.stop_event is None
+    assert runtime_state.stop_event is event_obj
     process.start.assert_called_once()
 
 

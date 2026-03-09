@@ -1383,12 +1383,14 @@ class Ui_PyCCAPT(object):
         self.variables.stop_flag = False
         self.variables.plot_clear_flag = True
         self.variables.clear_index_save_image = True
+        self.variables.access_override_enabled = self.flag_super_user
 
         issues = device_checks.collect_startup_device_issues(
             self.conf,
             self.variables,
             pulse_mode=self.variables.pulse_mode,
         )
+        self.variables.override_disabled_devices = [issue.device for issue in issues] if self.flag_super_user else []
         if issues:
             message = device_checks.format_startup_device_issue_message(issues)
             if self.flag_super_user:
@@ -1641,6 +1643,7 @@ class Ui_PyCCAPT(object):
         self.Gates = gui_gates.GatesWindow(self.gui_gates, flags=QtCore.Qt.WindowType.Tool)
         self.Gates.setWindowStyleFusion()
         self.gui_gates.setupUi(self.Gates)
+        self.Gates.closed.connect(lambda: self.reset_button_color(self.gates_control))
         # GUI Pumps and Vacuum
         self.SignalEmitter_Pumps_Vacuum = gui_pumps_vacuum.SignalEmitter()
         self.gui_pumps_vacuum = gui_pumps_vacuum.Ui_Pumps_Vacuum(self.variables, self.conf,
@@ -1650,6 +1653,7 @@ class Ui_PyCCAPT(object):
                                                                flags=Qt.WindowType.Tool)
         self.Pumps_vacuum.setWindowStyleFusion()
         self.gui_pumps_vacuum.setupUi(self.Pumps_vacuum)
+        self.Pumps_vacuum.closed.connect(lambda: self.reset_button_color(self.pumps_vaccum))
         self.variables.flag_pumps_vacuum_start = True
 
         # GUI Laser Control
@@ -1657,6 +1661,7 @@ class Ui_PyCCAPT(object):
         self.Laser_control = gui_laser_control.LaserControlWindow(self.gui_laser_control,
                                                                   flags=Qt.WindowType.Tool)
         self.gui_laser_control.setupUi(self.Laser_control)
+        self.Laser_control.closed.connect(lambda: self.reset_button_color(self.laser_control))
 
         # GUI Stage Control
         self.gui_stage_control = gui_stage_control.Ui_Stage_Control(self.variables, self.conf)
@@ -1664,6 +1669,7 @@ class Ui_PyCCAPT(object):
                                                                   flags=Qt.WindowType.Tool)
         self.Stage_control.setWindowStyleFusion()
         self.gui_stage_control.setupUi(self.Stage_control)
+        self.Stage_control.closed.connect(lambda: self.reset_button_color(self.stage_control))
 
         # GUI Visualization
         self.visualization_process = self.process_coordinator.start_visualization(
@@ -1676,6 +1682,16 @@ class Ui_PyCCAPT(object):
             self.t_plot,
             self.main_v_dc_plot,
         )
+
+    def _show_sub_window(self, window, button):
+        if window.isVisible():
+            window.raise_()
+            window.activateWindow()
+        else:
+            window.show()
+            window.raise_()
+            window.activateWindow()
+        button.setStyleSheet("background-color: green")
 
     def open_cameras_win(self):
         """
@@ -1728,12 +1744,9 @@ class Ui_PyCCAPT(object):
                                             None
                                     """
         if hasattr(self, 'Gates') and self.Gates.isVisible():
-            self.Gates.raise_()
-            self.Gates.activateWindow()
+            self._show_sub_window(self.Gates, self.gates_control)
         else:
-            self.Gates.show()
-            self.gates_control.setStyleSheet("background-color: green")
-            self.Gates.closed.connect(lambda: self.reset_button_color(self.gates_control))
+            self._show_sub_window(self.Gates, self.gates_control)
 
     def open_pumps_vacuum_win(self, ):
         """
@@ -1746,12 +1759,9 @@ class Ui_PyCCAPT(object):
                     None
             """
         if hasattr(self, 'Pumps_vacuum') and self.Pumps_vacuum.isVisible():
-            self.Pumps_vacuum.raise_()
-            self.Pumps_vacuum.activateWindow()
+            self._show_sub_window(self.Pumps_vacuum, self.pumps_vaccum)
         else:
-            self.Pumps_vacuum.show()
-            self.pumps_vaccum.setStyleSheet("background-color: green")
-            self.Pumps_vacuum.closed.connect(lambda: self.reset_button_color(self.pumps_vaccum))
+            self._show_sub_window(self.Pumps_vacuum, self.pumps_vaccum)
 
     def open_laser_control_win(self):
         """
@@ -1764,12 +1774,9 @@ class Ui_PyCCAPT(object):
                                             None
                                     """
         if hasattr(self, 'Laser_control') and self.Laser_control.isVisible():
-            self.Laser_control.raise_()
-            self.Laser_control.activateWindow()
+            self._show_sub_window(self.Laser_control, self.laser_control)
         else:
-            self.Laser_control.show()
-            self.laser_control.setStyleSheet("background-color: green")
-            self.Laser_control.closed.connect(lambda: self.reset_button_color(self.laser_control))
+            self._show_sub_window(self.Laser_control, self.laser_control)
 
     def open_stage_control_win(self):
         """
@@ -1782,12 +1789,9 @@ class Ui_PyCCAPT(object):
                                             None
                                     """
         if hasattr(self, 'Stage_control') and self.Stage_control.isVisible():
-            self.Stage_control.raise_()
-            self.Stage_control.activateWindow()
+            self._show_sub_window(self.Stage_control, self.stage_control)
         else:
-            self.Stage_control.show()
-            self.stage_control.setStyleSheet("background-color: green")
-            self.Stage_control.closed.connect(lambda: self.reset_button_color(self.stage_control))
+            self._show_sub_window(self.Stage_control, self.stage_control)
 
     def open_visualization_win(self, ):
         """
@@ -1814,17 +1818,17 @@ class Ui_PyCCAPT(object):
                                             None
                                     """
 
-        if hasattr(self, 'Baking') and self.Baking.isVisible():
-            self.Baking.raise_()
-            self.Baking.activateWindow()
-        else:
-
+        if not hasattr(self, 'Baking'):
             self.gui_baking = gui_baking.Ui_Baking(self.variables, self.conf, self.SignalEmitter_Pumps_Vacuum)
             self.Baking = gui_baking.BakingWindow(self.gui_baking, flags=Qt.WindowType.Tool)
+            self.Baking.setWindowStyleFusion()
             self.gui_baking.setupUi(self.Baking)
-            self.Baking.show()
-            self.baking.setStyleSheet("background-color: green")
             self.Baking.closed.connect(lambda: self.reset_button_color(self.baking))
+
+        if self.Baking.isVisible():
+            self._show_sub_window(self.Baking, self.baking)
+        else:
+            self._show_sub_window(self.Baking, self.baking)
 
     def reset_button_color(self, button):
         """
@@ -1882,11 +1886,19 @@ class Ui_PyCCAPT(object):
                                     Return:
                                             None
                                     """
+        if hasattr(self, "gui_baking"):
+            self.gui_baking.stop()
+        if hasattr(self, "gui_pumps_vacuum"):
+            self.gui_pumps_vacuum.stop()
+        if hasattr(self, "SignalEmitter_Pumps_Vacuum"):
+            self.SignalEmitter_Pumps_Vacuum.bool_flag_while_loop.emit(False)
+        if hasattr(self, "experiment_process") and self.experiment_process.is_alive():
+            self.experiment_process.terminate()
         if self.camera_process is not None and self.camera_process.is_alive():
             self.camera_process.terminate()
         if hasattr(self, 'visualization_process') and self.visualization_process.is_alive():
             self.visualization_process.terminate()
-        if hasattr(self.gui_pumps_vacuum, 'gauges_thread'):
+        if hasattr(self, 'gui_pumps_vacuum') and hasattr(self.gui_pumps_vacuum, 'gauges_thread'):
             self.gui_pumps_vacuum.gauges_thread.join(2)
 
     def closeEvent(self, event):
@@ -1932,6 +1944,7 @@ class MyPyCCAPT(QtWidgets.QMainWindow):
         )
 
         if reply == QtWidgets.QMessageBox.StandardButton.Yes:
+            self.ui.cleanup()
             event.accept()
         else:
             event.ignore()

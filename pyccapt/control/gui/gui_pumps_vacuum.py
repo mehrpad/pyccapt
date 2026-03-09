@@ -978,12 +978,9 @@ class PumpsVacuumWindow(QtWidgets.QWidget):
             Args:
                 event: Close event.
         """
-        self.gui_pumps_vacuum.stop()  # Call the stop method to stop any background activity
-        self.signal_emitter.bool_flag_while_loop.emit(False)
-        self.gui_pumps_vacuum.gauges_thread.join(1)
-        # Additional cleanup code here if needed
-        self.closed.emit()  # Emit the custom closed signal
-        super().closeEvent(event)
+        event.ignore()
+        self.hide()
+        self.closed.emit()
 
     def setWindowStyleFusion(self):
         # Set the Fusion style

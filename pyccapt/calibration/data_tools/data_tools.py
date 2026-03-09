@@ -158,20 +158,20 @@ def save_data(data, variables, name=None, hdf=True, epos=False, pos=False, ato_6
     elif temp:
         data_name = f"{variables.result_data_name}_temp"
     else:
-        data_name = variables.data_name
+        data_name = variables.result_data_name
 
     if hdf:
         output_h5 = _resolve_variable_output_file(variables, filename=f"{data_name}.h5", data_directory=True)
         store_df_to_hdf(data, "df", output_h5)
     if epos:
-        ccapt_tools.ccapt_to_epos(data, path=variables.result_path, name=f"{data_name}.epos")
+        ccapt_tools.ccapt_to_epos(data, path=variables.result_data_path, name=f"{data_name}.epos")
     if pos:
-        ccapt_tools.ccapt_to_pos(data, path=variables.result_path, name=f"{data_name}.pos")
+        ccapt_tools.ccapt_to_pos(data, path=variables.result_data_path, name=f"{data_name}.pos")
     if ato_6v:
-        ato_tools.ccapt_to_ato(data, path=variables.result_path, name=f"{data_name}.ato")
+        ato_tools.ccapt_to_ato(data, path=variables.result_data_path, name=f"{data_name}.ato")
     if csv:
         output_csv = _resolve_variable_output_file(
-            variables, filename=f"{variables.result_data_name}.csv", data_directory=False
+            variables, filename=f"{data_name}.csv", data_directory=True
         )
         store_df_to_csv(data, output_csv)
 

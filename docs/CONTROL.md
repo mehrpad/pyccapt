@@ -48,6 +48,12 @@ names = [
 ]
 ```
 
+Electrode naming in the control workflow:
+
+![Electrode labels](../pyccapt/files/readme_images/electrode.png)
+
+Use the electrode list to match the naming shown in the GUI and your lab workflow. For example, `NiC1` refers to the nickel electrode and `CuC1` refers to the copper electrode.
+
 ## Startup Device Validation
 
 - Enabled devices are validated when an experiment is started.

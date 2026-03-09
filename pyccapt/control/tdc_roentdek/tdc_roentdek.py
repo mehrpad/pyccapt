@@ -1,4 +1,5 @@
 import ctypes
+import time
 from pathlib import Path
 
 import numpy as np
@@ -69,7 +70,7 @@ class TDC:
 		data = self.tdc_lib.get_data_tdc_buf(self.obj)
 		return data
 
-def experiment_measure(variables):
+def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_event):
 	"""
 	Measurement function: This function is called in a process to read data from the queue.
 
@@ -86,48 +87,93 @@ def experiment_measure(variables):
 	except Exception as exc:
 		print("TDC DLL was not found")
 		print(exc)
-		return 1
+		variables.flag_finished_tdc = True
+		if not getattr(variables, "access_override_enabled", False):
+			variables.flag_tdc_failure = True
+			return 1
+		print("Access Override is active. Continuing without a RoentDek detector.")
+		variables.flag_tdc_failure = False
+		return 0
 
 	tdc = TDC(tdc_lib, buf_size=30000, time_out=100)
 
 	ret_code = tdc.init_tdc()
+	if ret_code < 0:
+		print(f"Error initializing RoentDek TDC: {ret_code}")
+		variables.flag_finished_tdc = True
+		if not getattr(variables, "access_override_enabled", False):
+			variables.flag_tdc_failure = True
+			return ret_code
+		print("Access Override is active. Continuing without a RoentDek detector.")
+		variables.flag_tdc_failure = False
+		return 0
 
 	tdc.run_tdc()
+	events_detected = 0
+	raw_signal_detected = 0
+	events_detected_tmp = 0
+	start_time = time.time()
+	pulse_frequency = max(float(variables.pulse_frequency) * 1000.0, 1.0)
 
-	while True:
-		returnVale = tdc.get_data_tdc_buf()
-		buffer_length = int(returnVale[0])
-		returnVale_tmp = np.copy(returnVale[1:buffer_length * 12 + 1].reshape(buffer_length, 12))
+	while not stop_event.is_set() and not variables.flag_stop_tdc:
+		return_value = tdc.get_data_tdc_buf()
+		buffer_length = int(return_value[0])
+		if buffer_length <= 0:
+			time.sleep(0.01)
+			continue
 
-		xx = returnVale_tmp[:, 8]
-		yy = returnVale_tmp[:, 9]
-		tt = returnVale_tmp[:, 10]
+		return_value_tmp = np.copy(return_value[1:buffer_length * 12 + 1].reshape(buffer_length, 12))
+
+		xx = return_value_tmp[:, 8]
+		yy = return_value_tmp[:, 9]
+		tt = return_value_tmp[:, 10]
+		time_stamp = return_value_tmp[:, 11]
+		events_detected += buffer_length
+		raw_signal_detected += buffer_length
+		events_detected_tmp += buffer_length
+
+		main_v_dc_list = np.tile(variables.specimen_voltage, buffer_length)
+		pulse_data = np.tile(variables.pulse_voltage, buffer_length)
+		laser_data = np.tile(variables.laser_pulse_energy, buffer_length)
+
+		x_plot.put(xx)
+		y_plot.put(yy)
+		t_plot.put(tt)
+		main_v_dc_plot.put(main_v_dc_list)
+
 		variables.extend_to('x', xx.tolist())
 		variables.extend_to('y', yy.tolist())
 		variables.extend_to('t', tt.tolist())
-		variables.extend_to('time_stamp', returnVale_tmp[:, 11].tolist())
-		variables.extend_to('ch0', returnVale_tmp[:, 0].tolist())
-		variables.extend_to('ch1', returnVale_tmp[:, 1].tolist())
-		variables.extend_to('ch2', returnVale_tmp[:, 2].tolist())
-		variables.extend_to('ch3', returnVale_tmp[:, 3].tolist())
-		variables.extend_to('ch4', returnVale_tmp[:, 4].tolist())
-		variables.extend_to('ch5', returnVale_tmp[:, 5].tolist())
-		variables.extend_to('ch6', returnVale_tmp[:, 6].tolist())
-		variables.extend_to('ch7', returnVale_tmp[:, 7].tolist())
-		main_v_dc_dld_list = np.tile(variables.specimen_voltage, len(xx))
-		pulse_data = np.tile(variables.pulse_voltage, len(xx))
-		variables.extend_to('main_v_dc_tdc', main_v_dc_dld_list.tolist())
+		variables.extend_to('time_stamp', time_stamp.tolist())
+		variables.extend_to('ch0', return_value_tmp[:, 0].tolist())
+		variables.extend_to('ch1', return_value_tmp[:, 1].tolist())
+		variables.extend_to('ch2', return_value_tmp[:, 2].tolist())
+		variables.extend_to('ch3', return_value_tmp[:, 3].tolist())
+		variables.extend_to('ch4', return_value_tmp[:, 4].tolist())
+		variables.extend_to('ch5', return_value_tmp[:, 5].tolist())
+		variables.extend_to('ch6', return_value_tmp[:, 6].tolist())
+		variables.extend_to('ch7', return_value_tmp[:, 7].tolist())
+		variables.extend_to('main_v_dc_dld', main_v_dc_list.tolist())
+		variables.extend_to('main_v_p_dld', pulse_data.tolist())
+		variables.extend_to('main_l_p_dld', laser_data.tolist())
+		variables.extend_to('main_v_dc_tdc', main_v_dc_list.tolist())
+		variables.extend_to('main_v_p_tdc', pulse_data.tolist())
+		variables.extend_to('main_l_p_tdc', laser_data.tolist())
 		variables.extend_to('main_p_tdc_roentdek', pulse_data.tolist())
 
-		# with self.variables.lock_data_plot:
-		variables.extend_to('main_v_dc_plot', main_v_dc_dld_list.tolist())
-		variables.extend_to('x_plot', xx.tolist())
-		variables.extend_to('y_plot', yy.tolist())
-		variables.extend_to('t_plot', tt.tolist())
-
-		if variables.flag_stop_tdc:
-			break
+		current_time = time.time()
+		if current_time - start_time >= 0.5:
+			detection_rate = events_detected_tmp * 100 / pulse_frequency
+			variables.detection_rate_current = detection_rate * 2
+			variables.detection_rate_current_plot = detection_rate * 2
+			variables.total_ions = events_detected
+			variables.total_raw_signals = raw_signal_detected
+			events_detected_tmp = 0
+			start_time = current_time
 
 	tdc.stop_tdc()
+	variables.total_ions = events_detected
+	variables.total_raw_signals = raw_signal_detected
+	variables.flag_finished_tdc = True
 
 	return 0

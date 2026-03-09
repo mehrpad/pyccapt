@@ -47,7 +47,11 @@ def start_detector_processes(
         return runtime
 
     if conf.get("tdc_model") == "RoentDek" and variables.counter_source == "TDC":
-        runtime.tdc_process = process_factory(target=tdc_roentdek.experiment_measure, args=(variables,))
+        runtime.stop_event = event_factory()
+        runtime.tdc_process = process_factory(
+            target=tdc_roentdek.experiment_measure,
+            args=(variables, x_plot, y_plot, t_plot, main_v_dc_plot, runtime.stop_event),
+        )
         runtime.tdc_process.start()
         return runtime
 

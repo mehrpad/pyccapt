@@ -87,12 +87,22 @@ def append_main_loop_results(
     variables.extend_to("main_chamber_vacuum", main_chamber_vacuum)
 
 
-def validate_detector_data_lengths(variables: Any, log_apt: Any) -> None:
+def _warn_on_mismatch(log_apt: Any, label: str, arrays: list[Any]) -> None:
+    lengths = [len(values) for values in arrays]
+    non_zero_lengths = [length for length in lengths if length > 0]
+    if not non_zero_lengths:
+        return
+    if len(set(non_zero_lengths)) != 1 or len(non_zero_lengths) != len(lengths):
+        log_apt.warning("%s data do not have the same length: %s", label, lengths)
+
+
+def validate_detector_data_lengths(variables: Any, conf: dict[str, Any], log_apt: Any) -> None:
     """Validate synchronized detector list lengths and emit warnings."""
-    if variables.counter_source == "TDC":
-        if all(
-            len(lst) == len(variables.x)
-            for lst in [
+    if variables.counter_source == "TDC" and conf.get("tdc_model") == "Surface_Consept":
+        _warn_on_mismatch(
+            log_apt,
+            "dld",
+            [
                 variables.x,
                 variables.y,
                 variables.t,
@@ -100,27 +110,59 @@ def validate_detector_data_lengths(variables: Any, log_apt: Any) -> None:
                 variables.main_v_dc_dld,
                 variables.main_v_p_dld,
                 variables.main_l_p_dld,
-            ]
-        ):
-            log_apt.warning("dld data have not same length")
-
-        if all(
-            len(lst) == len(variables.channel)
-            for lst in [
+            ],
+        )
+        _warn_on_mismatch(
+            log_apt,
+            "tdc",
+            [
                 variables.channel,
                 variables.time_data,
                 variables.tdc_start_counter,
                 variables.main_v_dc_tdc,
                 variables.main_v_p_tdc,
                 variables.main_l_p_tdc,
-            ]
-        ):
-            log_apt.warning("tdc data have not same length")
+            ],
+        )
 
-    elif variables.counter_source == "DRS":
-        if all(
-            len(lst) == len(variables.ch0_time)
-            for lst in [
+    elif variables.counter_source == "TDC" and conf.get("tdc_model") == "RoentDek":
+        _warn_on_mismatch(
+            log_apt,
+            "roentdek_dld",
+            [
+                variables.x,
+                variables.y,
+                variables.t,
+                variables.time_stamp,
+                variables.main_v_dc_dld,
+                variables.main_v_p_dld,
+                variables.main_l_p_dld,
+            ],
+        )
+        _warn_on_mismatch(
+            log_apt,
+            "roentdek_raw",
+            [
+                variables.ch0,
+                variables.ch1,
+                variables.ch2,
+                variables.ch3,
+                variables.ch4,
+                variables.ch5,
+                variables.ch6,
+                variables.ch7,
+                variables.main_v_dc_tdc,
+                variables.main_v_p_tdc,
+                variables.main_l_p_tdc,
+            ],
+        )
+
+    elif variables.counter_source == "HSD":
+        _warn_on_mismatch(
+            log_apt,
+            "hsd",
+            [
+                variables.ch0_time,
                 variables.ch0_wave,
                 variables.ch1_time,
                 variables.ch1_wave,
@@ -131,9 +173,8 @@ def validate_detector_data_lengths(variables: Any, log_apt: Any) -> None:
                 variables.main_v_dc_drs,
                 variables.main_v_p_drs,
                 variables.main_l_p_drs,
-            ]
-        ):
-            log_apt.warning("tdc data have not same length")
+            ],
+        )
 
 
 def reset_runtime_variables(

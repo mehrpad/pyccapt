@@ -436,10 +436,9 @@ class GatesWindow(QtWidgets.QWidget):
         Args:
             event: Close event.
         """
-        self.gui_gates.stop()  # Call the stop method to stop any background activity
-        # Additional cleanup code here if needed
-        self.closed.emit()  # Emit the custom closed signal
-        super().closeEvent(event)
+        event.ignore()
+        self.hide()
+        self.closed.emit()
 
     def setWindowStyleFusion(self):
         # Set the Fusion style

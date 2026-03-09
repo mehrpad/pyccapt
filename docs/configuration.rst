@@ -29,6 +29,14 @@ Example:
        "NC",   # Not categorized
    ]
 
+Electrode naming reference:
+
+.. image:: ../pyccapt/files/readme_images/electrode.png
+   :alt: Electrode naming reference used in the control GUI
+   :width: 480px
+
+Use names that match your experimental workflow and the labels presented in the control GUI. In the default example, ``NiC1`` refers to the nickel electrode and ``CuC1`` refers to the copper electrode.
+
 TOML supports comments, so lab-specific notes can be kept directly in this file.
 
 Configuration Groups

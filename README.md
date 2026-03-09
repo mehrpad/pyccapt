@@ -24,15 +24,36 @@ PyCCAPT was developed and validated on the OXCART atom probe platform and is des
 
 PyCCAPT requires Python `>=3.9`.
 
-1. Create and activate a conda environment:
+### Recommended Quick Start (Conda)
+
+For most users, this is the best way to install PyCCAPT:
 
 ```bash
 conda create -n pyccapt python=3.11
 conda activate pyccapt
 python -m pip install --upgrade pip
+pip install "pyccapt[full]"
 ```
 
-2. Install from PyPI:
+If you want to work from this repository instead of PyPI:
+
+```bash
+git clone https://github.com/mmonajem/pyccapt.git
+cd pyccapt
+conda activate pyccapt
+pip install -e ".[full]"
+```
+
+Predefined conda environment files are also included in the repo:
+
+```bash
+conda env create -f environment.yml
+conda env create -f environment.full.yml
+```
+
+### Other Installation Options
+
+1. Install from PyPI:
 
 ```bash
 pip install pyccapt
@@ -46,26 +67,11 @@ pip install "pyccapt[control]"
 pip install "pyccapt[full]"
 ```
 
-3. Recommended repository install for development or lab deployment:
-
-```bash
-git clone https://github.com/mmonajem/pyccapt.git
-cd pyccapt
-pip install -e ".[full]"
-```
-
 Module-specific editable installs:
 
 ```bash
 pip install -e ".[control]"
 pip install -e ".[calibration]"
-```
-
-Predefined conda environment files are also included:
-
-```bash
-conda env create -f environment.yml
-conda env create -f environment.full.yml
 ```
 
 ## Running PyCCAPT
@@ -148,6 +154,8 @@ PyCCAPT calibration workflows cover detector hit maps, FDM views, mass-spectrum 
 ![Ranged mass spectrum](pyccapt/files/readme_images/mc.png)
 
 Processed calibration datasets can be exported as `HDF5`, `EPOS`, `POS`, and `ATO`.
+
+The visualization helpers also include optional two-segment precipitate clustering with a Min-Max algorithm so a selected precipitate population can be segmented directly in the 3D and iso-surface views.
 
 Interactive 3D example:
 [Nimonic 90 reconstruction](https://rawcdn.githack.com/mmonajem/pyccapt/52835bc47735ef12bffcf7e18ce90b556b07d12f/pyccapt/files/readme_images/3d_o.html)

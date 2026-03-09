@@ -11,6 +11,7 @@ from plotly.subplots import make_subplots
 import plotly.io as pio
 
 
+from pyccapt.calibration.clustering import build_cluster_scatter_traces
 from pyccapt.calibration.reconstructions import reconstruction
 from pyccapt.calibration.reconstructions.io_utils import (
     save_gif,
@@ -24,7 +25,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                         range_sequence=[], range_mc=[], range_detx=[], range_dety=[],
                         range_x=[], range_y=[], range_z=[], range_vol=[], ions_individually_plots=False,
                         max_num_ions=None, min_num_ions=None, isosurface_dic=None, detailed_isotope_charge=False,
-                        only_iso=False):
+                        only_iso=False, cluster_result=None):
     """
     Generate a 3D plot for atom probe reconstruction data.
 
@@ -50,6 +51,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
         isosurface_dic (dic): Dictionary with the isosurface elements and their values.
         detailed_isotope_charge (bool): Whether to plot the range of each isotopes and charge state.
         only_iso (bool): Whether to plot only the isosurface.
+        cluster_result: Optional Min-Max precipitate segmentation overlay.
 
     Returns:
         None
@@ -282,6 +284,8 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                     fig = reconstruction.draw_qube(fig, range_cube, col, row)
 
                     fig.add_trace(scatter, row=row + 1, col=col + 1)
+            if cluster_result is not None:
+                print('Cluster overlay is shown only in the combined 3D iso-surface plot mode.')
         else:
             fig = go.Figure()
             for index, elemen in enumerate(ion):
@@ -366,6 +370,10 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                             )
                         )
                     )
+
+            if cluster_result is not None:
+                for trace in build_cluster_scatter_traces(variables, cluster_result, opacity=min(1.0, opacity + 0.25)):
+                    fig.add_trace(trace)
 
             fig = reconstruction.draw_qube(fig, range_cube)
     else:

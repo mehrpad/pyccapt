@@ -7,6 +7,15 @@ calibration, reconstruction, and data processing.
 The project follows FAIR data principles and uses an HDF5-based storage model that can include
 experiment context, detector streams, and calibration outputs in a single interoperable format.
 
+Recommended setup starts with a conda environment and a pip install:
+
+.. code-block:: bash
+
+   conda create -n pyccapt python=3.11
+   conda activate pyccapt
+   python -m pip install --upgrade pip
+   pip install "pyccapt[full]"
+
 Documentation
 =============
 

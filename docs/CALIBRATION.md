@@ -51,6 +51,7 @@ Interactive examples are available in:
 - `pyccapt/calibration/tutorials/colab`
 
 The tutorial save steps can export processed datasets as `HDF5`, `EPOS`, `POS`, and `ATO`.
+The visualization helpers also include optional Min-Max clustering to split a selected precipitate population into two reconstruction segments.
 
 Related user-facing tutorial pages are listed under [tutorials](tutorials.rst) in this documentation set.
 

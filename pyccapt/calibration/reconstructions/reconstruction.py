@@ -9,6 +9,7 @@ from matplotlib.animation import FuncAnimation
 from plotly.subplots import make_subplots
 
 # Local module and scripts
+from pyccapt.calibration.clustering import build_cluster_scatter_traces
 from pyccapt.calibration.data_tools import data_loadcrop, selectors_data
 from pyccapt.calibration.reconstructions.io_utils import (
     resolve_result_file,
@@ -231,7 +232,7 @@ def draw_qube(fig, range, col=None, row=None):
 def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save, figname, save, make_gif=False,
                         make_evaporation_gif=False, range_sequence=[], range_mc=[], range_detx=[], range_dety=[],
                         range_x=[], range_y=[], range_z=[], range_vol=[], ions_individually_plots=False,
-                        detailed_isotope_charge=False, colab=False):
+                        detailed_isotope_charge=False, colab=False, cluster_result=None):
     """
     Generate a 3D plot for atom probe reconstruction data.
 
@@ -255,6 +256,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
         ions_individually_plots (bool): Whether to plot ions individually.
         detailed_isotope_charge (bool): Whether to plot detailed isotope and charge information.
         colab (bool): Whether to run in Google Colab.
+        cluster_result: Optional Min-Max segmentation result for precipitate overlays.
     Returns:
         None
     """
@@ -358,6 +360,8 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                 fig = draw_qube(fig, range_cube, col, row)
 
                 fig.add_trace(scatter, row=row + 1, col=col + 1)
+        if cluster_result is not None:
+            print("Cluster overlay is shown only in the combined 3D plot mode.")
     else:
         fig = go.Figure()
         for index, elemen in enumerate(ion):
@@ -390,6 +394,10 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                     )
                 )
             )
+
+        if cluster_result is not None:
+            for trace in build_cluster_scatter_traces(variables, cluster_result, opacity=min(1.0, opacity + 0.25)):
+                fig.add_trace(trace)
 
         fig = draw_qube(fig, range_cube)
 
@@ -1045,7 +1053,7 @@ def detector_animation(variables, points_per_frame, ranged, selected_area_specia
     plt.close()
 def x_y_z_calculation_and_plot(variables, element_percentage, kf, det_eff, icf, field_evap,
                                avg_dens, flight_path_length, rotary_fig_save, mode, opacity, figname, save,
-                               colab=False):
+                               colab=False, cluster_result=None):
     """
     Calculate the x, y, z coordinates of the atoms and plot them.
 
@@ -1065,6 +1073,7 @@ def x_y_z_calculation_and_plot(variables, element_percentage, kf, det_eff, icf, 
             figname (str): The name of the figure.
             save (bool): True to save the plot, False to display it.
             colab (bool): True if the code is running in Google Colab, False otherwise.
+            cluster_result: Optional Min-Max precipitate segmentation overlay.
 
         Returns:
             None
@@ -1086,7 +1095,16 @@ def x_y_z_calculation_and_plot(variables, element_percentage, kf, det_eff, icf, 
     variables.x = px
     variables.y = py
     variables.z = pz
-    reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save, figname, save, colab=colab)
+    reconstruction_plot(
+        variables,
+        element_percentage,
+        opacity,
+        rotary_fig_save,
+        figname,
+        save,
+        colab=colab,
+        cluster_result=cluster_result,
+    )
 
 
 

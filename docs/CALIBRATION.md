@@ -53,7 +53,7 @@ Interactive examples are available in:
 The tutorial save steps can export processed datasets as `HDF5`, `EPOS`, `POS`, and `ATO`.
 The visualization helpers also include optional Min-Max clustering to split a selected precipitate population into two reconstruction segments.
 
-Related user-facing tutorial pages are listed under [tutorials](tutorials.rst) in this documentation set.
+The user-facing tutorial pages are grouped in the Tutorials section of this documentation set.
 
 ## Workflow Snapshots
 

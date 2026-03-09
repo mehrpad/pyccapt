@@ -12,14 +12,6 @@ pyccapt.calibration.leap\_tools.ccapt\_tools module
    :undoc-members:
    :show-inheritance:
 
-pyccapt.calibration.leap\_tools.cloud\_ploter module
-----------------------------------------------------
-
-.. automodule:: pyccapt.calibration.leap_tools.cloud_ploter
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 pyccapt.calibration.leap\_tools.leap\_tools module
 --------------------------------------------------
 

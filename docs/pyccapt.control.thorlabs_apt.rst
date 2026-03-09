@@ -4,14 +4,6 @@ pyccapt.control.thorlabs\_apt package
 Submodules
 ----------
 
-pyccapt.control.thorlabs\_apt.core module
------------------------------------------
-
-.. automodule:: pyccapt.control.thorlabs_apt.core
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 pyccapt.control.thorlabs\_apt.thorlab\_motor module
 ---------------------------------------------------
 

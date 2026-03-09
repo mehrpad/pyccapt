@@ -52,6 +52,12 @@ Contents
    license
    bibliography
 
+.. toctree::
+   :hidden:
+
+   README
+   appendix
+
 
 Bibliography
 ============

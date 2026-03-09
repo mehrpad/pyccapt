@@ -172,16 +172,15 @@ def read_rrng(file_path):
 
 def write_rrng(file_path, ions, rrngs):
     """
-    Writes two DataFrames of 'ions' and 'ranges' to a .rrng file in IVAS format.
+    Write ion and range DataFrames to an IVAS-style ``.rrng`` file.
 
     Parameters:
-    - file_path (str): The path to the .rrng file to be created.
-    - ions (DataFrame): A DataFrame containing ion data with columns 'number' and 'name'.
-    - rrngs (DataFrame): A DataFrame containing range data with columns 'number', 'lower', 'upper', 'vol', 'comp',
-      and 'color'.
+    - file_path (str): Destination path for the ``.rrng`` file.
+    - ions (DataFrame): Ion table with at least the ``name`` column.
+    - rrngs (DataFrame): Range table with ``lower``, ``upper``, ``vol``, ``comp``, and ``color`` columns.
 
     Returns:
-    None
+    - None
     """
     with open(file_path, 'w') as f:
         # Write ion data

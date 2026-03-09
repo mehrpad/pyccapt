@@ -82,3 +82,19 @@ def test_legacy_name_for_cryo_pump_led_is_supported(variables):
     variables.flag_cryo_pump_load_lock_led = True
     assert variables.flag_pump_cryo_load_lock_led is True
 
+
+def _read_counter_in_spawned_process(shared_variables, queue):
+    queue.put(shared_variables.COM_PORT_cryo)
+
+
+def test_variables_can_be_unpickled_in_spawned_process_without_recursion(variables):
+    ctx = multiprocessing.get_context("spawn")
+    queue = ctx.Queue()
+    process = ctx.Process(target=_read_counter_in_spawned_process, args=(variables, queue))
+
+    process.start()
+    process.join(timeout=10)
+
+    assert process.exitcode == 0
+    assert queue.get(timeout=2) == "COM1"
+

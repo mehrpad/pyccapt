@@ -8,6 +8,7 @@ from PyQt6.QtCore import Qt
 
 # Local module and scripts
 from pyccapt.control.core import device_checks, runtime
+from pyccapt.control.devices import camera as camera_device
 from pyccapt.control.gui import main_parameters, process_coordinator
 from pyccapt.control.gui import (
     gui_baking,
@@ -48,6 +49,9 @@ class Ui_PyCCAPT(object):
         self.camera_win_front = multiprocessing.Event()
         self.visualization_win_front = multiprocessing.Event()
         self.process_coordinator = process_coordinator.ProcessCoordinator()
+        self.camera_process = None
+        self.camera_available = False
+        self.camera_status_message = ""
 
     def setupUi(self, PyCCAPT):
         PyCCAPT.setObjectName("PyCCAPT")
@@ -1576,13 +1580,40 @@ class Ui_PyCCAPT(object):
             self.error_message("Hold the DC voltage first")
 
     def wins_init(self):
-        # GUI Cameras
-        self.camera_process = self.process_coordinator.start_camera(
-            self.variables,
+        available_ports = device_checks.list_available_serial_ports()
+        serial_issues = device_checks.collect_configured_serial_port_issues(
             self.conf,
-            self.camera_closed_event,
-            self.camera_win_front,
+            available_ports=available_ports,
         )
+        if serial_issues:
+            message = device_checks.format_serial_port_issue_message(
+                serial_issues,
+                available_ports=available_ports,
+            )
+            print(message)
+            self.error_message(message)
+
+        if str(self.conf.get("camera", "off")).strip().lower() == "on":
+            self.camera_available, self.camera_status_message = camera_device.check_camera_availability()
+        else:
+            self.camera_available = False
+            self.camera_status_message = "Camera support is disabled in config.toml."
+
+        if self.camera_available:
+            self.camera_process = self.process_coordinator.start_camera(
+                self.variables,
+                self.conf,
+                self.camera_closed_event,
+                self.camera_win_front,
+            )
+        else:
+            self.camears.setEnabled(False)
+            self.camears.setToolTip(self.camera_status_message)
+            if self.camera_status_message and str(self.conf.get("camera", "off")).strip().lower() == "on":
+                print(self.camera_status_message)
+                if not serial_issues:
+                    self.error_message(self.camera_status_message)
+
         # GUI gate
         self.gui_gates = gui_gates.Ui_Gates(self.variables, self.conf)
         self.Gates = gui_gates.GatesWindow(self.gui_gates, flags=QtCore.Qt.WindowType.Tool)
@@ -1634,6 +1665,10 @@ class Ui_PyCCAPT(object):
                                     Return:
                                             None
                                     """
+        if not self.camera_available:
+            self.error_message(self.camera_status_message or "No cameras are available on this system.")
+            return
+
         self.variables.flag_camera_win_show = True
         self.camera_win_front.set()
         self.camears.setStyleSheet("background-color: green")
@@ -1825,9 +1860,11 @@ class Ui_PyCCAPT(object):
                                     Return:
                                             None
                                     """
-        if hasattr(self, 'camera_process') and self.camera_process.is_alive():
+        if self.camera_process is not None and self.camera_process.is_alive():
             self.camera_process.terminate()
+        if hasattr(self, 'visualization_process') and self.visualization_process.is_alive():
             self.visualization_process.terminate()
+        if hasattr(self.gui_pumps_vacuum, 'gauges_thread'):
             self.gui_pumps_vacuum.gauges_thread.join(2)
 
     def closeEvent(self, event):

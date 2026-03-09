@@ -15,6 +15,7 @@ class origClass:
 	def __init__(self, comPort):
 		self.comPort = comPort
 		self.ser = None
+		self.last_error = None
 
 	def open_port(self):
 		try:
@@ -24,9 +25,10 @@ class origClass:
 				stopbits=serial.STOPBITS_ONE,
 				bytesize=serial.EIGHTBITS,
 				rtscts=False)
+			self.last_error = None
 			return 0
 		except Exception as e:
-			print(e)
+			self.last_error = e
 			return -1
 
 	def close_port(self):

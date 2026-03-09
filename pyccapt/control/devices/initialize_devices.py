@@ -21,6 +21,18 @@ class bcolors:
     UNDERLINE = '\033[4m'
 
 
+def _available_serial_ports_text() -> str:
+    ports = sorted(port.device for port in serial.tools.list_ports.comports() if getattr(port, "device", ""))
+    return ", ".join(ports) if ports else "none detected"
+
+
+def _format_port_error(device_label, port, exc) -> str:
+    return (
+        f"{device_label} unavailable on {port}: {exc}. "
+        f"Available serial ports: {_available_serial_ports_text()}"
+    )
+
+
 def command_cryovac(cmd, com_port_cryovac):
     """
     Execute a command on Cryovac through serial communication.
@@ -57,6 +69,7 @@ def command_edwards(conf, variables, cmd, E_AGC, status=None):
         Response code after executing the command.
     """
 
+    response = -1
     try:
         if variables.flag_pump_load_lock_click and variables.flag_pump_load_lock and status == 'load_lock':
             if conf['pump_ll'] == "on":
@@ -109,8 +122,7 @@ def command_edwards(conf, variables, cmd, E_AGC, status=None):
                 response = E_AGC.comm('?V940')
             else:
                 print('Unknown command for Edwards TIC Load Lock')
-    except Exception as e:
-        print(f"An error occurred: {e}")
+    except Exception:
         response = -1  # Set response to -1 indicate an error
 
     return response
@@ -213,37 +225,63 @@ def state_update(conf, variables, emitter):
         None
     """
 
+    tpg = None
+    E_AGC_bc = None
+    E_AGC_ll = None
+    E_AGC_cll = None
+    reported_runtime_issues: set[str] = set()
+
+    def report_once(issue_key: str, message: str) -> None:
+        if issue_key not in reported_runtime_issues:
+            print(message)
+            reported_runtime_issues.add(issue_key)
+
+    def clear_issue(issue_key: str) -> None:
+        reported_runtime_issues.discard(issue_key)
+
     if conf['gauges'] == "on":
         if conf['COM_PORT_gauge_mc'] != "off":
             try:
                 tpg = TPG362(port=variables.COM_PORT_gauge_mc)
             except Exception as e:
-                print(f"{bcolors.FAIL}Error initializing analysis chamber on port {variables.COM_PORT_gauge_mc}: "
-                      f"{e}{bcolors.ENDC}")
+                print(
+                    f"{bcolors.FAIL}"
+                    f"{_format_port_error('Analysis chamber gauge', variables.COM_PORT_gauge_mc, e)}"
+                    f"{bcolors.ENDC}"
+                )
                 tpg = None
 
         if conf['COM_PORT_gauge_bc'] != "off":
             try:
                 E_AGC_bc = EdwardsAGC(variables.COM_PORT_gauge_bc, variables)
             except Exception as e:
-                print(f"{bcolors.FAIL}Error initializing EdwardsAGC (BC) on port {variables.COM_PORT_gauge_bc}: "
-                      f"{e}{bcolors.ENDC}")
+                print(
+                    f"{bcolors.FAIL}"
+                    f"{_format_port_error('Buffer chamber gauge', variables.COM_PORT_gauge_bc, e)}"
+                    f"{bcolors.ENDC}"
+                )
                 E_AGC_bc = None
 
         if conf['COM_PORT_gauge_ll'] != "off":
             try:
                 E_AGC_ll = EdwardsAGC(variables.COM_PORT_gauge_ll, variables)
             except Exception as e:
-                print(f"{bcolors.FAIL}Error initializing EdwardsAGC (LL) on port {variables.COM_PORT_gauge_ll}: "
-                      f"{e}{bcolors.ENDC}")
+                print(
+                    f"{bcolors.FAIL}"
+                    f"{_format_port_error('Load-lock gauge', variables.COM_PORT_gauge_ll, e)}"
+                    f"{bcolors.ENDC}"
+                )
                 E_AGC_ll = None
 
         if conf['COM_PORT_gauge_cll'] != "off":
             try:
                 E_AGC_cll = EdwardsAGC(variables.COM_PORT_gauge_cll, variables)
             except Exception as e:
-                print(f"{bcolors.FAIL}Error initializing EdwardsAGC (CLL) on port {variables.COM_PORT_gauge_cll}: "
-                      f"{e}{bcolors.ENDC}")
+                print(
+                    f"{bcolors.FAIL}"
+                    f"{_format_port_error('Cryo load-lock gauge', variables.COM_PORT_gauge_cll, e)}"
+                    f"{bcolors.ENDC}"
+                )
                 E_AGC_cll = None
 
     if conf['cryo'] == "off":
@@ -260,8 +298,7 @@ def state_update(conf, variables, emitter):
             initialize_cryovac(com_port_cryovac, variables)
         except Exception as e:
             com_port_cryovac = None
-            print('Can not initialize the cryovac')
-            print(e)
+            print(_format_port_error('Cryovac', variables.COM_PORT_cryo, e))
 
         start_time = time.time()
         log_time_time_interval = conf['log_time_time_interval']
@@ -332,8 +369,9 @@ def state_update(conf, variables, emitter):
                 value, _ = tpg.pressure_gauge(2)
                 try:
                     vacuum_main = '{}'.format(value)
+                    clear_issue("vacuum_main")
                 except Exception as e:
-                    print(f"Error reading Temperature:{e}")
+                    report_once("vacuum_main", f"Error reading Temperature:{e}")
                     # Handle the case where response is not a valid float
                     vacuum_main = -1
                 variables.vacuum_main = vacuum_main
@@ -341,8 +379,9 @@ def state_update(conf, variables, emitter):
                 value, _ = tpg.pressure_gauge(1)
                 try:
                     vacuum_buffer = '{}'.format(value)
+                    clear_issue("vacuum_buffer")
                 except Exception as e:
-                    print(f"Error reading BC:{e}")
+                    report_once("vacuum_buffer", f"Error reading BC:{e}")
                     tpg = None
                     # Handle the case where response is not a valid float
                     vacuum_buffer = -1
@@ -351,16 +390,24 @@ def state_update(conf, variables, emitter):
                 response = command_edwards(conf, variables, 'pressure', E_AGC=E_AGC_ll, status='load_lock')
 
                 try:
-                    vacuum_load_lock = float(response.replace(';', ' ').split()[2]) * 0.01
+                    if isinstance(response, str):
+                        vacuum_load_lock = float(response.replace(';', ' ').split()[2]) * 0.01
+                        clear_issue("vacuum_load_lock")
+                    else:
+                        raise ValueError("device returned no pressure payload")
                 except Exception as e:
-                    print(f"Error reading LL:{e}")
+                    report_once("vacuum_load_lock", f"Error reading LL:{e}")
                     E_AGC_ll = None
                     # Handle the case where response is not a valid float
                     vacuum_load_lock = -1
                 try:
-                    vacuum_load_lock_backing = float(response.replace(';', ' ').split()[4]) * 0.01
+                    if isinstance(response, str):
+                        vacuum_load_lock_backing = float(response.replace(';', ' ').split()[4]) * 0.01
+                        clear_issue("vacuum_load_lock_backing")
+                    else:
+                        raise ValueError("device returned no backing-pressure payload")
                 except Exception as e:
-                    print(f"Error reading LL backing:{e}")
+                    report_once("vacuum_load_lock_backing", f"Error reading LL backing:{e}")
                     E_AGC_ll = None
                     # Handle the case where response is not a valid float
                     vacuum_load_lock_backing = -1
@@ -371,16 +418,24 @@ def state_update(conf, variables, emitter):
                 response = command_edwards(conf, variables, 'pressure', E_AGC=E_AGC_cll, status='cryo_load_lock')
 
                 try:
-                    vacuum_cryo_load_lock = float(response.replace(';', ' ').split()[2]) * 0.01
+                    if isinstance(response, str):
+                        vacuum_cryo_load_lock = float(response.replace(';', ' ').split()[2]) * 0.01
+                        clear_issue("vacuum_cryo_load_lock")
+                    else:
+                        raise ValueError("device returned no pressure payload")
                 except Exception as e:
-                    print(f"Error reading CLL:{e}")
+                    report_once("vacuum_cryo_load_lock", f"Error reading CLL:{e}")
                     E_AGC_cll = None
                     # Handle the case where response is not a valid float
                     vacuum_cryo_load_lock = -1
                 try:
-                    vacuum_cryo_load_lock_backing = float(response.replace(';', ' ').split()[4]) * 0.01
+                    if isinstance(response, str):
+                        vacuum_cryo_load_lock_backing = float(response.replace(';', ' ').split()[4]) * 0.01
+                        clear_issue("vacuum_cryo_load_lock_backing")
+                    else:
+                        raise ValueError("device returned no backing-pressure payload")
                 except Exception as e:
-                    print(f"Error reading CLL backing:{e}")
+                    report_once("vacuum_cryo_load_lock_backing", f"Error reading CLL backing:{e}")
                     # Handle the case where response is not a valid float
                     vacuum_cryo_load_lock_backing = -1
                 emitter.vacuum_cryo_load_lock.emit(vacuum_cryo_load_lock)
@@ -389,9 +444,13 @@ def state_update(conf, variables, emitter):
             if conf['COM_PORT_gauge_bc'] != "off" and E_AGC_bc is not None:
                 response = command_edwards(conf, variables, 'pressure', E_AGC=E_AGC_bc)
                 try:
-                    vacuum_buffer_backing = float(response.replace(';', ' ').split()[2]) * 0.01
+                    if isinstance(response, str):
+                        vacuum_buffer_backing = float(response.replace(';', ' ').split()[2]) * 0.01
+                        clear_issue("vacuum_buffer_backing")
+                    else:
+                        raise ValueError("device returned no pressure payload")
                 except Exception as e:
-                    print(f"Error reading BC backing:{e}")
+                    report_once("vacuum_buffer_backing", f"Error reading BC backing:{e}")
                     # Handle the case where response is not a valid float
                     vacuum_buffer_backing = -1
                 variables.vacuum_buffer_backing = vacuum_buffer_backing

@@ -624,6 +624,10 @@ class Ui_Cameras_Alignment(object):
 			# Thread for reading cameras
 			# Create a camera instance and move it to a new thread
 			self.camera_worker = camera.CameraWorker(variables=self.variables, emitter=self.emitter)
+			if not self.camera_worker.camera_available:
+				print(self.camera_worker.camera_status_message)
+				self.variables.flag_camera_grab = False
+				return
 
 			self.camera_thread = QThread()
 			self.camera_worker.moveToThread(self.camera_thread)
@@ -649,7 +653,8 @@ class Ui_Cameras_Alignment(object):
 		# Add any additional cleanup code here
 		# with self.variables.lock_setup_parameters:
 		self.variables.flag_camera_grab = False
-		self.camera_thread.join()
+		if hasattr(self, 'camera_thread'):
+			self.camera_thread.wait()
 
 	def cameras_screenshot(self):
 		if self.variables.flag_cameras_take_screenshot:

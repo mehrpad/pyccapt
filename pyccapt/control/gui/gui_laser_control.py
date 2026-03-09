@@ -3,6 +3,7 @@ import os
 import re
 import sys
 import time
+import serial.tools.list_ports
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import QThread
@@ -11,6 +12,11 @@ from PyQt6.QtGui import QPixmap
 # Local module and scripts
 from pyccapt.control.core import runtime
 from pyccapt.control.nkt_photonics import origamiClassCLI
+
+
+def _available_serial_ports_text():
+    ports = sorted(port.device for port in serial.tools.list_ports.comports() if getattr(port, "device", ""))
+    return ", ".join(ports) if ports else "none detected"
 
 
 class Ui_Laser_Control(object):
@@ -502,11 +508,21 @@ class Ui_Laser_Control(object):
                 else:
                     print("The laser status code is:", databack)
             else:
-                print("laser port can not be opened")
+                error_text = self.laser_device.last_error or "no response from device"
+                message = (
+                    f"Laser is unavailable on {self.conf['COM_PORT_laser']}: {error_text}. "
+                    f"Available serial ports: {_available_serial_ports_text()}."
+                )
+                print(message)
+                self.error_message(message)
                 self.laser_device = None
         except Exception as e:
-            print(e)
-            print("laser port can not be opened")
+            message = (
+                f"Laser is unavailable on {self.conf['COM_PORT_laser']}: {e}. "
+                f"Available serial ports: {_available_serial_ports_text()}."
+            )
+            print(message)
+            self.error_message(message)
             self.laser_device = None
 
         self.worker = Worker(self.check_laser_status)

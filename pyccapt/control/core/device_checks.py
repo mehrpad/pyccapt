@@ -29,6 +29,10 @@ def _resolve_config_value(conf: Mapping[str, Any], variables: Any, key: str) -> 
     return str(value).strip()
 
 
+def _is_missing_port(value: str) -> bool:
+    return value.strip().lower() in {"", "off", "none"}
+
+
 def _check_serial_device(
     *,
     device_label: str,
@@ -56,6 +60,18 @@ def _check_serial_device(
                 pass
 
     return None
+
+
+_GUI_SERIAL_DEVICE_CONFIG = (
+    ("gauges", "COM_PORT_gauge_mc", "analysis_chamber_gauge"),
+    ("gauges", "COM_PORT_gauge_bc", "buffer_chamber_gauge"),
+    ("pump_ll", "COM_PORT_gauge_ll", "load_lock_gauge"),
+    ("pump_cll", "COM_PORT_gauge_cll", "cryo_load_lock_gauge"),
+    ("cryo", "COM_PORT_cryo", "cryovac"),
+    ("laser", "COM_PORT_laser", "laser"),
+    ("v_dc", "COM_PORT_V_dc", "v_dc"),
+    ("v_p", "COM_PORT_V_p", "v_p"),
+)
 
 
 def _check_signal_generator(
@@ -156,6 +172,54 @@ def collect_startup_device_issues(
     return issues
 
 
+def list_available_serial_ports(
+    port_lister: Callable[[], Sequence[Any]] | None = None,
+) -> tuple[str, ...]:
+    """Return detected serial port names in a stable order."""
+
+    if port_lister is None:
+        import serial.tools.list_ports
+
+        port_lister = serial.tools.list_ports.comports
+
+    ports = []
+    for port in port_lister():
+        device_name = getattr(port, "device", "")
+        if device_name:
+            ports.append(str(device_name).strip())
+    return tuple(sorted(set(ports)))
+
+
+def collect_configured_serial_port_issues(
+    conf: Mapping[str, Any],
+    *,
+    available_ports: Sequence[str] | None = None,
+    port_lister: Callable[[], Sequence[Any]] | None = None,
+) -> list[DeviceIssue]:
+    """Report enabled GUI devices whose configured COM ports are unavailable."""
+
+    detected_ports = tuple(available_ports or list_available_serial_ports(port_lister))
+    detected_port_set = set(detected_ports)
+    issues: list[DeviceIssue] = []
+
+    for toggle_key, port_key, device_label in _GUI_SERIAL_DEVICE_CONFIG:
+        if not _is_enabled(conf, toggle_key):
+            continue
+        port = str(conf.get(port_key, "")).strip()
+        if _is_missing_port(port):
+            issues.append(DeviceIssue(device=device_label, reason=f"{port_key} is not configured"))
+            continue
+        if port not in detected_port_set:
+            issues.append(
+                DeviceIssue(
+                    device=device_label,
+                    reason=f"configured port '{port}' is not available",
+                )
+            )
+
+    return issues
+
+
 def format_startup_device_issue_message(issues: Sequence[DeviceIssue]) -> str:
     """Format user-facing startup issue message for terminal and GUI."""
 
@@ -163,4 +227,19 @@ def format_startup_device_issue_message(issues: Sequence[DeviceIssue]) -> str:
     return (
         "Experiment start blocked. Device check failed for enabled devices: "
         f"{details}. Turn on/fix these devices, or set them to 'off' in config.toml."
+    )
+
+
+def format_serial_port_issue_message(
+    issues: Sequence[DeviceIssue],
+    *,
+    available_ports: Sequence[str],
+) -> str:
+    """Format a startup summary for unavailable serial devices."""
+
+    details = "; ".join(f"{item.device}: {item.reason}" for item in issues)
+    available = ", ".join(available_ports) if available_ports else "none detected"
+    return (
+        "Some configured control devices are unavailable: "
+        f"{details}. Available serial ports: {available}."
     )

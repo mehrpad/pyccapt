@@ -320,10 +320,15 @@ class Variables:
 
     def __getattr__(self, name: str) -> Any:
         field = self._resolve_field_name(name)
-        if hasattr(self.ns, field):
+        try:
+            namespace = object.__getattribute__(self, "ns")
+        except AttributeError as exc:
+            raise AttributeError(f"{type(self).__name__!s} has no attribute {name!r}") from exc
+
+        if hasattr(namespace, field):
             lock = self._lock_for_field(field)
             with lock:
-                return getattr(self.ns, field)
+                return getattr(namespace, field)
         raise AttributeError(f"{type(self).__name__!s} has no attribute {name!r}")
 
     def __setattr__(self, name: str, value: Any) -> None:

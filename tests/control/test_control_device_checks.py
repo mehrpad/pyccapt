@@ -112,3 +112,45 @@ def test_format_startup_device_issue_message_contains_guidance():
     assert "Experiment start blocked" in message
     assert "v_dc: cannot open 'COM6'" in message
     assert "set them to 'off' in config.toml" in message
+
+
+def test_collect_configured_serial_port_issues_reports_missing_ports():
+    conf = {
+        "gauges": "on",
+        "pump_ll": "on",
+        "pump_cll": "off",
+        "cryo": "on",
+        "laser": "on",
+        "v_dc": "off",
+        "v_p": "off",
+        "COM_PORT_gauge_mc": "COM5",
+        "COM_PORT_gauge_bc": "COM2",
+        "COM_PORT_gauge_ll": "COM1",
+        "COM_PORT_gauge_cll": "COM8",
+        "COM_PORT_cryo": "COM7",
+        "COM_PORT_laser": "COM9",
+        "COM_PORT_V_dc": "COM6",
+        "COM_PORT_V_p": "COM4",
+    }
+
+    issues = device_checks.collect_configured_serial_port_issues(
+        conf,
+        available_ports=("COM1", "COM7"),
+    )
+
+    assert [issue.device for issue in issues] == [
+        "analysis_chamber_gauge",
+        "buffer_chamber_gauge",
+        "laser",
+    ]
+
+
+def test_format_serial_port_issue_message_lists_available_ports():
+    message = device_checks.format_serial_port_issue_message(
+        [device_checks.DeviceIssue("laser", "configured port 'COM9' is not available")],
+        available_ports=("COM1", "COM7"),
+    )
+
+    assert "Some configured control devices are unavailable" in message
+    assert "laser: configured port 'COM9' is not available" in message
+    assert "Available serial ports: COM1, COM7" in message

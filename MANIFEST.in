@@ -3,9 +3,14 @@ include LICENSE
 include CHANGELOG.txt
 
 recursive-include pyccapt *.toml *.json *.txt *.md
-recursive-include pyccapt *.png *.jpg *.gif *.html *.ui *.xlsx
-recursive-include pyccapt *.h5 *.mat *.pos *.epos *.rrng *.ipynb
-recursive-include pyccapt *.dll *.lib *.exp *.ocx *.chm *.cfg *.ini *.bit *.exe *.obj
-recursive-include pyccapt *.h *.c *.cc *.cpp *.sln *.vcxproj *.filters *.user *.zip
+recursive-include pyccapt *.ui
+recursive-include pyccapt *.h5 *.mat *.pos *.epos *.rrng
+recursive-include pyccapt/control *.dll *.lib *.exp *.ocx *.chm *.cfg *.ini *.bit *.exe *.lmf
 
-global-exclude __pycache__ *.py[cod]
+recursive-exclude pyccapt/calibration/tutorials *.ipynb *.png *.jpg *.gif *.html *.xlsx
+recursive-exclude pyccapt/calibration/leap_tools/tutorials *.ipynb *.png *.jpg *.gif *.html *.xlsx
+recursive-exclude pyccapt/data *
+recursive-exclude pyccapt/files/logs *
+recursive-exclude pyccapt/files/readme_images *
+
+global-exclude __pycache__ *.py[cod] *.ipynb

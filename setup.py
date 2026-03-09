@@ -27,6 +27,7 @@ def unique(items: list[str]) -> list[str]:
             seen.add(item)
     return ordered
 
+
 common_deps = [
     "deepdiff",
     "h5py",
@@ -73,6 +74,29 @@ calibration_deps = [
     "vispy",
 ]
 
+package_data = {
+    "pyccapt": [
+        "config.toml",
+        "control/electrode.toml",
+        "files/*.h5",
+        "files/*.png",
+        "files/*.jpg",
+        "files/*.txt",
+        "files/PyQt6_UI/*.ui",
+        "files/PyQt6_UI/*.md",
+        "control/*/*.dll",
+        "control/*/*.lib",
+        "control/*/*.exp",
+        "control/*/*.ocx",
+        "control/*/*.chm",
+        "control/*/*.cfg",
+        "control/*/*.ini",
+        "control/*/*.bit",
+        "control/*/*.exe",
+        "control/*/*.lmf",
+    ],
+}
+
 
 setup(
     name="pyccapt",
@@ -83,8 +107,21 @@ setup(
     long_description=README_PATH.read_text(encoding="utf-8") if README_PATH.exists() else "",
     long_description_content_type="text/markdown",
     url="https://github.com/mmonajem/pyccapt",
-    packages=find_packages(include=("pyccapt", "pyccapt.*"), exclude=("tests", "tests.*")),
-    include_package_data=True,
+    packages=find_packages(
+        include=("pyccapt", "pyccapt.*"),
+        exclude=(
+            "tests",
+            "tests.*",
+            "pyccapt.calibration.tutorials",
+            "pyccapt.calibration.tutorials.*",
+            "pyccapt.calibration.leap_tools.tutorials",
+            "pyccapt.calibration.leap_tools.tutorials.*",
+            "pyccapt.control.devices_test",
+            "pyccapt.control.devices_test.*",
+        ),
+    ),
+    include_package_data=False,
+    package_data=package_data,
     entry_points={"console_scripts": ["pyccapt=pyccapt.control.__main__:main"]},
     python_requires=">=3.9",
     install_requires=unique(common_deps),

@@ -1,4 +1,4 @@
-import multiprocessing
+﻿import multiprocessing
 import os
 import sys
 import time
@@ -11,7 +11,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import QTimer
 
 # Local module and scripts
-from pyccapt.control.control import share_variables, read_files, tof2mc_simple
+from pyccapt.control.core import runtime, tof2mc_simple
 from pyccapt.control.devices import initialize_devices
 
 
@@ -75,7 +75,7 @@ class Ui_Visualization(object):
 
 		self.update_timer = QTimer()  # Create a QTimer for updating graphs
 		self.update_timer.timeout.connect(self.update_graphs)  # Connect it to the update_graphs slot
-		self.visualization_window = None  # In♠itialize the attribute
+		self.visualization_window = None  # Inâ™ itialize the attribute
 
 	def setupUi(self, Visualization):
 		"""
@@ -371,11 +371,12 @@ class Ui_Visualization(object):
 		self.Error = QtWidgets.QLabel(parent=Visualization)
 		self.Error.setMinimumSize(QtCore.QSize(800, 30))
 		font = QtGui.QFont()
-		font.setPointSize(13)
+		font.setPointSize(10)
 		font.setBold(True)
 		font.setStrikeOut(False)
 		self.Error.setFont(font)
 		self.Error.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+		self.Error.setWordWrap(True)
 		self.Error.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.LinksAccessibleByMouse)
 		self.Error.setObjectName("Error")
 		self.gridLayout_2.addWidget(self.Error, 3, 0, 1, 1)
@@ -410,7 +411,7 @@ class Ui_Visualization(object):
 		self.x_vdc = [i * 0.5 for i in range(200)]  # 100 time points
 		self.y_vdc = [0.0] * 200  # 200 data points, all initialized to 0.0
 		self.y_vdc[:] = [np.nan] * len(self.y_vdc)
-		pen_vdc = pg.mkPen(color=(255, 0, 0), width=6)
+		pen_vdc = pg.mkPen(color=(255, 0, 0), width=3)
 		self.data_line_vdc = self.vdc_time.plot(self.x_vdc, self.y_vdc, pen=pen_vdc)
 		self.vdc_time.plotItem.setMouseEnabled(x=False)  # Only allow zoom in Y-axis
 		# Add Axis Labels
@@ -427,7 +428,7 @@ class Ui_Visualization(object):
 		self.x_dtec = [i * 0.5 for i in range(200)]  # 100 time points
 		self.y_dtec = [0.0] * 200  # 200 data points, all initialized to 0.0
 		self.y_dtec[:] = [np.nan] * len(self.y_vdc)
-		pen_dtec = pg.mkPen(color=(255, 0, 0), width=6)
+		pen_dtec = pg.mkPen(color=(255, 0, 0), width=3)
 		self.data_line_dtec = self.detection_rate_viz.plot(self.x_dtec, self.y_dtec, pen=pen_dtec)
 
 		# Add Axis Labels
@@ -876,7 +877,7 @@ class Ui_Visualization(object):
 			self.y_vdc[:] = [np.nan] * len(self.y_vdc)
 
 			self.vdc_time.clear()
-			pen_vdc = pg.mkPen(color=(255, 0, 0), width=6)
+			pen_vdc = pg.mkPen(color=(255, 0, 0), width=3)
 			self.data_line_vdc = self.vdc_time.plot(self.x_vdc, self.y_vdc, pen=pen_vdc)
 
 			self.x_dtec = [i * 0.5 for i in range(200)]  # 100 time points
@@ -884,7 +885,7 @@ class Ui_Visualization(object):
 			self.y_dtec[:] = [np.nan] * len(self.y_vdc)
 
 			self.detection_rate_viz.clear()
-			pen_dtec = pg.mkPen(color=(255, 0, 0), width=6)
+			pen_dtec = pg.mkPen(color=(255, 0, 0), width=3)
 			self.data_line_dtec = self.detection_rate_viz.plot(self.x_dtec, self.y_dtec, pen=pen_dtec)
 
 			self.histogram.clear()
@@ -1218,27 +1219,25 @@ def run_visualization_window(variables, conf, visualization_closed_event, visual
 
 if __name__ == "__main__":
 	try:
-		# Load the JSON file
-		configFile = 'config.json'
-		p = os.path.abspath(os.path.join(__file__, "../../.."))
-		os.chdir(p)
-		conf = read_files.read_json_file(configFile)
-	except Exception as e:
+		conf, _ = runtime.load_project_config()
+	except Exception as exc:
 		print('Can not load the configuration file')
-		print(e)
+		print(exc)
 		sys.exit()
-	manager = multiprocessing.Manager()
-	ns = manager.Namespace()
-	variables = share_variables.Variables(conf, ns)
+	shared = runtime.create_shared_context(conf)
 
 	app = QtWidgets.QApplication(sys.argv)
 	app.setStyle('Fusion')
 	Visualization = QtWidgets.QWidget()
-	x_plot = multiprocessing.Queue()
-	y_plot = multiprocessing.Queue()
-	t_plot = multiprocessing.Queue()
-	main_v_dc_plot = multiprocessing.Queue()
-	ui = Ui_Visualization(variables, conf, x_plot, y_plot, t_plot, main_v_dc_plot)
+	ui = Ui_Visualization(
+		shared.variables,
+		conf,
+		shared.x_plot,
+		shared.y_plot,
+		shared.t_plot,
+		shared.main_v_dc_plot,
+	)
 	ui.setupUi(Visualization)
 	Visualization.show()
 	sys.exit(app.exec())
+

@@ -1,4 +1,4 @@
-pyccapt.calibration package
+﻿pyccapt.calibration package
 ===========================
 
 Subpackages
@@ -7,7 +7,7 @@ Subpackages
 .. toctree::
    :maxdepth: 4
 
-   pyccapt.calibration.calibration
+   pyccapt.calibration.core
    pyccapt.calibration.clustering
    pyccapt.calibration.data_tools
    pyccapt.calibration.leap_tools
@@ -22,3 +22,4 @@ Module contents
    :members:
    :undoc-members:
    :show-inheritance:
+

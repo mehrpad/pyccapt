@@ -10,6 +10,7 @@ from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
 
 from pyccapt.calibration.data_tools.data_loadcrop import elliptical_shape_selector
 from pyccapt.calibration.data_tools.merge_range import merge_by_range
+from pyccapt.calibration.reconstructions.io_utils import save_matplotlib_figure
 
 
 def plot_density_map(x, y, z_weigth=False, log=True, bins=(256, 256), frac=1.0, axis_mode='normal', figure_size=(5, 4),
@@ -19,7 +20,7 @@ def plot_density_map(x, y, z_weigth=False, log=True, bins=(256, 256), frac=1.0, 
                      save=False, figname='disparity_map', cmap='plasma',
                      normalize=False, normalize_axes=False):
     """
-    Plot and crop the FDM with the option to select a region of interest.
+    Plot and crop the density map with the option to select a region of interest.
 
     Args:
         x: x-axis data
@@ -104,15 +105,18 @@ def plot_density_map(x, y, z_weigth=False, log=True, bins=(256, 256), frac=1.0, 
     if variables is not None:
         if composition and isinstance(composition, list):
             if 'element' in variables.data.columns:
-                pass
+                data = variables.data
             else:
                 if variables.range_data is None:
                     raise ValueError('Range data is not provided')
-                variables.data = merge_by_range(variables.data, variables.range_data, full=True)
+                data = merge_by_range(variables.data, variables.range_data, full=True)
             mask_comp = np.zeros(len(x), dtype=bool)
             # Create a mask from the composition list of variables.data
             for comp in composition:
-                mask_comp = mask_comp | variables.data['element'].apply(lambda x: comp in x)
+                mask_comp = mask_comp | data['element'].apply(lambda x: comp in x)
+            if not mask_comp.any():
+                print('No composition found - using all data')
+                mask_comp = np.ones(len(x), dtype=bool)
         else:
             mask_comp = np.ones(len(x), dtype=bool)
     else:
@@ -226,5 +230,4 @@ def plot_density_map(x, y, z_weigth=False, log=True, bins=(256, 256), frac=1.0, 
     if save and variables is not None:
         # Enable rendering for text elements
         rcParams['svg.fonttype'] = 'none'
-        plt.savefig("%s.png" % (variables.result_path + figname), format="png", dpi=600)
-        plt.savefig("%s.svg" % (variables.result_path + figname), format="svg", dpi=600)
+        save_matplotlib_figure(fig1, variables, stem=figname, formats=("png", "svg"), dpi=600)

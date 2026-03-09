@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import rcParams
 from scipy.spatial import cKDTree
+from pyccapt.calibration.reconstructions.io_utils import save_matplotlib_figure
 
 def rdf(particles, dr, variables=None, rho=None, rcutoff=0.9, eps=1e-15, normalize=True, reference_point=None,
         box_dimensions=None, plot=False, save=False, figure_size=(6, 6), figname='rdf'):
@@ -121,8 +122,7 @@ def rdf(particles, dr, variables=None, rho=None, rcutoff=0.9, eps=1e-15, normali
 		if save and variables is not None:
 			# Enable rendering for text elements
 			rcParams['svg.fonttype'] = 'none'
-			plt.savefig(variables.result_path + '\\projection_{fn}.png'.format(fn=figname), format="png", dpi=600)
-			plt.savefig(variables.result_path + '\\projection_{fn}.svg'.format(fn=figname), format="svg", dpi=600)
+			save_matplotlib_figure(fig, variables, stem=f"projection_{figname}", formats=("png", "svg"), dpi=600)
 
 		if plot:
 			plt.show()

@@ -1,20 +1,29 @@
-import io
 from copy import copy
 
-import imageio
 import matplotlib.pyplot as plt
 import numpy as np
-import plotly
 import plotly.graph_objects as go
 import plotly.io as pio
 from matplotlib import rcParams, colors
 from matplotlib.animation import FuncAnimation
-from PIL import Image
 from plotly.subplots import make_subplots
 
 # Local module and scripts
+from pyccapt.calibration.clustering import build_cluster_scatter_traces
 from pyccapt.calibration.data_tools import data_loadcrop, selectors_data
-
+from pyccapt.calibration.reconstructions.io_utils import (
+    resolve_result_file,
+    save_gif,
+    save_matplotlib_figure,
+    save_plotly_animation,
+    write_plotly_html,
+    write_plotly_image,
+)
+from pyccapt.calibration.reconstructions.rotation_tools import (
+    plotly_fig2array,
+    rotary_fig,
+    rotate_z,
+)
 
 def cart2pol(x, y):
     """
@@ -52,7 +61,7 @@ def pol2cart(rho, phi):
 
 def atom_probe_recons_from_detector_Gault_et_al(detx, dety, hv, flight_path_length, kf, det_eff, icf, field_evap, avg_dens):
     """
-    Perform atom probe reconstruction using Gault et al.'s method.
+    Perform atom probe reconstruction using Geiser et al.'s method.
 
     Args:
         detx (float): Hit position on the detector (x-coordinate).
@@ -71,16 +80,16 @@ def atom_probe_recons_from_detector_Gault_et_al(detx, dety, hv, flight_path_leng
         float: z-coordinates of reconstructed atom positions in nm.
     """
     # Convert detector coordinates to polar form
-    rad, ang = cart2pol(detx * 1E-2, dety * 1E-2)
+    rad, ang = cart2pol(detx * 1E1, dety * 1E1)
 
     # Calculate effective detector area
     det_area = (np.max(rad) ** 2) * np.pi
 
     # Calculate radius evolution
-    radius_evolution = hv / (kf * (field_evap / 1E-9))
+    radius_evolution = hv / (kf * field_evap)
 
     # Calculate launch angle relative to specimen axis
-    theta_p = np.arctan(rad / (flight_path_length * 1E-3))
+    theta_p = np.arctan(rad / flight_path_length)
 
     # Calculate theta normal (image compression correction)
     theta_a = theta_p + np.arcsin((icf - 1) * np.sin(theta_p))
@@ -93,19 +102,32 @@ def atom_probe_recons_from_detector_Gault_et_al(detx, dety, hv, flight_path_leng
     # the z shift with respect to the top of the cap is Rspec - zP
     # z_p = radius_evolution * (1 - np.cos(theta_a))
     z_p = radius_evolution - z_p
-    omega = 1E-9 ** 3 / avg_dens
+    omega = 1 / avg_dens
+    omega = omega / det_eff
 
+    M = flight_path_length / (icf * radius_evolution)
+
+    spec_area = det_area / M ** 2
+
+    dz = omega / spec_area
     # icf_2 = theta_a / theta_p
     # dz = (omega * ((flight_path_length * 1E-3) ** 2) * (kf ** 2) * ((field_evap / 1E-9) ** 2)) / (
     #         det_area * det_eff * (icf_2 ** 2) * (hv ** 2))
 
-    dz = (omega * ((flight_path_length * 1E-3) ** 2) * (kf ** 2) * ((field_evap / 1E-9) ** 2)) / (
-            det_area * det_eff * (icf ** 2) * (hv ** 2))
+    # dz_o = (omega * ((flight_path_length * 1E-3) ** 2) * (kf ** 2) * ((field_evap / 1E-9) ** 2)) / (
+    #         det_area * det_eff * (icf ** 2) * (hv ** 2))
+
+    # dz = avg_dens * flight_path_length ** 2 * kf ** 2 * field_evap ** 2 / (det_area * det_eff * icf ** 2 * hv ** 2)
+
+    # assert dz.any() != dz_o.any(), 'dz is not equal to dz_o'
+    # check if dz has any NaN of inf values
+    assert not np.isnan(dz).any(), 'dz has NaN values'
+    assert not np.isinf(dz).any(), 'dz has inf values'
 
     cum_z = np.cumsum(dz)
     z = cum_z + z_p
 
-    return x * 1E9, y * 1E9, z * 1E9
+    return x, y, z
 
 
 def atom_probe_recons_Bas_et_al(detx, dety, hv, flight_path_length, kf, det_eff, icf, field_evap, avg_dens):
@@ -210,7 +232,7 @@ def draw_qube(fig, range, col=None, row=None):
 def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save, figname, save, make_gif=False,
                         make_evaporation_gif=False, range_sequence=[], range_mc=[], range_detx=[], range_dety=[],
                         range_x=[], range_y=[], range_z=[], range_vol=[], ions_individually_plots=False,
-                        detailed_isotope_charge=False, colab=False):
+                        detailed_isotope_charge=False, colab=False, cluster_result=None):
     """
     Generate a 3D plot for atom probe reconstruction data.
 
@@ -234,6 +256,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
         ions_individually_plots (bool): Whether to plot ions individually.
         detailed_isotope_charge (bool): Whether to plot detailed isotope and charge information.
         colab (bool): Whether to run in Google Colab.
+        cluster_result: Optional Min-Max segmentation result for precipitate overlays.
     Returns:
         None
     """
@@ -337,6 +360,8 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                 fig = draw_qube(fig, range_cube, col, row)
 
                 fig.add_trace(scatter, row=row + 1, col=col + 1)
+        if cluster_result is not None:
+            print("Cluster overlay is shown only in the combined 3D plot mode.")
     else:
         fig = go.Figure()
         for index, elemen in enumerate(ion):
@@ -369,6 +394,10 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                     )
                 )
             )
+
+        if cluster_result is not None:
+            for trace in build_cluster_scatter_traces(variables, cluster_result, opacity=min(1.0, opacity + 0.25)):
+                fig.add_trace(trace)
 
         fig = draw_qube(fig, range_cube)
 
@@ -434,7 +463,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
         print('The images are ready for the GIF')
 
         # Save the images as a GIF using imageio
-        imageio.mimsave(variables.result_path + '\\rota_evaporation_{fn}.gif'.format(fn=figname), images, fps=2)
+        save_gif(images, variables, f"rota_evaporation_{figname}.gif", fps=2)
 
     fig.update_layout(
         legend=dict(
@@ -479,9 +508,11 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
     # Show the plot in the Jupyter cell output
     variables.plotly_3d_reconstruction = go.FigureWidget(fig)
 
-    fig.show(config=config)
+
     if not colab:
         pio.renderers.default = 'browser'
+        fig.show(config=config)
+    else:
         fig.show(config=config)
 
     if save:
@@ -492,7 +523,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                     eye=dict(x=4, y=4, z=4),  # Adjust the camera position for zooming
                 )
             )
-            pio.write_html(fig, variables.result_path + "/%s_3d.html" % figname, include_mathjax='cdn')
+            write_plotly_html(fig, variables, f"{figname}_3d.html", include_mathjax='cdn')
             fig.update_layout(showlegend=False)
             layout = go.Layout(
                 margin=go.layout.Margin(
@@ -503,155 +534,21 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                 )
             )
             fig.update_layout(layout)
-            pio.write_image(fig, variables.result_path + "/%s_3d.png" % figname, scale=3, format='png')
-            pio.write_image(fig, variables.result_path + "/%s_3d.svg" % figname, scale=3, format='svg')
+            write_plotly_image(fig, variables, f"{figname}_3d.png", scale=3, image_format='png')
+            write_plotly_image(fig, variables, f"{figname}_3d.svg", scale=3, image_format='svg')
             fig.update_layout(showlegend=True)
 
             fig.update_scenes(xaxis_visible=False, yaxis_visible=False, zaxis_visible=False)
             fig.update_layout(showlegend=False)
-            pio.write_image(fig, variables.result_path + "/%s_3d_o.png" % figname, scale=3, format='png')
-            pio.write_image(fig, variables.result_path + "/%s_3d_o.svg" % figname, scale=3, format='svg')
+            write_plotly_image(fig, variables, f"{figname}_3d_o.png", scale=3, image_format='png')
+            write_plotly_image(fig, variables, f"{figname}_3d_o.svg", scale=3, image_format='svg')
             fig.update_layout(showlegend=True)
-            pio.write_html(fig, variables.result_path + "/%s_3d_o.html" % figname, include_mathjax='cdn')
+            write_plotly_html(fig, variables, f"{figname}_3d_o.html", include_mathjax='cdn')
             fig.update_scenes(xaxis_visible=True, yaxis_visible=True, zaxis_visible=True)
         except Exception as e:
             print('The figure could not be saved')
             print(e)
 
-
-
-def rotate_z(x, y, z, theta):
-    """
-    Rotate coordinates around the z-axis.
-
-    Args:
-        x (float): x-coordinate.
-        y (float): y-coordinate.
-        z (float): z-coordinate.
-        theta (float): Rotation angle.
-
-    Returns:
-        tuple: Rotated coordinates (x, y, z).
-    """
-    w = x + 1j * y
-    return np.real(np.exp(1j * theta) * w), np.imag(np.exp(1j * theta) * w), z
-
-
-def plotly_fig2array(fig):
-    """
-    convert Plotly fig to  an array
-
-    Args:
-        fig (plotly.graph_objects.Figure): The base figure.
-
-    Returns:
-        array: The array representation of the figure.
-    """
-    # convert Plotly fig to  an array
-    fig_bytes = pio.to_image(fig, format="jpeg", scale=5, engine="kaleido")
-    buf = io.BytesIO(fig_bytes)
-    img = Image.open(buf)
-    return np.asarray(img)
-
-
-def rotary_fig(fig, variables, rotary_fig_save, make_gif, figname):
-    """
-    Generate a rotating figure using Plotly.
-
-    Args:
-        fig (plotly.graph_objects.Figure): The base figure.
-        variables (object): The variables object.
-        rotary_fig_save (bool): Whether to save the rotary figure.
-        make_gif (bool): Whether to make a GIF.
-        figname (str): The name of the figure.
-
-    Returns:
-        None
-    """
-    x_eye = -1.25
-    y_eye = 2
-    z_eye = 0.5
-    fig = go.Figure(fig)
-
-    fig.update_scenes(xaxis_visible=False, yaxis_visible=False, zaxis_visible=False)
-
-    if make_gif:
-        fig.update_layout(showlegend=False)
-        layout = go.Layout(
-            margin=go.layout.Margin(
-                l=0,  # left margin
-                r=0,  # right margin
-                b=0,  # bottom margin
-                t=0,  # top margin
-            )
-        )
-        fig.update_layout(layout)
-
-        figures = []
-        for t in np.arange(0, 4, 0.2):
-            xe, ye, ze = rotate_z(x_eye, y_eye, z_eye, t)
-            rotated_fig = go.Figure(fig)
-            rotated_fig.update_layout(scene_camera_eye=dict(x=xe, y=ye, z=ze))
-            figures.append(rotated_fig)
-
-        images = []
-        print('Starting to process the frames for the GIF')
-        print('The total number of frames is:', len(figures))
-        for index, frame in enumerate(figures):
-            images.append(plotly_fig2array(frame))
-            print('frame', index, 'is being processed')
-        print('The images are ready for the GIF')
-
-        # Save the images as a GIF using imageio
-        imageio.mimsave(variables.result_path + '\\rota_{fn}.gif'.format(fn=figname), images, fps=2)
-
-        fig.update_layout(showlegend=True)
-
-    if rotary_fig_save:
-        fig.update_layout(
-            scene_camera_eye=dict(x=x_eye, y=y_eye, z=z_eye),
-            updatemenus=[
-                dict(
-                    type='buttons',
-                    showactive=False,
-                    y=1.2,
-                    x=0.8,
-                    xanchor='left',
-                    yanchor='bottom',
-                    pad=dict(t=45, r=10),
-                    buttons=[
-                        dict(
-                            label='Play',
-                            method='animate',
-                            args=[
-                                None,
-                                dict(
-                                    frame=dict(duration=15, redraw=True),
-                                    transition=dict(duration=0),
-                                    fromcurrent=True,
-                                    mode='immediate'
-                                )
-                            ]
-                        )
-                    ]
-                )
-            ]
-        )
-
-        frames = []
-
-        for t in np.arange(0, 50, 0.1):
-            xe, ye, ze = rotate_z(x_eye, y_eye, z_eye, -t)
-            frames.append(go.Frame(layout=dict(scene_camera_eye=dict(x=xe, y=ye, z=ze))))
-        fig.frames = frames
-
-        plotly.offline.plot(
-            fig,
-            filename=variables.result_path + '\\rota_{fn}.html'.format(fn=figname),
-            show_link=True,
-            auto_open=False,
-            include_mathjax='cdn'
-        )
 
 
 def scatter_plot(data, range_data, variables, element_percentage, selected_area, x_or_y, figname, figure_size,
@@ -717,8 +614,7 @@ def scatter_plot(data, range_data, variables, element_percentage, selected_area,
     if save:
         # Enable rendering for text elements
         rcParams['svg.fonttype'] = 'none'
-        plt.savefig(variables.result_path + '\\projection_{fn}.png'.format(fn=figname))
-        plt.savefig(variables.result_path + '\\projection_{fn}.svg'.format(fn=figname))
+        save_matplotlib_figure(fig, variables, stem=f"projection_{figname}", formats=("png", "svg"), dpi=600)
     plt.show()
 
 
@@ -834,8 +730,7 @@ def projection(variables, element_percentage, range_sequence=[], range_mc=[], ra
     if save:
         # Enable rendering for text elements
         rcParams['svg.fonttype'] = 'none'
-        plt.savefig(variables.result_path + '\\projection_{fn}.png'.format(fn=figname), format="png", dpi=600)
-        plt.savefig(variables.result_path + '\\projection_{fn}.svg'.format(fn=figname), format="svg", dpi=600)
+        save_matplotlib_figure(fig, variables, stem=f"projection_{figname}", formats=("png", "svg"), dpi=600)
     plt.show()
 
 
@@ -944,8 +839,7 @@ def heatmap(variables, element_percentage, range_sequence=[], range_mc=[], range
     if save:
         # Enable rendering for text elements
         rcParams['svg.fonttype'] = 'none'
-        plt.savefig(variables.result_path + figure_name + "heatmap.png", format="png", dpi=600)
-        plt.savefig(variables.result_path + figure_name + "heatmap.svg", format="svg", dpi=600)
+        save_matplotlib_figure(fig, variables, stem=f"{figure_name}heatmap", formats=("png", "svg"), dpi=600)
     plt.show()
 
 
@@ -1049,8 +943,7 @@ def reconstruction_2d_histogram(variables, x, y, bins, percentage, range_sequenc
     if save:
         # Enable rendering for text elements
         rcParams['svg.fonttype'] = 'none'
-        plt.savefig(variables.result_path + figure_name + ".png", format="png", dpi=600)
-        plt.savefig(variables.result_path + figure_name + ".svg", format="svg", dpi=600)
+        save_matplotlib_figure(fig, variables, stem=figure_name, formats=("png", "svg"), dpi=600)
     # Show the plot
     plt.show()
 
@@ -1143,11 +1036,11 @@ def detector_animation(variables, points_per_frame, ranged, selected_area_specia
     if save:
         # Enable rendering for text elements
         rcParams['svg.fonttype'] = 'none'
-        animation.save(variables.result_path + figure_name + ".gif", writer='imagemagick')
+        animation.save(resolve_result_file(variables, f"{figure_name}.gif"), writer='imagemagick')
     plt.close()
 def x_y_z_calculation_and_plot(variables, element_percentage, kf, det_eff, icf, field_evap,
                                avg_dens, flight_path_length, rotary_fig_save, mode, opacity, figname, save,
-                               colab=False):
+                               colab=False, cluster_result=None):
     """
     Calculate the x, y, z coordinates of the atoms and plot them.
 
@@ -1160,28 +1053,46 @@ def x_y_z_calculation_and_plot(variables, element_percentage, kf, det_eff, icf, 
             field_evap (float): The field evaporation efficiency.
             avg_dens (float): The average density of the atoms.
             flight_path_length (float): The flight path length.
+            pulse_mode (str):
             rotary_fig_save (bool): True to save the rotary plot, False to display it.
             mode (str): The reconstruction mode.
             opacity (float): The opacity of the markers.
             figname (str): The name of the figure.
             save (bool): True to save the plot, False to display it.
             colab (bool): True if the code is running in Google Colab, False otherwise.
+            cluster_result: Optional Min-Max precipitate segmentation overlay.
 
         Returns:
             None
 
     """
-    dld_highVoltage = variables.dld_high_voltage
+    if variables.pulse_mode == 'laser':
+        dld_Voltage = variables.dld_high_voltage
+    elif variables.pulse_mode == 'voltage':
+        dld_Voltage = variables.dld_high_voltage + variables.dld_pulse_v
     dld_x = variables.dld_x_det
     dld_y = variables.dld_y_det
     if mode == 'Gault':
-        px, py, pz = atom_probe_recons_from_detector_Gault_et_al(dld_x, dld_y, dld_highVoltage,
+        px, py, pz = atom_probe_recons_from_detector_Gault_et_al(dld_x, dld_y, dld_Voltage,
                                                                  flight_path_length, kf, det_eff, icf,
                                                                  field_evap, avg_dens)
     elif mode == 'Bas':
-        px, py, pz = atom_probe_recons_Bas_et_al(dld_x, dld_y, dld_highVoltage, flight_path_length, kf, det_eff,
+        px, py, pz = atom_probe_recons_Bas_et_al(dld_x, dld_y, dld_Voltage, flight_path_length, kf, det_eff,
                                                  icf, field_evap, avg_dens)
     variables.x = px
     variables.y = py
     variables.z = pz
-    reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save, figname, save, colab=colab)
+    reconstruction_plot(
+        variables,
+        element_percentage,
+        opacity,
+        rotary_fig_save,
+        figname,
+        save,
+        colab=colab,
+        cluster_result=cluster_result,
+    )
+
+
+
+

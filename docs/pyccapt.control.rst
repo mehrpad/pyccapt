@@ -1,4 +1,4 @@
-pyccapt.control package
+﻿pyccapt.control package
 =======================
 
 Subpackages
@@ -8,7 +8,7 @@ Subpackages
    :maxdepth: 4
 
    pyccapt.control.apt
-   pyccapt.control.control
+   pyccapt.control.core
    pyccapt.control.devices
    pyccapt.control.devices_test
    pyccapt.control.drs
@@ -26,3 +26,4 @@ Module contents
    :members:
    :undoc-members:
    :show-inheritance:
+

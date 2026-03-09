@@ -1,4 +1,4 @@
-import multiprocessing
+﻿import multiprocessing
 import os
 import sys
 import threading
@@ -15,11 +15,14 @@ try:
 	from mcculw import ul
 	from mcculw.enums import TempScale, TInOptions
 except Exception as e:
+	ul = None
+	TempScale = None
+	TInOptions = None
 	print('Cannot import mcculw library')
 	print(e)
 
 # Local module and scripts
-from pyccapt.control.control import share_variables, read_files
+from pyccapt.control.core import runtime
 from pyccapt.control.gui import gui_pumps_vacuum
 from pyccapt.control.devices import initialize_devices
 
@@ -45,17 +48,17 @@ class Ui_Baking(object):
 		self.vacuum_buffer = 0
 		self.vacuum_load_lock = 0
 		self.vacuum_cryo_load_lock = 0
+		self._warned_messages = set()
 
 		self.data = pd.DataFrame(
 			columns=['data', 'Time', 'timestamp', 'MC_vacuum', 'BC_vacuum', 'LL_vacuum', 'CLL_vacuum', 'MC_NEG',
 			         'MC_Det', 'Mc_Top', 'MC_Gate', 'BC_Top', 'BC_Pump', 'CLL_gate', 'LL_pump'])
 		now_time = self.now.strftime("%d-%m-%Y_%H-%M-%S")
-		folders_above = os.path.abspath(os.path.join(os.getcwd(), "../"))
-		self.save_path = folders_above + '/pyccapt/files/baking_logging/%s/' % now_time
-		if not os.path.isdir(self.save_path):
-			os.makedirs(self.save_path, mode=0o777, exist_ok=True)
-		self.file_name = self.save_path + 'baking_logging_%s.csv' % now_time
-		self.file_name_backup = self.save_path + 'backup_baking_logging_%s.csv' % now_time
+		self.save_path = runtime.project_path("files", "logs", "baking", now_time)
+		os.makedirs(self.save_path, mode=0o777, exist_ok=True)
+		self.file_name = str(self.save_path / f'baking_logging_{now_time}.csv')
+		self.file_name_backup = str(self.save_path / f'backup_baking_logging_{now_time}.csv')
+
 
 	def setupUi(self, Baking):
 		"""
@@ -120,6 +123,12 @@ class Ui_Baking(object):
 		self.emitter.vacuum_buffer.connect(self.update_vacuum_buffer)
 		self.emitter.vacuum_load_lock.connect(self.update_vacuum_load)
 		self.emitter.vacuum_cryo_load_lock.connect(self.update_vacuum_cryo_load_lock)
+
+		# Add grids to the plots
+		self.tempretures.showGrid(x=True, y=True)
+		self.presures.showGrid(x=True, y=True)  # Add grid to pressure plot
+
+
 	def retranslateUi(self, Baking):
 		"""
 		retranslateUi function.
@@ -133,7 +142,7 @@ class Ui_Baking(object):
 		###
 		#  Baking.setWindowTitle(_translate("Baking", "Form"))
 		Baking.setWindowTitle(_translate("Baking", "PyCCAPT Baking"))
-		Baking.setWindowIcon(QtGui.QIcon('../files/logo.png'))
+		Baking.setWindowIcon(QtGui.QIcon(str(runtime.project_path("files", "logo.png"))))
 		###
 		self.save_data.setText(_translate("Baking", "Save CSV"))
 
@@ -146,9 +155,7 @@ class Ui_Baking(object):
 		Return:
 			None
 		"""
-		if value == -1:
-			print('Error')
-		else:
+		if value != -1:
 			self.vacuum_main = value
 
 	def update_vacuum_buffer(self, value):
@@ -160,9 +167,7 @@ class Ui_Baking(object):
 		Return:
 			None
 		"""
-		if value == -1:
-			print('Error')
-		else:
+		if value != -1:
 			self.vacuum_buffer = value
 
 	def update_vacuum_load(self, value):
@@ -174,9 +179,7 @@ class Ui_Baking(object):
 		Return:
 			None
 		"""
-		if value == -1:
-			print('Error')
-		else:
+		if value != -1:
 			self.vacuum_load_lock = value
 
 	def update_vacuum_cryo_load_lock(self, value):
@@ -188,11 +191,35 @@ class Ui_Baking(object):
 		Return:
 			None
 		"""
-		if value == -1:
-			print('Error')
-		else:
+		if value != -1:
 			self.vacuum_cryo_load_lock = value
 
+	def _warn_once(self, key, message):
+		if key not in self._warned_messages:
+			print(message)
+			self._warned_messages.add(key)
+
+	def _read_temperatures(self):
+		"""Return DAQ temperatures or NaN placeholders when the DAQ is unavailable."""
+		if ul is None or TempScale is None or TInOptions is None:
+			self._warn_once(
+				'daq_unavailable',
+				'DAQ temperature input is unavailable. Baking temperatures will remain empty until mcculw and cbw64.dll are installed.',
+			)
+			return np.full(8, np.nan, dtype=float)
+
+		board_num = 0
+		value_temperature = []
+		try:
+			for i in range(8):
+				options = TInOptions.NOFILTER
+				val = float(ul.t_in(board_num, i, TempScale.CELSIUS, options))
+				value_temperature.append(round(val, 3))
+		except Exception as e:
+			self._warn_once('daq_read_error', f'Error reading baking temperatures: {e}')
+			return np.full(8, np.nan, dtype=float)
+
+		return np.array(value_temperature, dtype=np.dtype(float))
 
 	def read(self):
 		"""
@@ -203,23 +230,26 @@ class Ui_Baking(object):
 		Returns:
 			None
 		"""
+		tpg = None
+		E_AGC_ll = None
+		E_AGC_cll = None
 		if not self.variables.flag_pumps_vacuum_start:
 			try:
-				tpg = initialize_devices.TPG362(port='COM5')
+				tpg = initialize_devices.TPG362(port=self.variables.COM_PORT_gauge_mc)
 			except Exception as e:
-				print(f"Error connecting to TPG362:{e}")
+				self._warn_once('baking_tpg_connect', f"Error connecting to TPG362:{e}")
 				tpg = None
-			if conf['COM_PORT_gauge_ll'] != "off":
+			if self.conf['COM_PORT_gauge_ll'] != "off":
 				try:
-					E_AGC_ll = initialize_devices.EdwardsAGC(variables.COM_PORT_gauge_ll, variables)
+					E_AGC_ll = initialize_devices.EdwardsAGC(self.variables.COM_PORT_gauge_ll, self.variables)
 				except Exception as e:
-					print(f"Error connecting to LL gauge:{e}")
+					self._warn_once('baking_ll_connect', f"Error connecting to LL gauge:{e}")
 					E_AGC_ll = None
-			if conf['COM_PORT_gauge_cll'] != "off":
+			if self.conf['COM_PORT_gauge_cll'] != "off":
 				try:
-					E_AGC_cll = initialize_devices.EdwardsAGC(variables.COM_PORT_gauge_cll, variables)
+					E_AGC_cll = initialize_devices.EdwardsAGC(self.variables.COM_PORT_gauge_cll, self.variables)
 				except Exception as e:
-					print(f"Error connecting to CLL gauge:{e}")
+					self._warn_once('baking_cll_connect', f"Error connecting to CLL gauge:{e}")
 					E_AGC_cll = None
 
 		index = 0
@@ -229,50 +259,59 @@ class Ui_Baking(object):
 				start_time = time.perf_counter()
 				# print('-----------', index, 'seconds', '--------------')
 				if not self.variables.flag_pumps_vacuum_start:
-					try:
-						gauge_bc, _ = tpg.pressure_gauge(1)
-					except Exception as e:
-						print(f"Error reading BC:{e}")
-						# Handle the case where response is not a valid float
+					if tpg is not None:
+						try:
+							gauge_bc, _ = tpg.pressure_gauge(1)
+						except Exception as e:
+							self._warn_once('baking_bc_read', f"Error reading BC:{e}")
+							gauge_bc = -1
+						try:
+							gauge_mc, _ = tpg.pressure_gauge(2)
+						except Exception as e:
+							self._warn_once('baking_mc_read', f"Error reading MC:{e}")
+							gauge_mc = -1
+					else:
 						gauge_bc = -1
-					try:
-						gauge_mc, _ = tpg.pressure_gauge(2)
-					except Exception as e:
-						print(f"Error reading MC:{e}")
-						# Handle the case where response is not a valid float
 						gauge_mc = -1
-					response = initialize_devices.command_edwards(conf, variables, 'pressure', E_AGC=E_AGC_ll,
-					                                              status='load_lock')
 
-					try:
-						gauge_ll = float(response.replace(';', ' ').split()[2]) * 0.01
-					except Exception as e:
-						print(f"Error reading LL:{e}")
-						# Handle the case where response is not a valid float
+					if E_AGC_ll is not None:
+						response = initialize_devices.command_edwards(
+							self.conf,
+							self.variables,
+							'pressure',
+							E_AGC=E_AGC_ll,
+							status='load_lock',
+						)
+						try:
+							gauge_ll = float(response.replace(';', ' ').split()[2]) * 0.01
+						except Exception as e:
+							self._warn_once('baking_ll_read', f"Error reading LL:{e}")
+							gauge_ll = -1
+					else:
 						gauge_ll = -1
-					response = initialize_devices.command_edwards(conf, variables, 'pressure', E_AGC=E_AGC_cll,
-					                                              status='cryo_load_lock')
 
-					try:
-						gauge_cll = float(response.replace(';', ' ').split()[2]) * 0.01
-					except Exception as e:
-						print(f"Error reading CLL:{e}")
-						# Handle the case where response is not a valid float
+					if E_AGC_cll is not None:
+						response = initialize_devices.command_edwards(
+							self.conf,
+							self.variables,
+							'pressure',
+							E_AGC=E_AGC_cll,
+							status='cryo_load_lock',
+						)
+						try:
+							gauge_cll = float(response.replace(';', ' ').split()[2]) * 0.01
+						except Exception as e:
+							self._warn_once('baking_cll_read', f"Error reading CLL:{e}")
+							gauge_cll = -1
+					else:
 						gauge_cll = -1
 				else:
-					gauge_bc = self.vacuum_main
-					gauge_mc = self.variables.vacuum_buffer
+					gauge_bc = self.vacuum_buffer
+					gauge_mc = self.vacuum_main
 					gauge_ll = self.vacuum_load_lock
 					gauge_cll = self.vacuum_cryo_load_lock
 
-				board_num = 0
-				value_temperature = []
-				for i in range(8):
-					options = TInOptions.NOFILTER
-					val = float(ul.t_in(board_num, i, TempScale.CELSIUS, options))
-					value_temperature.append(round(val, 3))
-				# print("Channel{:d} - {:s}:  {:.3f} Degrees.".format(i, channel_list[i], value_temperature[i]))
-				value_temperature = np.array(value_temperature, dtype=np.dtype(float))
+				value_temperature = self._read_temperatures()
 
 				new_row = [self.now.strftime("%d-%m-%Y"), datetime.now().strftime('%H:%M:%S'), index,
 				           gauge_mc, gauge_bc, gauge_ll, gauge_cll,
@@ -308,6 +347,9 @@ class Ui_Baking(object):
 		Returns:
 			None
 		"""
+		if self.data.empty:
+			return
+
 		time_range = 900  # 15 minutes
 		time = self.data['timestamp'].tail(time_range).to_numpy()
 		MC_NEG = self.data['MC_NEG'].tail(time_range).to_numpy()
@@ -322,24 +364,29 @@ class Ui_Baking(object):
 		CLL_vacuum = self.data['CLL_vacuum'].tail(time_range).to_numpy()
 		CLL_gate = self.data['CLL_gate'].tail(time_range).to_numpy()
 		LL_pump = self.data['LL_pump'].tail(time_range).to_numpy()
-
+		if len(time) == 0:
+			return
 		self.tempretures.clear()
 		self.presures.clear()
 
-		self.tempretures.plot(time, MC_NEG, pen='b', name='MC_NEG')
-		self.tempretures.plot(time, MC_Det, pen='g', name='MC_Det')
-		self.tempretures.plot(time, Mc_Top, pen='r', name='Mc_Top')
-		self.tempretures.plot(time, MC_Gate, pen='c', name='MC_Gate')
-		self.tempretures.plot(time, BC_Top, pen='m', name='BC_Top')
-		self.tempretures.plot(time, BC_Pump, pen='y', name='BC_Pump')
-		self.tempretures.plot(time, CLL_gate, pen='orange', name='CLL_gate')
-		self.tempretures.plot(time, LL_pump, pen='w', name='LL_pump')
+		try:
+			# Plot the latest values in the legend so the live view doubles as a quick status panel.
+			self.tempretures.plot(time, MC_NEG, pen='b', name='MC_NEG %.2f' % MC_NEG[-1])
+			self.tempretures.plot(time, MC_Det, pen='g', name='MC_Det %.2f' % MC_Det[-1])
+			self.tempretures.plot(time, Mc_Top, pen='r', name='Mc_Top %.2f' % Mc_Top[-1])
+			self.tempretures.plot(time, MC_Gate, pen='c', name='MC_Gate %.2f' % MC_Gate[-1])
+			self.tempretures.plot(time, BC_Top, pen='m', name='BC_Top %.2f' % BC_Top[-1])
+			self.tempretures.plot(time, BC_Pump, pen='y', name='BC_Pump %.2f' % BC_Pump[-1])
+			self.tempretures.plot(time, CLL_gate, pen='orange', name='CLL_gate %.2f' % CLL_gate[-1])
+			self.tempretures.plot(time, LL_pump, pen='w', name='LL_pump %.2f' % LL_pump[-1])
 
+			self.presures.plot(time, MC_vacuum, pen='r', name='MC_vacuum %s' % MC_vacuum[-1])
+			self.presures.plot(time, BC_vacuum, pen='g', name='BC_vacuum %s' % BC_vacuum[-1])
+			self.presures.plot(time, LL_vacuum, pen='b', name='LL_vacuum %s' % LL_vacuum[-1])
+			self.presures.plot(time, CLL_vacuum, pen='c', name='CLL_vacuum %s' % CLL_vacuum[-1])
+		except Exception as e:
+			self._warn_once('baking_plot_error', f'Error in plotting the data: {e}')
 
-		self.presures.plot(time, MC_vacuum, pen='r', name='MC_vacuum')
-		self.presures.plot(time, BC_vacuum, pen='g', name='BC_vacuum')
-		self.presures.plot(time, LL_vacuum, pen='b', name='LL_vacuum')
-		self.presures.plot(time, CLL_vacuum, pen='c', name='CLL_vacuum')
 
 		self.tempretures.enableAutoRange(axis='x')
 		self.presures.enableAutoRange(axis='x')
@@ -354,7 +401,7 @@ class Ui_Baking(object):
 		"""
 		now = datetime.now()
 		now_time = now.strftime("%d-%m-%Y_%H-%M-%S")
-		self.data.to_csv(self.save_path + '/manual_save_%s.csv' % now_time,
+		self.data.to_csv(str(self.save_path / f'manual_save_{now_time}.csv'),
 		                 sep=';', index=False)
 
 	def stop(self):
@@ -391,10 +438,9 @@ class BakingWindow(QtWidgets.QWidget):
 		Args:
 			event: The close event.
 		"""
-		self.gui_baking.stop()  # Call the stop method to stop the background thread
-		# Additional cleanup code here if needed
-		self.closed.emit()  # Emit the custom closed signal
-		super().closeEvent(event)
+		event.ignore()
+		self.hide()
+		self.closed.emit()
 
 	def setWindowStyleFusion(self):
 		# Set the Fusion style
@@ -403,26 +449,20 @@ class BakingWindow(QtWidgets.QWidget):
 
 if __name__ == "__main__":
 	try:
-		# Load the JSON file
-		configFile = 'config.json'
-		p = os.path.abspath(os.path.join(__file__, "../../.."))
-		os.chdir(p)
-		conf = read_files.read_json_file(configFile)
-	except Exception as e:
+		conf, _ = runtime.load_project_config()
+	except Exception as exc:
 		print('Can not load the configuration file')
-		print(e)
+		print(exc)
 		sys.exit()
 
-	# Initialize global experiment variables
-	manager = multiprocessing.Manager()
-	ns = manager.Namespace()
-	variables = share_variables.Variables(conf, ns)
+	shared = runtime.create_shared_context(conf)
 
 	app = QtWidgets.QApplication(sys.argv)
 	app.setStyle('Fusion')
 	Baking = QtWidgets.QWidget()
 	SignalEmitter_Pumps_Vacuum = gui_pumps_vacuum.SignalEmitter()
-	ui = Ui_Baking(variables, conf, SignalEmitter_Pumps_Vacuum)
+	ui = Ui_Baking(shared.variables, conf, SignalEmitter_Pumps_Vacuum)
 	ui.setupUi(Baking)
 	Baking.show()
 	sys.exit(app.exec())
+

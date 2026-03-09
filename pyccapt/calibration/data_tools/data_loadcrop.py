@@ -9,9 +9,26 @@ from matplotlib.patches import Circle, Rectangle
 from matplotlib.widgets import RectangleSelector, EllipseSelector
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
 from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
-from numba.cpython.slicing import make_slice_from_constant
 
 from pyccapt.calibration.data_tools import data_tools, selectors_data
+from pyccapt.calibration.path_utils import save_figure
+
+EXTRACT_MODE_ALIASES = {
+    "dld": "dld",
+    "surface_concept": "dld",
+    "tdc_sc": "tdc_sc",
+    "roentdec": "tdc_ro",
+    "tdc_ro": "tdc_ro",
+}
+
+
+def _normalize_extract_mode(extract_mode: str) -> str:
+    """Normalize legacy and modern extract mode names."""
+    mode = EXTRACT_MODE_ALIASES.get(extract_mode)
+    if mode is None:
+        supported = ", ".join(sorted(EXTRACT_MODE_ALIASES))
+        raise ValueError(f"Unsupported extract_mode {extract_mode!r}. Supported modes: {supported}")
+    return mode
 
 
 def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld') -> pd.DataFrame:
@@ -28,33 +45,44 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld') -> pd.DataFram
     Returns:
         DataFrame: Contains relevant information from the dld group.
     """
+    extract_mode = _normalize_extract_mode(extract_mode)
+    flag_old_pyccpat_data = False
     if extract_mode == 'dld':
         try:
-            hdf5Data = data_tools.read_hdf5(filename)
-            if hdf5Data is None:
+            hdf5_data = data_tools.read_hdf5(filename)
+            if hdf5_data is None:
                 raise FileNotFoundError
-            dld_highVoltage = hdf5Data['dld/high_voltage'].to_numpy()
-            if 'dld/pulse' in hdf5Data:
-                dld_voltage_pulse = hdf5Data['dld/pulse'].to_numpy()
-            elif 'dld/voltage_pulse' in hdf5Data:
-                dld_voltage_pulse = hdf5Data['dld/voltage_pulse'].to_numpy()
-            elif 'dld/pulse_voltage' in hdf5Data:
-                dld_voltage_pulse = hdf5Data['dld/pulse_voltage'].to_numpy()
+            dld_high_voltage = hdf5_data['dld/high_voltage'].to_numpy()
+            if 'dld/pulse' in hdf5_data:
+                dld_pulse_v = hdf5_data['dld/pulse'].to_numpy()
+            elif 'dld/voltage_pulse' in hdf5_data:
+                dld_pulse_v = hdf5_data['dld/voltage_pulse'].to_numpy()
+                print('The data is loaded in dld mode')
+            elif 'dld/pulse_voltage' in hdf5_data:
+                dld_pulse_v = hdf5_data['dld/pulse_voltage'].to_numpy()
+                flag_old_pyccpat_data = True
             else:
-                raise KeyError('Neither dld/pulse nor dld/voltage_pulse exists in the dataset')
-            if 'dld/laser_pulse' in hdf5Data:
-                dld_laser_pulse = hdf5Data['dld/laser_pulse'].to_numpy()
+                dld_pulse_v = np.zeros(len(dld_high_voltage))
+                dld_pulse_v = np.expand_dims(dld_pulse_v, axis=1)
+            if 'dld/laser_intensity' in hdf5_data:
+                dld_pulse_l = hdf5_data['dld/laser_intensity'].to_numpy()
             else:
-                dld_laser_pulse = np.expand_dims(np.zeros(len(dld_highVoltage)), axis=1)
-
-            dld_startCounter = hdf5Data['dld/start_counter'].to_numpy()
-            dld_t = hdf5Data['dld/t'].to_numpy()
-            dld_x = hdf5Data['dld/x'].to_numpy()
-            dld_y = hdf5Data['dld/y'].to_numpy()
-            dldGroupStorage = np.concatenate(
-                (dld_highVoltage, dld_voltage_pulse, dld_startCounter, dld_t, dld_x, dld_y),
-                                             axis=1)
-            dld_group_storage = create_pandas_dataframe(dldGroupStorage, mode='dld')
+                dld_pulse_l = np.zeros(len(dld_high_voltage))
+                dld_pulse_l = np.expand_dims(dld_pulse_l, axis=1)
+            if 'dld/start_counter' in hdf5_data:
+                dld_start_counter = hdf5_data['dld/start_counter'].to_numpy()
+            else:
+                dld_start_counter = np.zeros(len(dld_high_voltage))
+                dld_start_counter = np.expand_dims(dld_start_counter, axis=1)
+            dld_t = hdf5_data['dld/t'].to_numpy()
+            dld_x = hdf5_data['dld/x'].to_numpy()
+            dld_y = hdf5_data['dld/y'].to_numpy()
+            dld_group_array = np.concatenate(
+                (dld_high_voltage, dld_pulse_v, dld_pulse_l, dld_start_counter, dld_t, dld_x, dld_y),
+                axis=1,
+            )
+            dld_group_storage = create_pandas_dataframe(dld_group_array, mode='dld',
+                                                        flag_old_pyccpat_data=flag_old_pyccpat_data)
             return dld_group_storage
         except KeyError as error:
             print(error)
@@ -64,27 +92,26 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld') -> pd.DataFram
             print("[*] HDF5 file not found")
     elif extract_mode == 'tdc_sc':
         try:
-            hdf5Data = data_tools.read_hdf5(filename)
-            if hdf5Data is None:
+            hdf5_data = data_tools.read_hdf5(filename)
+            if hdf5_data is None:
                 raise FileNotFoundError
-            channel = hdf5Data['tdc/channel'].to_numpy()
-            start_counter = hdf5Data['tdc/start_counter'].to_numpy()
-            high_voltage = hdf5Data['tdc/high_voltage'].to_numpy()
-            if 'tdc/pulse' in hdf5Data:
-                voltage_pulse = hdf5Data['tdc/pulse'].to_numpy()
-            elif 'tdc/voltage_pulse' in hdf5Data:
-                voltage_pulse = hdf5Data['tdc/voltage_pulse'].to_numpy()
+            channel = hdf5_data['tdc/channel'].to_numpy()
+            start_counter = hdf5_data['tdc/start_counter'].to_numpy()
+            high_voltage = hdf5_data['tdc/high_voltage'].to_numpy()
+            if 'tdc/pulse' in hdf5_data:
+                voltage_pulse = hdf5_data['tdc/pulse'].to_numpy()
+            elif 'tdc/voltage_pulse' in hdf5_data:
+                voltage_pulse = hdf5_data['tdc/voltage_pulse'].to_numpy()
             else:
                 raise KeyError('Neither tdc/pulse nor tdc/voltage_pulse exists in the dataset')
-            if 'tdc/laser_pulse' in hdf5Data:
-                laser_pulse = hdf5Data['tdc/laser_pulse'].to_numpy()
+            if 'tdc/laser_pulse' in hdf5_data:
+                laser_pulse = hdf5_data['tdc/laser_pulse'].to_numpy()
             else:
                 laser_pulse = np.zeros(len(channel))
-            time_data = hdf5Data['tdc/time_data'].to_numpy()
+            time_data = hdf5_data['tdc/time_data'].to_numpy()
 
-            dldGroupStorage = np.concatenate((channel, start_counter, high_voltage, voltage_pulse,
-                                              time_data), axis=1)
-            dld_group_storage = create_pandas_dataframe(dldGroupStorage, mode='tdc_sc')
+            dld_group_array = np.concatenate((channel, start_counter, high_voltage, voltage_pulse, time_data), axis=1)
+            dld_group_storage = create_pandas_dataframe(dld_group_array, mode='tdc_sc')
             return dld_group_storage
         except KeyError as error:
             print(error)
@@ -94,19 +121,20 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld') -> pd.DataFram
             print("[*] HDF5 file not found")
     elif extract_mode == 'tdc_ro':
         print('Not implemented yet')
+    return None
 
-def concatenate_dataframes_of_dld_grp(dataframeList: list) -> pd.DataFrame:
+def concatenate_dataframes_of_dld_grp(dataframe_list: list) -> pd.DataFrame:
     """
     Concatenates dataframes into a single dataframe.
 
     Args:
-        dataframeList: List of different information from dld group.
+        dataframe_list: List of different information from dld group.
 
     Returns:
         DataFrame: Single concatenated dataframe containing all relevant information.
     """
-    dld_masterDataframe = pd.concat(dataframeList, axis=1)
-    return dld_masterDataframe
+    dld_master_dataframe = pd.concat(dataframe_list, axis=1)
+    return dld_master_dataframe
 
 
 def plot_crop_experiment_history(data: pd.DataFrame, variables, max_tof, frac=1.0, bins=(1200, 800), figure_size=(8, 3),
@@ -149,7 +177,10 @@ def plot_crop_experiment_history(data: pd.DataFrame, variables, max_tof, frac=1.
     tof = dldGroupStorage['t (ns)'].to_numpy()
     high_voltage = data['high_voltage (V)'].to_numpy()
     high_voltage = high_voltage / 1000  # change to kV
-    pulse = dldGroupStorage['pulse'].to_numpy()
+    if pulse_mode == 'laser':
+        pulse = dldGroupStorage['pulse_l (pJ)'].to_numpy()
+    elif pulse_mode == 'voltage':
+        pulse = dldGroupStorage['pulse_v (V)'].to_numpy()
 
     xaxis = np.arange(len(tof))
 
@@ -241,8 +272,14 @@ def plot_crop_experiment_history(data: pd.DataFrame, variables, max_tof, frac=1.
     if save:
         # Enable rendering for text elements
         rcParams['svg.fonttype'] = 'none'
-        plt.savefig("%s.png" % (variables.result_path + figname), format="png", dpi=600, bbox_inches='tight')
-        plt.savefig("%s.svg" % (variables.result_path + figname), format="svg", dpi=600)
+        save_figure(
+            fig1,
+            directory=variables.result_path,
+            stem=figname or "experiment_history",
+            formats=("png", "svg"),
+            dpi=600,
+            bbox_inches='tight',
+        )
 
     plt.show()
 
@@ -280,7 +317,7 @@ def plot_crop_fdm(x, y, bins=(256, 256), frac=1.0, axis_mode='normal', figure_si
     """
     if range_sequence or range_mc or range_detx or range_dety or range_x or range_y or range_z:
         if range_sequence:
-            mask_sequence = np.zeros_like(len(x), dtype=bool)
+            mask_sequence = np.zeros(len(x), dtype=bool)
             mask_sequence[range_sequence[0]:range_sequence[1]] = True
         else:
             mask_sequence = np.ones(len(x), dtype=bool)
@@ -381,8 +418,56 @@ def plot_crop_fdm(x, y, bins=(256, 256), frac=1.0, axis_mode='normal', figure_si
     if save and variables is not None:
         # Enable rendering for text elements
         rcParams['svg.fonttype'] = 'none'
-        plt.savefig("%s.png" % (variables.result_path + figname), format="png", dpi=600)
-        plt.savefig("%s.svg" % (variables.result_path + figname), format="svg", dpi=600)
+        save_figure(fig1, directory=variables.result_path, stem=figname or "FDM", formats=("png", "svg"), dpi=600)
+    plt.show()
+
+
+def _legacy_extract_xy(data) -> tuple[np.ndarray, np.ndarray]:
+    """Extract detector x/y from legacy ndarray inputs."""
+    arr = np.asarray(data)
+    if arr.ndim != 2:
+        raise ValueError("Expected a 2D array for legacy FDM plotting")
+    if arr.shape[1] >= 7:
+        return arr[:, 5], arr[:, 6]
+    if arr.shape[1] >= 2:
+        return arr[:, 0], arr[:, 1]
+    raise ValueError("Expected at least 2 columns for legacy FDM plotting")
+
+
+def plot_crop_FDM(ax, fig, data, bins=(256, 256), save_name=None):
+    """
+    Backward-compatible wrapper for legacy camelCase API.
+
+    Notes:
+        The `ax` and `fig` arguments are kept for compatibility with older call
+        sites and are not used directly because the modern API creates its own figure.
+    """
+    x, y = _legacy_extract_xy(data)
+    # Lightweight adapter for older UI callbacks.
+    variables = type(
+        "LegacyVariables",
+        (),
+        {"selected_x_fdm": 0, "selected_y_fdm": 0, "roi_fdm": 0, "result_path": "."},
+    )()
+    plot_crop_fdm(
+        x,
+        y,
+        bins=bins,
+        variables=variables,
+        data_crop=True,
+        mode_selector="circle",
+        save=bool(save_name),
+        figname=save_name or "FDM",
+    )
+
+
+def plot_FDM(ax, fig, data, bins=(256, 256), save_name=None):
+    """Backward-compatible wrapper for legacy `plot_FDM` API."""
+    x, y = _legacy_extract_xy(data)
+    fdm, xedges, yedges = np.histogram2d(x, y, bins=bins)
+    plt.imshow(fdm.T, origin="lower", aspect="auto", extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]])
+    if save_name:
+        plt.savefig(f"{save_name}.png", format="png", dpi=600)
     plt.show()
 
 
@@ -482,7 +567,7 @@ def crop_data_after_selection(data_crop, variables):
     return data_crop
 
 
-def create_pandas_dataframe(data_crop, mode='dld'):
+def create_pandas_dataframe(data_crop, mode='dld', flag_old_pyccpat_data=False):
     """
     Create a pandas dataframe from the cropped data.
 
@@ -491,21 +576,35 @@ def create_pandas_dataframe(data_crop, mode='dld'):
         mode: Mode of extraction
                 dld: Extracts data from dld group
                 tdc_sc: Extracts data from tdc for Surface Consept
-                tdc_ro: Extracts data from tdc for Roentdek detector
+                tdc_ro: Extracts data from tdc for RoentDek detector
+        flag_old_pyccpat_data: Flag to determine if data is already convert from bin to ns and mm (old pyccapt datas)
 
     Returns:
         hdf_dataframe: Dataframe to be inserted in the HDF file
     """
+    mode = _normalize_extract_mode(mode)
     if mode == 'dld':
+        if flag_old_pyccpat_data:
+            TOFFACTOR = 27.432 / (1000 * 4)  # 27.432 ps/bin, tof in ns, data is TDC time sum
+            DETBINS = 4900
+            BINNINGFAC = 2
+            XYFACTOR = 80 / DETBINS * BINNINGFAC  # XXX mm/bin
+            XYBINSHIFT = DETBINS / BINNINGFAC / 2  # to center detector
+
+            data_crop[:, 4] = data_crop[:, 4] * TOFFACTOR  # in ns
+            data_crop[:, 5] = ((data_crop[:, 5] - XYBINSHIFT) * XYFACTOR) * 0.1  # from mm to in cm by dividing by 10
+            data_crop[:, 6] = ((data_crop[:, 6] - XYBINSHIFT) * XYFACTOR) * 0.1  # from mm to in cm by dividing by 10
+
         hdf_dataframe = pd.DataFrame(data=data_crop,
-                                     columns=['high_voltage (V)', 'pulse', 'start_counter', 't (ns)',
+                                     columns=['high_voltage (V)', 'pulse_v (V)',
+                                              'pulse_l (pJ)', 'start_counter', 't (ns)',
                                               'x_det (cm)', 'y_det (cm)'])
 
         hdf_dataframe['start_counter'] = hdf_dataframe['start_counter'].astype('uint32')
     elif mode == 'tdc_sc':
         hdf_dataframe = pd.DataFrame(data=data_crop,
-                                     columns=['channel', 'start_counter', 'high_voltage (V)', 'pulse',
-                                              'time_data'])
+                                     columns=['channel', 'start_counter', 'high_voltage (V)', 'pulse_v (V)',
+                                              'pulse_l (pJ)', 'time_data'])
 
         hdf_dataframe['channel'] = hdf_dataframe['channel'].astype('uint32')
         hdf_dataframe['start_counter'] = hdf_dataframe['start_counter'].astype('uint32')
@@ -513,6 +612,8 @@ def create_pandas_dataframe(data_crop, mode='dld'):
     elif mode == 'tdc_ro':
         print('Not implemented yet')
         hdf_dataframe = None
+    else:
+        raise ValueError(f"Unsupported mode: {mode!r}")
 
     return hdf_dataframe
 
@@ -540,7 +641,9 @@ def calculate_ppi_and_ipp(data, max_start_counter):
     multi_hit_count = 1
 
     total_iterations = len(counter)
-    twenty_percent = total_iterations // 5  # 20% of total iterations
+    if total_iterations == 0:
+        return delta_p, multi
+    progress_step = max(1, total_iterations // 5)
 
     for i, current_counter in enumerate(counter):
         if i == 0:
@@ -568,8 +671,8 @@ def calculate_ppi_and_ipp(data, max_start_counter):
         if i == len(counter) - 1:
             multi[i] = multi_hit_count
 
-        # Print progress at each 20% interval
-        if i % twenty_percent == 0:
+        # Print progress at each ~20% interval
+        if i % progress_step == 0:
             progress_percent = int((i / total_iterations) * 100)
             print(f"Progress: {progress_percent}% complete")
 

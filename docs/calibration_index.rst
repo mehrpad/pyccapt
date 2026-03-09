@@ -1,9 +1,9 @@
-Calibration module
-===================
+Calibration Module
+==================
 
 .. toctree::
    :maxdepth: 1
-   :caption: Calibration module:
+   :caption: Calibration Module
 
    CALIBRATION.md
    Calibration_DATA_STRUCTURE.md

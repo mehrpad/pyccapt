@@ -60,5 +60,7 @@ if __name__ == "__main__":
 
     switch_number = 16  # Change this to the desired switch number
     switch.switch_on(switch_number)
+    print("Switch is on")
     time.sleep(3)
     switch.switch_off(switch_number)
+    print("Switch is off")

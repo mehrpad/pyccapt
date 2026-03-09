@@ -93,6 +93,7 @@ def tof2mc(t: int, t0: int, V: float, xDet: int, yDet: int,
             mc = 2 * V * e * (t / flightPathLength) ** 2
         elif mode == 'voltage':
             mc = 2 * alpha * (V + beta * V_pulse) * e * (t / flightPathLength) ** 2
+            # mc = 2 * alpha * (V) * e * (t / flightPathLength) ** 2
 
         mc = mc / amu  # conversion from kg/C to Da (6.022E23 g/mol, 1.6E-19C/ec)
 

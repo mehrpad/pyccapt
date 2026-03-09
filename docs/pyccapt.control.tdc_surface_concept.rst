@@ -12,10 +12,10 @@ pyccapt.control.tdc\_surface\_concept.scTDC module
    :undoc-members:
    :show-inheritance:
 
-pyccapt.control.tdc\_surface\_concept.tdc\_surface\_consept module
+pyccapt.control.tdc\_surface\_concept.tdc\_surface\_concept module
 ------------------------------------------------------------------
 
-.. automodule:: pyccapt.control.tdc_surface_concept.tdc_surface_consept
+.. automodule:: pyccapt.control.tdc_surface_concept.tdc_surface_concept
    :members:
    :undoc-members:
    :show-inheritance:

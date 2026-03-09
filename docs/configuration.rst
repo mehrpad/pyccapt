@@ -1,29 +1,107 @@
-Setting the JSON file
-======================================
-To run the GUI, you need to set the JSON file.
-The JSON file is a Python dictionary that contains the following keys:
+Control Configuration
+=====================
 
+PyCCAPT control runtime is configured with a TOML file:
 
-.. figure:: json.jpg
+- default path: ``pyccapt/config.toml``
+- supported format: ``.toml`` only
 
-Visualization
------------------
-The GUI will show tof or mass-to-charge ratio. You can choose
-tof or mc. There is also some constant parameters like flight path length, max of DC voltage and etc. that should be
-specified int he JSON file.
+Runtime loading follows this order:
 
-Devices
------------------
-The parameters from tdc to edge_counter is all the devices you want to control. you can
-turn on or off the devices with the command.
+1. Explicit config path (if provided by the caller)
+2. ``config.toml`` in the detected project root
 
+Electrode List Configuration
+----------------------------
 
-ports
------------------
-All the parameters which start with COM are the serial ports of the devices. you can run the
-com_port.py script from tools folder to print out all the available serial ports. Then
-you should passing each port to the corresponding device. It is also possible to test all the devices
-separately with scripts in devices_test module.
+The control GUI electrode dropdown is loaded from:
 
+- ``pyccapt/control/electrode.toml``
 
+Example:
 
+.. code-block:: toml
+
+   [electrodes]
+   names = [
+       "NiC1", # Nickel electrode
+       "CuC1", # Copper electrode
+       "NC",   # Not categorized
+   ]
+
+Electrode naming reference:
+
+.. image:: ../pyccapt/files/readme_images/electrode.png
+   :alt: Electrode naming reference used in the control GUI
+   :width: 480px
+
+Use names that match your experimental workflow and the labels presented in the control GUI. In the default example, ``NiC1`` refers to the nickel electrode and ``CuC1`` refers to the copper electrode.
+
+TOML supports comments, so lab-specific notes can be kept directly in this file.
+
+Configuration Groups
+--------------------
+
+The control configuration file is organized into a few logical groups.
+
+Visualization and Calibration Constants
+---------------------------------------
+
+These settings define plotting mode and conversion constants used during control
+and visualization (for example, flight-path length and timing offsets).
+
+Examples:
+
+- ``visualization = "mc"``
+- ``flight_path_length``
+- ``t_0_voltage``
+- ``t_0_laser``
+- ``max_mass``
+- ``max_tof``
+
+Safety Limits and Control Bounds
+--------------------------------
+
+These values define operating ranges and guardrails for voltages, pulse behavior,
+laser power, and cryogenic temperatures.
+
+Examples:
+
+- ``max_vdc``
+- ``min_vp`` / ``max_vp``
+- ``pulse_fraction_max``
+- ``max_laser_power``
+- ``max_temperature_cryo`` / ``min_temperature_cryo``
+
+Device Enable Flags
+-------------------
+
+Hardware blocks can be enabled or disabled using ``"enabled"`` / ``"disabled"``.
+Legacy ``"on"`` / ``"off"`` values still work.
+
+Examples:
+
+- ``tdc``, ``camera``, ``gates``, ``laser``, ``stage``
+- ``pump_ll``, ``pump_cll``, ``gauges``, ``cryo``
+- ``v_dc``, ``v_p``, ``signal_generator``, ``DAQ``
+
+Connection Identifiers
+----------------------
+
+Connection endpoints are specified using ``COM_PORT_*`` keys.
+Depending on the device, values can be serial COM ports, NI-DAQ paths, VISA
+resource strings, or hardware IDs.
+
+Examples:
+
+- ``COM_PORT_laser = "COM9"``
+- ``COM_PORT_gates = "Dev2/port0/"``
+- ``COM_PORT_signal_generator = "USB0::...::INSTR"``
+
+Best Practices
+--------------
+
+- Start from ``pyccapt/config.toml`` and keep it under version control.
+- Add comments directly in the TOML file to document local lab settings.
+- Validate hardware port values before experiment runs.
+- Keep conservative bounds for safety-critical settings.

@@ -1,1 +1,1 @@
-name = 'calibration'
+"""Tutorial assets and notebook helper modules."""

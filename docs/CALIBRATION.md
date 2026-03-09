@@ -1,71 +1,85 @@
 # Calibration Module
 
-The PyCCAPT Calibration Sub-Module provides essential tools and workflows for calibrating and processing atom probe
-tomography (APT) data. This module is designed to assist researchers in preparing and enhancing their APT data for
-further analysis.
+The `pyccapt.calibration` package provides workflows for atom probe tomography data preparation, calibration, reconstruction, and visualization.
 
+![Calibration visualization](../pyccapt/files/readme_images/visualization_gif.gif)
 
-## Jupyter data processing Workflows
+## Core Workflows
 
-The workflows in PyCCAPT Calibration Sub-Module are designed to streamline the following APT key tasks:
+Typical calibration workflows include:
 
-### 1. Data Cropping
+1. Import and crop datasets (HDF5, EPOS, POS, ATO, CSV).
+2. Correct time-of-flight and estimate `t0`/flight-path parameters.
+3. Convert time-of-flight to mass-to-charge (`m/c`).
+4. Apply voltage and bowl corrections.
+5. Perform 3D reconstruction.
+6. Define and apply ranging windows.
+7. Generate 2D/3D visualizations and analysis plots.
 
-- *Description*: Allows you to crop atom probe data, whether it's originally collected using PyCCAPT or in various other
-  formats such as EPOS, POS, ATO, and CSV.
-- *Usage*: Define the region of interest (ROI) to focus on specific areas of the dataset.
+## Package Structure
 
-### 2. Time of Flight Calibration
+- `core`: validation, shared state, and primary calibration logic
+- `data_tools`: loading, conversion, and preprocessing utilities
+- `mc`: mass-to-charge and time-of-flight helper functions
+- `reconstructions`: reconstruction and structural analysis tools
+- `clustering`: clustering and isosurface workflows
+- `leap_tools`: LEAP/POS/EPOS/RRNG import and helper tools
+- `tutorials`: notebooks and notebook helper modules
 
-- *Description*: Perform time-of-flight (TOF) calibration to correct for flight time distortions in the data.
-- *Usage*: Improve the accuracy of spatial information in the APT dataset.
+## Shared State and Validation
 
-### 3. Converting time-of-flight to mass-to-charge ratio
+Calibration workflows use shared mutable state through `Variables` in `pyccapt.calibration.core.share_variables`.
+Validation and state-related errors should raise explicit calibration exceptions.
 
-- *Description*: Calibrate the mass-to-charge ratio (MC) of ions in the dataset.
-- *Usage*: Enhance the accuracy of quantitative analysis by ensuring precise MC values.
+## Cross-Platform Paths
 
-### 4. 3D Reconstruction
+Use `pyccapt.calibration.path_utils` helpers for output and figure paths:
 
-- *Description*: Reconstruct the 3D spatial distribution of from the atom probe data.
-- *Usage*: Visualize the spatial distribution of atoms within the material.
+- `ensure_directory`
+- `build_output_path`
+- `save_figure`
 
-### 5. Ranging the Mass-to-Charge Ratio
+## Data Structures
 
-- *Description*: Define a range for the mass-to-charge ratio to filter ions based on specific MC values.
-- *Usage*: Focus on ions within a specific MC range for analysis.
+Calibration and range-file schema details are documented in [Calibration_DATA_STRUCTURE.md](Calibration_DATA_STRUCTURE.md).
 
-### 6. Visualization
+## Tutorials
 
-- *Description*: Visualize the atom probe data using various plotting and visualization techniques.
-- *Usage*: Gain insights into the data through 2D and 3D visualizations.
+Interactive examples are available in:
 
-### 7. T0 and Flight Path Calculation
+- `pyccapt/calibration/tutorials/jupyter_files`
+- `pyccapt/calibration/tutorials/colab`
 
-- *Description*: Calculate T0 and flight paths length for ions.
-- *Usage*: Essential for precise quantitative analysis and data interpretation.
+The tutorial save steps can export processed datasets as `HDF5`, `EPOS`, `POS`, and `ATO`.
+The visualization helpers also include optional Min-Max clustering to split a selected precipitate population into two reconstruction segments.
 
-## Data structures
+Related user-facing tutorial pages are listed under [tutorials](tutorials.rst) in this documentation set.
 
-For the data structure, you can check the [data structure](Control_DATA_STRUCTURE.md) file. 
-There is also the possibility to convert the PyCCAPT HDF5 file data to EPOS, POS, and CSV file. 
-You can find the example code in the [`tutorials`](https://github.com/mmonajem/pyccapt/tree/main/pyccapt/calibration/tutorials/jupyter_files).
+## Workflow Snapshots
 
-## Additional Features
+![Mass spectrum](../pyccapt/files/readme_images/hist.png)
 
-In addition to the core functionalities mentioned above, the calibration module of PyCCAPT offers various advanced
-features and capabilities, such as the following:
+<p align="center">
+  <img width="36%" src="../pyccapt/files/readme_images/fdm.png" alt="FDM">
+  <img width="32%" src="../pyccapt/files/readme_images/detector.gif" alt="Detector GIF">
+</p>
 
-- **Data Analysis**: Perform advanced data analysis on atom probe data, such as spatial distribution map (SDM), isosurface
-  generation, and radial distribution function (RDF) calculation.
-- **Data Export**: Export atom probe data to various file formats, including EPOS, POS, ATO, and CSV.
-- **Data Import**: Import atom probe data from various file formats, including EPOS, POS, ATO, and CSV.
-- **Data Filtering**: Filter atom probe data based on specific criteria, such as mass-to-charge ratio (MC) or spatial
-  coordinates.
+<p align="center">
+  <img width="30%" src="../pyccapt/files/readme_images/vol_corr.png" alt="Voltage correction">
+  <img width="30%" src="../pyccapt/files/readme_images/bowl_corr.png" alt="Bowl correction">
+</p>
 
+<p align="center">
+  <img width="30%" src="../pyccapt/files/readme_images/tof_V_corr.png" alt="TOF versus voltage">
+  <img width="30%" src="../pyccapt/files/readme_images/tof_bowl_corr_y_det.png" alt="TOF bowl correction">
+</p>
 
-For specific usage examples and code snippets, explore the Jupyter notebooks provided in
-the [`tutorials`](https://github.com/mmonajem/pyccapt/tree/main/pyccapt/calibration/tutorials/jupyter_files)
-or [`colab`](https://github.com/mmonajem/pyccapt/tree/main/pyccapt/calibration/tutorials/colab)
-of the PyCCAPT repository. 
+![Ranged mass spectrum](../pyccapt/files/readme_images/mc.png)
 
+Interactive 3D example:
+[Nimonic 90 reconstruction](https://rawcdn.githack.com/mmonajem/pyccapt/52835bc47735ef12bffcf7e18ce90b556b07d12f/pyccapt/files/readme_images/3d_o.html)
+
+<p align="center">
+  <img width="40%" src="../pyccapt/files/readme_images/roto.gif" alt="3D rotation">
+  <img width="40%" src="../pyccapt/files/readme_images/iso.gif" alt="3D isosurface">
+</p>

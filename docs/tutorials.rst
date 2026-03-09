@@ -1,33 +1,25 @@
-Tutorials for APT data processing
-============================================================
+Tutorials for APT Data Processing
+=================================
 
-The tutorials in this section provide a step-by-step guide to processing APT data using PyCCAPT.
-The tutorials cover data processing, 3D reconstruction, visualization, and propagation delay calculation.
+This section provides step-by-step tutorials for common PyCCAPT calibration and
+analysis workflows, including data processing, propagation delay correction,
+visualization, and 3D reconstruction.
 
-
------------------
-Dataset download
------------------
-
-.. toctree::
-    :maxdepth: 1
-
-    download_tutorial_data.md
-
-
-
-
------------------
-Tutorials
------------------
+Dataset Download
+----------------
 
 .. toctree::
-    :maxdepth: 2
+   :maxdepth: 1
 
-    tutorials/data_processing
-    tutorials/propagation_delay_calculation
-    tutorials/visualization
-    tutorials/3d_reconstruction
+   download_tutorial_data.md
 
+Tutorial Guides
+---------------
 
+.. toctree::
+   :maxdepth: 2
 
+   tutorials/data_processing
+   tutorials/propagation_delay_calculation
+   tutorials/visualization
+   tutorials/3d_reconstruction

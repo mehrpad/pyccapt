@@ -1,16 +1,22 @@
-import multiprocessing
+﻿import multiprocessing
 import os
 import re
 import sys
 import time
+import serial.tools.list_ports
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import QThread
 from PyQt6.QtGui import QPixmap
 
 # Local module and scripts
-from pyccapt.control.control import share_variables, read_files
+from pyccapt.control.core import runtime
 from pyccapt.control.nkt_photonics import origamiClassCLI
+
+
+def _available_serial_ports_text():
+    ports = sorted(port.device for port in serial.tools.list_ports.comports() if getattr(port, "device", ""))
+    return ", ".join(ports) if ports else "none detected"
 
 
 class Ui_Laser_Control(object):
@@ -408,11 +414,12 @@ class Ui_Laser_Control(object):
         self.Error = QtWidgets.QLabel(parent=Laser_Control)
         self.Error.setMinimumSize(QtCore.QSize(500, 30))
         font = QtGui.QFont()
-        font.setPointSize(13)
+        font.setPointSize(10)
         font.setBold(True)
         font.setStrikeOut(False)
         self.Error.setFont(font)
         self.Error.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.Error.setWordWrap(True)
         self.Error.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.LinksAccessibleByMouse)
         self.Error.setObjectName("Error")
         self.gridLayout_5.addWidget(self.Error, 4, 0, 1, 4)
@@ -502,11 +509,21 @@ class Ui_Laser_Control(object):
                 else:
                     print("The laser status code is:", databack)
             else:
-                print("laser port can not be opened")
+                error_text = self.laser_device.last_error or "no response from device"
+                message = (
+                    f"Laser is unavailable on {self.conf['COM_PORT_laser']}: {error_text}. "
+                    f"Available serial ports: {_available_serial_ports_text()}."
+                )
+                print(message)
+                self.error_message(message)
                 self.laser_device = None
         except Exception as e:
-            print(e)
-            print("laser port can not be opened")
+            message = (
+                f"Laser is unavailable on {self.conf['COM_PORT_laser']}: {e}. "
+                f"Available serial ports: {_available_serial_ports_text()}."
+            )
+            print(message)
+            self.error_message(message)
             self.laser_device = None
 
         self.worker = Worker(self.check_laser_status)
@@ -969,10 +986,9 @@ class LaserControlWindow(QtWidgets.QWidget):
         Args:
             event: Close event.
         """
-        self.gui_laser_control.stop()  # Call the stop method to stop any background activity
-        self.closed.emit()  # Emit the custom closed signal
-        # Additional cleanup code here if needed
-        super().closeEvent(event)
+        event.ignore()
+        self.hide()
+        self.closed.emit()
 
     def setWindowStyleFusion(self):
         # Set the Fusion style
@@ -981,24 +997,18 @@ class LaserControlWindow(QtWidgets.QWidget):
 
 if __name__ == "__main__":
     try:
-        # Load the Json file
-        configFile = 'config.json'
-        p = os.path.abspath(os.path.join(__file__, "../../.."))
-        os.chdir(p)
-        conf = read_files.read_json_file(configFile)
-    except Exception as e:
+        conf, _ = runtime.load_project_config()
+    except Exception as exc:
         print('Can not load the configuration file')
-        print(e)
+        print(exc)
         sys.exit()
-    # Initialize global experiment variables
-    manager = multiprocessing.Manager()
-    ns = manager.Namespace()
-    variables = share_variables.Variables(conf, ns)
+    shared = runtime.create_shared_context(conf)
 
     app = QtWidgets.QApplication(sys.argv)
     app.setStyle('Fusion')
     Laser_Control = QtWidgets.QWidget()
-    ui = Ui_Laser_Control(variables, conf)
+    ui = Ui_Laser_Control(shared.variables, conf)
     ui.setupUi(Laser_Control)
     Laser_Control.show()
     sys.exit(app.exec())
+

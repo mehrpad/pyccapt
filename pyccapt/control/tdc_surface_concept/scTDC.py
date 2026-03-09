@@ -76,6 +76,7 @@ __version__ = "1.2.0"
 
 import ctypes
 import os
+from pathlib import Path
 import time
 import traceback
 
@@ -309,13 +310,10 @@ class scTDClib:
         """
         loads the shared library
         """
+        self._module_dir = Path(__file__).resolve().parent
 
         if os.name == 'nt':
-            # directory has to be changed to be changed to the directory of dlls
-            p = os.path.abspath(os.path.join(__file__, "../../.."))
-            p = p + '\\control\\tdc_surface_concept\\'
-            os.chdir(p)
-            self.lib = ctypes.WinDLL('./scTDC1.dll')
+            self.lib = ctypes.WinDLL(str(self._module_dir / "scTDC1.dll"))
             self.lib.sc_tdc_init_inifile.argtypes = [ctypes.c_char_p]
             self.lib.sc_get_err_msg.argtypes = [ctypes.c_int, ctypes.c_char_p]
         else:
@@ -358,7 +356,12 @@ class scTDClib:
         functions.
         """
 
-        return self.lib.sc_tdc_init_inifile(inifile_path.encode('utf-8'))
+        ini_path = Path(inifile_path)
+        if not ini_path.is_absolute():
+            candidate = self._module_dir / ini_path
+            if candidate.exists():
+                ini_path = candidate
+        return self.lib.sc_tdc_init_inifile(str(ini_path).encode('utf-8'))
 
     def sc_get_err_msg(self, errcode):
         """
@@ -495,11 +498,9 @@ class scTDC_hdf5lib:
         """
         loads the shared library scTDC_hdf5
         """
+        self._module_dir = Path(__file__).resolve().parent
         if os.name == 'nt':
-            p = os.path.abspath(os.path.join(__file__, "../../.."))
-            p = p + '\\control\\tdc_surface_concept\\'
-            os.chdir(p)
-            self.lib = ctypes.WinDLL("scTDC_hdf50.dll")
+            self.lib = ctypes.WinDLL(str(self._module_dir / "scTDC_hdf50.dll"))
         else:
             self.lib = ctypes.CDLL("libscTDC_hdf5.so.0")
         l = self.lib

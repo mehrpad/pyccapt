@@ -1,4 +1,4 @@
-import multiprocessing
+﻿import multiprocessing
 import os
 import sys
 import time
@@ -9,7 +9,7 @@ from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QPixmap
 
 # Local module and scripts
-from pyccapt.control.control import share_variables, read_files
+from pyccapt.control.core import runtime
 
 
 class Ui_Gates(object):
@@ -139,11 +139,12 @@ class Ui_Gates(object):
         self.Error = QtWidgets.QLabel(parent=Gates)
         self.Error.setMinimumSize(QtCore.QSize(400, 30))
         font = QtGui.QFont()
-        font.setPointSize(13)
+        font.setPointSize(10)
         font.setBold(True)
         font.setStrikeOut(False)
         self.Error.setFont(font)
         self.Error.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.Error.setWordWrap(True)
         self.Error.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.LinksAccessibleByMouse)
         self.Error.setObjectName("Error")
         self.gridLayout_2.addWidget(self.Error, 1, 1, 1, 1)
@@ -222,6 +223,19 @@ class Ui_Gates(object):
             None
         """
         if not self.flag_super_user:
+            warning = QtWidgets.QMessageBox(parent=self.superuser)
+            warning.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+            warning.setWindowTitle("Confirm Access Override")
+            warning.setText("Gate override can bypass interlocks and may be dangerous.")
+            warning.setInformativeText("Only continue if you really want to override gate access.")
+            warning.setStandardButtons(
+                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
+            )
+            warning.setDefaultButton(QtWidgets.QMessageBox.StandardButton.No)
+            if warning.exec() != QtWidgets.QMessageBox.StandardButton.Yes:
+                self.error_message("Override Access canceled.")
+                self.timer.start(8000)
+                return
             self.flag_super_user = True
             self.superuser.setStyleSheet("QPushButton{\n"
                                          "background: rgb(0, 255, 26)\n"
@@ -422,10 +436,9 @@ class GatesWindow(QtWidgets.QWidget):
         Args:
             event: Close event.
         """
-        self.gui_gates.stop()  # Call the stop method to stop any background activity
-        # Additional cleanup code here if needed
-        self.closed.emit()  # Emit the custom closed signal
-        super().closeEvent(event)
+        event.ignore()
+        self.hide()
+        self.closed.emit()
 
     def setWindowStyleFusion(self):
         # Set the Fusion style
@@ -434,24 +447,18 @@ class GatesWindow(QtWidgets.QWidget):
 
 if __name__ == "__main__":
     try:
-        # Load the Json file
-        configFile = 'config.json'
-        p = os.path.abspath(os.path.join(__file__, "../../.."))
-        os.chdir(p)
-        conf = read_files.read_json_file(configFile)
-    except Exception as e:
+        conf, _ = runtime.load_project_config()
+    except Exception as exc:
         print('Can not load the configuration file')
-        print(e)
+        print(exc)
         sys.exit()
-    # Initialize global experiment variables
-    manager = multiprocessing.Manager()
-    ns = manager.Namespace()
-    variables = share_variables.Variables(conf, ns)
+    shared = runtime.create_shared_context(conf)
 
     app = QtWidgets.QApplication(sys.argv)
     app.setStyle('Fusion')
     Gates = QtWidgets.QWidget()
-    ui = Ui_Gates(variables, conf)
+    ui = Ui_Gates(shared.variables, conf)
     ui.setupUi(Gates)
     Gates.show()
     sys.exit(app.exec())
+

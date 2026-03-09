@@ -1,45 +1,93 @@
-# PyCCAPT Control Module
+﻿# PyCCAPT Control Module
 
-<img align="right" src="https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/logo2.png" alt="Alt Text" width="100" height="100">
+<img align="right" src="https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/logo2.png" alt="PyCCAPT logo" width="100" height="100">
 
-PyCCAPT is a powerful Python software designed for controlling atom probe tomography instruments, offering researchers
-and scientists an efficient means to interact with their equipment. With its capabilities, PyCCAPT is not only
-adept at reading surface concepts but also seamlessly interfaces with RoentDek time-to-digital converter (TDC) systems.
-This compatibility ensures that PyCCAPT can gather and process critical data from these instruments,
-facilitating precise analysis and investigation in the field of atom probe tomography. Whether you're exploring the
-nanoscale world of materials or conducting cutting-edge research, PyCCAPT proves to be an invaluable tool for instrument
-control and data management, enhancing the capabilities of atom probe tomography systems for a wide range of scientific
-applications.
+The `pyccapt.control` package drives instrument control, device communication, live monitoring, and experiment data acquisition for open-source atom probe tomography systems.
 
-## Data structures
+## Scope
 
-For the data structure you can check the [data structure](DATA_STRUCTURE.md) file.
+This module is responsible for:
 
-## Overview of the main GUI of the control module
-![plot](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/main_gui.png?raw=True)
+- instrument control loops (high voltage, pulse/laser settings)
+- hardware integration (TDC, DRS, pumps, gauges, stage, cameras)
+- GUI operation (main and sub-GUIs)
+- synchronized multi-process shared state
+- writing experiment metadata and raw data
 
-The following images show the GUI of the control module in detail.
-## Gates control GUI
-![plot](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/gates_gui.png?raw=True)
-## Pumps control, vacuum monitoring, temperature control GUI
-![plot](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/pumps_gui.png?raw=True)
-## Cameras control GUI
-![plot](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/cameras_gui.png?raw=True)
-## Laser control GUI
-![plot](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/laser_gui.png?raw=True)
-## Stage control GUI
-![plot](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/stage_gui.png?raw=True)
-## Visualization GUI
-![plot](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/visualization_gui.png?raw=True)
-## Baking process GUI
-![plot](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/baking_gui.png?raw=True)
+Calibration and reconstruction are implemented in `pyccapt.calibration`.
 
+## Runtime Architecture
 
+The control application uses multiple processes:
 
-The electrode Json file is a file that contains the list of available electrodes in the instrument.
-This will be helpful to keep track of the electrode that user use for each experiment.
+- main GUI process (`gui_main.py`)
+- experiment process (`apt/apt_exp_control.py`)
+- detector process (Surface Concept, RoentDek, or DRS)
+- optional sub-GUI processes (cameras, visualization)
 
-![plot](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/json.png?raw=True)
+Shared state is managed through `core/share_variables.py` using a `multiprocessing.Manager().Namespace()` wrapper.
 
+Configuration is loaded from `config.toml` (supports comments).
+`config.json` is no longer accepted by the control runtime.
 
+## Startup Device Validation
 
+- Device switches in `config.toml` (`"on"` / `"off"`) control whether each device is required at experiment start.
+- When an enabled startup-critical device cannot be opened, experiment start is blocked.
+- The failure reason is reported in both:
+  - the main GUI warning/error area
+  - the terminal output
+- To continue without a disconnected device, set that device to `"off"` in `config.toml`.
+
+## Data Structure
+
+HDF5 groups and dataset semantics are documented in [DATA_STRUCTURE.md](DATA_STRUCTURE.md).
+
+## Folder Responsibilities
+
+- `apt/`: experiment orchestration and control loop
+- `core/`: shared state, logging, HDF5 writing, runtime helpers
+- `devices/`: hardware-specific device interfaces and initialization
+- `devices_test/`: standalone per-device diagnostic scripts
+- `drs/`: DRS digitizer wrapper and native libraries
+- `gui/`: main GUI and sub-GUIs
+- `nkt_photonics/`: NKT Origami interfaces
+- `tdc_roentdek/`: RoentDek TDC wrapper and native libraries
+- `tdc_surface_concept/`: Surface Concept TDC wrapper and native libraries
+- `thorlabs_apt/`: Thorlabs stage control wrappers
+- `usb_switch/`: USB switch wrapper
+
+## Notes for Developers
+
+- Use `pathlib.Path` or `runtime.project_path(...)` for portable paths.
+- Keep hardware-facing logic isolated in `devices/`, `tdc_*`, `drs/` modules.
+- Keep GUI logic in `gui/` and avoid direct hardware access from UI classes.
+- Use `devices_test/` scripts to validate each device independently before full experiment runs.
+
+## GUI Overview
+
+![Main GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/main_gui.png?raw=True)
+
+Detailed sub-GUI snapshots:
+
+- Gates: ![Gates GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/gates_gui.png?raw=True)
+- Pumps/Vacuum: ![Pumps GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/pumps_gui.png?raw=True)
+- Cameras: ![Cameras GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/cameras_gui.png?raw=True)
+- Laser: ![Laser GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/laser_gui.png?raw=True)
+- Stage: ![Stage GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/stage_gui.png?raw=True)
+- Visualization: ![Visualization GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/visualization_gui.png?raw=True)
+- Baking: ![Baking GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/baking_gui.png?raw=True)
+
+## Electrode List
+
+`electrode.toml` stores available electrode identifiers used for experiment metadata entry in the GUI.
+The file is comment-friendly and user-editable. Example:
+
+```toml
+[electrodes]
+names = [
+    "NiC1",  # Nickel capillary
+    "CuC1",
+    "NC",    # Not categorized
+]
+```

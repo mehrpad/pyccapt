@@ -1,61 +1,67 @@
-# HDF5 Data Structure of PyCCAPT Control Module
+﻿# HDF5 Data Structure for `pyccapt.control`
 
-This document provides an overview of the data structure within the HDF5 file of the control software of the PyCCAPT.
-In the descriptions below, the notation "(n, )(unit, datatype)" is used to represent one-dimensional arrays with the
-unit and data type specified. This structure remains consistent for all other information. For example,
-"(n, )(nm, float64)" indicates a one-dimensional array in float64 data type with the unit "nm" (nanometers).
-"N/A" is used to indicate that there is no specific unit associated with the data.
+This document describes the expected structure of control-side HDF5 output.
 
-## Groups
+Notation:
 
-### Group: `apt`:
+- `(n,)`: one-dimensional array with `n` samples
+- units are listed in parentheses
+- datatype is listed as NumPy/HDF5 type
+- `N/A` means dimensionless or not directly unit-bearing
 
-The `apt` group contains the data from the APT system in each iteration of the control loop. As a result the frequency
-of saving data depends on the frequency of the control loop.
+## Group `apt`
 
-- `id` (n,) (N/A, uint64): Experiment loop iteration counter.
-- `num_event` (n,) (N/A, uint32): Number of detected ions
-- `num_raw_signal` (n,) (N/A, uint32): Number of detected delayline signals
-- `temperature` (n,) (k, float64): Measured Temperature of sample.
-- `experiment_chamber_vacuum` (n,) (mBar, float64): Vacuum level in the experiment chamber.
-- `timestamps` (n,) (UNIX, float64): UNIX time at which the data was recorded in each iteration with micro second
-  accuracy.
+Control-loop metadata recorded each iteration.
 
-### Group: `dld`
+- `id` `(n,)` (`N/A`, `uint64`): control-loop iteration index
+- `num_event` `(n,)` (`N/A`, `uint32`): number of detected ions in loop interval
+- `num_raw_signal` `(n,)` (`N/A`, `uint32`): number of raw detector signals
+- `temperature` `(n,)` (`K`, `float64`): sample temperature
+- `experiment_chamber_vacuum` `(n,)` (`mbar`, `float64`): main-chamber vacuum
+- `timestamps` `(n,)` (`UNIX s`, `float64`): acquisition timestamp
 
-The Delay Line Detector (`dld`) group contains the time of flight detector hit coordinates calculated via DLLs. The data
-structure of the
+## Group `dld`
 
-- `x` (n,) (cm, float64): Detector x hit position for the detected event.
-- `y` (n,) (cm, float64): Detector y hit position for the detected event.
-- `t` (n,) (ns, float64): Time-of-flight for the detected event.
-- `high_voltage` (n,) (V, float64): DC voltage value of the power supply.
-- `voltage_pulse` (n,) (V, float64): Pulse voltage.
-- `laser_pulse` (n,) (pJ, float64): Laser pulse energy.
-- `start_counter` (n,) (N/A, float64): Description of start counter data.
+Delay-line detector hit coordinates and synchronized high-voltage/pulse metadata.
 
-### Group: `tdc`
+- `x` `(n,)` (`cm`, `float64`): detector X hit position
+- `y` `(n,)` (`cm`, `float64`): detector Y hit position
+- `t` `(n,)` (`ns`, `float64`): time-of-flight
+- `high_voltage` `(n,)` (`V`, `float64`): specimen DC voltage
+- `voltage_pulse` `(n,)` (`V`, `float64`): pulse voltage
+- `laser_pulse` `(n,)` (`pJ`, `float64`): laser pulse energy
+- `start_counter` `(n,)` (`N/A`, `float64`): DLD/TDC start counter aligned to event stream
 
-Raw data from the Time to Digital Converter (`TDC`) system. The data structure depends on the TDC system used (Surface
-Concept ot RoentDek).
+## Group `tdc`
 
-#### Surface Concept TDC:
+Raw time-to-digital converter stream. Exact channel schema depends on the TDC backend.
 
-- `start_counter` (n,) (N/A, uint64): Start counter of tdc (integer).
-- `channel` (n,) (N/A, uint32): Description of channel data (integer).
-- `time_data` (n,) (N/A, uint64): Description of time data (integer).
-- `high_voltage` (n,) (V, float64): Applied DC voltage for tdc events (float64).
-- `voltage_pulse` (n,) (V, float64): Pulse voltage.
-- `laser_pulse` (n,) (pJ, float64): Laser pulse energy.
-#### RoentDek TDC:
+### Surface Concept backend
 
-- `ch0` (n,) (N/A, uint64): Time counter at channel 0 for tdc events, dld 1.
-- `ch1` (n,) (N/A, uint64): Time counter at channel 1 for tdc events, dld 1.
-- `ch2` (n,) (N/A, uint64): Time counter at channel 2 for tdc events, dld 2.
-- `ch3` (n,) (N/A, uint64): Time counter at channel 3 for tdc events, dld 2.
-- `ch4` (n,) (N/A, uint64): Time counter at channel 4 for tdc events, dld 3.
-- `ch5` (n,) (N/A, uint64): Time counter at channel 5 for tdc events, dld 3.
-- `ch6` (n,) (N/A, uint64): Time counter at channel 6 for tdc events, pulse trigger.
-- `ch7` (n,) (N/A, uint64): Time counter at channel 7 for tdc events.
-- `voltage_pulse` (n,) (V, float64): Pulse voltage.
-- `laser_pulse` (n,) (pJ, float64): Laser pulse energy.
+- `start_counter` `(n,)` (`N/A`, `uint64`)
+- `channel` `(n,)` (`N/A`, `uint32`)
+- `time_data` `(n,)` (`N/A`, `uint64`)
+- `high_voltage` `(n,)` (`V`, `float64`)
+- `voltage_pulse` `(n,)` (`V`, `float64`)
+- `laser_pulse` `(n,)` (`pJ`, `float64`)
+
+### RoentDek backend
+
+- `ch0..ch7` `(n,)` (`N/A`, `uint64`): per-channel raw counters
+- `voltage_pulse` `(n,)` (`V`, `float64`)
+- `laser_pulse` `(n,)` (`pJ`, `float64`)
+
+## Group `hsd`
+
+High-speed digitizer (DRS) waveforms and synchronized metadata.
+
+- `ch0_time`, `ch1_time`, `ch2_time`, `ch3_time` `(n,)` (`ns`, `float64`)
+- `ch0_wave`, `ch1_wave`, `ch2_wave`, `ch3_wave` `(n,)` (`V`, `float64`)
+- `high_voltage` `(n,)` (`V`, `float64`)
+- `voltage_pulse` `(n,)` (`V`, `float64`)
+- `laser_pulse` `(n,)` (`pJ`, `float64`)
+
+## Compatibility Notes
+
+- Some historical files may use older dataset names.
+- `control/control_data_tool.py` contains migration helpers for older structures.

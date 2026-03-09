@@ -1,6 +1,5 @@
-import multiprocessing
-import os
-import sys
+﻿import sys
+from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
@@ -9,7 +8,7 @@ from PyQt6.QtCore import pyqtSignal, QObject, QThread
 from PyQt6.QtGui import QPixmap
 
 # Local module and scripts
-from pyccapt.control.control import share_variables, read_files
+from pyccapt.control.core import runtime
 from pyccapt.control.devices import camera
 from pyccapt.control.usb_switch import usb_switch
 
@@ -414,12 +413,13 @@ class Ui_Cameras_Alignment(object):
 		# arrow1 = pg.ArrowItem(pos=(925, 770), angle=0)
 		# self.cam_b_o.addItem(arrow1)
 		# Side camera (x, y) main arrow for puck exchange (Blue arrow)
-		arrow1 = pg.ArrowItem(pos=(805, 735), angle=-90)
-		arrow2 = pg.ArrowItem(pos=(645, 760), angle=-90, brush='r')
-		# arrow3 = pg.ArrowItem(pos=(890, 1100), angle=0)
+		arrow1 = pg.ArrowItem(pos=(920, 830), angle=-90, brush='r')
+		arrow3 = pg.ArrowItem(pos=(940, 600), angle=0, brush='g')
+		arrow2 = pg.ArrowItem(pos=(795, 850), angle=-90, brush='b')
+
 		self.cam_s_o.addItem(arrow1)
 		self.cam_s_o.addItem(arrow2)
-		# self.cam_s_o.addItem(arrow3)
+		self.cam_s_o.addItem(arrow3)
 		# side camera zoom (x, y) zoom arrow
 		# arrow1 = pg.ArrowItem(pos=(380, 115), angle=90, brush='r')
 		# self.cam_s_d.addItem(arrow1)
@@ -624,6 +624,10 @@ class Ui_Cameras_Alignment(object):
 			# Thread for reading cameras
 			# Create a camera instance and move it to a new thread
 			self.camera_worker = camera.CameraWorker(variables=self.variables, emitter=self.emitter)
+			if not self.camera_worker.camera_available:
+				print(self.camera_worker.camera_status_message)
+				self.variables.flag_camera_grab = False
+				return
 
 			self.camera_thread = QThread()
 			self.camera_worker.moveToThread(self.camera_thread)
@@ -649,12 +653,13 @@ class Ui_Cameras_Alignment(object):
 		# Add any additional cleanup code here
 		# with self.variables.lock_setup_parameters:
 		self.variables.flag_camera_grab = False
-		self.camera_thread.join()
+		if hasattr(self, 'camera_thread'):
+			self.camera_thread.wait()
 
 	def cameras_screenshot(self):
 		if self.variables.flag_cameras_take_screenshot:
 			screenshot = QtWidgets.QApplication.primaryScreen().grabWindow(self.Cameras_Alignment.winId())
-			screenshot.save(self.variables.path_meta + '\cameras_screenshot.png', 'png')
+			screenshot.save(str(Path(self.variables.path_meta) / "cameras_screenshot.png"), 'png')
 
 
 class SignalEmitter(QObject):
@@ -738,26 +743,20 @@ def run_camera_window(variables, conf, camera_closed_event, camera_win_front):
 
 if __name__ == "__main__":
 	try:
-		# Load the JSON file
-		configFile = 'config.json'
-		p = os.path.abspath(os.path.join(__file__, "../../.."))
-		os.chdir(p)
-		conf = read_files.read_json_file(configFile)
-	except Exception as e:
+		conf, _ = runtime.load_project_config()
+	except Exception as exc:
 		print('Can not load the configuration file')
-		print(e)
+		print(exc)
 		sys.exit()
 
-	# Initialize global experiment variables
-	manager = multiprocessing.Manager()
-	ns = manager.Namespace()
-	variables = share_variables.Variables(conf, ns)
+	shared = runtime.create_shared_context(conf)
 
 	app = QtWidgets.QApplication(sys.argv)
 	app.setStyle('Fusion')
 	Cameras_Alignment = QtWidgets.QWidget()
 	signal_emitter = SignalEmitter()
-	ui = Ui_Cameras_Alignment(variables, conf, signal_emitter)
+	ui = Ui_Cameras_Alignment(shared.variables, conf, signal_emitter)
 	ui.setupUi(Cameras_Alignment)
 	Cameras_Alignment.show()
 	sys.exit(app.exec())
+

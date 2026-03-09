@@ -1,238 +1,221 @@
-# PyCCAPT (APT_PyControl)
-
-# A modular, FAIR open-source python atom probe tomography software package for experiment control and data calibration
+# PyCCAPT
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.10210507.svg)](https://doi.org/10.5281/zenodo.10210507)
 [![Documentation Status](https://readthedocs.org/projects/pyccapt/badge/?version=latest)](https://pyccapt.readthedocs.io/en/latest/?badge=latest)
-<!--[![coverage report](https://gitlab.com/jesseds/apav/badges/master/coverage.svg)](https://gitlab.com/jesseds/apav/commits/master)
-[![pipeline status](https://gitlab.com/jesseds/apav/badges/master/pipeline.svg)](https://gitlab.com/jesseds/apav/-/commits/master)-->
 
-<img align="right" src="https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/logo2.png?raw=True)" alt="Alt Text" width="300" height="300">
+PyCCAPT is a modular, FAIR-oriented Python package for atom probe tomography (APT) instrument control, data calibration, and reconstruction workflows.
 
-This package aims to provide open-source software for controlling atom probe systems and calibrating data.
-The package is modular and adaptable for a wide range of devices in atom probe instrument. So far it is
-capable of collecting data from Surface consept and ReoenDek TDC systems. The package is developed in Python 3.9.
-Additionally, the package encompasses a comprehensive calibration module that provides various functionalities,
-including t<sub>0</sub> and flight path calculation, region of interest (ROI) selection, voltage and bowl calibration,
-as well as
-3D reconstruction techniques.
-This module enhances the capabilities of PyCCAPT by providing essential tools for accurate data interpretation and
-analysis.
+It provides:
 
-----------
+- experiment control and acquisition for APT hardware
+- calibration workflows such as `t0` and flight-path estimation, ROI selection, voltage and bowl correction, and ranging
+- reconstruction and visualization tooling
+- interoperable data export for HDF5-based workflows and common APT exchange formats
 
-# Overview
+<img align="right" src="https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/logo2.png?raw=True" alt="PyCCAPT logo" width="220" height="220">
 
-PyCCAPT was initially developed and tested on the OXCART atom probe, an in-house atom probe system situated
-within the Department of Materials Science & Engineering at the University of Erlangen-Nürnberg. The OXCART atom probe boasts a titanium-based measuring chamber that facilitates an ultra-low hydrogen 
-vacuum environment. This system also features a state-of-the-art detector with a high detection
-efficiency of approximately 80%. While tailor-made for the OXCART, the PyCCAPT package offers versatility, extending its
-capabilities to effectively control atom probe systems.
+## Project Scope
 
-![](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/oxcart.jpg?raw=True)
+PyCCAPT was developed and validated on the OXCART atom probe platform and is designed to be adaptable to other APT systems through device-specific modules. Current integrations include detector backends such as Surface Concept and RoentDek, together with modular support for common laboratory hardware.
 
-The package is designed with modularity in mind, making it highly adaptable to new instruments. This
-adaptability extends to instruments like Pfeifer gauges, Fug power supplies, and Siglent signal generators. Notably, the
-PyCCAPT package has already demonstrated its proficiency in collecting data from Surface Concept and ReoenDek TDC
-systems.
+![OXCART atom probe](pyccapt/files/readme_images/oxcart.jpg)
 
-The PyCCAPT package forms the foundation of a fully FAIR atom probe data collection and processing chain. This
-repository includes the graphical user interface (GUI) and control program, which enable experiment control,
-visualization, and data acquisition. The following images provide an overview of the user interface:
+## Installation
 
-![](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/main_gui.png?raw=True)
+PyCCAPT requires Python `>=3.9`.
 
-The calibration module is another component of the PyCCAPT, providing essential tools for data calibration and
-interpretation. This module includes functionalities such as t<sub>0</sub> and flight path calculation, region of
-interest (ROI) selection, voltage and bowl calibration, and 3D reconstruction techniques. 
+### Recommended Quick Start (Conda)
 
-![](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/visualization_gif.gif?raw=True)
+For most users, this is the best way to install PyCCAPT:
 
-You can see some of the features of the calibration module in the following images.
-
-The FDM and detector hitmap as Gif images for an Aluminium sample:
-
-![](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/hist.png?raw=True)
-
-<div align="center">
-  <img width = "37%" src="https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/fdm.png?raw=True">
-  &nbsp;&nbsp;&nbsp;&nbsp;
-  <img width = "33%" src="https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/detector.gif?raw=True">
-</div>
-
-Bowl and voltage calibration:
-
-
-<div align="center">
-  <img width="30%" src="https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/vol_corr.png?raw=True">
-  &nbsp;&nbsp;&nbsp;&nbsp;
-  <img width="30%" src="https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/bowl_corr.png?raw=True">
-</div>
-<div align="center">
-  <img width = "30%" src="https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/tof_V_corr.png?raw=True">
-  &nbsp;&nbsp;&nbsp;&nbsp;  
-  <img width = "30%" src="https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/tof_bowl_corr_y_det.png?raw=True">
-</div>
-
-
-A ranged mass spectrum for a Nimonic® 90 sample:
-
-<div align="center">
-  <img width = "90%" src="https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/mc.png?raw=True">
-</div>
-
-
-Html link below can be used to show a 3d reconstruction of Nimonic® 90 sample: [Nimonic® 3D reconstruction](https://rawcdn.githack.com/mmonajem/pyccapt/52835bc47735ef12bffcf7e18ce90b556b07d12f/pyccapt/files/readme_images/3d_o.html)
-
-The 3d reconstruction of Nimonic® 90 and precipitates can be seen in the following Gifs:
-
-
-<div align="center">
-  <img width = "40%" src="https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/roto.gif?raw=True">
-  &nbsp;&nbsp;&nbsp;&nbsp;
-  <img width = "40%" src="https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/iso.gif?raw=True">
-</div>
-
-The PyCCAPT package is a tool for controlling atom probe systems and
-calibrating data.
-
- ---------------------
-
-# Directory structure
+```bash
+conda create -n pyccapt python=3.11
+conda activate pyccapt
+python -m pip install --upgrade pip
+pip install "pyccapt[full]"
 ```
-pyccapt/
-├── pyccapt/
-│   ├── __init__.py
-│   ├── config.json   
-│   ├── calibration/
-│   │   ├── __init__.py
-│   │   └── module_folders   
-│   ├── control/
-│   │   ├── __init__.py
-│   │   └── module_folders
-│   └── files/
-├── docs/
-├── setup.py
-├── README.md
-├── CONTRIBUTION.md
-├── MANIFEST.in
-├── Licence
-└── tox.ini
-└── tests/
-    ├── __init__.py
-    ├── data/
-    └── tests
+
+If you want to work from this repository instead of PyPI:
+
+```bash
+git clone https://github.com/mmonajem/pyccapt.git
+cd pyccapt
+conda activate pyccapt
+pip install -e ".[full]"
 ```
- ---------------------
 
-# Installation
+Predefined conda environment files are also included in the repo:
 
-1. Create a virtual environment using Anaconda:
+```bash
+conda env create -f environment.yml
+conda env create -f environment.full.yml
+```
 
-   ```bash
-   conda create -n apt_env python=3.9
-    ```
+### Other Installation Options
 
-2. Activate the virtual environment:
+1. Install from PyPI:
 
-   ```bash
-   conda activate apt_env
-   ```
+```bash
+pip install pyccapt
+```
 
-3. Clone or download this repository, unzip it, and in the project directory run:
+Optional dependency groups:
 
-   ```bash
-   pip install -e .
-   ```
+```bash
+pip install "pyccapt[calibration]"
+pip install "pyccapt[control]"
+pip install "pyccapt[full]"
+```
 
-After installation, you can run the control GUI by entering the following command in the console:
+Module-specific editable installs:
 
-   ```bash
-   pyccapt
-   ```
+```bash
+pip install -e ".[control]"
+pip install -e ".[calibration]"
+```
 
-or if the above command does not work, you can run the following command:
+## Running PyCCAPT
 
-   ```bash
-   python -m pyccapt.control
-   ```
+Start the control application:
 
+```bash
+pyccapt
+```
 
-To start the tutorial, please follow these steps:
+Fallback entrypoint:
 
-1- Open your terminal.
+```bash
+python -m pyccapt.control
+```
 
-2- Navigate to the project folder using the cd command.
+Run tests:
 
-3- Once you're inside the project folder, go to the tutorial folder by running the following command:
+```bash
+pytest -q --run-calibration
+pytest -q --run-control
+pytest -q
+```
 
-   ```bash
-   Jupyter lab
-   ```
+Run calibration tutorials:
 
---------------
+```bash
+jupyter lab
+```
 
-# Documentation
+Then open notebooks under `pyccapt/calibration/tutorials`.
 
-The latest documentation is available on
-[ReadTheDocs](https://pyccapt.readthedocs.io/en/latest/?#) page. It provides feature descriptions, tutorials, and
-valuable information.
+## Configuration
 
+Control runtime configuration is stored in `pyccapt/config.toml`.
 
----------------------
-# Using PyCCAPT
+Control GUI electrode labels are stored in `pyccapt/control/electrode.toml`:
+
+```toml
+[electrodes]
+names = [
+  "NiC1", # Nickel electrode
+  "CuC1", # Copper electrode
+]
+```
+
+For device toggles, prefer `enabled` and `disabled`. Legacy `on` and `off` values still work.
+
+## Control Highlights
+
+![Main GUI](pyccapt/files/readme_images/main_gui.png)
+
+The control stack includes the main acquisition GUI together with dedicated windows for gates, pumps and vacuum, cameras, laser, stage control, visualization, and baking. Startup reports unavailable configured ports clearly, GUI error boxes wrap long messages, and `Access Override` now asks for confirmation before allowing a run to proceed with missing enabled devices.
+
+Vacuum logs are written under `pyccapt/files/logs/vacuum`, and baking logs are written under `pyccapt/files/logs/baking/<timestamp>`.
+
+## Calibration Highlights
+
+![Calibration visualization](pyccapt/files/readme_images/visualization_gif.gif)
+
+PyCCAPT calibration workflows cover detector hit maps, FDM views, mass-spectrum calibration, bowl and voltage correction, reconstruction, and downstream visualization.
+
+![Mass spectrum](pyccapt/files/readme_images/hist.png)
+
+<p align="center">
+  <img width="36%" src="pyccapt/files/readme_images/fdm.png" alt="FDM">
+  <img width="32%" src="pyccapt/files/readme_images/detector.gif" alt="Detector GIF">
+</p>
+
+<p align="center">
+  <img width="30%" src="pyccapt/files/readme_images/vol_corr.png" alt="Voltage correction">
+  <img width="30%" src="pyccapt/files/readme_images/bowl_corr.png" alt="Bowl correction">
+</p>
+
+<p align="center">
+  <img width="30%" src="pyccapt/files/readme_images/tof_V_corr.png" alt="TOF versus voltage">
+  <img width="30%" src="pyccapt/files/readme_images/tof_bowl_corr_y_det.png" alt="TOF bowl correction">
+</p>
+
+![Ranged mass spectrum](pyccapt/files/readme_images/mc.png)
+
+Processed calibration datasets can be exported as `HDF5`, `EPOS`, `POS`, and `ATO`.
+
+The visualization helpers also include optional two-segment precipitate clustering with a Min-Max algorithm so a selected precipitate population can be segmented directly in the 3D and iso-surface views.
 
 For control part of the package you can follow the steps
 on [documentation](https://pyccapt.readthedocs.io/).
 
-For calibration, review the [tutorial](https://pyccapt.readthedocs.io/en/latest/tutorials.html) to understand package
-features.
+<p align="center">
+  <img width="40%" src="pyccapt/files/readme_images/roto.gif" alt="3D rotation">
+  <img width="40%" src="pyccapt/files/readme_images/iso.gif" alt="3D isosurface">
+</p>
 
-To test the code on Google colab, you can use the following links:
-[data processing](https://colab.research.google.com/github/mmonajem/pyccapt/blob/main/pyccapt/calibration/tutorials/colab/data_processing.ipynb), 
-[data visualization](https://colab.research.google.com/github/mmonajem/pyccapt/blob/main/pyccapt/calibration/tutorials/colab/visualization.ipynb), and
-[t<sub>0</sub> and flight path calculation](https://colab.research.google.com/github/mmonajem/pyccapt/blob/main/pyccapt/calibration/tutorials/colab/L_and_t0_determination.ipynb).
+## Documentation
 
----------------------
-# Data structure
+- Full documentation: [Read the Docs](https://pyccapt.readthedocs.io/)
+- Control guide: [docs/configuration](https://pyccapt.readthedocs.io/en/latest/configuration.html)
+- Calibration tutorials: [docs/tutorials](https://pyccapt.readthedocs.io/en/latest/tutorials.html)
 
-For checking the data structure of the control module you can check [here](pyccapt/control/DATA_STRUCTURE.md). For the 
-calibration module, you can check [here](pyccapt/calibration/DATA_STRUCTURE.md).
+Google Colab notebooks:
 
----------------------
-# Test data
+- [Data processing](https://colab.research.google.com/github/mmonajem/pyccapt/blob/main/pyccapt/calibration/tutorials/colab/data_processing.ipynb)
+- [Visualization](https://colab.research.google.com/github/mmonajem/pyccapt/blob/main/pyccapt/calibration/tutorials/colab/visualization.ipynb)
+- [`t0` and flight path estimation](https://colab.research.google.com/github/mmonajem/pyccapt/blob/main/pyccapt/calibration/tutorials/colab/L_and_t0_determination.ipynb)
 
-For start using the calibration package, you can use the test data (pure Aluminium) provided in the following link. The
-link contains the raw dataset that is collected from the OXCART atom probe from a pure Aluminium sample. It also
-contains
-the output file from the calibration module, which contains the calibrated data as well as the reconstructed data. The
-link also contain the range file (HDF5) that is calculated by the calibration module.
+## Data Structures
+
+- Control data model: [pyccapt/control/DATA_STRUCTURE.md](pyccapt/control/DATA_STRUCTURE.md)
+- Calibration data model: [pyccapt/calibration/DATA_STRUCTURE.md](pyccapt/calibration/DATA_STRUCTURE.md)
+
+## Tutorial Dataset
+
+Calibration tutorial data (pure aluminum), including raw and processed outputs, is available on Zenodo:
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.14673955.svg)](https://doi.org/10.5281/zenodo.14673955)
 
-------------------
-# Bug reports
+## Citation
 
-Report bugs, issues, ask for help, or provide feedback on
-the [Github section](https://github.com/mmonajem/pyccapt/issues).
+If you use PyCCAPT in your work, please cite:
 
-Qestions/comments:
-  - Mehrpad Monajem, mehrpad.monajem@fau.de
+```bibtex
+@article{monajem2025pyccapt,
+  title={PyCCAPT: A Python Package for Open-Source Atom Probe Instrument Control and Data Calibration},
+  author={Monajem, Mehrpad and Ott, Benedict and Heimerl, Jonas and Meier, Stefan and Hommelhoff, Peter and Felfer, Peter},
+  journal={Microscopy Research and Technique},
+  volume={88},
+  number={12},
+  pages={3199--3210},
+  year={2025},
+  publisher={Wiley Online Library}
+}
+```
 
------------
+Citation metadata is also available in [CITATION.cff](CITATION.cff).
 
-# Citing
+## Contributing
 
------------
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow and pull-request guidance.
 
-# Contributing
+## Support
 
-Contributions to PyCCAPT are always welcome, and they are greatly appreciated! Our contribution
-policy can be found [here](CONTRIBUTING.md).
+- Issues and bug reports: [GitHub Issues](https://github.com/mmonajem/pyccapt/issues)
+- Contact: Mehrpad Monajem (`mehrpad.monajem@fau.de`)
 
-------------
+## License
 
-# License
-
-This project is licensed under the GNU General Public License v3.0. See
-the [LICENSE](LICENSE) file for details.
+PyCCAPT is licensed under the GNU General Public License v3.0. See [LICENSE](LICENSE).

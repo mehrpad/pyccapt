@@ -5,22 +5,27 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.signal import find_peaks
 import io
-import imageio
-import plotly
 import plotly.graph_objects as go
 from PIL import Image
 from plotly.subplots import make_subplots
 import plotly.io as pio
 
 
+from pyccapt.calibration.clustering import build_cluster_scatter_traces
 from pyccapt.calibration.reconstructions import reconstruction
+from pyccapt.calibration.reconstructions.io_utils import (
+    save_gif,
+    save_plotly_animation,
+    write_plotly_html,
+    write_plotly_image,
+)
 
 
 def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save, figname, save, make_gif=False,
                         range_sequence=[], range_mc=[], range_detx=[], range_dety=[],
                         range_x=[], range_y=[], range_z=[], range_vol=[], ions_individually_plots=False,
                         max_num_ions=None, min_num_ions=None, isosurface_dic=None, detailed_isotope_charge=False,
-                        only_iso=False):
+                        only_iso=False, cluster_result=None):
     """
     Generate a 3D plot for atom probe reconstruction data.
 
@@ -46,6 +51,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
         isosurface_dic (dic): Dictionary with the isosurface elements and their values.
         detailed_isotope_charge (bool): Whether to plot the range of each isotopes and charge state.
         only_iso (bool): Whether to plot only the isosurface.
+        cluster_result: Optional Min-Max precipitate segmentation overlay.
 
     Returns:
         None
@@ -278,6 +284,8 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                     fig = reconstruction.draw_qube(fig, range_cube, col, row)
 
                     fig.add_trace(scatter, row=row + 1, col=col + 1)
+            if cluster_result is not None:
+                print('Cluster overlay is shown only in the combined 3D iso-surface plot mode.')
         else:
             fig = go.Figure()
             for index, elemen in enumerate(ion):
@@ -363,6 +371,10 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                         )
                     )
 
+            if cluster_result is not None:
+                for trace in build_cluster_scatter_traces(variables, cluster_result, opacity=min(1.0, opacity + 0.25)):
+                    fig.add_trace(trace)
+
             fig = reconstruction.draw_qube(fig, range_cube)
     else:
         if max_num_ions is None:
@@ -430,7 +442,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                     eye=dict(x=4, y=4, z=4),  # Adjust the camera position for zooming
                 )
             )
-            pio.write_html(fig, variables.result_path + "/%s_3d.html" % figname, include_mathjax='cdn')
+            write_plotly_html(fig, variables, f"{figname}_3d.html", include_mathjax='cdn')
             fig.update_layout(showlegend=False)
             layout = go.Layout(
                 margin=go.layout.Margin(
@@ -441,16 +453,16 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                 )
             )
             fig.update_layout(layout)
-            pio.write_image(fig, variables.result_path + "/%s_3d.png" % figname, scale=3, format='png')
-            pio.write_image(fig, variables.result_path + "/%s_3d.svg" % figname, scale=3, format='svg')
+            write_plotly_image(fig, variables, f"{figname}_3d.png", scale=3, image_format='png')
+            write_plotly_image(fig, variables, f"{figname}_3d.svg", scale=3, image_format='svg')
             fig.update_layout(showlegend=True)
 
             fig.update_scenes(xaxis_visible=False, yaxis_visible=False, zaxis_visible=False)
             fig.update_layout(showlegend=False)
-            pio.write_image(fig, variables.result_path + "/%s_3d_o.png" % figname, scale=3, format='png')
-            pio.write_image(fig, variables.result_path + "/%s_3d_o.svg" % figname, scale=3, format='svg')
+            write_plotly_image(fig, variables, f"{figname}_3d_o.png", scale=3, image_format='png')
+            write_plotly_image(fig, variables, f"{figname}_3d_o.svg", scale=3, image_format='svg')
             fig.update_layout(showlegend=True)
-            pio.write_html(fig, variables.result_path + "/%s_3d_o.html" % figname, include_mathjax='cdn')
+            write_plotly_html(fig, variables, f"{figname}_3d_o.html", include_mathjax='cdn')
             fig.update_scenes(xaxis_visible=True, yaxis_visible=True, zaxis_visible=True)
         except Exception as e:
             print('The figure could not be saved')
@@ -538,7 +550,7 @@ def rotary_fig(fig, variables, rotary_fig_save, make_gif, figname):
         print('The images are ready for the GIF')
 
         # Save the images as a GIF using imageio
-        imageio.mimsave(variables.result_path + '\\rota_{fn}.gif'.format(fn=figname), images, fps=2)
+        save_gif(images, variables, f"rota_{figname}.gif", fps=2)
 
         fig.update_layout(showlegend=True)
 
@@ -580,12 +592,13 @@ def rotary_fig(fig, variables, rotary_fig_save, make_gif, figname):
             frames.append(go.Frame(layout=dict(scene_camera_eye=dict(x=xe, y=ye, z=ze))))
         fig.frames = frames
 
-        plotly.offline.plot(
+        save_plotly_animation(
             fig,
-            filename=variables.result_path + '\\rota_{fn}.html'.format(fn=figname),
+            variables,
+            filename=f"rota_{figname}.html",
             show_link=True,
             auto_open=False,
-            include_mathjax='cdn'
+            include_mathjax='cdn',
         )
 
 

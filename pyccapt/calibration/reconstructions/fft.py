@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import colors, rcParams
 
+from pyccapt.calibration.reconstructions.io_utils import save_matplotlib_figure
 
 
 def fft(particles, d, variables=None, normalize=False, reference_point=None,
@@ -151,8 +152,7 @@ def fft(particles, d, variables=None, normalize=False, reference_point=None,
         if save and variables is not None:
             # Enable rendering for text elements
             rcParams['svg.fonttype'] = 'none'
-            plt.savefig(variables.result_path + '\\fft_{fn}.png'.format(fn=figname), format="png", dpi=600)
-            plt.savefig(variables.result_path + '\\fft_{fn}.svg'.format(fn=figname), format="svg", dpi=600)
+            save_matplotlib_figure(fig, variables, stem=f"fft_{figname}", formats=("png", "svg"), dpi=600)
 
         if plot:
             plt.show()

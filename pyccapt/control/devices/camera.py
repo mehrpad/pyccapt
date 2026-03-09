@@ -3,8 +3,37 @@ import time
 
 import cv2
 import numpy as np
-from pypylon import pylon
 from PyQt6.QtCore import QObject, pyqtSlot, pyqtSignal
+
+try:
+    from pypylon import pylon
+except Exception as exc:  # pragma: no cover - depends on local Basler runtime
+    pylon = None
+    _PYPYLON_IMPORT_ERROR = exc
+else:
+    _PYPYLON_IMPORT_ERROR = None
+
+
+def check_camera_availability(required_cameras: int = 2) -> tuple[bool, str]:
+    """Return whether the Basler camera backend has enough connected devices."""
+
+    if pylon is None:
+        return False, f"Camera backend is unavailable ({_PYPYLON_IMPORT_ERROR})"
+
+    try:
+        devices = pylon.TlFactory.GetInstance().EnumerateDevices()
+    except Exception as exc:  # pragma: no cover - backend specific
+        return False, f"Unable to enumerate cameras ({exc})"
+
+    count = len(devices)
+    if count < required_cameras:
+        plural = "s" if count != 1 else ""
+        return (
+            False,
+            f"Detected {count} Basler camera{plural}; at least {required_cameras} are required.",
+        )
+
+    return True, f"Detected {count} Basler cameras."
 
 
 class CameraWorker(QObject):
@@ -29,6 +58,8 @@ class CameraWorker(QObject):
         self.exposure_auto = None
         self.emitter = emitter
         self.variables = variables
+        self.camera_available = False
+        self.camera_status_message = ""
 
         self.running = False
         self.index_save_image = 0
@@ -52,6 +83,9 @@ class CameraWorker(QObject):
         self.initialize_cameras()
 
     def start_capturing(self):
+        if not self.camera_available:
+            self.finished.emit()
+            return
         self.running = True
         self.thread = threading.Thread(target=self.update_cameras)
         self.thread.start()
@@ -157,14 +191,18 @@ class CameraWorker(QObject):
         Return:
             None
         """
+        available, message = check_camera_availability(required_cameras=2)
+        self.camera_available = available
+        self.camera_status_message = message
+        self.cameras = None
+        if not available:
+            print(message)
+            return
+
         try:
             maxCamerasToUse = 2
             self.tlFactory = pylon.TlFactory.GetInstance()
             self.devices = self.tlFactory.EnumerateDevices()
-
-            if len(self.devices) == 0:
-                raise pylon.RuntimeException("No camera present.")
-
             self.cameras = pylon.InstantCameraArray(min(len(self.devices), maxCamerasToUse))
 
             for i, cam in enumerate(self.cameras):
@@ -179,13 +217,12 @@ class CameraWorker(QObject):
             self.cameras[1].Open()
             self.cameras[1].ExposureAuto.SetValue('Off')
             self.cameras[1].ExposureTime.SetValue(self.exposure_time_cam_2)
-            # self.cameras[2].Open()
-            # self.cameras[2].ExposureAuto.SetValue('Off')
-            # self.cameras[2].ExposureTime.SetValue(self.exposure_time_cam_3)
             self.exposure_auto = False
         except Exception as e:
-            print('Error in initializing the camera class')
-            print(e)
+            self.camera_available = False
+            self.camera_status_message = f"Error in initializing the camera class ({e})"
+            self.cameras = None
+            print(self.camera_status_message)
 
     def update_cameras(self):
         """
@@ -197,6 +234,10 @@ class CameraWorker(QObject):
         Return:
             None
         """
+        if not self.camera_available or self.cameras is None:
+            self.finished.emit()
+            return
+
         retry_attempts = 5
         tmp_exposure_time_cam_1 = self.exposure_time_cam_1
         tmp_exposure_time_cam_2 = self.exposure_time_cam_2

@@ -79,6 +79,7 @@ import os
 from pathlib import Path
 import time
 import traceback
+from contextlib import contextmanager
 
 try:  # most stuff works without numpy
     import numpy as np
@@ -304,6 +305,37 @@ def copy_statistics(s):
     return r
 
 
+@contextmanager
+def _vendor_runtime_environment(module_dir: Path):
+    old_cwd = Path.cwd()
+    dll_directory = None
+    set_dll_directory = None
+    if os.name == 'nt':
+        if hasattr(os, "add_dll_directory"):
+            dll_directory = os.add_dll_directory(str(module_dir))
+        try:
+            kernel32 = ctypes.windll.kernel32
+            kernel32.SetDllDirectoryW.argtypes = [ctypes.c_wchar_p]
+            kernel32.SetDllDirectoryW.restype = ctypes.c_bool
+            set_dll_directory = kernel32.SetDllDirectoryW
+            set_dll_directory(str(module_dir))
+        except Exception:
+            set_dll_directory = None
+
+    try:
+        os.chdir(module_dir)
+        yield
+    finally:
+        os.chdir(old_cwd)
+        if set_dll_directory is not None:
+            try:
+                set_dll_directory(None)
+            except Exception:
+                pass
+        if dll_directory is not None:
+            dll_directory.close()
+
+
 class scTDClib:
 
     def __init__(self):
@@ -313,9 +345,10 @@ class scTDClib:
         self._module_dir = Path(__file__).resolve().parent
 
         if os.name == 'nt':
-            self.lib = ctypes.WinDLL(str(self._module_dir / "scTDC1.dll"))
-            self.lib.sc_tdc_init_inifile.argtypes = [ctypes.c_char_p]
-            self.lib.sc_get_err_msg.argtypes = [ctypes.c_int, ctypes.c_char_p]
+            with _vendor_runtime_environment(self._module_dir):
+                self.lib = ctypes.WinDLL(str(self._module_dir / "scTDC1.dll"))
+                self.lib.sc_tdc_init_inifile.argtypes = [ctypes.c_char_p]
+                self.lib.sc_get_err_msg.argtypes = [ctypes.c_int, ctypes.c_char_p]
         else:
             self.lib = ctypes.CDLL("libscTDC.so.1")
         self.lib.sc_tdc_init_inifile.argtypes = [ctypes.c_char_p]
@@ -361,6 +394,9 @@ class scTDClib:
             candidate = self._module_dir / ini_path
             if candidate.exists():
                 ini_path = candidate
+        if os.name == 'nt':
+            with _vendor_runtime_environment(self._module_dir):
+                return self.lib.sc_tdc_init_inifile(str(ini_path).encode('utf-8'))
         return self.lib.sc_tdc_init_inifile(str(ini_path).encode('utf-8'))
 
     def sc_get_err_msg(self, errcode):
@@ -500,7 +536,8 @@ class scTDC_hdf5lib:
         """
         self._module_dir = Path(__file__).resolve().parent
         if os.name == 'nt':
-            self.lib = ctypes.WinDLL(str(self._module_dir / "scTDC_hdf50.dll"))
+            with _vendor_runtime_environment(self._module_dir):
+                self.lib = ctypes.WinDLL(str(self._module_dir / "scTDC_hdf50.dll"))
         else:
             self.lib = ctypes.CDLL("libscTDC_hdf5.so.0")
         l = self.lib

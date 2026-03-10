@@ -32,8 +32,47 @@ def _write_chunked_dataset(hdf_file, dataset_name: str, chunk_files: list[Path],
 		offset += chunk_size
 
 
+def _coerce_numeric_array(data, dtype):
+	target_dtype = np.dtype(dtype)
+	values = np.asarray(data)
+	needs_string_conversion = (
+		values.dtype.kind in {"U", "S", "O"}
+		and (
+			np.issubdtype(target_dtype, np.floating)
+			or np.issubdtype(target_dtype, np.integer)
+		)
+	)
+	if not needs_string_conversion:
+		return values.astype(target_dtype, copy=False)
+
+	def _normalize_string(value):
+		if isinstance(value, bytes):
+			value = value.decode("utf-8", errors="ignore")
+		text = str(value).strip()
+		return text
+
+	def _convert_value(value):
+		text = _normalize_string(value)
+		if not text or text.lower() in {"n/a", "nan", "none"}:
+			return np.nan if np.issubdtype(target_dtype, np.floating) else 0
+		try:
+			numeric_value = float(text)
+		except (TypeError, ValueError):
+			return np.nan if np.issubdtype(target_dtype, np.floating) else 0
+		if np.issubdtype(target_dtype, np.integer):
+			return int(numeric_value)
+		return numeric_value
+
+	if values.ndim == 0:
+		return np.asarray(_convert_value(values.item()), dtype=target_dtype)
+
+	flat_values = [_convert_value(value) for value in values.reshape(-1)]
+	return np.asarray(flat_values, dtype=target_dtype).reshape(values.shape)
+
+
 def _create_dataset(hdf_file, dataset_name: str, data, dtype) -> None:
-	hdf_file.create_dataset(dataset_name, data=np.asarray(data), dtype=dtype)
+	dataset_data = _coerce_numeric_array(data, dtype)
+	hdf_file.create_dataset(dataset_name, data=dataset_data, dtype=dtype)
 
 
 def _write_surface_concept_detector_data(hdf_file, variables) -> None:

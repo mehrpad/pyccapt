@@ -208,9 +208,9 @@ def initialize_pfeiffer_gauges(variables):
     """
     tpg = TPG362(port=variables.COM_PORT_gauge_mc)
     value, _ = tpg.pressure_gauge(2)
-    variables.vacuum_main = '{}'.format(value)
+    variables.vacuum_main = float(value)
     value, _ = tpg.pressure_gauge(1)
-    variables.vacuum_buffer = '{}'.format(value)
+    variables.vacuum_buffer = float(value)
 
 
 def state_update(conf, variables, emitter):
@@ -303,13 +303,13 @@ def state_update(conf, variables, emitter):
 
         start_time = time.time()
         log_time_time_interval = conf['log_time_time_interval']
-        vacuum_main = 'N/A'
-        vacuum_buffer = 'N/A'
-        vacuum_buffer_backing = 'N/A'
-        vacuum_load_lock = 'N/A'
-        vacuum_load_lock_backing = 'N/A'
-        vacuum_cryo_load_lock = 'N/A'
-        vacuum_cryo_load_lock_backing = 'N/A'
+        vacuum_main = -1.0
+        vacuum_buffer = -1.0
+        vacuum_buffer_backing = -1.0
+        vacuum_load_lock = -1.0
+        vacuum_load_lock_backing = -1.0
+        vacuum_cryo_load_lock = -1.0
+        vacuum_cryo_load_lock_backing = -1.0
         set_temperature_tmp_cryo = 0
         set_temperature_tmp_ll = 0
         while emitter.bool_flag_while_loop:
@@ -369,23 +369,24 @@ def state_update(conf, variables, emitter):
             if conf['COM_PORT_gauge_mc'] != "off" and tpg is not None:
                 value, _ = tpg.pressure_gauge(2)
                 try:
-                    vacuum_main = '{}'.format(value)
+                    vacuum_main = float(value)
                     clear_issue("vacuum_main")
                 except Exception as e:
                     report_once("vacuum_main", f"Error reading Temperature:{e}")
                     # Handle the case where response is not a valid float
-                    vacuum_main = -1
+                    vacuum_main = -1.0
                 variables.vacuum_main = vacuum_main
                 emitter.vacuum_main.emit(float(vacuum_main))
                 value, _ = tpg.pressure_gauge(1)
                 try:
-                    vacuum_buffer = '{}'.format(value)
+                    vacuum_buffer = float(value)
                     clear_issue("vacuum_buffer")
                 except Exception as e:
                     report_once("vacuum_buffer", f"Error reading BC:{e}")
                     tpg = None
                     # Handle the case where response is not a valid float
-                    vacuum_buffer = -1
+                    vacuum_buffer = -1.0
+                variables.vacuum_buffer = vacuum_buffer
                 emitter.vacuum_buffer.emit(float(vacuum_buffer))
             if conf['pump_ll'] != "off" and E_AGC_ll is not None:
                 response = command_edwards(conf, variables, 'pressure', E_AGC=E_AGC_ll, status='load_lock')

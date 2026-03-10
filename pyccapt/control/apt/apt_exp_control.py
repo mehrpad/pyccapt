@@ -600,32 +600,43 @@ class APT_Exp_Control:
         self.variables.last_screen_shot = True
         validate_detector_data_lengths(self.variables, self.conf, self.log_apt)
 
-        self.variables.end_time = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
-        # save data in hdf5 file
-        hdf5_creator.hdf_creator(self.variables, self.conf, time_counter, time_ex)
-        # Adding results of the experiment to the log file
-        self.log_apt.info('Total number of Ions is: %s' % self.variables.total_ions)
-        self.log_apt.info('HDF5 file is created')
+        try:
+            self.variables.end_time = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
+            # save data in hdf5 file
+            hdf5_creator.hdf_creator(self.variables, self.conf, time_counter, time_ex)
+            # Adding results of the experiment to the log file
+            self.log_apt.info('Total number of Ions is: %s' % self.variables.total_ions)
+            self.log_apt.info('HDF5 file is created')
 
+            # save setup parameters and run statistics in a txt file
+            experiment_statistics.save_statistics_apt(self.variables, self.conf)
 
-        # save setup parameters and run statistics in a txt file
-        experiment_statistics.save_statistics_apt(self.variables, self.conf)
+            # send an email
+            if len(self.variables.email) > 3:
+                apt_exp_control_func.send_info_email(self.log_apt, self.variables)
 
-        # send an email
-        if len(self.variables.email) > 3:
-            apt_exp_control_func.send_info_email(self.log_apt, self.variables)
-
-        # Save new value of experiment counter
-        counter_path = runtime.ensure_counter_file()
-        self.variables.counter += 1
-        counter_path.write_text(str(self.variables.counter), encoding="utf-8")
-        self.log_apt.info('Experiment counter is increased')
-
-        self.experiment_finished_event.set()
-        # Clear up all the variables and deinitialize devices
-        self.clear_up()
-        self.log_apt.info('Variables and devices are cleared and deinitialized')
-        self.variables.flag_end_experiment = True
+            # Save new value of experiment counter
+            counter_path = runtime.ensure_counter_file()
+            self.variables.counter += 1
+            counter_path.write_text(str(self.variables.counter), encoding="utf-8")
+            self.log_apt.info('Experiment counter is increased')
+        except Exception as exc:
+            message = f'Experiment finalization failed: {exc.__class__.__name__}: {exc}'
+            print(message)
+            if self.log_apt is not None:
+                self.log_apt.exception(message)
+        finally:
+            try:
+                # Clear up all the variables and deinitialize devices
+                self.clear_up()
+                if self.log_apt is not None:
+                    self.log_apt.info('Variables and devices are cleared and deinitialized')
+            except Exception as exc:
+                print(f'Experiment cleanup failed: {exc.__class__.__name__}: {exc}')
+                if self.log_apt is not None:
+                    self.log_apt.exception('Experiment cleanup failed')
+            self.experiment_finished_event.set()
+            self.variables.flag_end_experiment = True
 
     def clear_up(self):
         """

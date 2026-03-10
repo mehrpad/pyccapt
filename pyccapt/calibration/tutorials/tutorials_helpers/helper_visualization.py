@@ -205,6 +205,7 @@ def call_visualization(variables, colab=False):
     make_evap_3d = widgets.Dropdown(options=[('True', True), ('False', False)], value=False)
     cluster_precipitate_3d = widgets.Dropdown(options=[('False', False), ('True', True)], value=False)
     cluster_labels_3d = widgets.Text(value='', placeholder='Ni3Al, Al')
+    cluster_count_3d = widgets.IntText(value=2)
     plot_3d_button.on_click(lambda b: plot_3d(b, variables, out))
     range_sequence_3d = widgets.Textarea(value='[0,0]')
     range_detx_3d = widgets.Textarea(value='[0,0]')
@@ -262,7 +263,11 @@ def call_visualization(variables, colab=False):
                 if not cluster_selection:
                     print('Clustering is enabled, but no ion or element labels were provided. Skipping segmentation.')
                 else:
-                    cluster_result = clustering.segment_ions_by_min_max(variables, cluster_selection, n_clusters=2)
+                    cluster_result = clustering.segment_ions_by_min_max(
+                        variables,
+                        cluster_selection,
+                        n_clusters=max(2, int(cluster_count_3d.value)),
+                    )
                     print('Min-Max clustering counts:', cluster_result.counts)
 
             reconstruction.reconstruction_plot(variables, element_percentage_list, opacity.value,
@@ -735,6 +740,7 @@ def call_visualization(variables, colab=False):
     make_gif_p3_iso = widgets.Dropdown(options=[('True', True), ('False', False)], value=False)
     cluster_precipitate_iso = widgets.Dropdown(options=[('False', False), ('True', True)], value=False)
     cluster_labels_iso = widgets.Text(value='', placeholder='Ni3Al, Al')
+    cluster_count_iso = widgets.IntText(value=2)
     plot_3d_button_iso.on_click(lambda b: plot_3d_iso(b, variables, out))
     isosurface_dic_p3_iso = widgets.Textarea(value="{Al: [3,3,3]}")
     detailed_isotope_charge_3d_iso = widgets.Dropdown(options=[('False', False), ('True', True)], value=False)
@@ -799,7 +805,11 @@ def call_visualization(variables, colab=False):
                 if not cluster_selection:
                     print('Iso-surface clustering is enabled, but no ion or element labels were provided. Skipping segmentation.')
                 else:
-                    cluster_result = clustering.segment_ions_by_min_max(variables, cluster_selection, n_clusters=2)
+                    cluster_result = clustering.segment_ions_by_min_max(
+                        variables,
+                        cluster_selection,
+                        n_clusters=max(2, int(cluster_count_iso.value)),
+                    )
                     print('Min-Max clustering counts:', cluster_result.counts)
 
             iso_surface.reconstruction_plot(variables, element_percentage_list_iso, opacity_iso.value,
@@ -842,6 +852,20 @@ def call_visualization(variables, colab=False):
         with out:
             clear_output(True)
             print('')
+
+    plot_clustered_3d_button = widgets.Button(description='plot clustered 3D')
+    plot_clustered_iso_button = widgets.Button(description='plot clustered iso surface')
+
+    def plot_clustered_3d(b):
+        cluster_precipitate_3d.value = True
+        plot_3d(b, variables, out)
+
+    def plot_clustered_iso(b):
+        cluster_precipitate_iso.value = True
+        plot_3d_iso(b, variables, out)
+
+    plot_clustered_3d_button.on_click(plot_clustered_3d)
+    plot_clustered_iso_button.on_click(plot_clustered_iso)
 
     tab0 = widgets.HBox([
         widgets.VBox([
@@ -923,8 +947,7 @@ def call_visualization(variables, colab=False):
             widgets.HBox([widgets.Label(value='Opacity:', layout=label_layout), opacity]),
             widgets.HBox(
                 [widgets.Label(value='Ions individually plots:', layout=label_layout), ions_individually_plots]),
-            widgets.HBox([widgets.Label(value='Cluster precipitate:', layout=label_layout), cluster_precipitate_3d]),
-            widgets.HBox([widgets.Label(value='Cluster ions/elements:', layout=label_layout), cluster_labels_3d]),
+            widgets.HTML(value="Cluster controls moved to the <b>Clustering</b> tab."),
             widgets.HBox([widgets.Label(value='Fig name:', layout=label_layout), figname_3d]),
             widgets.HBox([widgets.Label(value='Rotary save:', layout=label_layout), rotary_fig_save_p3]),
             widgets.HBox([widgets.Label(value='Save GIF:', layout=label_layout), make_gif_p3]),
@@ -1091,8 +1114,6 @@ def call_visualization(variables, colab=False):
             widgets.HBox([widgets.Label(value='Element percentage:', layout=label_layout), element_percentage_p3_iso]),
             widgets.HBox([widgets.Label(value='Opacity:', layout=label_layout), opacity_iso]),
             widgets.HBox([widgets.Label(value='Ions individually plots:', layout=label_layout), ions_individually_plots_iso]),
-            widgets.HBox([widgets.Label(value='Cluster precipitate:', layout=label_layout), cluster_precipitate_iso]),
-            widgets.HBox([widgets.Label(value='Cluster ions/elements:', layout=label_layout), cluster_labels_iso]),
             widgets.HBox([widgets.Label(value='Isosurface dic:', layout=label_layout), isosurface_dic_p3_iso]),
             widgets.HBox([widgets.Label(value='Detailed isotope charge:', layout=label_layout),
                             detailed_isotope_charge_3d_iso]),
@@ -1119,10 +1140,19 @@ def call_visualization(variables, colab=False):
         widgets.HTML(
             value=(
                 "<b>Min-Max clustering</b><br>"
-                "Use the controls in the <b>3D</b> or <b>Iso surface</b> tabs to enable "
-                "precipitate segmentation and provide the ion or element labels to cluster."
+                "Configure precipitate segmentation here, then run the clustered 3D or iso-surface plot."
             )
         ),
+        widgets.HTML(value="<b>3D clustering</b>"),
+        widgets.HBox([widgets.Label(value='Enable clustering:', layout=label_layout), cluster_precipitate_3d]),
+        widgets.HBox([widgets.Label(value='Cluster ions/elements:', layout=label_layout), cluster_labels_3d]),
+        widgets.HBox([widgets.Label(value='Number of clusters:', layout=label_layout), cluster_count_3d]),
+        widgets.HBox([plot_clustered_3d_button]),
+        widgets.HTML(value="<b>Iso-surface clustering</b>"),
+        widgets.HBox([widgets.Label(value='Enable clustering:', layout=label_layout), cluster_precipitate_iso]),
+        widgets.HBox([widgets.Label(value='Cluster ions/elements:', layout=label_layout), cluster_labels_iso]),
+        widgets.HBox([widgets.Label(value='Number of clusters:', layout=label_layout), cluster_count_iso]),
+        widgets.HBox([plot_clustered_iso_button]),
         widgets.HBox([clear_button]),
     ])
 

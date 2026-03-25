@@ -154,8 +154,12 @@ PyCCAPT calibration workflows cover detector hit maps, FDM views, mass-spectrum 
 ![Ranged mass spectrum](pyccapt/files/readme_images/mc.png)
 
 Processed calibration datasets can be exported as `HDF5`, `EPOS`, `POS`, and `ATO`.
+Saved range tables can be reloaded from PyCCAPT `HDF5` files as well as IVAS/LEAP
+range files in `.rrng` and `.rng` format.
 
-The visualization helpers also include optional two-segment precipitate clustering with a Min-Max algorithm so a selected precipitate population can be segmented directly in the 3D and iso-surface views.
+The visualization helpers also include optional precipitate clustering with both
+Min-Max and Maximum-Separation algorithms, plus iso-surface and proxigram
+workflows for interface analysis.
 
 For control part of the package you can follow the steps
 on [documentation](https://pyccapt.readthedocs.io/).
@@ -171,11 +175,15 @@ on [documentation](https://pyccapt.readthedocs.io/).
 - Control guide: [docs/configuration](https://pyccapt.readthedocs.io/en/latest/configuration.html)
 - Calibration tutorials: [docs/tutorials](https://pyccapt.readthedocs.io/en/latest/tutorials.html)
 
-Google Colab notebooks:
+Google Colab notebooks currently supported:
 
 - [Data processing](https://colab.research.google.com/github/mmonajem/pyccapt/blob/main/pyccapt/calibration/tutorials/colab/data_processing.ipynb)
 - [Visualization](https://colab.research.google.com/github/mmonajem/pyccapt/blob/main/pyccapt/calibration/tutorials/colab/visualization.ipynb)
-- [`t0` and flight path estimation](https://colab.research.google.com/github/mmonajem/pyccapt/blob/main/pyccapt/calibration/tutorials/colab/L_and_t0_determination.ipynb)
+
+Additional Jupyter-only widget workflows are available under
+`pyccapt/calibration/tutorials/jupyter_files`, including
+`L_and_t0_determination.ipynb`, `raw_data_analysis.ipynb`,
+`cameca_raw_import.ipynb`, and `tapsim_node_builder.ipynb`.
 
 ## Data Structures
 

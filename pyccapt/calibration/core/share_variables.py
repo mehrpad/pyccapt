@@ -102,8 +102,20 @@ class SharedVariablesBase:
 
     def build_calibration_mask(self, calibration_mode: str) -> np.ndarray:
         """Build a boolean mask from the selected peak range and calibration mode."""
+        mode = ensure_choice(calibration_mode, field_name="calibration_mode", allowed=CALIBRATION_MODES)
+        data = self.get_calibration_array(mode)
+        override = self.calibration_selection_masks.get(mode)
+        if override is not None:
+            override = np.asarray(override, dtype=bool)
+            if override.shape != data.shape:
+                raise CalibrationStateError(
+                    f"Locked calibration mask shape {override.shape} does not match data shape {data.shape}"
+                )
+            if not np.any(override):
+                raise CalibrationStateError(f"Locked calibration mask is empty for calibration_mode={mode!r}")
+            return override.copy()
+
         self.ensure_valid_peak_range()
-        data = self.get_calibration_array(calibration_mode)
         mask = np.logical_and(data > self.selected_x1, data < self.selected_x2)
         if not np.any(mask):
             raise CalibrationStateError(
@@ -111,6 +123,100 @@ class SharedVariablesBase:
                 f"calibration_mode={calibration_mode!r}"
             )
         return mask
+
+    def set_calibration_selection_mask(self, calibration_mode: str, mask: np.ndarray) -> None:
+        """Lock a boolean ion-selection mask for repeated calibration steps."""
+        mode = ensure_choice(calibration_mode, field_name="calibration_mode", allowed=CALIBRATION_MODES)
+        data = self.get_calibration_array(mode)
+        locked_mask = np.asarray(mask, dtype=bool)
+        if locked_mask.shape != data.shape:
+            raise CalibrationInputError(
+                f"Mask shape {locked_mask.shape} does not match calibration data shape {data.shape}"
+            )
+        if not np.any(locked_mask):
+            raise CalibrationInputError("Locked calibration mask cannot be empty")
+        self.calibration_selection_masks[mode] = locked_mask.copy()
+
+    def clear_calibration_selection_mask(self, calibration_mode: str | None = None) -> None:
+        """Clear one or all locked calibration ion masks."""
+        if calibration_mode is None:
+            self.calibration_selection_masks.clear()
+            return
+        mode = ensure_choice(calibration_mode, field_name="calibration_mode", allowed=CALIBRATION_MODES)
+        self.calibration_selection_masks.pop(mode, None)
+
+    @staticmethod
+    def _column_or_zeros(dataframe: pd.DataFrame, column: str, *, like: str | None = None) -> np.ndarray:
+        """Return a dataframe column as ndarray, or zeros matched to another column length."""
+        if column in dataframe.columns:
+            return dataframe[column].to_numpy()
+        if like is not None and like in dataframe.columns:
+            return np.zeros(len(dataframe[like].to_numpy()))
+        return np.zeros(len(dataframe))
+
+    def sync_from_data(self, data: pd.DataFrame | None = None, *, update_backups: bool = False,
+                       clear_selection: bool = True) -> pd.DataFrame:
+        """Synchronize shared arrays from the current dataframe after crop/load/reset operations."""
+        frame = self.data if data is None else data
+        if frame is None:
+            raise CalibrationStateError("No dataframe is available to synchronize shared variables")
+
+        frame = frame.reset_index(drop=True).copy()
+        self.data = frame
+        if update_backups or self.data_backup is None:
+            self.data_backup = frame.copy()
+
+        self.dld_high_voltage = self._column_or_zeros(frame, "high_voltage (V)")
+        if "pulse_v (V)" in frame.columns:
+            self.dld_pulse_v = frame["pulse_v (V)"].to_numpy()
+        elif "pulse" in frame.columns:
+            self.dld_pulse_v = frame["pulse"].to_numpy()
+        else:
+            self.dld_pulse_v = np.zeros(len(frame))
+        self.dld_pulse_l = self._column_or_zeros(frame, "pulse_l (pJ)", like="high_voltage (V)")
+        self.dld_t = self._column_or_zeros(frame, "t (ns)")
+        self.dld_t_c = self._column_or_zeros(frame, "t_c (ns)", like="t (ns)")
+        self.dld_x_det = self._column_or_zeros(frame, "x_det (cm)", like="t (ns)")
+        self.dld_y_det = self._column_or_zeros(frame, "y_det (cm)", like="t (ns)")
+
+        self.mc = self._column_or_zeros(frame, "mc (Da)", like="t (ns)")
+        if "mc_uc (Da)" in frame.columns:
+            self.mc_uc = frame["mc_uc (Da)"].to_numpy()
+        else:
+            self.mc_uc = self.mc.copy()
+
+        self.dld_t_calib = self.dld_t.copy()
+        self.mc_calib = self.mc_uc.copy()
+        if update_backups or self.dld_t_calib_backup.shape != self.dld_t_calib.shape:
+            self.dld_t_calib_backup = self.dld_t_calib.copy()
+        if update_backups or self.mc_calib_backup.shape != self.mc_calib.shape:
+            self.mc_calib_backup = self.mc_calib.copy()
+
+        self.x = self._column_or_zeros(frame, "x (nm)", like="t (ns)")
+        self.y = self._column_or_zeros(frame, "y (nm)", like="t (ns)")
+        self.z = self._column_or_zeros(frame, "z (nm)", like="t (ns)")
+
+        self.mask = None
+        self.AptHistPlotter = None
+        self.peak_x = []
+        self.peak_y = []
+        self.peak_widths = []
+        self.x_hist = None
+        self.y_hist = None
+        self.h_line_pos = []
+        self.clear_calibration_selection_mask()
+        if clear_selection:
+            self.clear_peak_range()
+            self.selected_x_fdm = 0
+            self.selected_y_fdm = 0
+            self.roi_fdm = 0
+        return frame
+
+    def restore_data_from_backup(self) -> pd.DataFrame:
+        """Restore the original dataframe snapshot and resynchronize shared arrays."""
+        if self.data_backup is None:
+            raise CalibrationStateError("No backup dataframe is available for restore")
+        return self.sync_from_data(self.data_backup.copy(), update_backups=False, clear_selection=True)
 
     @staticmethod
     def _dir_as_string(directory: str | Path) -> str:
@@ -214,6 +320,7 @@ class Variables(SharedVariablesBase):
         self.range_data = _create_default_range_data()
         self.range_data_backup = None
         self.animation_detector_html = None
+        self.calibration_selection_masks = {}
 
     @property
     def dld_highVoltage(self):

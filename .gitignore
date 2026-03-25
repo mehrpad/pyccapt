@@ -136,3 +136,7 @@ dmypy.json
 .idea/
 .virtual_documents/
 
+# Runtime logs / generated run artifacts
+/pyccapt/files/logs/
+/pyccapt/files/baking_logging/
+

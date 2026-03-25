@@ -15,7 +15,7 @@ def load_data(dataset_path, max_mc, flightPathLength, pulse_mode, tdc, variables
 		# Check that the dataset is a valid leap_epos dataset with .epos extension
 		if not dataset_path.endswith(('.epos', '.EPOS')):
 			raise ValueError('The dataset should be a valid leap_epos dataset with .epos extension')
-	elif tdc == 'pos':
+	elif tdc in {'pos', 'leap_pos'}:
 		# Check that the dataset is a valid pos dataset with .pos extension
 		if not dataset_path.endswith(('.pos', '.POS')):
 			raise ValueError('The dataset should be a valid pos dataset with .pos extension')
@@ -62,7 +62,7 @@ def load_data(dataset_path, max_mc, flightPathLength, pulse_mode, tdc, variables
 				else:
 					mode = 'processed'
 		else:
-			load_data_type = 'leap_pos' if tdc == 'pos' else tdc
+			load_data_type = 'leap_pos' if tdc in {'pos', 'leap_pos'} else tdc
 			dld_group_storage = data_tools.load_data(dataset_path, load_data_type)
 
 		if tdc == 'pyccapt' and mode == 'raw':
@@ -92,17 +92,17 @@ def load_data(dataset_path, max_mc, flightPathLength, pulse_mode, tdc, variables
 		if tdc == 'pyccapt':
 			data = data_tools.load_data(dataset_path, tdc, mode='processed')
 		else:
-			load_data_type = 'leap_pos' if tdc == 'pos' else tdc
+			load_data_type = 'leap_pos' if tdc in {'pos', 'leap_pos'} else tdc
 			data = data_tools.load_data(dataset_path, load_data_type)
 
 	print('Total number of Ions:', len(data))
 
 	variables.data = data
-	variables.data_backup = data.copy()
 	variables.max_mc = max_mc
 	variables.max_tof = max_tof
 	variables.flight_path_length = flightPathLength
 	variables.pulse_mode = pulse_mode
+	variables.sync_from_data(update_backups=True)
 
 
 

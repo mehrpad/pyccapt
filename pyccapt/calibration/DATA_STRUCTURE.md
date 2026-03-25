@@ -28,9 +28,12 @@ Typical calibrated dataset fields:
 - `multi`: `(n,)` `(N/A, uint32)` multiplicity per pulse
 - `start_counter`: `(n,)` `(N/A, float64)` TDC counter value
 
-## Range Dataset (HDF5)
+## Range Dataset (HDF5 or Imported `.rrng` / `.rng`)
 
-Range data defines identified ion windows in mass-to-charge space.
+Range data defines identified ion windows in mass-to-charge space. The workflow
+widgets can load either a saved PyCCAPT HDF5 range table (`.h5`), an IVAS
+range file (`.rrng`), or a legacy LEAP/IVAS range file (`.rng`), which are all
+normalized into the schema below.
 
 - `name`: `(n,)` `(N/A, string)` ion label (plain text)
 - `ion`: `(n,)` `(N/A, string)` ion label (LaTeX style)

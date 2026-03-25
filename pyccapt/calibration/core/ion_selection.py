@@ -102,6 +102,83 @@ def chunks(lst, n):
         yield lst[i:i + n]
 
 
+def _sequence_key(values):
+    """Convert list-like candidate fields to stable tuple keys."""
+    if isinstance(values, np.ndarray):
+        values = values.tolist()
+    if isinstance(values, (list, tuple)):
+        return tuple(int(v) if isinstance(v, (np.integer, int)) else v for v in values)
+    return values
+
+
+def _candidate_atom_count(complex_values):
+    """Return the total number of atoms represented by a candidate ion."""
+    if isinstance(complex_values, np.ndarray):
+        complex_values = complex_values.tolist()
+    if isinstance(complex_values, (list, tuple)):
+        return int(np.sum(np.asarray(complex_values, dtype=float)))
+    return int(complex_values)
+
+
+def rank_candidate_assignments(df, target_mass=None, variables=None):
+    """
+    Rank candidate atoms/molecules using mass error, abundance, and simplicity.
+
+    Lower score is better. The resulting dataframe is deduplicated and sorted so
+    the most plausible assignment appears first.
+    """
+    if df is None or df.empty:
+        return df
+
+    ranked = df.copy()
+    ranked['n_atoms'] = ranked['complex'].apply(_candidate_atom_count)
+
+    if target_mass is not None:
+        target_mass = float(target_mass)
+        ranked['mass_error'] = np.abs(ranked['mass'].astype(float) - target_mass)
+        if target_mass != 0:
+            ranked['ppm_error'] = ranked['mass_error'] / abs(target_mass) * 1e6
+        else:
+            ranked['ppm_error'] = np.nan
+    else:
+        if 'mass_error' not in ranked.columns:
+            ranked['mass_error'] = np.nan
+        if 'ppm_error' not in ranked.columns:
+            ranked['ppm_error'] = np.nan
+
+    abundance_safe = np.clip(ranked['abundance'].astype(float), 1e-12, None)
+    ranked['score'] = (
+        np.nan_to_num(ranked['mass_error'].astype(float), nan=0.0)
+        + 0.05 * np.maximum(ranked['n_atoms'].astype(float) - 1.0, 0.0)
+        + 0.02 * np.maximum(np.log10(1.0 / abundance_safe), 0.0)
+    )
+
+    ranked['_element_key'] = ranked['element'].apply(_sequence_key)
+    ranked['_complex_key'] = ranked['complex'].apply(_sequence_key)
+    ranked['_isotope_key'] = ranked['isotope'].apply(_sequence_key)
+    ranked = ranked.sort_values(
+        by=['score', 'mass_error', 'n_atoms', 'mass'],
+        ascending=[True, True, True, True],
+    )
+    ranked = ranked.drop_duplicates(
+        subset=['_element_key', '_complex_key', '_isotope_key', 'charge'],
+        keep='first',
+    )
+    ranked = ranked.drop(columns=['_element_key', '_complex_key', '_isotope_key'])
+
+    if 'mass_error' in ranked.columns:
+        ranked['mass_error'] = ranked['mass_error'].round(5)
+    if 'ppm_error' in ranked.columns:
+        ranked['ppm_error'] = ranked['ppm_error'].round(1)
+    ranked['score'] = ranked['score'].round(5)
+    ranked = ranked.reset_index(drop=True)
+
+    if variables is not None:
+        variables.range_data_backup = ranked.copy()
+
+    return ranked
+
+
 def find_closest_elements(target_elem, num_elements, abundance_threshold=0.0, charge=4, variables=None):
     """
     Find the closest elements to a target element.
@@ -149,7 +226,8 @@ def find_closest_elements(target_elem, num_elements, abundance_threshold=0.0, ch
     abundance = abundance[mask_abundanc]
 
     # Find closest elements
-    idxs = np.argsort(np.abs(weights - target_elem))[:num_elements]
+    pool_size = min(len(weights), max(int(num_elements) * 5, int(num_elements)))
+    idxs = np.argsort(np.abs(weights - target_elem))[:pool_size]
 
     selected_elements = elements[idxs]
     selected_isotope_number = isotope_number[idxs]
@@ -193,18 +271,13 @@ def find_closest_elements(target_elem, num_elements, abundance_threshold=0.0, ch
     })
 
     # Sort DataFrame
-    df = df.sort_values(by=['mass'], ascending=[True])
-    df.reset_index(drop=True, inplace=True)
     # Round the abundance column to 4 decimal places
     df['abundance'] = df['abundance'].round(4)
     # Divide all elements in abundance by 100
     df['abundance'] = df['abundance'] / 100
     df['mass'] = df['mass'].round(4)
-    # Backup data if variables provided
-    if variables is not None:
-        variables.range_data_backup = df.copy()
-
-    return df
+    df = rank_candidate_assignments(df, target_mass=target_elem, variables=variables)
+    return df.head(int(num_elements)).reset_index(drop=True)
 
 def load_elements(target_elements, abundance_threshold=0.0, charge=4, variables=None):
     """
@@ -300,20 +373,12 @@ def load_elements(target_elements, abundance_threshold=0.0, charge=4, variables=
         'abundance': selected_abundance,
     })
 
-    # Sort DataFrame
-    df = df.sort_values(by=['mass'], ascending=[True])
-    df.reset_index(drop=True, inplace=True)
-
     # Round the abundance column to 4 decimal places
     df['abundance'] = df['abundance'].round(4)
     # Divide all elements in abundance by 100
     df['abundance'] = df['abundance'] / 100
     df['mass'] = df['mass'].round(4)
-    # Backup data if variables provided
-    if variables is not None:
-        variables.range_data_backup = df.copy()
-
-    return df
+    return rank_candidate_assignments(df, variables=variables)
 def molecule_manual(target_element, charge, latex=True, variables=None):
     """
     Generate a list of isotopes for a given target element.
@@ -396,10 +461,7 @@ def molecule_manual(target_element, charge, latex=True, variables=None):
     # Round the abundance column to 4 decimal places
     df['abundance'] = df['abundance'].round(4)
     df['mass'] = df['mass'].round(4)
-
-    if variables is not None:
-        variables.range_data_backup = df.copy()
-    return df
+    return rank_candidate_assignments(df, variables=variables)
 
 
 def transform_combination_and_isotopes(combination, isotopes):
@@ -561,21 +623,10 @@ def molecule_create(element_list, max_complexity, charge, abundance_threshold, v
 
     df = df[df['abundance'] > abundance_threshold]
 
-    # Reset the index
-    df = df.reset_index(drop=True)
-
-    # Sort DataFrame
-    df = df.sort_values(by=['mass'], ascending=[True])
-    df.reset_index(drop=True, inplace=True)
-
     # Round the abundance column to 4 decimal places
     df['abundance'] = df['abundance'].round(4)
     df['mass'] = df['mass'].round(4)
-    # Backup data if variables provided
-    if variables is not None:
-        variables.range_data_backup = df.copy()
-
-    return df
+    return rank_candidate_assignments(df, variables=variables)
 
 
 def ranging_dataset_create(variables, row_index, mass_ion):
@@ -595,8 +646,15 @@ def ranging_dataset_create(variables, row_index, mass_ion):
         print('First press the button to find the closest elements')
     else:
         if row_index >= 0:
-            selected_row = variables.range_data_backup.iloc[row_index].tolist()
-            selected_row = selected_row[:-1]
+            row = variables.range_data_backup.iloc[row_index]
+            selected_row = [
+                row['ion'],
+                float(row['mass']),
+                list(row['element']),
+                list(row['complex']),
+                list(row['isotope']),
+                np.uint32(row['charge']),
+            ]
         else:
             selected_row = ['un', mass_ion, ['unranged'], [0], [0], 0]
         fake = Factory.create()
@@ -627,9 +685,15 @@ def ranging_dataset_create(variables, row_index, mass_ion):
             print('First specify the left and right boundary for the selected peak')
         else:
             # Find the closest h_line that is smaller than mass
-            smaller_h_line = max(filter(lambda x: x < mass_ion, variables.h_line_pos))
+            smaller_candidates = [x for x in variables.h_line_pos if x < mass_ion]
             # Find the closest h_line that is bigger than mass
-            bigger_h_line = min(filter(lambda x: x > mass_ion, variables.h_line_pos))
+            bigger_candidates = [x for x in variables.h_line_pos if x > mass_ion]
+            if not smaller_candidates or not bigger_candidates:
+                print('Could not find valid lower and upper peak boundaries around the selected mass.')
+                print('Please place two range lines around the target peak first.')
+                return
+            smaller_h_line = max(smaller_candidates)
+            bigger_h_line = min(bigger_candidates)
 
             def generate_name(elements, counts):
                 return ".".join(f"{el}{ct}" for el, ct in zip(elements, counts))

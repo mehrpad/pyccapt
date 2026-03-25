@@ -3,6 +3,7 @@ import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from scipy.ndimage import gaussian_filter
 from scipy.signal import find_peaks
 import io
 import plotly.graph_objects as go
@@ -21,11 +22,183 @@ from pyccapt.calibration.reconstructions.io_utils import (
 )
 
 
+def build_range_mask(variables, range_sequence=None, range_mc=None, range_detx=None, range_dety=None,
+                     range_x=None, range_y=None, range_z=None, range_vol=None, verbose=False):
+    """Build a boolean mask for the requested reconstruction sub-range."""
+    range_sequence = range_sequence or []
+    range_mc = range_mc or []
+    range_detx = range_detx or []
+    range_dety = range_dety or []
+    range_x = range_x or []
+    range_y = range_y or []
+    range_z = range_z or []
+    range_vol = range_vol or []
+
+    if range_sequence or range_detx or range_dety or range_mc or range_x or range_y or range_z or range_vol:
+        if range_sequence:
+            mask_sequence = np.zeros_like(variables.dld_x_det, dtype=bool)
+            start, stop = sorted((int(range_sequence[0]), int(range_sequence[1])))
+            mask_sequence[start:stop] = True
+        else:
+            mask_sequence = np.ones_like(variables.dld_x_det, dtype=bool)
+
+        if range_detx and range_dety:
+            x_min, x_max = sorted((range_detx[0], range_detx[1]))
+            y_min, y_max = sorted((range_dety[0], range_dety[1]))
+            mask_det_x = (variables.dld_x_det < x_max) & (variables.dld_x_det > x_min)
+            mask_det_y = (variables.dld_y_det < y_max) & (variables.dld_y_det > y_min)
+            mask_det = mask_det_x & mask_det_y
+        else:
+            mask_det = np.ones(len(variables.dld_x_det), dtype=bool)
+
+        if range_mc:
+            mc_min, mc_max = sorted((range_mc[0], range_mc[1]))
+            mask_mc = (variables.mc_uc < mc_max) & (variables.mc_uc > mc_min)
+        else:
+            mask_mc = np.ones(len(variables.mc), dtype=bool)
+
+        if range_x and range_y and range_z:
+            x_min, x_max = sorted((range_x[0], range_x[1]))
+            y_min, y_max = sorted((range_y[0], range_y[1]))
+            z_min, z_max = sorted((range_z[0], range_z[1]))
+            mask_x = (variables.x < x_max) & (variables.x > x_min)
+            mask_y = (variables.y < y_max) & (variables.y > y_min)
+            mask_z = (variables.z < z_max) & (variables.z > z_min)
+            mask_3d = mask_x & mask_y & mask_z
+        else:
+            mask_3d = np.ones(len(variables.x), dtype=bool)
+
+        if range_vol:
+            vol_min, vol_max = sorted((range_vol[0], range_vol[1]))
+            mask_vol = (variables.volume < vol_max) & (variables.volume > vol_min)
+        else:
+            mask_vol = np.ones(len(variables.x), dtype=bool)
+
+        mask_f = mask_sequence & mask_det & mask_mc & mask_3d & mask_vol
+        if verbose:
+            print('The number of data sequence:', len(mask_sequence[mask_sequence]))
+            print('The number of data mc:', len(mask_mc[mask_mc]))
+            print('The number of data det:', len(mask_det[mask_det]))
+            print('The number of data 3d:', len(mask_3d[mask_3d]))
+            print('The number of data after cropping:', len(mask_f[mask_f]))
+        return mask_f
+
+    return np.ones(len(variables.x), dtype=bool)
+
+
+def build_element_mask(variables, element_name, base_mask=None):
+    """Build a boolean mask for all ranged ions containing a given element."""
+    if variables.range_data is None or variables.range_data.empty:
+        raise ValueError('Range data must be available to build an element mask')
+
+    matching_rows = variables.range_data[
+        variables.range_data['element'].apply(lambda elements: element_name in elements)
+    ]
+    if matching_rows.empty:
+        raise ValueError(f'{element_name} is not present in the range dataset')
+
+    mask = np.zeros(len(variables.mc), dtype=bool)
+    for _, row in matching_rows.iterrows():
+        mask |= (variables.mc > row['mc_low']) & (variables.mc < row['mc_up'])
+
+    if base_mask is not None:
+        mask &= base_mask
+    return mask
+
+
+def filter_isosurface_by_size(isosurf, min_vertices=100, largest_n=None):
+    """Remove small disconnected isosurface components."""
+    if isosurf.n_points == 0:
+        return isosurf
+
+    try:
+        components = isosurf.connectivity(largest=False)
+        region_ids = components.point_data['RegionId']
+        unique_regions = np.unique(region_ids)
+
+        filtered_meshes = []
+        for index, region_id in enumerate(unique_regions):
+            mask = region_ids == region_id
+            n_vertices = int(np.sum(mask))
+            keep_region = n_vertices >= int(min_vertices)
+            if largest_n is not None and index >= int(largest_n):
+                keep_region = False
+            if not keep_region:
+                continue
+
+            region_mesh = components.extract_points(mask, adjacent_cells=False)
+            if isinstance(region_mesh, pv.UnstructuredGrid):
+                region_mesh = region_mesh.extract_surface()
+            filtered_meshes.append(region_mesh)
+
+        if not filtered_meshes:
+            return pv.PolyData()
+
+        result = filtered_meshes[0]
+        for mesh in filtered_meshes[1:]:
+            result = result + mesh
+
+        if isinstance(result, pv.UnstructuredGrid):
+            result = result.extract_surface()
+        return result.clean()
+    except Exception as exc:
+        print(f'Unable to filter disconnected isosurface regions: {exc}')
+        return isosurf
+
+
+def calculate_element_isosurface(variables, element_name, bin_values, base_mask=None, smoothing_sigma=1.0,
+                                 min_atoms_per_voxel=10, min_vertices=20, fig_name=None):
+    """Create a filtered isosurface mesh for a single interface element."""
+    if base_mask is None:
+        base_mask = np.ones(len(variables.x), dtype=bool)
+    if not np.any(base_mask):
+        raise ValueError('No ions are available inside the requested plotting range')
+
+    element_mask = build_element_mask(variables, element_name, base_mask=base_mask)
+    if not np.any(element_mask):
+        raise ValueError(f'No {element_name} ions are available inside the requested plotting range')
+
+    coords = np.column_stack([variables.x[base_mask], variables.y[base_mask], variables.z[base_mask]])
+    species_mask = element_mask[base_mask]
+    if len(coords) < 4 or np.sum(species_mask) < 4:
+        raise ValueError(f'Not enough ions are available to build the {element_name} isosurface')
+
+    bin_centers, _ = bin_vectors_from_distance(coords, bin_values, mode='distance')
+    grid_vec = [bin_centers[0], bin_centers[1], bin_centers[2]]
+    vox = pos_to_voxel(coords, grid_vec)
+    vox_ion = pos_to_voxel(coords, grid_vec, species=species_mask)
+    conc = np.divide(vox_ion, vox, out=np.zeros_like(vox_ion, dtype=float), where=vox != 0)
+    conc[vox < max(1, int(min_atoms_per_voxel))] = 0
+
+    if float(smoothing_sigma) > 0:
+        conc_for_iso = gaussian_filter(conc, sigma=float(smoothing_sigma))
+    else:
+        conc_for_iso = conc
+
+    iso_value = calculate_iso_value(
+        conc_for_iso,
+        save_path=variables.result_path,
+        fig_name=fig_name,
+    )
+    isosurf = isosurface(grid_vec, conc_for_iso, isovalue=iso_value)
+    isosurf = filter_isosurface_by_size(isosurf, min_vertices=max(1, int(min_vertices)))
+
+    return {
+        'mesh': isosurf,
+        'iso_value': iso_value,
+        'grid_vec': grid_vec,
+        'coords': coords,
+        'concentration': conc_for_iso,
+        'voxel_counts': vox,
+    }
+
+
 def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save, figname, save, make_gif=False,
                         range_sequence=[], range_mc=[], range_detx=[], range_dety=[],
                         range_x=[], range_y=[], range_z=[], range_vol=[], ions_individually_plots=False,
                         max_num_ions=None, min_num_ions=None, isosurface_dic=None, detailed_isotope_charge=False,
-                        only_iso=False, cluster_result=None):
+                        only_iso=False, cluster_result=None, smoothing_sigma=1.0, min_atoms_per_voxel=10,
+                        min_isosurface_vertices=20):
     """
     Generate a 3D plot for atom probe reconstruction data.
 
@@ -61,43 +234,18 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
             print('The isosurface_dic should be a dictionary')
             isosurface_dic = None
             print('The isosurface_dic is set to None')
-    if range_sequence or range_detx or range_dety or range_mc or range_x or range_y or range_z:
-        if range_sequence:
-            mask_sequence = np.zeros_like(variables.dld_x_det, dtype=bool)
-            mask_sequence[range_sequence[0]:range_sequence[1]] = True
-        else:
-            mask_sequence = np.ones_like(variables.dld_x_det, dtype=bool)
-        if range_detx and range_dety:
-            mask_det_x = (variables.dld_x_det < range_detx[1]) & (variables.dld_x_det > range_detx[0])
-            mask_det_y = (variables.dld_y_det < range_dety[1]) & (variables.dld_y_det > range_dety[0])
-            mask_det = mask_det_x & mask_det_y
-        else:
-            mask_det = np.ones(len(variables.dld_x_det), dtype=bool)
-        if range_mc:
-            mask_mc = (variables.mc_uc < range_mc[1]) & (variables.mc_uc > range_mc[0])
-        else:
-            mask_mc = np.ones(len(variables.mc), dtype=bool)
-        if range_x and range_y and range_z:
-            mask_x = (variables.x < range_x[1]) & (variables.x > range_x[0])
-            mask_y = (variables.y < range_y[1]) & (variables.y > range_y[0])
-            mask_z = (variables.z < range_z[1]) & (variables.z > range_z[0])
-            mask_3d = mask_x & mask_y & mask_z
-        else:
-            mask_3d = np.ones(len(variables.x), dtype=bool)
-        if range_vol:
-            mask_vol = (variables.volume < range_vol[1]) & (variables.volume > range_vol[0])
-        else:
-            mask_vol = np.ones(len(variables.x), dtype=bool)
-
-        mask_f = mask_sequence & mask_det & mask_mc & mask_3d & mask_vol
-        print('The number of data sequence:', len(mask_sequence[mask_sequence == True]))
-        print('The number of data mc:', len(mask_mc[mask_mc == True]))
-        print('The number of data det:', len(mask_det[mask_det == True]))
-        print('The number of data 3d:', len(mask_3d[mask_3d == True]))
-        print('The number of data after cropping:', len(mask_f[mask_f == True]))
-
-    else:
-        mask_f = np.ones(len(variables.x), dtype=bool)
+    mask_f = build_range_mask(
+        variables,
+        range_sequence=range_sequence,
+        range_mc=range_mc,
+        range_detx=range_detx,
+        range_dety=range_dety,
+        range_x=range_x,
+        range_y=range_y,
+        range_z=range_z,
+        range_vol=range_vol,
+        verbose=True,
+    )
 
     if isinstance(element_percentage, list):
         pass
@@ -109,13 +257,42 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
     y_range = [min(variables.y), max(variables.y)]
     z_range = [min(variables.z), max(variables.z)]
     range_cube = [x_range, y_range, z_range]
+
+    def _safe_random_subset(mask_s, fraction):
+        true_indices = np.flatnonzero(mask_s)
+        if len(true_indices) == 0:
+            return np.zeros_like(mask_s, dtype=bool)
+
+        size = int(len(true_indices) * float(fraction))
+        if min_num_ions is not None:
+            size = max(size, int(min_num_ions))
+        if max_num_ions is not None:
+            size = min(size, int(max_num_ions))
+        size = min(max(size, 1), len(true_indices))
+
+        if size == len(true_indices):
+            chosen = true_indices
+        else:
+            chosen = np.random.choice(true_indices, size=size, replace=False)
+
+        sampled_mask = np.zeros_like(mask_s, dtype=bool)
+        sampled_mask[chosen] = True
+        return sampled_mask
+
+    def _resolve_iso_element(ion_label):
+        if isosurface_dic is None:
+            return None
+        for iso_element in isosurface_elements_list:
+            if iso_element in ion_label:
+                return iso_element
+        return None
+
     indices_iso = []
     if isosurface_dic is not None:
         if variables.range_data is None:
             raise ValueError('Range data must be provided to plot isosurfaces')
         else:
             isosurface_elements_list = list(isosurface_dic.keys())
-            bin_values = list(isosurface_dic.values())
             # check if the data dataframe has the elements columns
             # # Flatten the lists in the 'element' column and find unique elements
             unique_elements = pd.Series([elem for sublist in variables.range_data['element'] for elem in sublist]).unique()
@@ -215,56 +392,42 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                             mask_noise = mask_noise | mask_s
                     else:
                         mask_s = mask_new[index]
-                    size = int(len(mask_s[mask_s == True]) * float(element_percentage[index]))
-                    if min_num_ions is not None:
-                        if size < min_num_ions:
-                            size = min_num_ions
-                    if max_num_ions is not None:
-                        if size > max_num_ions:
-                            size = max_num_ions
-                    # Find indices where the original mask is True
-                    true_indices = np.where(mask_s)[0]
-                    # Randomly choose 100 indices from the true indices
-                    random_true_indices = np.random.choice(true_indices, size=size, replace=False)
-                    # Create a new mask with the same length as the original, initialized with False
-                    new_mask = np.full(len(variables.mc), False)
-                    # Set the selected indices to True in the new mask
-                    new_mask[random_true_indices] = True
-                    # Apply the new mask to the original mask
-                    mask = mask & new_mask & mask_f
+                    new_mask = _safe_random_subset(mask_s, element_percentage[index])
+                    mask = mask_s & new_mask & mask_f
                     if index in indices_iso:
-                        if isosurface_elements_list[0] in isosurface_dic:
-                            bin_values = isosurface_dic[isosurface_elements_list[0]]
-                        dist = np.column_stack([variables.x, variables.y, variables.z])
-                        bin_centers, bin_edges = bin_vectors_from_distance(dist,
-                                                                                      bin_values, mode='distance')
-                        grid_vec = [bin_centers[0], bin_centers[1], bin_centers[2]]
-                        vox = pos_to_voxel(dist, grid_vec)
-                        vox_ion = pos_to_voxel(dist, grid_vec, species=mask_s)
-                        conc = np.divide(vox_ion, vox, out=np.zeros_like(vox_ion, dtype=float), where=vox != 0)
-                        iso_value = (conc.max() + conc.min()) / 2
-                        isosurf = isosurface(grid_vec, conc, isovalue=iso_value)
-                        # Extract vertices and faces from the isosurface
-                        vertices = isosurf.points
-                        faces = isosurf.faces.reshape(-1, 4)[:, 1:]  # Faces have a leading count
-                        ion_name = ion[index].rsplit('$', 1)[0]
-                        ion_name = ion_name + '_{iso}~' + '(%s)' % (element_percentage[index]) + '$'
-                        mesh = go.Mesh3d(
-                            x=vertices[:, 0],
-                            y=vertices[:, 1],
-                            z=vertices[:, 2],
-                            i=faces[:, 0],
-                            j=faces[:, 1],
-                            k=faces[:, 2],
-                            opacity=opacity,
-                            alphahull=5,
-                            color=colors[index],
-                            name=ion_name,
-                            showlegend=True
-
-                        )
-                        fig = reconstruction.draw_qube(fig, range_cube, col, row)
-                        fig.add_trace(mesh, row=row + 1, col=col + 1)
+                        iso_element = _resolve_iso_element(ion[index])
+                        if iso_element is not None:
+                            iso_result = calculate_element_isosurface(
+                                variables,
+                                iso_element,
+                                isosurface_dic[iso_element],
+                                base_mask=mask_f,
+                                smoothing_sigma=smoothing_sigma,
+                                min_atoms_per_voxel=min_atoms_per_voxel,
+                                min_vertices=min_isosurface_vertices,
+                                fig_name=f'{figname}_{iso_element}',
+                            )
+                            isosurf = iso_result['mesh']
+                            if isosurf.n_points > 0 and isosurf.n_cells > 0:
+                                vertices = isosurf.points
+                                faces = isosurf.faces.reshape(-1, 4)[:, 1:]
+                                ion_name = ion[index].rsplit('$', 1)[0]
+                                ion_name = ion_name + '_{iso}~' + '(%s)' % (element_percentage[index]) + '$'
+                                mesh = go.Mesh3d(
+                                    x=vertices[:, 0],
+                                    y=vertices[:, 1],
+                                    z=vertices[:, 2],
+                                    i=faces[:, 0],
+                                    j=faces[:, 1],
+                                    k=faces[:, 2],
+                                    opacity=opacity,
+                                    alphahull=5,
+                                    color=colors[index],
+                                    name=ion_name,
+                                    showlegend=True
+                                )
+                                fig = reconstruction.draw_qube(fig, range_cube, col, row)
+                                fig.add_trace(mesh, row=row + 1, col=col + 1)
 
                     ion_name = ion[index].rsplit('$', 1)[0]
                     ion_name = ion_name + '~' + '(%s)' % (element_percentage[index]) + '$'
@@ -297,60 +460,41 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                         mask_noise = mask_noise | mask_s
                 else:
                     mask_s = mask_new[index]
-                size = int(len(mask_s[mask_s == True]) * float(element_percentage[index]))
-                if min_num_ions is not None:
-                    if size < min_num_ions:
-                        size = min_num_ions
-                if max_num_ions is not None:
-                    if size > max_num_ions:
-                        size = max_num_ions
-                # Find indices where the original mask is True
-                true_indices = np.where(mask_s)[0]
-                # Randomly choose 100 indices from the true indices
-                random_true_indices = np.random.choice(true_indices, size=size, replace=False)
-                # Create a new mask with the same length as the original, initialized with False
-                new_mask = np.full(len(variables.mc), False)
-                # Set the selected indices to True in the new mask
-                new_mask[random_true_indices] = True
-                # Apply the new mask to the original mask
+                new_mask = _safe_random_subset(mask_s, element_percentage[index])
                 mask = mask_s & new_mask & mask_f
                 if index in indices_iso:
-                    #TODO: if we want to have different bin size for each element we need to change here
-                    if isosurface_elements_list[0] in isosurface_dic:
-                        bin_values = isosurface_dic[isosurface_elements_list[0]]
-                    dist = np.column_stack([variables.x, variables.y, variables.z])
-                    bin_centers, bin_edges = bin_vectors_from_distance(dist,
-                                                                                  bin_values, mode='distance')
-                    grid_vec = [bin_centers[0], bin_centers[1], bin_centers[2]]
-                    vox = pos_to_voxel(dist, grid_vec)
-                    vox_ion = pos_to_voxel(dist, grid_vec, species=mask_s)
-                    conc = np.divide(vox_ion, vox, out=np.zeros_like(vox_ion, dtype=float), where=vox != 0)
-                    iso_value = calculate_iso_value(conc, save_path=variables.result_path)
-                    isosurf = isosurface(grid_vec, conc, isovalue=iso_value)
-                    # import pyvista as pv
-                    # plotter = pv.Plotter()
-                    # plotter.add_mesh(isosurf, color="blue", opacity=0.6)
-                    # plotter.show()
-                    # Extract vertices and faces from the isosurface
-                    vertices = isosurf.points
-                    faces = isosurf.faces.reshape(-1, 4)[:, 1:]  # Faces have a leading count
-                    ion_name = ion[index].rsplit('$', 1)[0]
-                    ion_name = ion_name + '_{iso}$'
-                    mesh = go.Mesh3d(
-                        x=vertices[:, 1],
-                        y=vertices[:, 0],
-                        z=vertices[:, 2],
-                        i=faces[:, 0],
-                        j=faces[:, 1],
-                        k=faces[:, 2],
-                        opacity=opacity,
-                        alphahull=5,
-                        color=colors[index],
-                        name=ion_name,
-                        showlegend=True
-
-                    )
-                    fig.add_trace(mesh)
+                    iso_element = _resolve_iso_element(ion[index])
+                    if iso_element is not None:
+                        iso_result = calculate_element_isosurface(
+                            variables,
+                            iso_element,
+                            isosurface_dic[iso_element],
+                            base_mask=mask_f,
+                            smoothing_sigma=smoothing_sigma,
+                            min_atoms_per_voxel=min_atoms_per_voxel,
+                            min_vertices=min_isosurface_vertices,
+                            fig_name=f'{figname}_{iso_element}',
+                        )
+                        isosurf = iso_result['mesh']
+                        if isosurf.n_points > 0 and isosurf.n_cells > 0:
+                            vertices = isosurf.points
+                            faces = isosurf.faces.reshape(-1, 4)[:, 1:]
+                            ion_name = ion[index].rsplit('$', 1)[0]
+                            ion_name = ion_name + '_{iso}$'
+                            mesh = go.Mesh3d(
+                                x=vertices[:, 1],
+                                y=vertices[:, 0],
+                                z=vertices[:, 2],
+                                i=faces[:, 0],
+                                j=faces[:, 1],
+                                k=faces[:, 2],
+                                opacity=opacity,
+                                alphahull=5,
+                                color=colors[index],
+                                name=ion_name,
+                                showlegend=True
+                            )
+                            fig.add_trace(mesh)
 
                 if not only_iso:
                     ion_name = ion[index].rsplit('$', 1)[0]
@@ -380,7 +524,8 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
         if max_num_ions is None:
             print('The maximum number of ions is not provided, setting it to 100,000')
             max_num_ions = 100_000
-        mask = np.random.choice(len(variables.x), size=max_num_ions, replace=False)
+        sample_size = min(len(variables.x), int(max_num_ions))
+        mask = np.random.choice(len(variables.x), size=sample_size, replace=False)
         fig = go.Figure()
         fig.add_trace(
             go.Scatter3d(
@@ -795,7 +940,7 @@ def isosurface(gridVec, data, isovalue):
 
 
 
-def calculate_iso_value(conc, save_path=None):
+def calculate_iso_value(conc, save_path=None, fig_name=None):
     """
     Calculate the optimal iso value from a 3D array and save the histogram plot.
 
@@ -828,7 +973,7 @@ def calculate_iso_value(conc, save_path=None):
     hist, bin_edges = np.histogram(conc_flat, bins=bin_edges)
 
     # Find peaks in the histogram
-    peaks, _ = find_peaks(hist)
+    peaks, _ = find_peaks(hist, prominence=20)
 
     # Check if any peaks are found
     if len(peaks) == 0:
@@ -852,7 +997,7 @@ def calculate_iso_value(conc, save_path=None):
             iso_val = bin_edges[trough_idx]
     print(f"Default Iso Value: {iso_val} is set")
 
-    if save_path is not None:
+    if save_path is not None and fig_name is not None:
         if len(peaks) == 0:
             print("No peaks found in the histogram to calculate the optimum iso value.")
         else:
@@ -869,7 +1014,7 @@ def calculate_iso_value(conc, save_path=None):
             plt.grid(True, linestyle='--', alpha=0.5)
 
             # Ensure the save directory exists
-            plot_path = os.path.join(save_path, "histogram_with_iso_value.png")
+            plot_path = os.path.join(save_path, f"histogram_with_iso_value_{fig_name}.png")
             plt.savefig(plot_path, dpi=300)
             plt.close()  # Close the plot to prevent it from displaying
 

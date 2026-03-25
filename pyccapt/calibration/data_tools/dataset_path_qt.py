@@ -14,11 +14,10 @@ def gui_fname(initial_directory):
 
     app = QApplication([initial_directory])
     fname = QFileDialog.getOpenFileName(None, "Select a file...", initial_directory,
-                                        filter="PyCCAPT data, range (*.h5);;"
+                                        filter="PyCCAPT data / saved range (*.h5 *.rrng *.rng);;"
                                                "LEAP (*.pos *.epos *.apt);;"
                                                "APT (*.ato);;"
                                                "CSV (*.csv);;"
-                                               "rrng (*.rrng);;"
                                                "All Files (*)")
     chosen_file = fname[0]
 

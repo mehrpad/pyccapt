@@ -7,6 +7,7 @@ from typing import Iterable, Sequence
 
 import numpy as np
 import plotly.graph_objects as go
+from scipy.spatial import cKDTree
 
 
 DEFAULT_CLUSTER_COLORS = (
@@ -17,10 +18,12 @@ DEFAULT_CLUSTER_COLORS = (
     "#FFA15A",
 )
 
+SUPPORTED_CLUSTERING_METHODS = ("min-max", "maximum-separation")
+
 
 @dataclass(frozen=True)
 class MinMaxClusterResult:
-    """Result of a Min-Max segmentation on a selected ion population."""
+    """Result of a clustering pass on a selected ion population."""
 
     labels: np.ndarray
     selected_mask: np.ndarray
@@ -29,6 +32,7 @@ class MinMaxClusterResult:
     ion_names: tuple[str, ...]
     cluster_column: str
     algorithm: str = "min-max"
+    parameters: dict[str, float | int | bool] | None = None
 
     @property
     def counts(self) -> tuple[int, ...]:
@@ -47,6 +51,25 @@ def parse_label_selection(selection: str | Iterable[str]) -> tuple[str, ...]:
         labels = [str(item).strip() for item in selection]
     labels = [label for label in labels if label]
     return tuple(dict.fromkeys(labels))
+
+
+def normalize_clustering_method(method: str) -> str:
+    """Return the canonical clustering method identifier."""
+    normalized = str(method).strip().lower().replace("_", "-").replace(" ", "-")
+    aliases = {
+        "min-max": "min-max",
+        "minmax": "min-max",
+        "maximum-separation": "maximum-separation",
+        "max-separation": "maximum-separation",
+        "maximumseparation": "maximum-separation",
+        "maximum-seperation": "maximum-separation",
+        "max-seperation": "maximum-separation",
+    }
+    resolved = aliases.get(normalized)
+    if resolved is None:
+        supported = ", ".join(SUPPORTED_CLUSTERING_METHODS)
+        raise ValueError(f"Unsupported clustering method {method!r}. Choose one of: {supported}")
+    return resolved
 
 
 def _resolve_xyz(variables) -> np.ndarray:
@@ -105,6 +128,41 @@ def _build_selection_mask(variables, ion_names: Sequence[str]) -> np.ndarray:
     return selection_mask
 
 
+def _write_cluster_labels(variables, cluster_column: str, labels: np.ndarray) -> None:
+    """Persist clustering labels onto shared variables and dataframe when possible."""
+    if getattr(variables, "data", None) is not None and len(variables.data) == len(labels):
+        variables.data[cluster_column] = labels
+    setattr(variables, cluster_column, labels)
+
+
+def _build_cluster_result(
+    variables,
+    *,
+    ion_names: tuple[str, ...],
+    selection_mask: np.ndarray,
+    labels: np.ndarray,
+    centers: np.ndarray,
+    cluster_column: str,
+    algorithm: str,
+    parameters: dict[str, float | int | bool] | None = None,
+) -> MinMaxClusterResult:
+    """Expand selected-ion labels back to the full reconstruction length."""
+    full_labels = np.full(len(selection_mask), -1, dtype=int)
+    selected_indices = np.flatnonzero(selection_mask)
+    full_labels[selected_indices] = labels
+    _write_cluster_labels(variables, cluster_column, full_labels)
+    return MinMaxClusterResult(
+        labels=full_labels,
+        selected_mask=selection_mask,
+        selected_indices=selected_indices,
+        centers=np.asarray(centers, dtype=float).reshape((-1, 3)) if len(centers) else np.empty((0, 3), dtype=float),
+        ion_names=ion_names,
+        cluster_column=cluster_column,
+        algorithm=algorithm,
+        parameters=parameters,
+    )
+
+
 def min_max_clustering(points: np.ndarray, n_clusters: int = 2, max_iter: int = 50) -> tuple[np.ndarray, np.ndarray]:
     """Segment points with a deterministic Min-Max initialization plus centroid refinement."""
     points = np.asarray(points, dtype=float)
@@ -149,6 +207,120 @@ def min_max_clustering(points: np.ndarray, n_clusters: int = 2, max_iter: int = 
     return labels, centers
 
 
+def estimate_maximum_separation_distance(
+    points: np.ndarray,
+    *,
+    kth_neighbor: int = 3,
+    percentile: float = 50.0,
+) -> float:
+    """Estimate `d_max` from the kth-nearest-neighbor distance distribution."""
+    points = np.asarray(points, dtype=float)
+    if points.ndim != 2 or points.shape[1] != 3:
+        raise ValueError("points must be a (N, 3) array")
+    if len(points) < 2:
+        raise ValueError("At least two points are required to estimate d_max")
+    kth_neighbor = int(kth_neighbor)
+    if kth_neighbor < 1:
+        raise ValueError("kth_neighbor must be at least 1")
+    percentile = float(percentile)
+    if not 0.0 <= percentile <= 100.0:
+        raise ValueError("percentile must be between 0 and 100")
+
+    effective_neighbor = min(kth_neighbor, len(points) - 1)
+    tree = cKDTree(points)
+    distances, _ = tree.query(points, k=effective_neighbor + 1)
+    kth_distances = np.asarray(distances[:, effective_neighbor], dtype=float)
+    d_max = float(np.percentile(kth_distances, percentile))
+    if not np.isfinite(d_max) or d_max <= 0:
+        raise ValueError("Estimated d_max must be a positive finite number")
+    return d_max
+
+
+def maximum_separation_clustering(
+    points: np.ndarray,
+    *,
+    d_max: float,
+    n_min: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Cluster points by connected components with maximum edge length `d_max`."""
+    points = np.asarray(points, dtype=float)
+    if points.ndim != 2 or points.shape[1] != 3:
+        raise ValueError("points must be a (N, 3) array")
+    if len(points) == 0:
+        raise ValueError("points cannot be empty")
+    d_max = float(d_max)
+    if not np.isfinite(d_max) or d_max <= 0:
+        raise ValueError("d_max must be a positive finite number")
+    n_min = int(n_min)
+    if n_min < 2:
+        raise ValueError("n_min must be at least 2")
+
+    n_points = len(points)
+    labels = np.full(n_points, -1, dtype=int)
+    if n_points < n_min:
+        return labels, np.empty((0, 3), dtype=float)
+
+    tree = cKDTree(points)
+    try:
+        pairs = tree.query_pairs(d_max, output_type="ndarray")
+    except TypeError:
+        pairs = np.asarray(sorted(tree.query_pairs(d_max)), dtype=int)
+
+    if pairs.size == 0:
+        return labels, np.empty((0, 3), dtype=float)
+
+    parent = np.arange(n_points, dtype=int)
+    size = np.ones(n_points, dtype=int)
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(left: int, right: int) -> None:
+        root_left = find(left)
+        root_right = find(right)
+        if root_left == root_right:
+            return
+        if size[root_left] < size[root_right]:
+            root_left, root_right = root_right, root_left
+        parent[root_right] = root_left
+        size[root_left] += size[root_right]
+
+    for left, right in np.asarray(pairs, dtype=int):
+        union(int(left), int(right))
+
+    roots = np.fromiter((find(index) for index in range(n_points)), count=n_points, dtype=int)
+    unique_roots, inverse, counts = np.unique(roots, return_inverse=True, return_counts=True)
+    valid_mask = counts >= n_min
+    if not np.any(valid_mask):
+        return labels, np.empty((0, 3), dtype=float)
+
+    centers = []
+    cluster_sizes = []
+    old_to_new: dict[int, int] = {}
+    valid_root_ids = np.flatnonzero(valid_mask)
+    for local_root_id in valid_root_ids:
+        member_mask = inverse == local_root_id
+        centers.append(points[member_mask].mean(axis=0))
+        cluster_sizes.append(int(np.count_nonzero(member_mask)))
+        old_to_new[int(local_root_id)] = len(centers) - 1
+
+    centers = np.asarray(centers, dtype=float)
+    cluster_sizes = np.asarray(cluster_sizes, dtype=int)
+    order = np.lexsort((centers[:, 2], centers[:, 1], centers[:, 0], -cluster_sizes))
+
+    remap = {int(old_idx): int(new_idx) for new_idx, old_idx in enumerate(order)}
+    for point_index, local_root_id in enumerate(inverse):
+        if not valid_mask[local_root_id]:
+            continue
+        labels[point_index] = remap[old_to_new[int(local_root_id)]]
+
+    centers = centers[order]
+    return labels, centers
+
+
 def segment_ions_by_min_max(
     variables,
     ion_names: Sequence[str] | str,
@@ -160,23 +332,99 @@ def segment_ions_by_min_max(
     ion_names_tuple = parse_label_selection(ion_names)
     xyz = _resolve_xyz(variables)
     selection_mask = _build_selection_mask(variables, ion_names_tuple)
-    selected_indices = np.flatnonzero(selection_mask)
     labels, centers = min_max_clustering(xyz[selection_mask], n_clusters=n_clusters)
-
-    full_labels = np.full(len(xyz), -1, dtype=int)
-    full_labels[selected_indices] = labels
-
-    if getattr(variables, "data", None) is not None and len(variables.data) == len(full_labels):
-        variables.data[cluster_column] = full_labels
-    setattr(variables, cluster_column, full_labels)
-
-    return MinMaxClusterResult(
-        labels=full_labels,
-        selected_mask=selection_mask,
-        selected_indices=selected_indices,
-        centers=centers,
+    return _build_cluster_result(
+        variables,
         ion_names=ion_names_tuple,
+        selection_mask=selection_mask,
+        labels=labels,
+        centers=centers,
         cluster_column=cluster_column,
+        algorithm="min-max",
+        parameters={"n_clusters": int(n_clusters)},
+    )
+
+
+def segment_ions_by_maximum_separation(
+    variables,
+    ion_names: Sequence[str] | str,
+    *,
+    d_max: float | None = None,
+    n_min: int = 25,
+    auto_d_max: bool = True,
+    kth_neighbor: int = 3,
+    percentile: float = 50.0,
+    cluster_column: str = "cluster_maxsep",
+) -> MinMaxClusterResult:
+    """Cluster a selected ion population with a fast maximum-separation rule."""
+    ion_names_tuple = parse_label_selection(ion_names)
+    xyz = _resolve_xyz(variables)
+    selection_mask = _build_selection_mask(variables, ion_names_tuple)
+    selected_points = xyz[selection_mask]
+
+    if auto_d_max or d_max is None:
+        d_max_value = estimate_maximum_separation_distance(
+            selected_points,
+            kth_neighbor=kth_neighbor,
+            percentile=percentile,
+        )
+    else:
+        d_max_value = float(d_max)
+
+    labels, centers = maximum_separation_clustering(
+        selected_points,
+        d_max=d_max_value,
+        n_min=n_min,
+    )
+    return _build_cluster_result(
+        variables,
+        ion_names=ion_names_tuple,
+        selection_mask=selection_mask,
+        labels=labels,
+        centers=centers,
+        cluster_column=cluster_column,
+        algorithm="maximum-separation",
+        parameters={
+            "d_max": float(d_max_value),
+            "n_min": int(n_min),
+            "kth_neighbor": int(kth_neighbor),
+            "percentile": float(percentile),
+            "auto_d_max": bool(auto_d_max),
+        },
+    )
+
+
+def segment_ions(
+    variables,
+    ion_names: Sequence[str] | str,
+    *,
+    method: str = "min-max",
+    n_clusters: int = 2,
+    d_max: float | None = None,
+    n_min: int = 25,
+    auto_d_max: bool = True,
+    kth_neighbor: int = 3,
+    percentile: float = 50.0,
+    cluster_column: str | None = None,
+) -> MinMaxClusterResult:
+    """Cluster a selected ion population with the requested algorithm."""
+    normalized_method = normalize_clustering_method(method)
+    if normalized_method == "min-max":
+        return segment_ions_by_min_max(
+            variables,
+            ion_names,
+            n_clusters=n_clusters,
+            cluster_column=cluster_column or "cluster_minmax",
+        )
+    return segment_ions_by_maximum_separation(
+        variables,
+        ion_names,
+        d_max=d_max,
+        n_min=n_min,
+        auto_d_max=auto_d_max,
+        kth_neighbor=kth_neighbor,
+        percentile=percentile,
+        cluster_column=cluster_column or "cluster_maxsep",
     )
 
 
@@ -213,8 +461,14 @@ def build_cluster_scatter_traces(
 
 __all__ = [
     "MinMaxClusterResult",
+    "SUPPORTED_CLUSTERING_METHODS",
     "build_cluster_scatter_traces",
+    "estimate_maximum_separation_distance",
     "min_max_clustering",
+    "maximum_separation_clustering",
+    "normalize_clustering_method",
     "parse_label_selection",
+    "segment_ions",
+    "segment_ions_by_maximum_separation",
     "segment_ions_by_min_max",
 ]

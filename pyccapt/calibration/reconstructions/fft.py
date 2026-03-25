@@ -1,4 +1,5 @@
 from copy import copy
+
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import colors, rcParams
@@ -6,154 +7,110 @@ from matplotlib import colors, rcParams
 from pyccapt.calibration.reconstructions.io_utils import save_matplotlib_figure
 
 
-def fft(particles, d, variables=None, normalize=False, reference_point=None,
-        box_dimensions=None, plot=False, save=False, figure_size=(6, 6), figname='fft', fft_type='1d', axes=None):
-    """
-    Calculate the 1D, 2D, or 3D FFT of the particle positions.
-
-    Parameters
-    ----------
-    particles : (N, 3) np.array
-        Set of particle coordinates for which to compute the SDM.
-    d : float
-
-    variables : variables object
-    normalize : bool, optional
-        Option to normalize the fft. If True, the fft values are normalized.
-    reference_point : (3,) np.array or list, optional
-        The center of the box. If left as None, there is no data cropping, and calculate the fft for the whole data.
-    box_dimensions : (3,) np.array or list, optional
-        The dimensions of the box. If left as None, the box dimensions will be inferred from the particles.
-    plot : bool, optional
-        Option to plot the histograms. If True, the fft are plotted.
-    save : bool, optional
-        Option to save the histograms. If True, the fft are saved.
-    figure_size : (float, float), optional
-        The size of the figure in inches.
-    figname : str, optional
-        The name of the figure.
-    fft_type : str, optional
-        Type of histogram. Options are '1d' or '2d' or '3d'.
-    axes : list or None, optional
-        Specifies the axes for 1D or 2D histograms. For '1d', provide a list like ['x'], ['y'], or ['z'].
-        For '2d', provide a list like ['x', 'y'], ['y', 'z'], or ['x', 'z'] or ['x', 'y', 'z'].
-
-    Returns
-    -------
-    fft : list of np.array
-        List of 1D or 2D histograms based on user preferences.
-    	"""
-
+def _crop_particles(particles, reference_point=None, box_dimensions=None):
+    coords = np.asarray(particles, dtype=float)
     if reference_point is not None and box_dimensions is not None:
-        if isinstance(reference_point, list):
-            reference_point = np.array(reference_point)
-        if isinstance(box_dimensions, list):
-            box_dimensions = np.array(box_dimensions)
-        # Ensure box_dimensions has at least 3 components
-        assert len(box_dimensions) == 3, "box_dimensions must have 3 components (x, y, z)."
-
-        # Calculate the bounds of the box
+        reference_point = np.asarray(reference_point, dtype=float)
+        box_dimensions = np.asarray(box_dimensions, dtype=float)
+        if box_dimensions.shape[0] != coords.shape[1]:
+            raise ValueError("box_dimensions must match the particle dimensionality")
         box_min = reference_point - 0.5 * box_dimensions
         box_max = reference_point + 0.5 * box_dimensions
+        inside_box = np.all((coords >= box_min) & (coords <= box_max), axis=1)
+        coords = coords[inside_box]
+    if len(coords) < 2:
+        raise ValueError("At least two particles are required for FFT analysis")
+    return coords
 
-        # Crop particles within the specified box
-        inside_box = np.all((particles >= box_min) & (particles <= box_max), axis=1)
-        particles = particles[inside_box]
+
+def _axis_index(axis_name):
+    return {'x': 0, 'y': 1, 'z': 2}[axis_name]
+
+
+def fft(particles, d, variables=None, normalize=False, reference_point=None,
+        box_dimensions=None, plot=False, save=False, figure_size=(6, 6), figname='fft', fft_type='1d', axes=None):
+    """Compute histogram-based FFT spectra for 1D or 2D coordinate profiles."""
+    coords = _crop_particles(particles, reference_point=reference_point, box_dimensions=box_dimensions)
+    if not axes:
+        raise ValueError("axes must be provided for FFT analysis")
+    spacing = float(d)
+    if spacing <= 0:
+        raise ValueError("d must be greater than 0")
 
     fft_list = []
-    edges_list = []
+    metadata = []
+
     if fft_type == '1d':
-        if 'x' in axes:
-            fft = np.fft.fft(particles[:, 0])
-            fft = np.fft.fftshift(fft)
-            fft = np.abs(fft)
-            fft_list.append(fft)
-        elif 'y' in axes:
-            fft = np.fft.fft(particles[:, 1])
-            fft = np.fft.fftshift(fft)
-            fft = np.abs(fft)
-            fft_list.append(fft)
-        elif 'z' in axes:
-            fft = np.fft.fft(particles[:, 2])
-            fft = np.fft.fftshift(fft)
-            fft = np.abs(fft)
-            fft_list.append(fft)
-        else:
-            raise ValueError("Invalid axes for 1D histogram. Choose from ['x'], ['y'], or ['z'].")
-        if normalize:
-            fft_list[-1] = fft_list[-1] / np.max(fft_list[-1])
-    if fft_type == '2d':
-        if 'x' in axes and 'y' in axes:
-            x, y = np.meshgrid(particles[:, 0], particles[:, 1])
-            fft2d = np.fft.fft2(x)
-            # Shift zero frequency components to the center
-            fft2d = np.fft.fftshift(fft2d)
-            amplitude = 20 * np.log(np.abs(fft2d))
-            fft_list.append(amplitude)
-            x_edges = np.fft.fftfreq(len(particles[:, 0]))
-            y_edges = np.fft.fftfreq(len(particles[:, 1]))
-            edges_list.append([x_edges, y_edges])
-        elif 'y' in axes and 'z' in axes:
-            y, z = np.meshgrid(particles[:, 1], particles[:, 2])
-            fft2d = np.fft.fft2(y)
-            # Shift zero frequency components to the center
-            fft2d = np.fft.fftshift(fft2d)
-            amplitude = 20 * np.log(np.abs(fft2d))
-            fft_list.append(amplitude)
-            y_edges = np.fft.fftfreq(len(particles[:, 1]))
-            z_edges = np.fft.fftfreq(len(particles[:, 2]))
-            edges_list.append([y_edges, z_edges])
-        elif 'x' in axes and 'z' in axes:
-            x, z = np.meshgrid(particles[:, 0], particles[:, 2])
-            fft2d = np.fft.fft2(z)
-            # Shift zero frequency components to the center
-            fft2d = np.fft.fftshift(fft2d)
-            amplitude = 20 * np.log(np.abs(fft2d))
-            fft_list.append(amplitude)
-            x_edges = np.fft.fftfreq(len(particles[:, 0]))
-            z_edges = np.fft.fftfreq(len(particles[:, 2]))
-            edges_list.append([x_edges, z_edges])
-        else:
-            raise ValueError("Invalid axes for 2D histogram. Choose from ['x', 'y'], ['y', 'z'], or ['x', 'z'].")
+        axis_name = axes[0]
+        values = coords[:, _axis_index(axis_name)]
+        bins = np.arange(values.min(), values.max() + spacing, spacing)
+        if len(bins) < 3:
+            raise ValueError("Not enough bins are available for 1D FFT")
+        hist, _ = np.histogram(values, bins=bins)
+        signal = hist.astype(float) - np.mean(hist)
+        spectrum = np.abs(np.fft.rfft(signal))
+        freqs = np.fft.rfftfreq(len(signal), d=spacing)
+        if len(freqs) > 1:
+            spectrum = spectrum[1:]
+            freqs = freqs[1:]
+        if normalize and np.max(spectrum) > 0:
+            spectrum = spectrum / np.max(spectrum)
+        fft_list.append(spectrum)
+        metadata.append((freqs, axis_name))
 
-        if normalize:
-            fft_list[-1] = fft_list[-1] / np.max(fft_list[-1])
-
-    if fft_type == '3d':
-        if 'x' in axes and 'y' in axes and 'z' in axes:
-            pass
-        if normalize:
-            pass
-#             fft_list[-1] = fft_list[-1] / np.max(fft_list[-1])
+    elif fft_type == '2d':
+        axis_x, axis_y = axes[:2]
+        values_x = coords[:, _axis_index(axis_x)]
+        values_y = coords[:, _axis_index(axis_y)]
+        bins_x = np.arange(values_x.min(), values_x.max() + spacing, spacing)
+        bins_y = np.arange(values_y.min(), values_y.max() + spacing, spacing)
+        if len(bins_x) < 3 or len(bins_y) < 3:
+            raise ValueError("Not enough bins are available for 2D FFT")
+        hist2d, x_edges, y_edges = np.histogram2d(values_x, values_y, bins=[bins_x, bins_y])
+        signal = hist2d.astype(float) - np.mean(hist2d)
+        spectrum = np.abs(np.fft.fftshift(np.fft.fft2(signal)))
+        if normalize and np.max(spectrum) > 0:
+            spectrum = spectrum / np.max(spectrum)
+        freq_x = np.fft.fftshift(np.fft.fftfreq(hist2d.shape[0], d=spacing))
+        freq_y = np.fft.fftshift(np.fft.fftfreq(hist2d.shape[1], d=spacing))
+        fft_list.append(spectrum)
+        metadata.append((freq_x, freq_y, axis_x, axis_y))
+    else:
+        raise ValueError("fft_type must be '1d' or '2d'")
 
     if plot or save:
-        # Plot histograms
         if fft_type == '1d':
             fig, ax = plt.subplots(figsize=figure_size)
-            for i, fft_i in enumerate(fft_list):
-                plt.plot(fft_i)
-                plt.xlabel(f'{axes[i]} Frequency (Hz)')
-                plt.ylabel('Amplitude')
-        elif fft_type == '2d':
+            freqs, axis_name = metadata[0]
+            ax.plot(freqs, fft_list[0])
+            ax.set_xlabel(f'{axis_name} spatial frequency (1/nm)')
+            ax.set_ylabel('Normalized amplitude' if normalize else 'Amplitude')
+            ax.grid(alpha=0.3, linestyle='-.', linewidth=0.4)
+        else:
             fig, ax = plt.subplots(figsize=figure_size)
-            plt.imshow(fft_list[-1], extent=[-1, 1, -1, 1], origin='lower', aspect="auto")
+            freq_x, freq_y, axis_x, axis_y = metadata[0]
             cmap = copy(plt.cm.plasma)
             cmap.set_bad(cmap(0))
-            x_edges = edges_list[-1][0]
-            y_edges = edges_list[-1][1]
-            pcm = ax.pcolormesh(x_edges, y_edges, fft_list[-1], cmap=cmap, norm=colors.LogNorm(), rasterized=True)
+            spectrum = fft_list[0]
+            if normalize:
+                pcm = ax.pcolormesh(freq_x, freq_y, spectrum.T, cmap=cmap, rasterized=True)
+            else:
+                pcm = ax.pcolormesh(
+                    freq_x,
+                    freq_y,
+                    np.maximum(spectrum.T, np.finfo(float).tiny),
+                    cmap=cmap,
+                    norm=colors.LogNorm(),
+                    rasterized=True,
+                )
             cbar = fig.colorbar(pcm, ax=ax, pad=0)
-            cbar.set_label('Counts', fontsize=10)
-            plt.xlabel(f'{axes[0]} Frequency (Hz)')
-            plt.ylabel(f'{axes[1]} Frequency (Hz)')
-        elif fft_type == '3d':
-            pass
+            cbar.set_label('Amplitude', fontsize=10)
+            ax.set_xlabel(f'{axis_x} spatial frequency (1/nm)')
+            ax.set_ylabel(f'{axis_y} spatial frequency (1/nm)')
 
         if save and variables is not None:
-            # Enable rendering for text elements
             rcParams['svg.fonttype'] = 'none'
             save_matplotlib_figure(fig, variables, stem=f"fft_{figname}", formats=("png", "svg"), dpi=600)
-
         if plot:
             plt.show()
 

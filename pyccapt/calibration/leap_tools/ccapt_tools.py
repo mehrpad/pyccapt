@@ -154,36 +154,44 @@ def apt_to_ccapt(file_path):
     """
 
     data = leap_tools.read_apt(file_path)
-
-    data['zs'] = data['zs'] * -1 # Invert z-axis
     length_data = len(data["Mass"])
 
-    # Define the keys and corresponding column names
-    key_mappings = {
-        'xs': 'x (nm)',
-        'ys': 'y (nm)',
-        'zs': 'z (nm)',
-        'Mass': 'mc (Da)',
-        'Voltage': 'high_voltage (V)',
-        'Vap': 'pulse_v (V)',
-        'laserpower': 'pulse_l (pJ)',
-        'Epos ToF': 't (ns)',
-        'tofc': 't_c (ns)',
-        'XDet_mm': 'x_det (cm)',
-        'YDet_mm': 'y_det (cm)',
-        'Delta Pulse': 'delta_p',
-        'Multiplicity': 'multi',
-        'tElapsed': 'start_counter'
-    }
+    def pick_first(*keys, default=0.0, dtype=float):
+        for key in keys:
+            if key in data.columns:
+                return data[key].to_numpy()
+        return np.full(length_data, default, dtype=dtype)
 
-    # Create a dictionary with zero-filled arrays for missing keys
-    data_dict = {column_name: data.get(key, np.zeros(length_data)) for key, column_name in key_mappings.items()}
-    data_dict['start_counter'] = np.zeros(length_data, dtype=int)
+    if "z" in data.columns:
+        z_values = data["z"].to_numpy()
+    elif "zs" in data.columns:
+        z_values = -1 * data["zs"].to_numpy()
+    else:
+        z_values = np.zeros(length_data)
+
+    data_dict = {
+        'x (nm)': pick_first('x', 'xs'),
+        'y (nm)': pick_first('y', 'ys'),
+        'z (nm)': z_values,
+        'mc (Da)': pick_first('Mass'),
+        'high_voltage (V)': pick_first('Voltage', 'Vref'),
+        'pulse_v (V)': pick_first('Vap', 'pulse'),
+        'pulse_l (pJ)': pick_first('laserpower'),
+        't (ns)': pick_first('Epos ToF', 'tof'),
+        't_c (ns)': pick_first('tofc'),
+        'x_det (cm)': pick_first('XDet_mm'),
+        'y_det (cm)': pick_first('YDet_mm'),
+        'delta_p': pick_first('Delta Pulse', 'pulseDelta', dtype=int),
+        'multi': pick_first('Multiplicity', dtype=int),
+        'start_counter': pick_first('tElapsed', dtype=int),
+    }
 
     df = pd.DataFrame(data_dict)
     df.insert(loc=4, column='mc_uc (Da)', value=np.zeros(length_data))
-    # df.insert(loc=8, column='t_c (ns)', value=data['tofc '].to_numpy())
     df['x_det (cm)'] = df['x_det (cm)'] / 10
     df['y_det (cm)'] = df['y_det (cm)'] / 10
+    df['delta_p'] = df['delta_p'].astype(int)
+    df['multi'] = df['multi'].astype(int)
+    df['start_counter'] = df['start_counter'].astype(int)
 
     return df

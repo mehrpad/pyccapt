@@ -1,10 +1,12 @@
 ﻿import ipywidgets as widgets
 import matplotlib.colors as mcolors
+import numpy as np
 import pandas as pd
 from IPython.display import display, clear_output
 from ipywidgets import Output
 
 from pyccapt.calibration.core import ion_selection, mc_plot
+from pyccapt.calibration.core.mc_plot_peak_helpers import gaussian_mrp_report
 
 
 def call_ion_selection(variables, colab=False):
@@ -26,6 +28,98 @@ def call_ion_selection(variables, colab=False):
 		options=[('False', False), ('True', True)],
 		description='save fig:'
 	)
+	mrp_left = widgets.FloatText(value=0.0, description='MRP left:')
+	mrp_right = widgets.FloatText(value=0.0, description='MRP right:')
+	load_mrp_window_button = widgets.Button(description='load peak range')
+	gaussian_mrp_button = widgets.Button(description='Gaussian MRP')
+
+	def _resolve_gaussian_window():
+		left = float(mrp_left.value)
+		right = float(mrp_right.value)
+		if right > left:
+			return left, right
+
+		if getattr(variables, 'selected_x2', 0) > getattr(variables, 'selected_x1', 0):
+			return float(variables.selected_x1), float(variables.selected_x2)
+
+		if getattr(variables, 'h_line_pos', None):
+			lines = sorted(float(x) for x in variables.h_line_pos)
+			lower = [x for x in lines if x < peak_val.value]
+			upper = [x for x in lines if x > peak_val.value]
+			if lower and upper:
+				return max(lower), min(upper)
+
+		if getattr(variables, 'peak_widths', None) is not None and getattr(variables, 'peak_y', None) is not None:
+			try:
+				idx = int(np.argmax(np.asarray(variables.peak_y)))
+				x_hist = np.asarray(variables.x_hist)
+				left_idx = int(round(variables.peak_widths[2][idx]))
+				right_idx = int(round(variables.peak_widths[3][idx]))
+				if 0 <= left_idx < len(x_hist) and 0 <= right_idx < len(x_hist):
+					left = float(x_hist[left_idx])
+					right = float(x_hist[right_idx])
+					if right > left:
+						return left, right
+			except Exception:
+				pass
+		return None
+
+	def _current_hist_array():
+		return variables.mc
+
+	def _print_gaussian_report(result):
+		print('=' * 60)
+		print('PEAK PROFILE MRP REPORT')
+		print('=' * 60)
+		print(f'Peak position: {result["peak_position"]:.4f}')
+		print(f'Ions in range: {result["num_ions"]:,}')
+		print(f'Bin size used: {result["bin_size"]} ({result["num_bins"]} bins)')
+		print()
+		print('Gaussian fit MRP:' if result['gaussian_ok'] else 'Gaussian fit FAILED')
+		if result['gaussian_ok']:
+			print(f'  MRP(0.5)  = {result["gaussian_mrp"][0]:.2f}')
+			print(f'  MRP(0.1)  = {result["gaussian_mrp"][1]:.2f}')
+			print(f'  MRP(0.01) = {result["gaussian_mrp"][2]:.2f}')
+		print()
+		print('Voigt fit MRP:' if result['voigt_ok'] else 'Voigt fit FAILED')
+		if result['voigt_ok']:
+			print(f'  MRP(0.5)  = {result["voigt_mrp"][0]:.2f}')
+			print(f'  MRP(0.1)  = {result["voigt_mrp"][1]:.2f}')
+			print(f'  MRP(0.01) = {result["voigt_mrp"][2]:.2f}')
+			print(f'  Voigt FWHM = {result["voigt_fwhm"]:.6f}')
+		print()
+		print('Histogram-based MRP:')
+		print(f'  MRP(0.5)  = {result["histogram_mrp"][0]:.2f}')
+		print(f'  MRP(0.1)  = {result["histogram_mrp"][1]:.2f}')
+		print(f'  MRP(0.01) = {result["histogram_mrp"][2]:.2f}')
+		print('=' * 60)
+
+	def load_gaussian_window(b):
+		window = _resolve_gaussian_window()
+		with out:
+			if window is None:
+				print('No peak window is available yet. Draw range lines or plot/select a peak first.')
+			else:
+				mrp_left.value, mrp_right.value = window
+				print(f'Loaded Gaussian MRP window: ({mrp_left.value:.4f}, {mrp_right.value:.4f})')
+
+	def run_gaussian_mrp(b):
+		gaussian_mrp_button.disabled = True
+		with out:
+			window = _resolve_gaussian_window()
+			if window is None:
+				print('No valid peak window found. Set MRP left/right or load the current peak range.')
+			else:
+				mrp_left.value, mrp_right.value = window
+				result = gaussian_mrp_report(_current_hist_array(), mrp_left.value, mrp_right.value, bin_size=0.01)
+				if result is None:
+					print('Gaussian MRP: insufficient data in selected range')
+				else:
+					_print_gaussian_report(result)
+		gaussian_mrp_button.disabled = False
+
+	load_mrp_window_button.on_click(load_gaussian_window)
+	gaussian_mrp_button.on_click(run_gaussian_mrp)
 
 	def hist_plot_p(variables, out):
 
@@ -175,13 +269,17 @@ def call_ion_selection(variables, colab=False):
 			df = pd.concat([df1, df2, df3], axis=0)
 			df = df[(df['abundance'] >= aboundance_threshold.value)]
 			df = df[abs(df['mass'] - peak_val.value) <= mass_difference.value]
-			df = df.iloc[(df['mass'] - peak_val.value).abs().argsort()]
-			# Reset the index to maintain a clean index order
+			df = ion_selection.rank_candidate_assignments(df, target_mass=peak_val.value, variables=variables)
+			df = df.iloc[(df['mass'] - peak_val.value).abs().argsort(kind='stable')]
 			df.reset_index(drop=True, inplace=True)
-			df = df[:num_element.value]
+			df = ion_selection.rank_candidate_assignments(df, target_mass=peak_val.value, variables=variables)
+			df = df.head(num_element.value).reset_index(drop=True)
 			variables.range_data_backup = df.copy()
 			variables.ions_list_data = df.copy()
-			display(df)
+			if df.empty:
+				print('No matching atoms or molecules were found in the requested mass window.')
+			else:
+				display(df)
 
 	find_elem_button.on_click(lambda b: vol_on_click(b, variables, output2))
 
@@ -321,6 +419,11 @@ def call_ion_selection(variables, colab=False):
 		variables.peaks_x_selected = variables.peak_x
 		variables.peaks_index_list = [i for i in range(len(variables.peak_x))]
 
+	gaussian_controls = widgets.VBox([
+		widgets.HBox([mrp_left, mrp_right]),
+		widgets.HBox([load_mrp_window_button, gaussian_mrp_button]),
+	])
+
 	tab1 = widgets.VBox([bin_size, index_fig, prominence, distance, lim_tof, percent, plot_peak, save_fig,
 	                              widgets.HBox([plot_button_p, all_peaks_button])])
 	tab2 = widgets.VBox([bin_size, index_fig, prominence, distance, lim_tof, percent, widgets.HBox(
@@ -352,7 +455,7 @@ def call_ion_selection(variables, colab=False):
 		output_layout = widgets.HBox([out, widgets.VBox([output3, output2])])
 
 		# Display the buttons and the output widgets
-		display(buttons_layout, output_layout)
+		display(widgets.VBox([buttons_layout, gaussian_controls]), output_layout)
 
 		with output3:
 			display(variables.range_data)
@@ -393,7 +496,7 @@ def call_ion_selection(variables, colab=False):
 		output_layout = widgets.HBox([widgets.VBox([out_tab, out]), widgets.VBox([output3, output2])])
 
 		# Display the buttons and output areas
-		display(buttons_layout, output_layout)
+		display(buttons_layout, gaussian_controls, output_layout)
 
 		# Initial display
 		with out_tab:

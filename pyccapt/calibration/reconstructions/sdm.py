@@ -238,12 +238,21 @@ def sdm(particles, bin_size, variables=None, roi=[0,0,0.5], z_cut=True, normaliz
                 phi) * delta[:, 1] + np.cos(theta) * np.cos(phi) * delta[:, 2]
         if 'x' in axes:
             dx = shift[:, :, 0]
-        elif 'y' in axes:
+        if 'y' in axes:
             dy = shift[:, :, 1]
-        elif 'z' in axes:
+        if 'z' in axes:
             dz = shift[:, :, 2]
 
     edges_list = []
+    def _symmetric_edges(*arrays):
+        finite_arrays = [np.asarray(arr, dtype=float).ravel() for arr in arrays if arr is not None]
+        finite_arrays = [arr[np.isfinite(arr)] for arr in finite_arrays if arr.size > 0]
+        if not finite_arrays:
+            raise ValueError('No valid SDM distances are available to build histogram edges')
+        max_abs = max(float(np.max(np.abs(arr))) for arr in finite_arrays)
+        max_abs = max(max_abs, float(bin_size))
+        return np.arange(-max_abs, max_abs + bin_size, bin_size)
+
     if 'x' in axes and 'y' in axes and 'z' in axes:
         dx = dx.flatten()
         dy = dy.flatten()
@@ -254,12 +263,12 @@ def sdm(particles, bin_size, variables=None, roi=[0,0,0.5], z_cut=True, normaliz
         dx = dx[mask]
         dy = dy[mask]
         dz = dz[mask]
-        edges = np.arange(min(np.min(dx), np.min(dy), np.min(dz)), max(np.max(dx), np.max(dy), np.max(dz)), bin_size)
+        edges = _symmetric_edges(dx, dy, dz)
     elif 'x' in axes and 'y' in axes:
         mask = ((dx <= 1) & (dx >= -1)) & ((dy <= 1) & (dy >= -1))
         dx = dx[mask]
         dy = dy[mask]
-        edges = np.arange(min(np.min(dx), np.min(dy)), max(np.max(dx), np.max(dy)), bin_size)
+        edges = _symmetric_edges(dx, dy)
     elif 'y' in axes and 'z' in axes:
         dy = dy.flatten()
         dz = dz.flatten()
@@ -268,7 +277,7 @@ def sdm(particles, bin_size, variables=None, roi=[0,0,0.5], z_cut=True, normaliz
             mask = mask & ((dz <= 1) & (dz >= -1))
         dz = dz[mask]
         dy = dy[mask]
-        edges = np.arange(min(np.min(dy), np.min(dz)), max(np.max(dy), np.max(dz)), bin_size)
+        edges = _symmetric_edges(dy, dz)
     elif 'x' in axes and 'z' in axes:
         dx = dx.flatten()
         dz = dz.flatten()
@@ -277,23 +286,23 @@ def sdm(particles, bin_size, variables=None, roi=[0,0,0.5], z_cut=True, normaliz
             mask = mask & ((dz <= 1) & (dz >= -1))
         dx = dx[mask]
         dz = dz[mask]
-        edges = np.arange(min(np.min(dx), np.min(dz)), max(np.max(dx), np.max(dz)), bin_size)
+        edges = _symmetric_edges(dx, dz)
     elif 'x' in axes:
         dx = dx.flatten()
         mask = (dx <= 1) & (dx >= -1)
         dx = dx[mask]
-        edges = np.arange(np.min(dx), np.max(dx), bin_size)
+        edges = _symmetric_edges(dx)
     elif 'y' in axes:
         dy = dy.flatten()
         mask = (dy <= 1) & (dy >= -1)
         dy = dy[mask]
-        edges = np.arange(np.min(dy), np.max(dy), bin_size)
+        edges = _symmetric_edges(dy)
     elif 'z' in axes:
         dz = dz.flatten()
         if z_cut:
             mask = (dz <= 1) & (dz >= -1)
             dz = dz[mask]
-        edges = np.arange(np.min(dz), np.max(dz), bin_size)
+        edges = _symmetric_edges(dz)
 
     if histogram_type == '1D':
         if 'x' in axes:
@@ -318,7 +327,7 @@ def sdm(particles, bin_size, variables=None, roi=[0,0,0.5], z_cut=True, normaliz
 
     if histogram_type == '2D':
         if 'x' in axes and 'y' in axes:
-            mask = (dx != 0) & (dy != 0)
+            mask = ~((dx == 0) & (dy == 0))
             dx = dx[mask]
             dy = dy[mask]
             hist2d, x_edges, y_edges = np.histogram2d(dx, dy, bins=[edges, edges])
@@ -326,7 +335,7 @@ def sdm(particles, bin_size, variables=None, roi=[0,0,0.5], z_cut=True, normaliz
             histograms.append(hist2d)
             edges_list.extend([x_edges, y_edges])
         elif 'y' in axes and 'z' in axes:
-            mask = (dy != 0) & (dz != 0)
+            mask = ~((dy == 0) & (dz == 0))
             dy = dy[mask]
             dz = dz[mask]
             hist2d, x_edges, y_edges = np.histogram2d(dy, dz, bins=[edges, edges])
@@ -334,7 +343,7 @@ def sdm(particles, bin_size, variables=None, roi=[0,0,0.5], z_cut=True, normaliz
             histograms.append(hist2d)
             edges_list.extend([x_edges, y_edges])
         elif 'x' in axes and 'z' in axes:
-            mask = (dx != 0) & (dz != 0)
+            mask = ~((dx == 0) & (dz == 0))
             dx = dx[mask]
             dz = dz[mask]
             hist2d, x_edges, y_edges = np.histogram2d(dx, dz, bins=[edges, edges])
@@ -349,7 +358,7 @@ def sdm(particles, bin_size, variables=None, roi=[0,0,0.5], z_cut=True, normaliz
 
     if histogram_type == '3D':
         if 'x' in axes and 'y' in axes and 'z' in axes:
-            mask = (dx != 0) & (dy != 0) & (dz != 0)
+            mask = ~((dx == 0) & (dy == 0) & (dz == 0))
             dx = dx[mask]
             dy = dy[mask]
             dz = dz[mask]

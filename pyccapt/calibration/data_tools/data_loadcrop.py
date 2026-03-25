@@ -503,7 +503,21 @@ def crop_dataset(dld_master_dataframe, variables):
     Returns:
         data_crop: Cropped dataset
     """
-    data_crop = dld_master_dataframe.loc[int(variables.selected_x1):int(variables.selected_x2), :]
+    if dld_master_dataframe is None or dld_master_dataframe.empty:
+        raise ValueError('Dataset is empty, temporal crop cannot be applied')
+
+    left = int(np.floor(min(variables.selected_x1, variables.selected_x2)))
+    right = int(np.ceil(max(variables.selected_x1, variables.selected_x2)))
+    last_index = len(dld_master_dataframe) - 1
+
+    if left < 0 or right < 0:
+        raise ValueError('Crop indices must be non-negative')
+    if left > last_index or right > last_index:
+        raise ValueError(f'Crop indices must stay within [0, {last_index}]')
+    if right < left:
+        raise ValueError('End index must be greater than or equal to start index')
+
+    data_crop = dld_master_dataframe.iloc[left:right + 1, :].copy()
     data_crop.reset_index(inplace=True, drop=True)
     return data_crop
 
@@ -558,13 +572,37 @@ def crop_data_after_selection(data_crop, variables):
     Returns:
         data_crop: Cropped dataset
     """
+    if data_crop is None or data_crop.empty:
+        raise ValueError('Dataset is empty, spatial crop cannot be applied')
+
+    center_x = float(variables.selected_x_fdm)
+    center_y = float(variables.selected_y_fdm)
+    radius = float(variables.roi_fdm)
+
+    if not np.isfinite(center_x) or not np.isfinite(center_y):
+        raise ValueError('Crop center must be numeric')
+    if not np.isfinite(radius) or radius <= 0:
+        raise ValueError('Crop radius must be greater than 0')
+
     x = data_crop['x_det (cm)'].to_numpy()
     y = data_crop['y_det (cm)'].to_numpy()
-    detector_dist = np.sqrt((x - variables.selected_x_fdm) ** 2 + (y - variables.selected_y_fdm) ** 2)
-    mask_fdm = (detector_dist > variables.roi_fdm)
-    data_crop.drop(np.where(mask_fdm)[0], inplace=True)
-    data_crop.reset_index(inplace=True, drop=True)
-    return data_crop
+
+    x_min, x_max = float(np.min(x)), float(np.max(x))
+    y_min, y_max = float(np.min(y)), float(np.max(y))
+    if center_x < x_min or center_x > x_max or center_y < y_min or center_y > y_max:
+        raise ValueError(
+            f'Crop center must stay inside detector bounds: '
+            f'x in [{x_min:.4f}, {x_max:.4f}], y in [{y_min:.4f}, {y_max:.4f}]'
+        )
+
+    detector_dist = np.sqrt((x - center_x) ** 2 + (y - center_y) ** 2)
+    mask_fdm = detector_dist <= radius
+    if not np.any(mask_fdm):
+        raise ValueError('Spatial crop does not contain any detector hits')
+
+    cropped = data_crop.loc[mask_fdm].copy()
+    cropped.reset_index(inplace=True, drop=True)
+    return cropped
 
 
 def create_pandas_dataframe(data_crop, mode='dld', flag_old_pyccpat_data=False):

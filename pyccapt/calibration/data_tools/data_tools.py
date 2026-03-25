@@ -64,7 +64,7 @@ def read_hdf5(filename: str | Path):
 
 
 def read_range(filename: str | Path) -> pd.DataFrame:
-    """Read range definitions from `.h5` or `.rrng` files."""
+    """Read saved range definitions from `.h5`, `.rrng`, or legacy `.rng` files."""
     file_path = _as_path(filename)
     try:
         suffix = file_path.suffix.lower()
@@ -72,9 +72,11 @@ def read_range(filename: str | Path) -> pd.DataFrame:
             return pd.read_hdf(file_path, mode="r")
         if suffix == ".rrng":
             return leap_tools.read_rrng(str(file_path))
+        if suffix == ".rng":
+            return leap_tools.read_rng(str(file_path))
         raise ValueError(f"Unsupported range file extension: {file_path.suffix!r}")
     except FileNotFoundError as error:
-        print("[*] HDF5 File could not be found")
+        print("[*] Range file could not be found")
         print(error)
         raise
 

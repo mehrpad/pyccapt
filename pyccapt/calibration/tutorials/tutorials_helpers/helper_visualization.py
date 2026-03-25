@@ -10,9 +10,10 @@ from ipywidgets import Output
 
 from pyccapt.calibration import clustering
 from pyccapt.calibration.core import mc_plot, ion_selection
+from pyccapt.calibration.core.mc_plot_peak_helpers import gaussian_mrp_report
 from pyccapt.calibration.data_tools import data_loadcrop
 from pyccapt.calibration.reconstructions import reconstruction, sdm, rdf, density_map
-from pyccapt.calibration.reconstructions import iso_surface
+from pyccapt.calibration.reconstructions import iso_surface, proxigram
 
 # Define a layout for labels to make them a fixed width
 label_layout = widgets.Layout(width='200px')
@@ -71,6 +72,10 @@ def call_visualization(variables, colab=False):
     figure_mc_size_y_mc = widgets.FloatText(value=5.0)
     save_mc = widgets.Dropdown(options=[('True', True), ('False', False)], value=False)
     grid_mc = widgets.Dropdown(options=[('False', False), ('True', True)])
+    mrp_left_mc = widgets.FloatText(value=0.0)
+    mrp_right_mc = widgets.FloatText(value=0.0)
+    load_mrp_window_mc_button = widgets.Button(description='load selection')
+    gaussian_mrp_mc_button = widgets.Button(description='Gaussian MRP')
     range_sequence_mc = widgets.Textarea(value='[0,0]')
     range_detx_mc = widgets.Textarea(value='[0,0]')
     range_dety_mc = widgets.Textarea(value='[0,0]')
@@ -128,6 +133,83 @@ def call_visualization(variables, colab=False):
                               save_fig=save_mc.value, legend_mode=legend_widget.value)
 
         plot_mc_button.disabled = False
+
+    def _resolve_visualization_hist_array():
+        if target_mode.value == 'mc_uc':
+            return variables.data['mc_uc (Da)']
+        if target_mode.value == 'tof_c':
+            return variables.data['t_c (ns)']
+        if target_mode.value == 'tof':
+            return variables.data['t (ns)']
+        return variables.data['mc (Da)']
+
+    def _resolve_visualization_gaussian_window():
+        left = float(mrp_left_mc.value)
+        right = float(mrp_right_mc.value)
+        if right > left:
+            return left, right
+        if getattr(variables, 'selected_x2', 0) > getattr(variables, 'selected_x1', 0):
+            return float(variables.selected_x1), float(variables.selected_x2)
+        return None
+
+    def _print_visualization_gaussian_report(result):
+        print('=' * 60)
+        print('PEAK PROFILE MRP REPORT')
+        print('=' * 60)
+        print(f'Peak position: {result["peak_position"]:.4f}')
+        print(f'Ions in range: {result["num_ions"]:,}')
+        print(f'Bin size used: {result["bin_size"]} ({result["num_bins"]} bins)')
+        print()
+        print('Gaussian fit MRP:' if result['gaussian_ok'] else 'Gaussian fit FAILED')
+        if result['gaussian_ok']:
+            print(f'  MRP(0.5)  = {result["gaussian_mrp"][0]:.2f}')
+            print(f'  MRP(0.1)  = {result["gaussian_mrp"][1]:.2f}')
+            print(f'  MRP(0.01) = {result["gaussian_mrp"][2]:.2f}')
+        print()
+        print('Voigt fit MRP:' if result['voigt_ok'] else 'Voigt fit FAILED')
+        if result['voigt_ok']:
+            print(f'  MRP(0.5)  = {result["voigt_mrp"][0]:.2f}')
+            print(f'  MRP(0.1)  = {result["voigt_mrp"][1]:.2f}')
+            print(f'  MRP(0.01) = {result["voigt_mrp"][2]:.2f}')
+            print(f'  Voigt FWHM = {result["voigt_fwhm"]:.6f}')
+        print()
+        print('Histogram-based MRP:')
+        print(f'  MRP(0.5)  = {result["histogram_mrp"][0]:.2f}')
+        print(f'  MRP(0.1)  = {result["histogram_mrp"][1]:.2f}')
+        print(f'  MRP(0.01) = {result["histogram_mrp"][2]:.2f}')
+        print('=' * 60)
+
+    def load_mc_gaussian_window(_):
+        with out:
+            window = _resolve_visualization_gaussian_window()
+            if window is None:
+                print('No active mass/charge selection is available yet.')
+            else:
+                mrp_left_mc.value, mrp_right_mc.value = window
+                print(f'Loaded Gaussian MRP window: ({mrp_left_mc.value:.4f}, {mrp_right_mc.value:.4f})')
+
+    def run_mc_gaussian_mrp(_):
+        gaussian_mrp_mc_button.disabled = True
+        with out:
+            window = _resolve_visualization_gaussian_window()
+            if window is None:
+                print('Set MRP left/right or draw a selection first.')
+            else:
+                mrp_left_mc.value, mrp_right_mc.value = window
+                result = gaussian_mrp_report(
+                    _resolve_visualization_hist_array(),
+                    mrp_left_mc.value,
+                    mrp_right_mc.value,
+                    bin_size=0.01,
+                )
+                if result is None:
+                    print('Gaussian MRP: insufficient data in selected range')
+                else:
+                    _print_visualization_gaussian_report(result)
+        gaussian_mrp_mc_button.disabled = False
+
+    load_mrp_window_mc_button.on_click(load_mc_gaussian_window)
+    gaussian_mrp_mc_button.on_click(run_mc_gaussian_mrp)
 
     #############
     # Define widgets for each parameter
@@ -205,7 +287,16 @@ def call_visualization(variables, colab=False):
     make_evap_3d = widgets.Dropdown(options=[('True', True), ('False', False)], value=False)
     cluster_precipitate_3d = widgets.Dropdown(options=[('False', False), ('True', True)], value=False)
     cluster_labels_3d = widgets.Text(value='', placeholder='Ni3Al, Al')
-    cluster_count_3d = widgets.IntText(value=2)
+    cluster_method_3d = widgets.Dropdown(
+        options=[('Maximum separation', 'maximum-separation'), ('Min-Max', 'min-max')],
+        value='maximum-separation',
+    )
+    cluster_count_3d = widgets.BoundedIntText(value=2, min=2, max=12)
+    cluster_dmax_3d = widgets.BoundedFloatText(value=1.0, min=0.0001, max=1_000_000.0, step=0.05)
+    cluster_auto_dmax_3d = widgets.Dropdown(options=[('True', True), ('False', False)], value=True)
+    cluster_kth_neighbor_3d = widgets.BoundedIntText(value=3, min=1, max=100)
+    cluster_percentile_3d = widgets.BoundedFloatText(value=50.0, min=1.0, max=99.9, step=1.0)
+    cluster_min_size_3d = widgets.BoundedIntText(value=25, min=2, max=1_000_000)
     plot_3d_button.on_click(lambda b: plot_3d(b, variables, out))
     range_sequence_3d = widgets.Textarea(value='[0,0]')
     range_detx_3d = widgets.Textarea(value='[0,0]')
@@ -257,18 +348,18 @@ def call_visualization(variables, colab=False):
                         max_value = element_percentage_dic[element]
                 element_percentage_list.append(max_value)
 
-            cluster_result = None
-            if cluster_precipitate_3d.value:
-                cluster_selection = clustering.parse_label_selection(cluster_labels_3d.value)
-                if not cluster_selection:
-                    print('Clustering is enabled, but no ion or element labels were provided. Skipping segmentation.')
-                else:
-                    cluster_result = clustering.segment_ions_by_min_max(
-                        variables,
-                        cluster_selection,
-                        n_clusters=max(2, int(cluster_count_3d.value)),
-                    )
-                    print('Min-Max clustering counts:', cluster_result.counts)
+            cluster_result = _run_cluster_segmentation(
+                enabled=cluster_precipitate_3d.value,
+                selection_text=cluster_labels_3d.value,
+                method_value=cluster_method_3d.value,
+                cluster_count_value=cluster_count_3d.value,
+                d_max_value=cluster_dmax_3d.value,
+                auto_d_max_value=cluster_auto_dmax_3d.value,
+                kth_neighbor_value=cluster_kth_neighbor_3d.value,
+                percentile_value=cluster_percentile_3d.value,
+                n_min_value=cluster_min_size_3d.value,
+                context_label='3D clustering',
+            )
 
             reconstruction.reconstruction_plot(variables, element_percentage_list, opacity.value,
                                                rotary_fig_save_p3.value, figname_3d.value,
@@ -730,6 +821,107 @@ def call_visualization(variables, colab=False):
 
         plot_rdf_button.disabled = False
 
+    def _parse_common_ranges(sequence_widget, mc_widget, detx_widget, dety_widget,
+                             x_widget, y_widget, z_widget, vol_widget):
+        range_sequence = json.loads(sequence_widget.value)
+        range_mc = json.loads(mc_widget.value)
+        range_detx = json.loads(detx_widget.value)
+        range_dety = json.loads(dety_widget.value)
+        range_x = json.loads(x_widget.value)
+        range_y = json.loads(y_widget.value)
+        range_z = json.loads(z_widget.value)
+        range_vol = json.loads(vol_widget.value)
+
+        if range_sequence == [0, 0]:
+            range_sequence = []
+        if range_mc == [0, 0]:
+            range_mc = []
+        if range_detx == [0, 0] or range_dety == [0, 0]:
+            range_detx = []
+            range_dety = []
+        if range_x == [0, 0] or range_y == [0, 0] or range_z == [0, 0]:
+            range_x = []
+            range_y = []
+            range_z = []
+        if range_vol == [0, 0]:
+            range_vol = []
+        return range_sequence, range_mc, range_detx, range_dety, range_x, range_y, range_z, range_vol
+
+    def _parse_isosurface_dict(value):
+        formatted_string = re.sub(r'(\w+):', r'"\1":', value)
+        parsed = ast.literal_eval(formatted_string)
+        if not isinstance(parsed, dict) or not parsed:
+            raise ValueError('Isosurface definition must be a non-empty dictionary')
+        return parsed
+
+    def _build_element_percentage_list(value):
+        element_percentage_dic = ast.literal_eval(value)
+        element_percentage_list = []
+        for row_elements in variables.range_data['element']:
+            max_value = 0.1
+            for element in row_elements:
+                if element in element_percentage_dic:
+                    max_value = element_percentage_dic[element]
+            element_percentage_list.append(max_value)
+        return element_percentage_list
+
+    def _run_cluster_segmentation(*, enabled, selection_text, method_value, cluster_count_value,
+                                  d_max_value, auto_d_max_value, kth_neighbor_value, percentile_value,
+                                  n_min_value, context_label):
+        if not enabled:
+            return None
+
+        cluster_selection = clustering.parse_label_selection(selection_text)
+        if not cluster_selection:
+            print(f'{context_label} is enabled, but no ion or element labels were provided. Skipping segmentation.')
+            return None
+
+        try:
+            method = clustering.normalize_clustering_method(method_value)
+            if method == 'min-max':
+                cluster_result = clustering.segment_ions(
+                    variables,
+                    cluster_selection,
+                    method=method,
+                    n_clusters=max(2, int(cluster_count_value)),
+                )
+                print('Min-Max clustering counts:', cluster_result.counts)
+                return cluster_result
+
+            cluster_result = clustering.segment_ions(
+                variables,
+                cluster_selection,
+                method=method,
+                d_max=float(d_max_value),
+                n_min=max(2, int(n_min_value)),
+                auto_d_max=bool(auto_d_max_value),
+                kth_neighbor=max(1, int(kth_neighbor_value)),
+                percentile=float(percentile_value),
+            )
+            d_max_used = None
+            if cluster_result.parameters is not None:
+                d_max_used = float(cluster_result.parameters.get('d_max', 0.0))
+            if cluster_result.n_clusters == 0:
+                if d_max_used is not None and d_max_used > 0:
+                    print(
+                        f'Maximum separation found no clusters '
+                        f'(d_max={d_max_used:.4f}, min cluster size={max(2, int(n_min_value))}).'
+                    )
+                else:
+                    print('Maximum separation found no clusters.')
+            else:
+                print('Maximum separation counts:', cluster_result.counts)
+                if d_max_used is not None and d_max_used > 0:
+                    mode_name = 'auto-estimated' if auto_d_max_value else 'manual'
+                    print(
+                        f'Using d_max={d_max_used:.4f} ({mode_name}), '
+                        f'min cluster size={max(2, int(n_min_value))}.'
+                    )
+            return cluster_result
+        except ValueError as exc:
+            print(f'{context_label} error: {exc}')
+            return None
+
     #############
     figname_3d_iso = widgets.Text(value='3d_plot_iso')
     rotary_fig_save_p3_iso = widgets.Dropdown(options=[('False', False), ('True', True)])
@@ -740,11 +932,23 @@ def call_visualization(variables, colab=False):
     make_gif_p3_iso = widgets.Dropdown(options=[('True', True), ('False', False)], value=False)
     cluster_precipitate_iso = widgets.Dropdown(options=[('False', False), ('True', True)], value=False)
     cluster_labels_iso = widgets.Text(value='', placeholder='Ni3Al, Al')
-    cluster_count_iso = widgets.IntText(value=2)
+    cluster_method_iso = widgets.Dropdown(
+        options=[('Maximum separation', 'maximum-separation'), ('Min-Max', 'min-max')],
+        value='maximum-separation',
+    )
+    cluster_count_iso = widgets.BoundedIntText(value=2, min=2, max=12)
+    cluster_dmax_iso = widgets.BoundedFloatText(value=1.0, min=0.0001, max=1_000_000.0, step=0.05)
+    cluster_auto_dmax_iso = widgets.Dropdown(options=[('True', True), ('False', False)], value=True)
+    cluster_kth_neighbor_iso = widgets.BoundedIntText(value=3, min=1, max=100)
+    cluster_percentile_iso = widgets.BoundedFloatText(value=50.0, min=1.0, max=99.9, step=1.0)
+    cluster_min_size_iso = widgets.BoundedIntText(value=25, min=2, max=1_000_000)
     plot_3d_button_iso.on_click(lambda b: plot_3d_iso(b, variables, out))
     isosurface_dic_p3_iso = widgets.Textarea(value="{Al: [3,3,3]}")
     detailed_isotope_charge_3d_iso = widgets.Dropdown(options=[('False', False), ('True', True)], value=False)
     only_iso_3d_iso = widgets.Dropdown(options=[('False', False), ('True', True)], value=False)
+    smoothing_sigma_iso = widgets.FloatText(value=1.0)
+    min_atoms_per_voxel_iso = widgets.IntText(value=10)
+    min_vertices_iso = widgets.IntText(value=20)
     range_sequence_3d_iso = widgets.Textarea(value='[0,0]')
     range_detx_3d_iso = widgets.Textarea(value='[0,0]')
     range_dety_3d_iso = widgets.Textarea(value='[0,0]')
@@ -758,59 +962,35 @@ def call_visualization(variables, colab=False):
         plot_3d_button_iso.disabled = True
         with out:
             try:
-                # Use json.loads to convert the entered string to a list
-                range_sequence = json.loads(range_sequence_3d_iso.value)
-                range_mc = json.loads(range_mc_3d_iso.value)
-                range_detx = json.loads(range_detx_3d_iso.value)
-                range_dety = json.loads(range_dety_3d_iso.value)
-                range_x = json.loads(range_x_3d_iso.value)
-                range_y = json.loads(range_y_3d_iso.value)
-                range_z = json.loads(range_z_3d_iso.value)
-                range_vol = json.loads(range_vol_3d_iso.value)
-                if range_sequence == [0, 0]:
-                    range_sequence = []
-                if range_mc == [0, 0]:
-                    range_mc = []
-                if range_detx == [0, 0] or range_dety == [0, 0]:
-                    range_detx = []
-                    range_dety = []
+                range_sequence, range_mc, range_detx, range_dety, range_x, range_y, range_z, range_vol = _parse_common_ranges(
+                    range_sequence_3d_iso,
+                    range_mc_3d_iso,
+                    range_detx_3d_iso,
+                    range_dety_3d_iso,
+                    range_x_3d_iso,
+                    range_y_3d_iso,
+                    range_z_3d_iso,
+                    range_vol_3d_iso,
+                )
+                isosurface_dic_p3_iso_value = _parse_isosurface_dict(isosurface_dic_p3_iso.value)
+                element_percentage_list_iso = _build_element_percentage_list(element_percentage_p3_iso.value)
+            except (json.JSONDecodeError, ValueError, SyntaxError) as exc:
+                print(f'Invalid iso plot input: {exc}')
+                plot_3d_button_iso.disabled = False
+                return
 
-                if range_x == [0, 0] or range_y == [] or range_z == [0, 0]:
-                    range_x = []
-                    range_y = []
-                    range_z = []
-                if range_vol == [0, 0]:
-                    range_vol = []
-            except json.JSONDecodeError:
-                # Handle invalid input
-                print(f"Invalid range input")
-            # Use regular expressions to add quotes around keys
-            formatted_string = re.sub(r'(\w+):', r'"\1":', isosurface_dic_p3_iso.value)
-            # Convert to dictionary
-            isosurface_dic_p3_iso_value = ast.literal_eval(formatted_string)
-
-            element_percentage_dic = ast.literal_eval(element_percentage_p3_iso.value)
-            # Iterate through the 'element' column
-            element_percentage_list_iso = []
-            for row_elements in variables.range_data['element']:
-                max_value = 0.1  # Default value if no matching element is found
-                for element in row_elements:
-                    if element in element_percentage_dic:
-                        max_value = element_percentage_dic[element]
-                element_percentage_list_iso.append(max_value)
-
-            cluster_result = None
-            if cluster_precipitate_iso.value:
-                cluster_selection = clustering.parse_label_selection(cluster_labels_iso.value)
-                if not cluster_selection:
-                    print('Iso-surface clustering is enabled, but no ion or element labels were provided. Skipping segmentation.')
-                else:
-                    cluster_result = clustering.segment_ions_by_min_max(
-                        variables,
-                        cluster_selection,
-                        n_clusters=max(2, int(cluster_count_iso.value)),
-                    )
-                    print('Min-Max clustering counts:', cluster_result.counts)
+            cluster_result = _run_cluster_segmentation(
+                enabled=cluster_precipitate_iso.value,
+                selection_text=cluster_labels_iso.value,
+                method_value=cluster_method_iso.value,
+                cluster_count_value=cluster_count_iso.value,
+                d_max_value=cluster_dmax_iso.value,
+                auto_d_max_value=cluster_auto_dmax_iso.value,
+                kth_neighbor_value=cluster_kth_neighbor_iso.value,
+                percentile_value=cluster_percentile_iso.value,
+                n_min_value=cluster_min_size_iso.value,
+                context_label='Iso-surface clustering',
+            )
 
             iso_surface.reconstruction_plot(variables, element_percentage_list_iso, opacity_iso.value,
                                                rotary_fig_save_p3_iso.value, figname_3d_iso.value,
@@ -822,9 +1002,77 @@ def call_visualization(variables, colab=False):
                                                isosurface_dic=isosurface_dic_p3_iso_value,
                                                detailed_isotope_charge=detailed_isotope_charge_3d_iso.value,
                                                only_iso=only_iso_3d_iso.value,
-                                               cluster_result=cluster_result)
+                                               cluster_result=cluster_result,
+                                               smoothing_sigma=smoothing_sigma_iso.value,
+                                               min_atoms_per_voxel=min_atoms_per_voxel_iso.value,
+                                               min_isosurface_vertices=min_vertices_iso.value)
 
         plot_3d_button_iso.disabled = False
+
+    #############
+    plot_proxigram_button = widgets.Button(description='plot proxigram')
+    figname_proxigram = widgets.Text(value='proxigram')
+    proxigram_isosurface_dic = widgets.Textarea(value="{Al: [3,3,3]}")
+    proxigram_elements = widgets.Text(value='Al', placeholder='Al, Ni, Ti')
+    proxigram_bin_size = widgets.FloatText(value=0.1)
+    proxigram_symmetric_range = widgets.FloatText(value=0.0)
+    proxigram_flip_normals = widgets.Dropdown(options=[('False', False), ('True', True)], value=False)
+    proxigram_save = widgets.Dropdown(options=[('True', True), ('False', False)], value=False)
+    proxigram_sigma = widgets.FloatText(value=1.0)
+    proxigram_min_atoms = widgets.IntText(value=10)
+    proxigram_min_vertices = widgets.IntText(value=20)
+    range_sequence_prox = widgets.Textarea(value='[0,0]')
+    range_detx_prox = widgets.Textarea(value='[0,0]')
+    range_dety_prox = widgets.Textarea(value='[0,0]')
+    range_mc_prox = widgets.Textarea(value='[0,0]')
+    range_x_prox = widgets.Textarea(value='[0,0]')
+    range_y_prox = widgets.Textarea(value='[0,0]')
+    range_z_prox = widgets.Textarea(value='[0,0]')
+    range_vol_prox = widgets.Textarea(value='[0,0]')
+
+    def plot_proxigram_view(b, variables, out):
+        plot_proxigram_button.disabled = True
+        with out:
+            try:
+                range_sequence, range_mc, range_detx, range_dety, range_x, range_y, range_z, range_vol = _parse_common_ranges(
+                    range_sequence_prox,
+                    range_mc_prox,
+                    range_detx_prox,
+                    range_dety_prox,
+                    range_x_prox,
+                    range_y_prox,
+                    range_z_prox,
+                    range_vol_prox,
+                )
+                interface_dic = _parse_isosurface_dict(proxigram_isosurface_dic.value)
+                proxigram_elements_list = [item.strip() for item in proxigram_elements.value.split(',') if item.strip()]
+                symmetric_range = proxigram_symmetric_range.value if proxigram_symmetric_range.value > 0 else None
+                proxigram.plot_proxigram(
+                    variables,
+                    interface_dic,
+                    proxigram_elements_list,
+                    figname=figname_proxigram.value,
+                    save=proxigram_save.value,
+                    bin_size=proxigram_bin_size.value,
+                    symmetric_range=symmetric_range,
+                    flip_normals=proxigram_flip_normals.value,
+                    range_sequence=range_sequence,
+                    range_mc=range_mc,
+                    range_detx=range_detx,
+                    range_dety=range_dety,
+                    range_x=range_x,
+                    range_y=range_y,
+                    range_z=range_z,
+                    range_vol=range_vol,
+                    smoothing_sigma=proxigram_sigma.value,
+                    min_atoms_per_voxel=proxigram_min_atoms.value,
+                    min_isosurface_vertices=proxigram_min_vertices.value,
+                )
+            except (json.JSONDecodeError, ValueError, SyntaxError) as exc:
+                print(f'Unable to plot proxigram: {exc}')
+        plot_proxigram_button.disabled = False
+
+    plot_proxigram_button.on_click(lambda b: plot_proxigram_view(b, variables, out))
 
     #############
     row_index = widgets.IntText(value=0, description='index row:')
@@ -886,6 +1134,9 @@ def call_visualization(variables, colab=False):
             widgets.HBox([widgets.Label(value="Peak distance:", layout=label_layout), distance]),
             widgets.HBox([widgets.Label(value="Background:", layout=label_layout), background_mc]),
             widgets.HBox([widgets.Label(value="Grid:", layout=label_layout), grid_mc]),
+            widgets.HBox([widgets.Label(value="MRP range:", layout=label_layout),
+                          widgets.HBox([mrp_left_mc, mrp_right_mc])]),
+            widgets.HBox([load_mrp_window_mc_button, gaussian_mrp_mc_button]),
             widgets.HBox([plot_mc_button, clear_button])
         ]),
         widgets.VBox([
@@ -1118,6 +1369,9 @@ def call_visualization(variables, colab=False):
             widgets.HBox([widgets.Label(value='Detailed isotope charge:', layout=label_layout),
                             detailed_isotope_charge_3d_iso]),
             widgets.HBox([widgets.Label(value='Only iso:', layout=label_layout), only_iso_3d_iso]),
+            widgets.HBox([widgets.Label(value='Smoothing sigma:', layout=label_layout), smoothing_sigma_iso]),
+            widgets.HBox([widgets.Label(value='Min atoms / voxel:', layout=label_layout), min_atoms_per_voxel_iso]),
+            widgets.HBox([widgets.Label(value='Min iso vertices:', layout=label_layout), min_vertices_iso]),
             widgets.HBox([widgets.Label(value='Make GIF:', layout=label_layout), make_gif_p3_iso]),
             widgets.HBox([widgets.Label(value='Fig name:', layout=label_layout), figname_3d_iso]),
             widgets.HBox([widgets.Label(value='Save:', layout=label_layout), save_3d_iso]),
@@ -1136,27 +1390,72 @@ def call_visualization(variables, colab=False):
         ])
     ]))
 
-    tab11 = widgets.VBox([
+    tab11 = (widgets.HBox([
+        widgets.VBox([
+            widgets.HTML(value="<b>Interface isosurface</b>: use one element entry, for example <code>{Al: [3,3,3]}</code>."),
+            widgets.HBox([widgets.Label(value='Isosurface dic:', layout=label_layout), proxigram_isosurface_dic]),
+            widgets.HBox([widgets.Label(value='Proxigram elements:', layout=label_layout), proxigram_elements]),
+            widgets.HBox([widgets.Label(value='Bin size (nm):', layout=label_layout), proxigram_bin_size]),
+            widgets.HBox([widgets.Label(value='Symmetric range (nm):', layout=label_layout), proxigram_symmetric_range]),
+            widgets.HBox([widgets.Label(value='Flip normals:', layout=label_layout), proxigram_flip_normals]),
+            widgets.HBox([widgets.Label(value='Smoothing sigma:', layout=label_layout), proxigram_sigma]),
+            widgets.HBox([widgets.Label(value='Min atoms / voxel:', layout=label_layout), proxigram_min_atoms]),
+            widgets.HBox([widgets.Label(value='Min iso vertices:', layout=label_layout), proxigram_min_vertices]),
+            widgets.HBox([widgets.Label(value='Fig name:', layout=label_layout), figname_proxigram]),
+            widgets.HBox([widgets.Label(value='Save:', layout=label_layout), proxigram_save]),
+            widgets.HBox([plot_proxigram_button, clear_button]),
+        ]),
+        widgets.VBox([
+            widgets.HBox([widgets.Label(value="sequence range:", layout=label_layout), range_sequence_prox]),
+            widgets.HBox([widgets.Label(value='range mc:', layout=label_layout), range_mc_prox]),
+            widgets.HBox([widgets.Label(value='range detx:', layout=label_layout), range_detx_prox]),
+            widgets.HBox([widgets.Label(value='range dety:', layout=label_layout), range_dety_prox]),
+            widgets.HBox([widgets.Label(value='range x:', layout=label_layout), range_x_prox]),
+            widgets.HBox([widgets.Label(value='range y:', layout=label_layout), range_y_prox]),
+            widgets.HBox([widgets.Label(value='range z:', layout=label_layout), range_z_prox]),
+            widgets.HBox([widgets.Label(value="voltage range:", layout=label_layout), range_vol_prox]),
+        ])
+    ]))
+
+    tab12 = widgets.VBox([
         widgets.HTML(
             value=(
-                "<b>Min-Max clustering</b><br>"
-                "Configure precipitate segmentation here, then run the clustered 3D or iso-surface plot."
+                "<b>Precipitate clustering</b><br>"
+                "Use the faster maximum-separation method for connected precipitates, or keep Min-Max for a fixed-number split."
+            )
+        ),
+        widgets.HTML(
+            value=(
+                "For <b>maximum separation</b>, keep <code>Auto estimate d max</code> enabled in most cases. "
+                "PyCCAPT will estimate the cutoff from the selected ions' k-th nearest-neighbor distances."
             )
         ),
         widgets.HTML(value="<b>3D clustering</b>"),
         widgets.HBox([widgets.Label(value='Enable clustering:', layout=label_layout), cluster_precipitate_3d]),
         widgets.HBox([widgets.Label(value='Cluster ions/elements:', layout=label_layout), cluster_labels_3d]),
+        widgets.HBox([widgets.Label(value='Method:', layout=label_layout), cluster_method_3d]),
         widgets.HBox([widgets.Label(value='Number of clusters:', layout=label_layout), cluster_count_3d]),
+        widgets.HBox([widgets.Label(value='Auto estimate d max:', layout=label_layout), cluster_auto_dmax_3d]),
+        widgets.HBox([widgets.Label(value='d max:', layout=label_layout), cluster_dmax_3d]),
+        widgets.HBox([widgets.Label(value='k-th NN:', layout=label_layout), cluster_kth_neighbor_3d]),
+        widgets.HBox([widgets.Label(value='NN percentile:', layout=label_layout), cluster_percentile_3d]),
+        widgets.HBox([widgets.Label(value='Min cluster size:', layout=label_layout), cluster_min_size_3d]),
         widgets.HBox([plot_clustered_3d_button]),
         widgets.HTML(value="<b>Iso-surface clustering</b>"),
         widgets.HBox([widgets.Label(value='Enable clustering:', layout=label_layout), cluster_precipitate_iso]),
         widgets.HBox([widgets.Label(value='Cluster ions/elements:', layout=label_layout), cluster_labels_iso]),
+        widgets.HBox([widgets.Label(value='Method:', layout=label_layout), cluster_method_iso]),
         widgets.HBox([widgets.Label(value='Number of clusters:', layout=label_layout), cluster_count_iso]),
+        widgets.HBox([widgets.Label(value='Auto estimate d max:', layout=label_layout), cluster_auto_dmax_iso]),
+        widgets.HBox([widgets.Label(value='d max:', layout=label_layout), cluster_dmax_iso]),
+        widgets.HBox([widgets.Label(value='k-th NN:', layout=label_layout), cluster_kth_neighbor_iso]),
+        widgets.HBox([widgets.Label(value='NN percentile:', layout=label_layout), cluster_percentile_iso]),
+        widgets.HBox([widgets.Label(value='Min cluster size:', layout=label_layout), cluster_min_size_iso]),
         widgets.HBox([plot_clustered_iso_button]),
         widgets.HBox([clear_button]),
     ])
 
-    tab12 = widgets.VBox([
+    tab13 = widgets.VBox([
         widgets.HBox([widgets.Label(value='Index row:', layout=label_layout), row_index]),
         widgets.HBox([widgets.Label(value='Color:', layout=label_layout), color_picker]),
         widgets.VBox([show_color, change_color, clear_button]),
@@ -1164,7 +1463,7 @@ def call_visualization(variables, colab=False):
 
     if not colab:
         tab = widgets.Tab([tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11,
-                                    tab12])
+                                    tab12, tab13])
         tab.set_title(0, 'mc')
         tab.set_title(1, 'Experiment history')
         tab.set_title(2, 'FDM')
@@ -1177,8 +1476,9 @@ def call_visualization(variables, colab=False):
         tab.set_title(8, 'SDM')
         tab.set_title(9, 'RDF')
         tab.set_title(10, 'Iso surface')
-        tab.set_title(11, 'Clustering')
-        tab.set_title(12, 'Change Color')
+        tab.set_title(11, 'Proxigram')
+        tab.set_title(12, 'Clustering')
+        tab.set_title(13, 'Change Color')
 
         out = Output()
 
@@ -1187,12 +1487,12 @@ def call_visualization(variables, colab=False):
     else:
         # Define the content for each tab
         content = [tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11,
-                                          tab12]
+                                          tab12, tab13]
 
         # Create buttons for each tab
         buttons = [widgets.Button(description=title) for title in [
             'mc', 'Experiment history', 'FDM', '3D', 'Hitmap', 'Animated hitmap',
-            'Projection', 'Disparity map', 'SDM', 'RDF', 'Iso surface', 'Clustering', 'Change Color'
+            'Projection', 'Disparity map', 'SDM', 'RDF', 'Iso surface', 'Proxigram', 'Clustering', 'Change Color'
         ]]
 
         # Output widget to display the content

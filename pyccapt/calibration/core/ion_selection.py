@@ -67,7 +67,7 @@ def create_formula_latex(aa, num_charge=0):
                 if not aa[i + 1].isnumeric():
                     aa.insert(i + 1, '1')
     aa = ''.join(aa)
-    aa = re.findall('(\d+|[A-Za-z]+)', aa)
+    aa = re.findall(r'(\d+|[A-Za-z]+)', aa)
     for i in range(int(len(aa) / 3)):
         if aa[i * 3 + 2].isnumeric():
             aa[i * 3 + 2] = int(aa[i * 3 + 2])
@@ -720,4 +720,7 @@ def display_color(color):
         Returns:
             str: The color in hex format
     """
+    color = str(color).strip()
+    if color and not color.startswith('#') and re.fullmatch(r'[A-Fa-f0-9]{6}', color):
+        color = f'#{color}'
     return f'background-color: {color}; width: 50px; height: 20px;'

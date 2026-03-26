@@ -118,7 +118,7 @@ def patch_create_proxigram_mask(
 def plot_proxigram(variables, isosurface_dic, proxigram_elements, figname='proxigram', save=False, bin_size=0.1,
                    symmetric_range=None, flip_normals=False, range_sequence=None, range_mc=None, range_detx=None,
                    range_dety=None, range_x=None, range_y=None, range_z=None, range_vol=None, smoothing_sigma=1.0,
-                   min_atoms_per_voxel=10, min_isosurface_vertices=20):
+                   min_atoms_per_voxel=10, min_isosurface_vertices=20, pure_only=False, manual_iso_value=None):
     """Plot proxigram lines relative to a single interface isosurface."""
     if not isinstance(isosurface_dic, dict) or not isosurface_dic:
         raise ValueError('Isosurface definition must be a non-empty dictionary')
@@ -139,7 +139,7 @@ def plot_proxigram(variables, isosurface_dic, proxigram_elements, figname='proxi
         range_y=range_y or [],
         range_z=range_z or [],
         range_vol=range_vol or [],
-        verbose=True,
+        verbose=False,
     )
     if not np.any(mask_f):
         raise ValueError('No ions remain after applying the requested plotting ranges')
@@ -153,6 +153,8 @@ def plot_proxigram(variables, isosurface_dic, proxigram_elements, figname='proxi
         min_atoms_per_voxel=min_atoms_per_voxel,
         min_vertices=min_isosurface_vertices,
         fig_name=f'{figname}_{interface_element}',
+        pure_only=pure_only,
+        manual_iso_value=manual_iso_value,
     )
     interface_mesh = iso_result['mesh']
     if interface_mesh.n_points == 0 or interface_mesh.n_cells == 0:
@@ -170,7 +172,9 @@ def plot_proxigram(variables, isosurface_dic, proxigram_elements, figname='proxi
             continue
 
         try:
-            species_mask = iso_surface.build_element_mask(variables, element_name, base_mask=mask_f)[mask_f]
+            species_mask = iso_surface.build_element_mask(
+                variables, element_name, base_mask=mask_f, pure_only=pure_only
+            )[mask_f]
         except ValueError as exc:
             print(exc)
             continue

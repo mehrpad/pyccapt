@@ -1,5 +1,7 @@
 ﻿import numpy as np
 
+import pandas as pd
+
 from pyccapt.calibration.core import mc_plot
 from pyccapt.calibration.core.share_variables import Variables
 
@@ -61,4 +63,40 @@ def test_selector_wrapper_delegates(monkeypatch):
     assert result == 'sel-ok'
     assert called['plotter'] is plotter
     assert called['selector'] == 'peak'
+
+
+def test_range_display_labels_prefer_plain_name_over_math_ion():
+    range_data = pd.DataFrame(
+        {
+            'name': ['Mo2', 'CrMo'],
+            'ion': ['$Mo_{2}^{+}$', '$CrMo^{+}$'],
+        }
+    )
+
+    labels = mc_plot._resolve_range_display_labels(range_data)
+
+    assert labels == ['Mo2', 'CrMo']
+
+
+def test_plain_range_label_strips_mathtext_markup():
+    assert mc_plot._plain_range_label('$Mo_{2}^{2+}$') == 'Mo2 2+'
+
+
+def test_plot_peaks_handles_range_center_past_histogram_edge():
+    variables = Variables()
+    data = np.linspace(0.0, 10.0, 500)
+    plotter = mc_plot.AptHistPlotter(data, variables)
+    plotter.plot_histogram(bin_width=0.1, plot_show=True)
+
+    range_data = pd.DataFrame(
+        {
+            'name': ['edge_peak'],
+            'ion': ['$edge^{+}$'],
+            'mc': [float(plotter.x[-1] + 1.0)],
+        }
+    )
+
+    plotter.plot_peaks(range_data=range_data)
+
+    assert len(plotter.peak_annotates) == 1
 

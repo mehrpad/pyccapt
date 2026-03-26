@@ -52,6 +52,10 @@ def call_visualization(variables, colab=False):
     peaks_find = widgets.Dropdown(options=[('True', True), ('False', False)])
     plot_ranged_colors = widgets.Dropdown(options=[('False', False), ('True', True)])
     plot_ranged_peak = widgets.Dropdown(options=[('False', False), ('True', True)])
+    range_overlay_note = widgets.HTML(
+        value="<span style='color:#666;'>Ranged colors and ranged peak labels are mutually exclusive. "
+              "If you enable one, the other will be turned off.</span>"
+    )
     target_mode = widgets.Dropdown(options=[('mc', 'mc'), ('mc_uc', 'mc_uc'), ('tof_c', 'tof_c'), ('tof', 'tof')])
     print_info = widgets.Dropdown(options=[('False', False), ('True', True)])
     log_widget = widgets.Dropdown(options=[('True', True), ('False', False)])
@@ -87,10 +91,29 @@ def call_visualization(variables, colab=False):
 
     plot_mc_button.on_click(lambda b: plot_mc(b, variables, out))
 
+    def _sync_ranged_overlay(change, source):
+        if change.get('name') != 'value' or change.get('new') is not True:
+            return
+        if source == 'colors' and plot_ranged_peak.value:
+            plot_ranged_peak.value = False
+        elif source == 'peak' and plot_ranged_colors.value:
+            plot_ranged_colors.value = False
+
+    plot_ranged_colors.observe(lambda change: _sync_ranged_overlay(change, 'colors'), names='value')
+    plot_ranged_peak.observe(lambda change: _sync_ranged_overlay(change, 'peak'), names='value')
+
     def plot_mc(b, variables, out):
         plot_mc_button.disabled = True
         figure_size = (figure_mc_size_x_mc.value, figure_mc_size_y_mc.value)
         with out:
+            range_sequence = []
+            range_mc = []
+            range_detx = []
+            range_dety = []
+            range_x = []
+            range_y = []
+            range_z = []
+            range_vol = []
             try:
                 # Use json.loads to convert the entered string to a list
                 range_sequence = json.loads(range_sequence_mc.value)
@@ -119,13 +142,20 @@ def call_visualization(variables, colab=False):
             except json.JSONDecodeError:
                 # Handle invalid input
                 print(f"Invalid range input")
+                plot_mc_button.disabled = False
+                return
+            effective_plot_ranged_colors = plot_ranged_colors.value
+            effective_plot_ranged_peak = plot_ranged_peak.value
+            if effective_plot_ranged_colors and effective_plot_ranged_peak:
+                print('Both ranged colors and ranged peak labels were selected. Using ranged colors overlay.')
+                effective_plot_ranged_peak = False
             mc_plot.hist_plot(variables, bin_size_pm.value, log=log_widget.value, target=target_mode.value,
                               normalize=normalize.value,
                               prominence=prominence.value, distance=distance.value, percent=percent.value,
                               selector='rect',
                               figname=figname_mc.value, lim=lim_mc_pm.value, peaks_find=peaks_find.value,
-                              peaks_find_plot=peak_find_plot.value, plot_ranged_colors=plot_ranged_colors.value,
-                              plot_ranged_peak=plot_ranged_peak.value, mrp_all=mrp_all.value,
+                              peaks_find_plot=peak_find_plot.value, plot_ranged_colors=effective_plot_ranged_colors,
+                              plot_ranged_peak=effective_plot_ranged_peak, mrp_all=mrp_all.value,
                               background=background_mc.value, grid=grid_mc.value,
                               range_sequence=range_sequence, range_mc=range_mc, range_detx=range_detx,
                               range_dety=range_dety, range_x=range_x, range_y=range_y, range_z=range_z,
@@ -847,12 +877,88 @@ def call_visualization(variables, colab=False):
             range_vol = []
         return range_sequence, range_mc, range_detx, range_dety, range_x, range_y, range_z, range_vol
 
-    def _parse_isosurface_dict(value):
-        formatted_string = re.sub(r'(\w+):', r'"\1":', value)
-        parsed = ast.literal_eval(formatted_string)
+    def _parse_isosurface_dict(value, *, allow_multiple=True, field_name='Isosurface dictionary'):
+        text = str(value).strip()
+        if not text:
+            if allow_multiple:
+                raise ValueError(
+                    f'{field_name} must not be empty. Example: {{Al: [3,3,3], Ni: [4,4,4]}}'
+                )
+            raise ValueError(f'{field_name} must not be empty. Example: {{Al: [3,3,3]}}')
+
+        formatted_string = re.sub(r'([A-Za-z0-9_]+)\s*:', r'"\1":', text)
+        try:
+            parsed = ast.literal_eval(formatted_string)
+        except (ValueError, SyntaxError) as exc:
+            if allow_multiple:
+                raise ValueError(
+                    f'{field_name} must look like {{Al: [3,3,3], Ni: [4,4,4]}}'
+                ) from exc
+            raise ValueError(
+                f'{field_name} must look like {{Al: [3,3,3]}}'
+            ) from exc
+
         if not isinstance(parsed, dict) or not parsed:
-            raise ValueError('Isosurface definition must be a non-empty dictionary')
-        return parsed
+            raise ValueError(f'{field_name} must be a non-empty dictionary')
+        if not allow_multiple and len(parsed) != 1:
+            raise ValueError(
+                f'{field_name} must contain exactly one entry for proxigram, for example {{Al: [3,3,3]}}'
+            )
+
+        normalized = {}
+        for key, raw_value in parsed.items():
+            element_name = str(key).strip()
+            if not element_name:
+                raise ValueError(f'{field_name} contains an empty element name')
+            if not isinstance(raw_value, (list, tuple)) or len(raw_value) != 3:
+                raise ValueError(
+                    f'{field_name} entry for {element_name} must be a 3-value list like [3,3,3]'
+                )
+            try:
+                normalized[element_name] = [float(item) for item in raw_value]
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f'{field_name} entry for {element_name} must contain only numeric values'
+                ) from exc
+        return normalized
+
+    def _parse_element_list(value, field_name='Element list'):
+        text = str(value).strip()
+        if not text:
+            raise ValueError(f'{field_name} must not be empty. Example: Al, Ni, Cr')
+
+        parsed = None
+        if text.startswith('[') or text.startswith('('):
+            try:
+                parsed = ast.literal_eval(text)
+            except (ValueError, SyntaxError) as exc:
+                raise ValueError(
+                    f'{field_name} must be comma-separated like Al, Ni, Cr or a list like ["Al", "Ni", "Cr"]'
+                ) from exc
+
+        if parsed is None:
+            items = re.split(r'[,;\n]+', text)
+        elif isinstance(parsed, str):
+            items = [parsed]
+        elif isinstance(parsed, (list, tuple, set)):
+            items = list(parsed)
+        else:
+            raise ValueError(
+                f'{field_name} must be comma-separated like Al, Ni, Cr or a list like ["Al", "Ni", "Cr"]'
+            )
+
+        normalized = []
+        seen = set()
+        for item in items:
+            item = str(item).strip()
+            if not item or item in seen:
+                continue
+            normalized.append(item)
+            seen.add(item)
+
+        if not normalized:
+            raise ValueError(f'{field_name} must contain at least one valid element')
+        return normalized
 
     def _build_element_percentage_list(value):
         element_percentage_dic = ast.literal_eval(value)
@@ -943,10 +1049,15 @@ def call_visualization(variables, colab=False):
     cluster_percentile_iso = widgets.BoundedFloatText(value=50.0, min=1.0, max=99.9, step=1.0)
     cluster_min_size_iso = widgets.BoundedIntText(value=25, min=2, max=1_000_000)
     plot_3d_button_iso.on_click(lambda b: plot_3d_iso(b, variables, out))
-    isosurface_dic_p3_iso = widgets.Textarea(value="{Al: [3,3,3]}")
+    isosurface_dic_p3_iso = widgets.Textarea(
+        value="{Al: [3,3,3]}",
+        placeholder="{Al: [3,3,3], Ni: [4,4,4]}",
+    )
     detailed_isotope_charge_3d_iso = widgets.Dropdown(options=[('False', False), ('True', True)], value=False)
     only_iso_3d_iso = widgets.Dropdown(options=[('False', False), ('True', True)], value=False)
+    pure_element_only_iso = widgets.Dropdown(options=[('True', True), ('False', False)], value=True)
     smoothing_sigma_iso = widgets.FloatText(value=1.0)
+    manual_iso_value_iso = widgets.FloatText(value=0.0)
     min_atoms_per_voxel_iso = widgets.IntText(value=10)
     min_vertices_iso = widgets.IntText(value=20)
     range_sequence_3d_iso = widgets.Textarea(value='[0,0]')
@@ -972,7 +1083,11 @@ def call_visualization(variables, colab=False):
                     range_z_3d_iso,
                     range_vol_3d_iso,
                 )
-                isosurface_dic_p3_iso_value = _parse_isosurface_dict(isosurface_dic_p3_iso.value)
+                isosurface_dic_p3_iso_value = _parse_isosurface_dict(
+                    isosurface_dic_p3_iso.value,
+                    allow_multiple=True,
+                    field_name='Iso surface dictionary',
+                )
                 element_percentage_list_iso = _build_element_percentage_list(element_percentage_p3_iso.value)
             except (json.JSONDecodeError, ValueError, SyntaxError) as exc:
                 print(f'Invalid iso plot input: {exc}')
@@ -1004,21 +1119,32 @@ def call_visualization(variables, colab=False):
                                                only_iso=only_iso_3d_iso.value,
                                                cluster_result=cluster_result,
                                                smoothing_sigma=smoothing_sigma_iso.value,
+                                               manual_iso_value=(manual_iso_value_iso.value
+                                                                 if manual_iso_value_iso.value > 0 else None),
                                                min_atoms_per_voxel=min_atoms_per_voxel_iso.value,
-                                               min_isosurface_vertices=min_vertices_iso.value)
+                                               min_isosurface_vertices=min_vertices_iso.value,
+                                               pure_element_only=pure_element_only_iso.value)
 
         plot_3d_button_iso.disabled = False
 
     #############
     plot_proxigram_button = widgets.Button(description='plot proxigram')
     figname_proxigram = widgets.Text(value='proxigram')
-    proxigram_isosurface_dic = widgets.Textarea(value="{Al: [3,3,3]}")
-    proxigram_elements = widgets.Text(value='Al', placeholder='Al, Ni, Ti')
+    proxigram_isosurface_dic = widgets.Textarea(
+        value="{Al: [3,3,3]}",
+        placeholder="{Al: [3,3,3]}",
+    )
+    proxigram_elements = widgets.Text(
+        value='Al',
+        placeholder='Al, Ni, Ti or [\"Al\", \"Ni\", \"Ti\"]',
+    )
     proxigram_bin_size = widgets.FloatText(value=0.1)
     proxigram_symmetric_range = widgets.FloatText(value=0.0)
     proxigram_flip_normals = widgets.Dropdown(options=[('False', False), ('True', True)], value=False)
     proxigram_save = widgets.Dropdown(options=[('True', True), ('False', False)], value=False)
+    proxigram_pure_element_only = widgets.Dropdown(options=[('True', True), ('False', False)], value=True)
     proxigram_sigma = widgets.FloatText(value=1.0)
+    proxigram_manual_iso_value = widgets.FloatText(value=0.0)
     proxigram_min_atoms = widgets.IntText(value=10)
     proxigram_min_vertices = widgets.IntText(value=20)
     range_sequence_prox = widgets.Textarea(value='[0,0]')
@@ -1044,8 +1170,15 @@ def call_visualization(variables, colab=False):
                     range_z_prox,
                     range_vol_prox,
                 )
-                interface_dic = _parse_isosurface_dict(proxigram_isosurface_dic.value)
-                proxigram_elements_list = [item.strip() for item in proxigram_elements.value.split(',') if item.strip()]
+                interface_dic = _parse_isosurface_dict(
+                    proxigram_isosurface_dic.value,
+                    allow_multiple=False,
+                    field_name='Proxigram interface isosurface',
+                )
+                proxigram_elements_list = _parse_element_list(
+                    proxigram_elements.value,
+                    field_name='Proxigram elements',
+                )
                 symmetric_range = proxigram_symmetric_range.value if proxigram_symmetric_range.value > 0 else None
                 proxigram.plot_proxigram(
                     variables,
@@ -1067,6 +1200,9 @@ def call_visualization(variables, colab=False):
                     smoothing_sigma=proxigram_sigma.value,
                     min_atoms_per_voxel=proxigram_min_atoms.value,
                     min_isosurface_vertices=proxigram_min_vertices.value,
+                    pure_only=proxigram_pure_element_only.value,
+                    manual_iso_value=(proxigram_manual_iso_value.value
+                                      if proxigram_manual_iso_value.value > 0 else None),
                 )
             except (json.JSONDecodeError, ValueError, SyntaxError) as exc:
                 print(f'Unable to plot proxigram: {exc}')
@@ -1122,6 +1258,7 @@ def call_visualization(variables, colab=False):
             widgets.HBox([widgets.Label(value="Peak find plot:", layout=label_layout), peak_find_plot]),
             widgets.HBox([widgets.Label(value="Plot ranged colors:", layout=label_layout), plot_ranged_colors]),
             widgets.HBox([widgets.Label(value="Plot ranged peak:", layout=label_layout), plot_ranged_peak]),
+            range_overlay_note,
             widgets.HBox([widgets.Label(value="Print info:", layout=label_layout), print_info]),
             widgets.HBox([widgets.Label(value="Bins size:", layout=label_layout), bin_size_pm]),
             widgets.HBox([widgets.Label(value="Limit mc:", layout=label_layout), lim_mc_pm]),
@@ -1198,7 +1335,6 @@ def call_visualization(variables, colab=False):
             widgets.HBox([widgets.Label(value='Opacity:', layout=label_layout), opacity]),
             widgets.HBox(
                 [widgets.Label(value='Ions individually plots:', layout=label_layout), ions_individually_plots]),
-            widgets.HTML(value="Cluster controls moved to the <b>Clustering</b> tab."),
             widgets.HBox([widgets.Label(value='Fig name:', layout=label_layout), figname_3d]),
             widgets.HBox([widgets.Label(value='Rotary save:', layout=label_layout), rotary_fig_save_p3]),
             widgets.HBox([widgets.Label(value='Save GIF:', layout=label_layout), make_gif_p3]),
@@ -1362,14 +1498,20 @@ def call_visualization(variables, colab=False):
 
     tab10 = (widgets.HBox([
         widgets.VBox([
+            widgets.HTML(
+                value="<b>Iso surface dictionary</b>: one or more entries are allowed, for example "
+                      "<code>{Al: [3,3,3], Ni: [4,4,4]}</code>."
+            ),
             widgets.HBox([widgets.Label(value='Element percentage:', layout=label_layout), element_percentage_p3_iso]),
             widgets.HBox([widgets.Label(value='Opacity:', layout=label_layout), opacity_iso]),
             widgets.HBox([widgets.Label(value='Ions individually plots:', layout=label_layout), ions_individually_plots_iso]),
-            widgets.HBox([widgets.Label(value='Isosurface dic:', layout=label_layout), isosurface_dic_p3_iso]),
+            widgets.HBox([widgets.Label(value='Iso dict (multi):', layout=label_layout), isosurface_dic_p3_iso]),
             widgets.HBox([widgets.Label(value='Detailed isotope charge:', layout=label_layout),
                             detailed_isotope_charge_3d_iso]),
             widgets.HBox([widgets.Label(value='Only iso:', layout=label_layout), only_iso_3d_iso]),
+            widgets.HBox([widgets.Label(value='Pure elements only:', layout=label_layout), pure_element_only_iso]),
             widgets.HBox([widgets.Label(value='Smoothing sigma:', layout=label_layout), smoothing_sigma_iso]),
+            widgets.HBox([widgets.Label(value='Iso value override (0=auto):', layout=label_layout), manual_iso_value_iso]),
             widgets.HBox([widgets.Label(value='Min atoms / voxel:', layout=label_layout), min_atoms_per_voxel_iso]),
             widgets.HBox([widgets.Label(value='Min iso vertices:', layout=label_layout), min_vertices_iso]),
             widgets.HBox([widgets.Label(value='Make GIF:', layout=label_layout), make_gif_p3_iso]),
@@ -1393,12 +1535,18 @@ def call_visualization(variables, colab=False):
     tab11 = (widgets.HBox([
         widgets.VBox([
             widgets.HTML(value="<b>Interface isosurface</b>: use one element entry, for example <code>{Al: [3,3,3]}</code>."),
-            widgets.HBox([widgets.Label(value='Isosurface dic:', layout=label_layout), proxigram_isosurface_dic]),
+            widgets.HBox([widgets.Label(value='Interface iso dict:', layout=label_layout), proxigram_isosurface_dic]),
+            widgets.HTML(
+                value="<b>Proxigram elements</b>: multiple elements are allowed. "
+                      "Examples: <code>Al, Ni, Ti</code> or <code>[\"Al\", \"Ni\", \"Ti\"]</code>."
+            ),
             widgets.HBox([widgets.Label(value='Proxigram elements:', layout=label_layout), proxigram_elements]),
             widgets.HBox([widgets.Label(value='Bin size (nm):', layout=label_layout), proxigram_bin_size]),
             widgets.HBox([widgets.Label(value='Symmetric range (nm):', layout=label_layout), proxigram_symmetric_range]),
             widgets.HBox([widgets.Label(value='Flip normals:', layout=label_layout), proxigram_flip_normals]),
+            widgets.HBox([widgets.Label(value='Pure elements only:', layout=label_layout), proxigram_pure_element_only]),
             widgets.HBox([widgets.Label(value='Smoothing sigma:', layout=label_layout), proxigram_sigma]),
+            widgets.HBox([widgets.Label(value='Iso value override (0=auto):', layout=label_layout), proxigram_manual_iso_value]),
             widgets.HBox([widgets.Label(value='Min atoms / voxel:', layout=label_layout), proxigram_min_atoms]),
             widgets.HBox([widgets.Label(value='Min iso vertices:', layout=label_layout), proxigram_min_vertices]),
             widgets.HBox([widgets.Label(value='Fig name:', layout=label_layout), figname_proxigram]),

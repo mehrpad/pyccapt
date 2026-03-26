@@ -91,21 +91,21 @@ def pos_to_ccapt(file_path):
 
     """
     pos = leap_tools.read_pos(file_path)
-    length = len(pos['m/n (Da)'].to_numpy())
-    ccapt = pd.DataFrame({'x (nm)': pos['x (nm)'].to_numpy(),
-                          'y (nm)': pos['y (nm)'].to_numpy(),
-                          'z (nm)': pos['z (nm)'].to_numpy(),
-                          'mc (Da)': pos['m/n (Da)'].to_numpy(),
-                          'mc_uc (Da)': np.zeros(length),
-                          'high_voltage (V)': np.zeros(length),
-                          'pulse': np.zeros(length),
-                          't (ns)': np.zeros(length),
-                          't_c (ns)': np.zeros(length),
-                          'x_det (cm)': np.zeros(length),
-                          'y_det (cm)': np.zeros(length),
-                          'delta_p': np.zeros(length, dtype=int),
-                          'multi': np.zeros(length, dtype=int),
-                          'start_counter': np.zeros(length, dtype=int),
+    length = len(pos)
+    ccapt = pd.DataFrame({'x (nm)': pos['x (nm)'].to_numpy(dtype=np.float32, copy=False),
+                          'y (nm)': pos['y (nm)'].to_numpy(dtype=np.float32, copy=False),
+                          'z (nm)': pos['z (nm)'].to_numpy(dtype=np.float32, copy=False),
+                          'mc (Da)': pos['m/n (Da)'].to_numpy(dtype=np.float32, copy=False),
+                          'mc_uc (Da)': np.zeros(length, dtype=np.float32),
+                          'high_voltage (V)': np.zeros(length, dtype=np.float32),
+                          'pulse': np.zeros(length, dtype=np.float32),
+                          't (ns)': np.zeros(length, dtype=np.float32),
+                          't_c (ns)': np.zeros(length, dtype=np.float32),
+                          'x_det (cm)': np.zeros(length, dtype=np.float32),
+                          'y_det (cm)': np.zeros(length, dtype=np.float32),
+                          'delta_p': np.zeros(length, dtype=np.int32),
+                          'multi': np.zeros(length, dtype=np.int32),
+                          'start_counter': np.zeros(length, dtype=np.int32),
                           })
     return ccapt
 
@@ -122,22 +122,22 @@ def epos_to_ccapt(file_path):
 
     """
     epos = leap_tools.read_epos(file_path)
-    length = len(epos['m/n (Da)'].to_numpy())
-    ccapt = pd.DataFrame({'x (nm)': epos['x (nm)'].to_numpy(),
-                          'y (nm)': epos['y (nm)'].to_numpy(),
-                          'z (nm)': epos['z (nm)'].to_numpy(),
-                          'mc (Da)': epos['m/n (Da)'].to_numpy(),
-                          'mc_uc (Da)': np.zeros(length),
-                          'high_voltage (V)': epos['HV_DC (V)'].to_numpy(),
-                          'pulse_v (V)': epos['pulse (V)'].to_numpy(),
-                          'pulse_l (pJ)': np.zeros(length),
-                          't (ns)': epos['TOF (ns)'].to_numpy(),
-                          't_c (ns)': np.zeros(length),
-                          'x_det (cm)': epos['det_x (mm)'].to_numpy() / 10,
-                          'y_det (cm)': epos['det_y (mm)'].to_numpy() / 10,
-                          'delta_p': epos['pslep'].to_numpy(),
-                          'multi': epos['ipp'].to_numpy(),
-                          'start_counter': np.zeros(length, dtype=int),
+    length = len(epos)
+    ccapt = pd.DataFrame({'x (nm)': epos['x (nm)'].to_numpy(dtype=np.float32, copy=False),
+                          'y (nm)': epos['y (nm)'].to_numpy(dtype=np.float32, copy=False),
+                          'z (nm)': epos['z (nm)'].to_numpy(dtype=np.float32, copy=False),
+                          'mc (Da)': epos['m/n (Da)'].to_numpy(dtype=np.float32, copy=False),
+                          'mc_uc (Da)': np.zeros(length, dtype=np.float32),
+                          'high_voltage (V)': epos['HV_DC (V)'].to_numpy(dtype=np.float32, copy=False),
+                          'pulse_v (V)': epos['pulse (V)'].to_numpy(dtype=np.float32, copy=False),
+                          'pulse_l (pJ)': np.zeros(length, dtype=np.float32),
+                          't (ns)': epos['TOF (ns)'].to_numpy(dtype=np.float32, copy=False),
+                          't_c (ns)': np.zeros(length, dtype=np.float32),
+                          'x_det (cm)': epos['det_x (mm)'].to_numpy(dtype=np.float32, copy=False) / 10,
+                          'y_det (cm)': epos['det_y (mm)'].to_numpy(dtype=np.float32, copy=False) / 10,
+                          'delta_p': epos['pslep'].to_numpy(dtype=np.int32, copy=False),
+                          'multi': epos['ipp'].to_numpy(dtype=np.int32, copy=False),
+                          'start_counter': np.zeros(length, dtype=np.int32),
                           })
     return ccapt
 

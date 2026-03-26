@@ -165,7 +165,12 @@ def hist_plot(
         mc_hist.plot_hist_info_legend(label=label, mrp_all=mrp_all, background=None, legend_mode=legend_mode, loc="right")
 
     elif plot_ranged_colors and plot_ranged_peak:
-        raise ValueError("Please select only one of the plot_ranged_peak and plot_ranged_colors")
+        print("Both ranged colors and ranged peak labels were requested. Using ranged colors overlay.")
+        mc_hist.plot_range(range_data=variables.range_data, legend=True, legend_loc="upper right")
+        mc_hist.adjust_labels()
+        peaks = None
+        peak_widths = None
+        prominences = None
 
     else:
         peaks = None

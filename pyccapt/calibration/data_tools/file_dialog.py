@@ -20,12 +20,12 @@ def resolve_initial_directory(current_value: str | None = None, fallback_directo
     return str(Path.cwd())
 
 
-def choose_file_path(initial_directory: str | None = None) -> str | None:
+def choose_file_path(initial_directory: str | None = None, file_kind: str = "any") -> str | None:
     """Open the existing Qt picker in a subprocess and return the chosen file."""
     start_directory = resolve_initial_directory(initial_directory)
     script_path = Path(__file__).with_name("run_dataset_path_qt.py")
     result = subprocess.run(
-        [sys.executable, str(script_path), start_directory],
+        [sys.executable, str(script_path), start_directory, str(file_kind)],
         capture_output=True,
         text=True,
         check=False,

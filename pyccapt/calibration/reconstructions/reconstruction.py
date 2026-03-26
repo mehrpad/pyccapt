@@ -1,4 +1,5 @@
 from copy import copy
+import re
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -24,6 +25,19 @@ from pyccapt.calibration.reconstructions.rotation_tools import (
     rotary_fig,
     rotate_z,
 )
+
+
+def _normalize_plotly_color(value):
+    """Return a Plotly-safe color string from stored range colors."""
+    value = str(value).strip()
+    if value and not value.startswith('#') and re.fullmatch(r'[A-Fa-f0-9]{6}', value):
+        return f'#{value}'
+    return value
+
+
+def _normalize_plotly_colors(values):
+    """Normalize a sequence of stored range colors for Plotly usage."""
+    return [_normalize_plotly_color(value) for value in values]
 
 def cart2pol(x, y):
     """
@@ -303,7 +317,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
     else:
         print('element_percentage should be a list')
 
-    colors = variables.range_data['color'].tolist()
+    colors = _normalize_plotly_colors(variables.range_data['color'].tolist())
     mc_low = variables.range_data['mc_low'].tolist()
     mc_up = variables.range_data['mc_up'].tolist()
     ion = variables.range_data['ion'].tolist()
@@ -572,7 +586,7 @@ def scatter_plot(data, range_data, variables, element_percentage, selected_area,
     ax = fig.add_subplot(111)
 
     phases = range_data['element'].tolist()
-    colors = range_data['color'].tolist()
+    colors = _normalize_plotly_colors(range_data['color'].tolist())
     mc_low = range_data['mc_low'].tolist()
     mc_up = range_data['mc_up'].tolist()
     charge = range_data['charge'].tolist()
@@ -681,7 +695,7 @@ def projection(variables, element_percentage, range_sequence=[], range_mc=[], ra
 
 
     ions = variables.range_data['ion'].tolist()
-    colors = variables.range_data['color'].tolist()
+    colors = _normalize_plotly_colors(variables.range_data['color'].tolist())
     mc_low = variables.range_data['mc_low'].tolist()
     mc_up = variables.range_data['mc_up'].tolist()
 
@@ -798,7 +812,7 @@ def heatmap(variables, element_percentage, range_sequence=[], range_mc=[], range
         mask = np.ones(len(variables.mc), dtype=bool)
 
     ions = variables.range_data['ion'].tolist()
-    colors = variables.range_data['color'].tolist()
+    colors = _normalize_plotly_colors(variables.range_data['color'].tolist())
     mc_low = variables.range_data['mc_low'].tolist()
     mc_up = variables.range_data['mc_up'].tolist()
 
@@ -985,7 +999,7 @@ def detector_animation(variables, points_per_frame, ranged, selected_area_specia
 
     if ranged == True:
         ions = variables.range_data['ion'].tolist()
-        colors = variables.range_data['color'].tolist()
+        colors = _normalize_plotly_colors(variables.range_data['color'].tolist())
         mc_low = variables.range_data['mc_low'].tolist()
         mc_up = variables.range_data['mc_up'].tolist()
     else:

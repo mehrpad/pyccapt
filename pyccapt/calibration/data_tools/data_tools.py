@@ -153,7 +153,50 @@ def remove_invalid_data(dld_group_storage: pd.DataFrame, max_tof: float) -> pd.D
     return dld_group_storage
 
 
-def save_data(data, variables, name=None, hdf=True, epos=False, pos=False, ato_6v=False, csv=False, temp=False):
+def _slice_data_for_export(
+    data: pd.DataFrame,
+    start_index: int | None = None,
+    end_index: int | None = None,
+) -> pd.DataFrame:
+    """Return an index-sliced copy for export using inclusive end semantics."""
+    if not isinstance(data, pd.DataFrame):
+        raise TypeError("data must be a pandas.DataFrame")
+
+    if start_index in (None, "") and end_index in (None, ""):
+        return data
+
+    total_rows = len(data)
+    if total_rows == 0:
+        raise ValueError("Cannot slice an empty dataset for export")
+
+    start = 0 if start_index in (None, "") else int(start_index)
+    end = (total_rows - 1) if end_index in (None, "", -1) else int(end_index)
+
+    if start < 0 or start >= total_rows:
+        raise ValueError(f"start_index must be between 0 and {total_rows - 1}")
+    if end == -1:
+        end = total_rows - 1
+    if end < 0 or end >= total_rows:
+        raise ValueError(f"end_index must be between 0 and {total_rows - 1}, or -1 for the last row")
+    if end < start:
+        raise ValueError("end_index must be greater than or equal to start_index")
+
+    return data.iloc[start:end + 1].reset_index(drop=True).copy()
+
+
+def save_data(
+    data,
+    variables,
+    name=None,
+    hdf=True,
+    epos=False,
+    pos=False,
+    ato_6v=False,
+    csv=False,
+    temp=False,
+    start_index=0,
+    end_index=-1,
+):
     """Persist data in one or more supported export formats."""
     if name is not None:
         data_name = name
@@ -162,20 +205,22 @@ def save_data(data, variables, name=None, hdf=True, epos=False, pos=False, ato_6
     else:
         data_name = variables.result_data_name
 
+    export_data = _slice_data_for_export(data, start_index=start_index, end_index=end_index)
+
     if hdf:
         output_h5 = _resolve_variable_output_file(variables, filename=f"{data_name}.h5", data_directory=True)
-        store_df_to_hdf(data, "df", output_h5)
+        store_df_to_hdf(export_data, "df", output_h5)
     if epos:
-        ccapt_tools.ccapt_to_epos(data, path=variables.result_data_path, name=f"{data_name}.epos")
+        ccapt_tools.ccapt_to_epos(export_data, path=variables.result_data_path, name=f"{data_name}.epos")
     if pos:
-        ccapt_tools.ccapt_to_pos(data, path=variables.result_data_path, name=f"{data_name}.pos")
+        ccapt_tools.ccapt_to_pos(export_data, path=variables.result_data_path, name=f"{data_name}.pos")
     if ato_6v:
-        ato_tools.ccapt_to_ato(data, path=variables.result_data_path, name=f"{data_name}.ato")
+        ato_tools.ccapt_to_ato(export_data, path=variables.result_data_path, name=f"{data_name}.ato")
     if csv:
         output_csv = _resolve_variable_output_file(
             variables, filename=f"{data_name}.csv", data_directory=True
         )
-        store_df_to_csv(data, output_csv)
+        store_df_to_csv(export_data, output_csv)
 
 
 def load_data(dataset_path, data_type, mode="processed"):

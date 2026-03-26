@@ -1,6 +1,7 @@
 import re
 import struct
 import sys
+import os
 from enum import Enum
 from typing import Union, Tuple, Any
 from warnings import warn
@@ -21,6 +22,7 @@ _RRNG_PATTERN = re.compile(
 )
 _RNG_COUNTS_PATTERN = re.compile(r"^\d+\s+\d+$")
 _FORMULA_TOKEN_PATTERN = re.compile(r"([A-Z][a-z]*)(\d*)")
+_SPECIES_TOKEN_PATTERN = re.compile(r"(?:(?P<isotope>\d+))?(?P<element>[A-Z][a-z]*)(?P<count>\d*)")
 
 
 def _parse_rrng_float(value: str) -> float:
@@ -28,11 +30,41 @@ def _parse_rrng_float(value: str) -> float:
     return float(str(value).strip().replace(",", "."))
 
 
-def _parse_rrng_composition(composition: str):
+def _parse_rrng_species(species: str):
+    """Parse compact species names like `Al2O3` or isotope-prefixed `27CrMo`."""
+    species = str(species).strip()
+    if not species or species.lower() == "unranged":
+        return ["unranged"], [0], [0]
+
+    matches = list(_SPECIES_TOKEN_PATTERN.finditer(species))
+    if not matches or "".join(match.group(0) for match in matches) != species:
+        return [species], [1], [0]
+
+    elements = []
+    multiplicities = []
+    isotopes = []
+    for match in matches:
+        elements.append(match.group("element"))
+        multiplicities.append(int(match.group("count") or "1"))
+        isotopes.append(int(match.group("isotope") or "0"))
+
+    return elements, multiplicities, isotopes
+
+
+def _parse_rrng_element_token(token: str):
+    """Parse one element token such as `Fe` or `27Cr`."""
+    token = str(token).strip()
+    match = _SPECIES_TOKEN_PATTERN.fullmatch(token)
+    if not match:
+        return token, 0
+    return match.group("element"), int(match.group("isotope") or "0")
+
+
+def _parse_rrng_composition(composition: str, explicit_name: str = ""):
     """Parse the IVAS composition field into PyCCAPT element metadata."""
     tokens = [token for token in str(composition).split() if token]
     if not tokens:
-        return ["unranged"], [0], [0]
+        return _parse_rrng_species(explicit_name or "unranged")
 
     elements = []
     multiplicities = []
@@ -40,19 +72,41 @@ def _parse_rrng_composition(composition: str):
 
     for token in tokens:
         if ":" in token:
-            element, multiplicity = token.split(":", 1)
-        else:
-            element, multiplicity = token, "1"
+            element_token, value = token.split(":", 1)
+            element_token = element_token.strip()
+            value = value.strip()
 
-        element = element.strip()
-        multiplicity_value = int(float(multiplicity))
-        if element.lower() == "name":
-            element = "unranged"
-            multiplicity_value = 0
+            if element_token.lower() == "name":
+                species_name = explicit_name or ("unranged" if value in {"0", "0.0"} else value)
+                species_elements, species_multiplicities, species_isotopes = _parse_rrng_species(species_name)
+                elements.extend(species_elements)
+                multiplicities.extend(species_multiplicities)
+                isotopes.extend(species_isotopes)
+                continue
 
-        elements.append(element)
-        multiplicities.append(multiplicity_value)
-        isotopes.append(0 if element == "unranged" else 1)
+            try:
+                multiplicity_value = int(float(value))
+            except ValueError:
+                species_name = explicit_name or value or element_token
+                species_elements, species_multiplicities, species_isotopes = _parse_rrng_species(species_name)
+                elements.extend(species_elements)
+                multiplicities.extend(species_multiplicities)
+                isotopes.extend(species_isotopes)
+                continue
+
+            element_name, isotope_value = _parse_rrng_element_token(element_token)
+            elements.append(element_name)
+            multiplicities.append(multiplicity_value)
+            isotopes.append(isotope_value)
+            continue
+
+        species_elements, species_multiplicities, species_isotopes = _parse_rrng_species(token)
+        elements.extend(species_elements)
+        multiplicities.extend(species_multiplicities)
+        isotopes.extend(species_isotopes)
+
+    if not elements:
+        return _parse_rrng_species(explicit_name or "unranged")
 
     return elements, multiplicities, isotopes
 
@@ -85,6 +139,23 @@ def _composition_to_name(elements, multiplicities) -> str:
     )
 
 
+def _extract_explicit_rrng_name(composition: str, ion_name: str = "") -> str:
+    """Extract a stable explicit name from RRNG metadata when available."""
+    ion_name = str(ion_name).strip()
+    if ion_name:
+        return ion_name
+
+    tokens = [token for token in str(composition).split() if token]
+    if len(tokens) == 1 and ":" in tokens[0]:
+        key, value = tokens[0].split(":", 1)
+        if key.strip().lower() == "name":
+            value = str(value).strip()
+            if value in {"0", "0.0"}:
+                return "unranged"
+            return value
+    return ""
+
+
 def _range_tables_to_pyccapt_range(ions: pd.DataFrame, range_table: pd.DataFrame) -> pd.DataFrame:
     """Convert raw `.rrng` or legacy `.rng` tables into the normalized PyCCAPT schema."""
     if range_table.empty:
@@ -115,9 +186,9 @@ def _range_tables_to_pyccapt_range(ions: pd.DataFrame, range_table: pd.DataFrame
     charges = []
 
     for _, row in range_table.iterrows():
-        elements, multiplicities, isotopes = _parse_rrng_composition(row["comp"])
+        explicit_name = _extract_explicit_rrng_name(row["comp"], row.get("ion_name", ""))
+        elements, multiplicities, isotopes = _parse_rrng_composition(row["comp"], explicit_name=explicit_name)
         charge = 1
-        explicit_name = str(row.get("ion_name", "")).strip()
         name = explicit_name or _composition_to_name(elements, multiplicities)
         names.append(name)
         ion_labels.append(_build_rrng_formula(elements, multiplicities, charge))
@@ -136,7 +207,7 @@ def _range_tables_to_pyccapt_range(ions: pd.DataFrame, range_table: pd.DataFrame
             "mc": (mc_low + mc_up) / 2.0,
             "mc_low": mc_low,
             "mc_up": mc_up,
-            "color": range_table["colour"].astype(str).str.upper().to_numpy(),
+            "color": ("#" + range_table["colour"].astype(str).str.upper().str.lstrip("#")).to_numpy(),
             "element": element_lists,
             "complex": complex_lists,
             "isotope": isotope_lists,
@@ -350,15 +421,25 @@ def read_pos(file_path):
         z: Reconstructed z position
         Da: Mass/charge ratio of ion
     """
-    with open(file_path, 'rb') as file:
-        data = file.read()
-        n = len(data) // 4
-        d = struct.unpack('>' + 'f' * n, data)
+    record_size = 16
+    file_size = os.path.getsize(file_path)
+    record_count, remainder = divmod(file_size, record_size)
+    if remainder:
+        warn(
+            f"The .pos file size ({file_size} bytes) is not an exact multiple of {record_size}. "
+            f"Ignoring the final {remainder} trailing bytes.",
+            RuntimeWarning,
+        )
+
+    if record_count == 0:
+        return pd.DataFrame(columns=['x (nm)', 'y (nm)', 'z (nm)', 'm/n (Da)'])
+
+    records = np.memmap(file_path, dtype='>f4', mode='r', shape=(record_count, 4))
     pos = pd.DataFrame({
-        'x (nm)': d[0::4],
-        'y (nm)': d[1::4],
-        'z (nm)': d[2::4],
-        'm/n (Da)': d[3::4]
+        'x (nm)': np.asarray(records[:, 0], dtype=np.float32),
+        'y (nm)': np.asarray(records[:, 1], dtype=np.float32),
+        'z (nm)': np.asarray(records[:, 2], dtype=np.float32),
+        'm/n (Da)': np.asarray(records[:, 3], dtype=np.float32),
     })
     return pos
 
@@ -380,24 +461,59 @@ def read_epos(file_path):
         pslep: Pulses since last event pulse (i.e. ionisation rate)
         ipp: Ions per pulse (multihits)
     """
-    with open(file_path, 'rb') as file:
-        data = file.read()
+    record_dtype = np.dtype([
+        ('x', '>f4'),
+        ('y', '>f4'),
+        ('z', '>f4'),
+        ('mc', '>f4'),
+        ('tof', '>f4'),
+        ('hv', '>f4'),
+        ('pulse', '>f4'),
+        ('det_x', '>f4'),
+        ('det_y', '>f4'),
+        ('pslep', '>u4'),
+        ('ipp', '>u4'),
+    ])
+    record_size = record_dtype.itemsize
+    file_size = os.path.getsize(file_path)
+    record_count, remainder = divmod(file_size, record_size)
+    if remainder:
+        warn(
+            f"The .epos file size ({file_size} bytes) is not an exact multiple of {record_size}. "
+            f"Ignoring the final {remainder} trailing bytes.",
+            RuntimeWarning,
+        )
 
-    n = len(data) // 4
-    rs = n // 11
-    d = struct.unpack('>' + 'fffffffffII' * rs, data)
+    if record_count == 0:
+        return pd.DataFrame(
+            columns=[
+                'x (nm)',
+                'y (nm)',
+                'z (nm)',
+                'm/n (Da)',
+                'TOF (ns)',
+                'HV_DC (V)',
+                'pulse (V)',
+                'det_x (mm)',
+                'det_y (mm)',
+                'pslep',
+                'ipp',
+            ]
+        )
+
+    records = np.memmap(file_path, dtype=record_dtype, mode='r', shape=(record_count,))
     epos = pd.DataFrame({
-        'x (nm)': d[0::11],
-        'y (nm)': d[1::11],
-        'z (nm)': d[2::11],
-        'm/n (Da)': d[3::11],
-        'TOF (ns)': d[4::11],
-        'HV_DC (V)': d[5::11],
-        'pulse (V)': d[6::11],
-        'det_x (mm)': d[7::11],
-        'det_y (mm)': d[8::11],
-        'pslep': d[9::11],
-        'ipp': d[10::11]
+        'x (nm)': np.asarray(records['x'], dtype=np.float32),
+        'y (nm)': np.asarray(records['y'], dtype=np.float32),
+        'z (nm)': np.asarray(records['z'], dtype=np.float32),
+        'm/n (Da)': np.asarray(records['mc'], dtype=np.float32),
+        'TOF (ns)': np.asarray(records['tof'], dtype=np.float32),
+        'HV_DC (V)': np.asarray(records['hv'], dtype=np.float32),
+        'pulse (V)': np.asarray(records['pulse'], dtype=np.float32),
+        'det_x (mm)': np.asarray(records['det_x'], dtype=np.float32),
+        'det_y (mm)': np.asarray(records['det_y'], dtype=np.float32),
+        'pslep': np.asarray(records['pslep'], dtype=np.uint32),
+        'ipp': np.asarray(records['ipp'], dtype=np.uint32),
     })
     return epos
 

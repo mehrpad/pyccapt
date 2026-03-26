@@ -25,6 +25,39 @@ from pyccapt.calibration.core.mc_plot_selector_helpers import (
 )
 
 
+def _normalize_range_colors(values):
+    """Normalize stored range colors for matplotlib usage."""
+    normalized = []
+    for value in values:
+        value = str(value).strip()
+        if value and not value.startswith('#') and re.fullmatch(r'[A-Fa-f0-9]{6}', value):
+            value = f'#{value}'
+        normalized.append(value)
+    return normalized
+
+
+def _plain_range_label(value):
+    """Convert stored ion/range labels into plain text safe for matplotlib."""
+    text = str(value).strip()
+    if not text:
+        return text
+    text = text.replace("$", "")
+    text = re.sub(r"_\{([^}]*)\}", r"\1", text)
+    text = re.sub(r"\^\{([^}]*)\}", r" \1", text)
+    text = text.replace("{", "").replace("}", "")
+    text = text.replace("^", "").strip()
+    return text
+
+
+def _resolve_range_display_labels(range_data):
+    """Return plain-text labels for ranged overlays and legends."""
+    for column in ("name", "ion_name", "ion"):
+        if column in range_data.columns:
+            labels = [_plain_range_label(value) for value in range_data[column].tolist()]
+            if any(label for label in labels):
+                return labels
+    return [_plain_range_label(value) for value in range(len(range_data))]
+
 
 class AptHistPlotter:
     """
@@ -157,13 +190,13 @@ class AptHistPlotter:
             None
         """
         if len(self.patches) == len(self.x) - 1:
-            colors = range_data['color'].tolist()
+            colors = _normalize_range_colors(range_data['color'].tolist())
             mc_low = range_data['mc_low'].tolist()
             mc_up = range_data['mc_up'].tolist()
             mc = range_data['mc'].tolist()
-            ion = range_data['ion'].tolist()
+            labels = _resolve_range_display_labels(range_data)
             color_mask = np.full((len(self.x)), '#708090')  # default color is slategray
-            for i in range(len(ion)):
+            for i in range(len(labels)):
                 mask = np.logical_and(self.x >= mc_low[i], self.x <= mc_up[i])
                 color_mask[mask] = colors[i]
 
@@ -171,8 +204,8 @@ class AptHistPlotter:
                 if color_mask[i] != '#708090':
                     self.patches[i].set_facecolor(color_mask[i])
 
-            for i in range(len(ion)):
-                self.legend_colors.append((r'%s' % ion[i], plt.Rectangle((0, 0), 1, 1, fc=colors[i])))
+            for i in range(len(labels)):
+                self.legend_colors.append((labels[i], plt.Rectangle((0, 0), 1, 1, fc=colors[i])))
                 x_offset = 0.0  # Adjust this value as needed
 
                 # Find the bin that contains the mc[i]
@@ -196,7 +229,7 @@ class AptHistPlotter:
                     self.peak_annotates.append(plt.text(
                         peak_position + x_offset,
                         peak_height + y_offset,
-                        r'%s' % ion[i],
+                        labels[i],
                         color='black',
                         size=10,
                         alpha=1,
@@ -254,11 +287,14 @@ class AptHistPlotter:
         """
         x_offset = 0.0  # Adjust this value as needed
         if range_data is not None:
-            ion = range_data['ion'].tolist()
+            labels = _resolve_range_display_labels(range_data)
             mc = range_data['mc'].tolist()
-            for i in range(len(ion)):
+            for i in range(len(labels)):
+                if self.y is None or len(self.y) == 0 or self.x is None or len(self.x) == 0:
+                    continue
                 # Find the bin that contains the mc[i]
                 bin_index = np.searchsorted(self.x, mc[i]) - 1
+                clamped_index = min(max(int(bin_index), 0), len(self.y) - 1)
                 if 0 <= bin_index < len(self.y):
                     # Define a small range around the bin to search for the local maximum
                     search_range = slice(max(0, bin_index - 1), min(len(self.y), bin_index + 2))
@@ -275,11 +311,14 @@ class AptHistPlotter:
                     if self.ax.get_yscale() == 'log':
                         y_offset = 10 ** (np.log10(peak_height) + 0.1) - peak_height
                 else:
-                    peak_position = mc[i]
-                    peak_height = self.y[np.searchsorted(self.x, mc[i]) - 1]
+                    peak_position = float(np.clip(mc[i], self.x[0], self.x[-1]))
+                    peak_height = float(self.y[clamped_index])
+                    y_offset = peak_height * 0.05
+                    if self.ax.get_yscale() == 'log' and peak_height > 0:
+                        y_offset = 10 ** (np.log10(peak_height) + 0.1) - peak_height
                 if self.plot_show:
                     self.peak_annotates.append(plt.text(peak_position + x_offset, peak_height + y_offset,
-                                                        r'%s' % ion[i], color='black', size=10, alpha=1,
+                                                        labels[i], color='black', size=10, alpha=1,
                                                         rotation=90))
                     self.annotates.append(str(i + 1))
         else:

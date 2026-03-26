@@ -34,7 +34,8 @@ def _browse_into(text_widget: widgets.Text, status_output: Output, variables) ->
             file_dialog.resolve_initial_directory(
                 text_widget.value,
                 getattr(variables, "last_directory", None),
-            )
+            ),
+            file_kind="dataset",
         )
         if selected_path:
             text_widget.value = selected_path

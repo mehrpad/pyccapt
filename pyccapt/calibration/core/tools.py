@@ -1,6 +1,7 @@
 ﻿import matplotlib.pyplot as plt
 import numpy as np
 import pybaselines
+import re
 from adjustText import adjust_text
 from matplotlib import rcParams
 from pybaselines import Baseline
@@ -13,6 +14,40 @@ from pyccapt.calibration.core.exceptions import CalibrationInputError
 from pyccapt.calibration.core.validation import ensure_positive
 from pyccapt.calibration.data_tools import data_loadcrop, plot_vline_draw, selectors_data
 from pyccapt.calibration.path_utils import save_figure
+
+
+def _normalize_range_colors(values):
+    """Normalize stored range colors for matplotlib usage."""
+    normalized = []
+    for value in values:
+        value = str(value).strip()
+        if value and not value.startswith('#') and re.fullmatch(r'[A-Fa-f0-9]{6}', value):
+            value = f'#{value}'
+        normalized.append(value)
+    return normalized
+
+
+def _plain_range_label(value):
+    """Convert stored ion/range labels into plain text safe for matplotlib."""
+    text = str(value).strip()
+    if not text:
+        return text
+    text = text.replace("$", "")
+    text = re.sub(r"_\{([^}]*)\}", r"\1", text)
+    text = re.sub(r"\^\{([^}]*)\}", r" \1", text)
+    text = text.replace("{", "").replace("}", "")
+    text = text.replace("^", "").strip()
+    return text
+
+
+def _resolve_range_display_labels(range_data):
+    """Return plain-text labels for ranged overlays and legends."""
+    for column in ("name", "ion_name", "ion"):
+        if column in range_data.columns:
+            labels = [_plain_range_label(value) for value in range_data[column].tolist()]
+            if any(label for label in labels):
+                return labels
+    return [_plain_range_label(value) for value in range(len(range_data))]
 
 
 def hist_plot(mc_tof, variables, bin, label, range_data=None, adjust_label=False, ranging=False, hist_color_range=False,
@@ -92,21 +127,21 @@ def hist_plot(mc_tof, variables, bin, label, range_data=None, adjust_label=False
     if plot:
         fig1, ax1 = plt.subplots(figsize=fig_size)
         if ranging and hist_color_range:
-            colors = range_data['color'].tolist()
+            colors = _normalize_range_colors(range_data['color'].tolist())
             mc_low = range_data['mc_low'].tolist()
             mc_up = range_data['mc_up'].tolist()
-            ion = range_data['ion'].tolist()
+            labels = _resolve_range_display_labels(range_data)
             mask_all = np.full(len(mc_tof), False)
 
-            for i in range(len(ion) + 1):
-                if i < len(ion):
+            for i in range(len(labels) + 1):
+                if i < len(labels):
                     mask = np.logical_and((mc_tof < mc_up[i]), mc_tof > mc_low[i])
                     mask_all = np.logical_or(mask_all, mask)
 
-                    if ion[i] == 'unranged':
+                    if labels[i] == 'unranged':
                         name_element = 'unranged'
                     else:
-                        name_element = r'%s' %ion[i]
+                        name_element = labels[i]
 
                     y, x, _ = plt.hist(mc_tof[mask], bins=bins, log=log, histtype=steps, color=colors[i],
                                        label=name_element)

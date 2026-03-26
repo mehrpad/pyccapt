@@ -57,6 +57,7 @@ The main Jupyter widget workflows currently include:
 - `L_and_t0_determination.ipynb`
 - `raw_data_analysis.ipynb`
 - `cameca_raw_import.ipynb`
+- `reflectron_correction.ipynb`
 - `tapsim_node_builder.ipynb`
 
 Google Colab support is currently provided for:

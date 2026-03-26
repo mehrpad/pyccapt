@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import h5py
@@ -206,21 +207,57 @@ def save_data(
         data_name = variables.result_data_name
 
     export_data = _slice_data_for_export(data, start_index=start_index, end_index=end_index)
+    if not any([hdf, epos, pos, ato_6v, csv]):
+        print("No export format was selected.")
+        return None
+
+    saved_outputs: dict[str, str] = {}
 
     if hdf:
         output_h5 = _resolve_variable_output_file(variables, filename=f"{data_name}.h5", data_directory=True)
         store_df_to_hdf(export_data, "df", output_h5)
+        saved_outputs["hdf"] = output_h5
     if epos:
-        ccapt_tools.ccapt_to_epos(export_data, path=variables.result_data_path, name=f"{data_name}.epos")
+        output_epos = _resolve_variable_output_file(variables, filename=f"{data_name}.epos", data_directory=True)
+        output_epos_path = _as_path(output_epos)
+        output_epos_path.parent.mkdir(parents=True, exist_ok=True)
+        ccapt_tools.ccapt_to_epos(
+            export_data,
+            path=str(output_epos_path.parent) + os.sep,
+            name=output_epos_path.name,
+        )
+        saved_outputs["epos"] = str(output_epos_path)
     if pos:
-        ccapt_tools.ccapt_to_pos(export_data, path=variables.result_data_path, name=f"{data_name}.pos")
+        output_pos = _resolve_variable_output_file(variables, filename=f"{data_name}.pos", data_directory=True)
+        output_pos_path = _as_path(output_pos)
+        output_pos_path.parent.mkdir(parents=True, exist_ok=True)
+        ccapt_tools.ccapt_to_pos(
+            export_data,
+            path=str(output_pos_path.parent) + os.sep,
+            name=output_pos_path.name,
+        )
+        saved_outputs["pos"] = str(output_pos_path)
     if ato_6v:
-        ato_tools.ccapt_to_ato(export_data, path=variables.result_data_path, name=f"{data_name}.ato")
+        output_ato = _resolve_variable_output_file(variables, filename=f"{data_name}.ato", data_directory=True)
+        output_ato_path = _as_path(output_ato)
+        output_ato_path.parent.mkdir(parents=True, exist_ok=True)
+        ato_tools.ccapt_to_ato(
+            export_data,
+            path=str(output_ato_path.parent),
+            name=output_ato_path.name,
+        )
+        saved_outputs["ato"] = str(output_ato_path)
     if csv:
         output_csv = _resolve_variable_output_file(
             variables, filename=f"{data_name}.csv", data_directory=True
         )
         store_df_to_csv(export_data, output_csv)
+        saved_outputs["csv"] = output_csv
+
+    for format_name, output_path in saved_outputs.items():
+        print(f"Saved {format_name.upper()}: {output_path}")
+
+    return None
 
 
 def load_data(dataset_path, data_type, mode="processed"):
@@ -316,6 +353,9 @@ def pyccapt_raw_to_processed(data):
 
 def save_range(variables) -> None:
     """Save range data as both HDF5 and CSV."""
+    if getattr(variables, "range_data", None) is None or variables.range_data.empty:
+        print("No range table is loaded, so nothing was saved.")
+        return
     h5_file = _resolve_variable_output_file(
         variables,
         filename=f"{variables.dataset_name}_range.h5",
@@ -328,3 +368,5 @@ def save_range(variables) -> None:
     )
     store_df_to_hdf(variables.range_data, "df", h5_file)
     store_df_to_csv(variables.range_data, csv_file)
+    print(f"Saved range HDF: {h5_file}")
+    print(f"Saved range CSV: {csv_file}")

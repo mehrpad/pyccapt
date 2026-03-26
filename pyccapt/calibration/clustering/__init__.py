@@ -3,6 +3,7 @@
 from .clustering import (
     MinMaxClusterResult,
     SUPPORTED_CLUSTERING_METHODS,
+    build_cluster_context_trace,
     build_cluster_scatter_traces,
     estimate_maximum_separation_distance,
     min_max_clustering,
@@ -17,6 +18,7 @@ from .clustering import (
 __all__ = [
     "MinMaxClusterResult",
     "SUPPORTED_CLUSTERING_METHODS",
+    "build_cluster_context_trace",
     "build_cluster_scatter_traces",
     "estimate_maximum_separation_distance",
     "min_max_clustering",

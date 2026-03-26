@@ -434,21 +434,32 @@ def build_cluster_scatter_traces(
     *,
     opacity: float = 0.9,
     marker_size: float = 2.5,
+    valid_mask: np.ndarray | None = None,
 ) -> list[go.Scatter3d]:
     """Build Plotly traces for clustered precipitate segments."""
+    if valid_mask is None:
+        mask_limit = np.ones(len(cluster_result.labels), dtype=bool)
+    else:
+        mask_limit = np.asarray(valid_mask, dtype=bool)
+        if mask_limit.shape != cluster_result.labels.shape:
+            raise ValueError("valid_mask must match the cluster label array length")
+
     traces: list[go.Scatter3d] = []
     for label_index in range(cluster_result.n_clusters):
-        mask = cluster_result.labels == label_index
+        mask = (cluster_result.labels == label_index) & mask_limit
         if not np.any(mask):
             continue
+        cluster_size = int(np.count_nonzero(mask))
         traces.append(
             go.Scatter3d(
                 x=np.asarray(variables.x)[mask],
                 y=np.asarray(variables.y)[mask],
                 z=np.asarray(variables.z)[mask],
                 mode="markers",
-                name=f"Segment {label_index + 1} ({', '.join(cluster_result.ion_names)})",
+                name=f"Cluster {label_index + 1} (n={cluster_size})",
                 showlegend=True,
+                legendgroup="clusters",
+                legendrank=10 + label_index,
                 marker=dict(
                     size=marker_size,
                     color=DEFAULT_CLUSTER_COLORS[label_index % len(DEFAULT_CLUSTER_COLORS)],
@@ -459,9 +470,41 @@ def build_cluster_scatter_traces(
     return traces
 
 
+def build_cluster_context_trace(
+    variables,
+    *,
+    mask: np.ndarray,
+    name: str,
+    color: str = "rgba(160,160,160,0.55)",
+    opacity: float = 0.12,
+    marker_size: float = 1.0,
+    showlegend: bool = True,
+) -> go.Scatter3d | None:
+    """Build a faint context trace to show specimen geometry around clusters."""
+    mask = np.asarray(mask, dtype=bool)
+    if len(mask) == 0 or not np.any(mask):
+        return None
+    return go.Scatter3d(
+        x=np.asarray(variables.x)[mask],
+        y=np.asarray(variables.y)[mask],
+        z=np.asarray(variables.z)[mask],
+        mode="markers",
+        name=name,
+        showlegend=showlegend,
+        legendgroup="cluster-context",
+        legendrank=1,
+        marker=dict(
+            size=marker_size,
+            color=color,
+            opacity=opacity,
+        ),
+    )
+
+
 __all__ = [
     "MinMaxClusterResult",
     "SUPPORTED_CLUSTERING_METHODS",
+    "build_cluster_context_trace",
     "build_cluster_scatter_traces",
     "estimate_maximum_separation_distance",
     "min_max_clustering",

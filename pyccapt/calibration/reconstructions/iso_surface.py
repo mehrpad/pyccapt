@@ -12,7 +12,7 @@ from plotly.subplots import make_subplots
 import plotly.io as pio
 
 
-from pyccapt.calibration.clustering import build_cluster_scatter_traces
+from pyccapt.calibration.clustering import build_cluster_context_trace, build_cluster_scatter_traces
 from pyccapt.calibration.reconstructions import reconstruction
 from pyccapt.calibration.reconstructions.io_utils import (
     save_gif,
@@ -153,8 +153,7 @@ def filter_isosurface_by_size(isosurf, min_vertices=100, largest_n=None):
                 continue
 
             region_mesh = components.extract_points(mask, adjacent_cells=False)
-            if isinstance(region_mesh, pv.UnstructuredGrid):
-                region_mesh = region_mesh.extract_surface()
+            region_mesh = _extract_surface_compat(region_mesh)
             filtered_meshes.append(region_mesh)
 
         if not filtered_meshes:
@@ -164,12 +163,124 @@ def filter_isosurface_by_size(isosurf, min_vertices=100, largest_n=None):
         for mesh in filtered_meshes[1:]:
             result = result + mesh
 
-        if isinstance(result, pv.UnstructuredGrid):
-            result = result.extract_surface()
+        result = _extract_surface_compat(result)
         return result.clean()
     except Exception as exc:
         print(f'Unable to filter disconnected isosurface regions: {exc}')
         return isosurf
+
+
+def _extract_surface_compat(mesh):
+    """Extract a surface mesh across PyVista versions."""
+    if not isinstance(mesh, pv.UnstructuredGrid):
+        return mesh
+    try:
+        return mesh.extract_surface(algorithm='dataset_surface')
+    except TypeError:
+        return mesh.extract_surface()
+
+
+def _select_points_inside_surface_compat(points, surface):
+    """Mark query points inside a closed surface across PyVista versions."""
+    if hasattr(points, 'select_interior_points'):
+        selected = points.select_interior_points(surface)
+        mask = selected.point_data.get('selected_points', np.array([]))
+        return np.asarray(mask, dtype=bool)
+
+    if hasattr(points, 'select_enclosed_points'):
+        selected = points.select_enclosed_points(surface, check_surface=False)
+        mask = selected.point_data.get('SelectedPoints', np.array([]))
+        return np.asarray(mask, dtype=bool)
+
+    if hasattr(points, 'compute_implicit_distance'):
+        selected = points.compute_implicit_distance(surface)
+        distances = selected.point_data.get('implicit_distance', np.array([]))
+        return np.asarray(distances, dtype=float) <= 0
+
+    raise AttributeError('No supported PyVista point-in-surface method is available')
+
+
+def _structured_grid_from_volume(grid_vec, data, scalar_name):
+    """Build a PyVista structured grid from a volume on the reconstruction grid."""
+    x, y, z = np.meshgrid(grid_vec[0], grid_vec[1], grid_vec[2], indexing='ij')
+    grid = pv.StructuredGrid(x, y, z)
+    grid.point_data[scalar_name] = np.asarray(data, dtype=float).flatten()
+    return grid
+
+
+def _pad_grid_and_volume(grid_vec, data, pad_width=1):
+    """Pad a voxel volume with empty space so extracted surfaces can close at the boundary."""
+    padded_data = np.pad(np.asarray(data), int(pad_width), mode='constant', constant_values=0)
+    padded_grid = []
+    for axis_values in grid_vec:
+        axis_values = np.asarray(axis_values, dtype=float)
+        if axis_values.size > 1:
+            step = float(np.median(np.diff(axis_values)))
+        else:
+            step = 1.0
+        start = float(axis_values[0]) - step * int(pad_width)
+        stop = float(axis_values[-1]) + step * int(pad_width)
+        padded_grid.append(np.linspace(start, stop, axis_values.size + 2 * int(pad_width)))
+    return padded_grid, padded_data
+
+
+def _build_specimen_surface_from_voxels(grid_vec, voxel_counts, smoothing_sigma=1.0):
+    """Build a closed specimen-envelope surface from occupied voxel counts."""
+    occupancy = (np.asarray(voxel_counts) > 0).astype(float)
+    if not np.any(occupancy):
+        return pv.PolyData()
+
+    envelope_sigma = 0.0 if float(smoothing_sigma) <= 0 else min(1.25, max(0.75, float(smoothing_sigma)))
+    if envelope_sigma > 0:
+        envelope = gaussian_filter(occupancy, sigma=envelope_sigma)
+    else:
+        envelope = occupancy
+
+    positive_values = envelope[envelope > 0]
+    if positive_values.size == 0:
+        return pv.PolyData()
+
+    threshold = max(0.05, min(0.35, 0.25 * float(np.max(positive_values))))
+    padded_grid_vec, padded_envelope = _pad_grid_and_volume(grid_vec, envelope, pad_width=1)
+    surface = isosurface(padded_grid_vec, padded_envelope, isovalue=threshold)
+    if surface.n_points == 0 or surface.n_cells == 0:
+        return pv.PolyData()
+    surface = filter_isosurface_by_size(surface, min_vertices=50, largest_n=1)
+    if surface.n_points == 0 or surface.n_cells == 0:
+        return pv.PolyData()
+    surface = surface.triangulate().clean()
+    try:
+        hole_size = float(np.linalg.norm(np.array(surface.bounds)[1::2] - np.array(surface.bounds)[::2]))
+        surface = surface.fill_holes(hole_size).clean()
+    except Exception:
+        pass
+    return surface
+
+
+def _clip_isosurface_to_specimen_envelope(mesh, grid_vec, voxel_counts, smoothing_sigma=1.0):
+    """Clip an isosurface so it stays inside the closed specimen surface."""
+    if mesh is None or mesh.n_points == 0 or mesh.n_cells == 0:
+        return mesh
+
+    specimen_surface = _build_specimen_surface_from_voxels(
+        grid_vec,
+        voxel_counts,
+        smoothing_sigma=smoothing_sigma,
+    )
+    if specimen_surface.n_points == 0 or specimen_surface.n_cells == 0:
+        return mesh.triangulate().clean()
+
+    tri_mesh = mesh.triangulate().clean()
+    cell_centers = tri_mesh.cell_centers()
+    cell_keep = _select_points_inside_surface_compat(cell_centers, specimen_surface)
+    if cell_keep.size == 0:
+        return tri_mesh
+    if not np.any(cell_keep):
+        return pv.PolyData()
+
+    clipped = tri_mesh.extract_cells(np.flatnonzero(cell_keep))
+    clipped = _extract_surface_compat(clipped)
+    return clipped.clean()
 
 
 def calculate_element_isosurface(variables, element_name, bin_values, base_mask=None, smoothing_sigma=1.0,
@@ -194,24 +305,16 @@ def calculate_element_isosurface(variables, element_name, bin_values, base_mask=
     grid_vec = [bin_centers[0], bin_centers[1], bin_centers[2]]
     vox = pos_to_voxel(coords, grid_vec)
     vox_ion = pos_to_voxel(coords, grid_vec, species=species_mask)
-    occupancy_mask = vox > 0
     reliable_mask = vox >= max(1, int(min_atoms_per_voxel))
-    support_mask = reliable_mask if np.any(reliable_mask) else occupancy_mask
+    if not np.any(reliable_mask):
+        reliable_mask = vox > 0
     conc = np.divide(vox_ion, vox, out=np.zeros_like(vox_ion, dtype=float), where=vox != 0)
     conc[~reliable_mask] = 0
 
     if float(smoothing_sigma) > 0:
-        sample_weights = gaussian_filter(support_mask.astype(float), sigma=float(smoothing_sigma))
-        smoothed_signal = gaussian_filter(conc * support_mask.astype(float), sigma=float(smoothing_sigma))
-        conc_for_iso = np.divide(
-            smoothed_signal,
-            sample_weights,
-            out=np.zeros_like(smoothed_signal, dtype=float),
-            where=sample_weights > 1e-12,
-        )
+        conc_for_iso = gaussian_filter(conc, sigma=float(smoothing_sigma))
     else:
         conc_for_iso = conc.copy()
-    conc_for_iso[~support_mask] = 0.0
 
     if not np.any(conc_for_iso > 0):
         raise ValueError(
@@ -229,6 +332,12 @@ def calculate_element_isosurface(variables, element_name, bin_values, base_mask=
         )
     print(f'Iso value used for {element_name}: {iso_value:.6g}')
     isosurf = isosurface(grid_vec, conc_for_iso, isovalue=iso_value)
+    isosurf = _clip_isosurface_to_specimen_envelope(
+        isosurf,
+        grid_vec,
+        vox,
+        smoothing_sigma=smoothing_sigma,
+    )
     isosurf = filter_isosurface_by_size(isosurf, min_vertices=max(1, int(min_vertices)))
 
     return {
@@ -246,7 +355,8 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                         range_x=[], range_y=[], range_z=[], range_vol=[], ions_individually_plots=False,
                         max_num_ions=None, min_num_ions=None, isosurface_dic=None, detailed_isotope_charge=False,
                         only_iso=False, cluster_result=None, smoothing_sigma=1.0, min_atoms_per_voxel=10,
-                        min_isosurface_vertices=20, pure_element_only=False, manual_iso_value=None):
+                        min_isosurface_vertices=20, pure_element_only=False, manual_iso_value=None,
+                        cluster_display_mode='overlay'):
     """
     Generate a 3D plot for atom probe reconstruction data.
 
@@ -273,6 +383,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
         detailed_isotope_charge (bool): Whether to plot the range of each isotopes and charge state.
         only_iso (bool): Whether to plot only the isosurface.
         cluster_result: Optional Min-Max precipitate segmentation overlay.
+        cluster_display_mode (str): `overlay` or `clusters-only`.
 
     Returns:
         None
@@ -294,6 +405,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
         range_vol=range_vol,
         verbose=False,
     )
+    cluster_only = cluster_result is not None and str(cluster_display_mode).strip().lower() == 'clusters-only'
 
     if isinstance(element_percentage, list):
         pass
@@ -559,7 +671,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                             fig.add_trace(mesh)
                             drawn_iso_targets.add(iso_element)
 
-                if not only_iso:
+                if not only_iso and not cluster_only:
                     ion_name = ion[index].rsplit('$', 1)[0]
                     ion_name = ion_name + '~' + '(%s)' % (element_percentage[index]) + '$'
                     fig.add_trace(
@@ -579,7 +691,34 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                     )
 
             if cluster_result is not None:
-                for trace in build_cluster_scatter_traces(variables, cluster_result, opacity=min(1.0, opacity + 0.25)):
+                if cluster_only:
+                    background_trace = build_cluster_context_trace(
+                        variables,
+                        mask=mask_f & ~cluster_result.selected_mask,
+                        name='Background specimen',
+                        opacity=min(0.18, max(0.04, opacity * 0.3)),
+                        marker_size=0.9,
+                    )
+                    if background_trace is not None:
+                        fig.add_trace(background_trace)
+
+                    unclustered_trace = build_cluster_context_trace(
+                        variables,
+                        mask=mask_f & cluster_result.selected_mask & (cluster_result.labels < 0),
+                        name='Selected ions outside clusters',
+                        color='rgba(120,120,120,0.85)',
+                        opacity=min(0.35, max(0.10, opacity * 0.55)),
+                        marker_size=1.4,
+                    )
+                    if unclustered_trace is not None:
+                        fig.add_trace(unclustered_trace)
+
+                for trace in build_cluster_scatter_traces(
+                    variables,
+                    cluster_result,
+                    opacity=min(1.0, opacity + 0.25),
+                    valid_mask=mask_f,
+                ):
                     fig.add_trace(trace)
 
             fig = reconstruction.draw_qube(fig, range_cube)

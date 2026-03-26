@@ -337,67 +337,69 @@ def call_visualization(variables, colab=False):
     range_z_3d = widgets.Textarea(value='[0,0]')
     range_vol_3d = widgets.Textarea(value='[0,0]')
 
-    def plot_3d(b, variables, out):
+    def plot_3d(b, variables, out, cluster_display_mode='overlay'):
         plot_3d_button.disabled = True
-        with out:
-            try:
-                # Use json.loads to convert the entered string to a list
-                range_sequence = json.loads(range_sequence_3d.value)
-                range_mc = json.loads(range_mc_3d.value)
-                range_detx = json.loads(range_detx_3d.value)
-                range_dety = json.loads(range_dety_3d.value)
-                range_x = json.loads(range_x_3d.value)
-                range_y = json.loads(range_y_3d.value)
-                range_z = json.loads(range_z_3d.value)
-                range_vol = json.loads(range_vol_3d.value)
-                if range_sequence == [0, 0]:
-                    range_sequence = []
-                if range_mc == [0, 0]:
-                    range_mc = []
-                if range_detx == [0, 0] or range_dety == [0, 0]:
-                    range_detx = []
-                    range_dety = []
+        try:
+            with out:
+                try:
+                    # Use json.loads to convert the entered string to a list
+                    range_sequence = json.loads(range_sequence_3d.value)
+                    range_mc = json.loads(range_mc_3d.value)
+                    range_detx = json.loads(range_detx_3d.value)
+                    range_dety = json.loads(range_dety_3d.value)
+                    range_x = json.loads(range_x_3d.value)
+                    range_y = json.loads(range_y_3d.value)
+                    range_z = json.loads(range_z_3d.value)
+                    range_vol = json.loads(range_vol_3d.value)
+                    if range_sequence == [0, 0]:
+                        range_sequence = []
+                    if range_mc == [0, 0]:
+                        range_mc = []
+                    if range_detx == [0, 0] or range_dety == [0, 0]:
+                        range_detx = []
+                        range_dety = []
 
-                if range_x == [0, 0] or range_y == [] or range_z == [0, 0]:
-                    range_x = []
-                    range_y = []
-                    range_z = []
-                if range_vol == [0, 0]:
-                    range_vol = []
-            except json.JSONDecodeError:
-                # Handle invalid input
-                print(f"Invalid range input")
+                    if range_x == [0, 0] or range_y == [] or range_z == [0, 0]:
+                        range_x = []
+                        range_y = []
+                        range_z = []
+                    if range_vol == [0, 0]:
+                        range_vol = []
+                except json.JSONDecodeError:
+                    # Handle invalid input
+                    print(f"Invalid range input")
 
-            element_percentage_dic = ast.literal_eval(element_percentage_p3.value)
-            # Iterate through the 'element' column
-            element_percentage_list = []
-            for row_elements in variables.range_data['element']:
-                max_value = 0.1  # Default value if no matching element is found
-                for element in row_elements:
-                    if element in element_percentage_dic:
-                        max_value = element_percentage_dic[element]
-                element_percentage_list.append(max_value)
+                element_percentage_dic = ast.literal_eval(element_percentage_p3.value)
+                # Iterate through the 'element' column
+                element_percentage_list = []
+                for row_elements in variables.range_data['element']:
+                    max_value = 0.1  # Default value if no matching element is found
+                    for element in row_elements:
+                        if element in element_percentage_dic:
+                            max_value = element_percentage_dic[element]
+                    element_percentage_list.append(max_value)
 
-            cluster_result = _run_cluster_segmentation(
-                enabled=cluster_precipitate_3d.value,
-                selection_text=cluster_labels_3d.value,
-                method_value=cluster_method_3d.value,
-                cluster_count_value=cluster_count_3d.value,
-                d_max_value=cluster_dmax_3d.value,
-                auto_d_max_value=cluster_auto_dmax_3d.value,
-                kth_neighbor_value=cluster_kth_neighbor_3d.value,
-                percentile_value=cluster_percentile_3d.value,
-                n_min_value=cluster_min_size_3d.value,
-                context_label='3D clustering',
-            )
+                cluster_result = _run_cluster_segmentation(
+                    enabled=cluster_precipitate_3d.value,
+                    selection_text=cluster_labels_3d.value,
+                    method_value=cluster_method_3d.value,
+                    cluster_count_value=cluster_count_3d.value,
+                    d_max_value=cluster_dmax_3d.value,
+                    auto_d_max_value=cluster_auto_dmax_3d.value,
+                    kth_neighbor_value=cluster_kth_neighbor_3d.value,
+                    percentile_value=cluster_percentile_3d.value,
+                    n_min_value=cluster_min_size_3d.value,
+                    context_label='3D clustering',
+                )
 
-            reconstruction.reconstruction_plot(variables, element_percentage_list, opacity.value,
-                                               rotary_fig_save_p3.value, figname_3d.value,
-                                               save_3d.value, make_gif_p3.value, make_evap_3d.value, range_sequence,
-                                               range_mc, range_detx, range_dety, range_x, range_y, range_z, range_vol,
-                                               ions_individually_plots.value, cluster_result=cluster_result)
-
-        plot_3d_button.disabled = False
+                reconstruction.reconstruction_plot(variables, element_percentage_list, opacity.value,
+                                                   rotary_fig_save_p3.value, figname_3d.value,
+                                                   save_3d.value, make_gif_p3.value, make_evap_3d.value, range_sequence,
+                                                   range_mc, range_detx, range_dety, range_x, range_y, range_z, range_vol,
+                                                   ions_individually_plots.value, cluster_result=cluster_result,
+                                                   cluster_display_mode=cluster_display_mode)
+        finally:
+            plot_3d_button.disabled = False
 
     #############
     max_tof_mc_widget = widgets.FloatText(value=variables.max_tof)
@@ -1069,63 +1071,148 @@ def call_visualization(variables, colab=False):
     range_z_3d_iso = widgets.Textarea(value='[0,0]')
     range_vol_3d_iso = widgets.Textarea(value='[0,0]')
 
-    def plot_3d_iso(b, variables, out):
+    def _sync_cluster_method_controls(method_widget, count_widget, auto_dmax_widget, dmax_widget,
+                                      kth_neighbor_widget, percentile_widget, min_size_widget,
+                                      note_widget=None):
+        method = clustering.normalize_clustering_method(method_widget.value)
+        uses_fixed_count = method == 'min-max'
+        auto_d_max = bool(auto_dmax_widget.value)
+
+        count_widget.disabled = not uses_fixed_count
+        auto_dmax_widget.disabled = uses_fixed_count
+        min_size_widget.disabled = uses_fixed_count
+        dmax_widget.disabled = uses_fixed_count or auto_d_max
+        kth_neighbor_widget.disabled = uses_fixed_count or not auto_d_max
+        percentile_widget.disabled = uses_fixed_count or not auto_d_max
+
+        if note_widget is not None:
+            if uses_fixed_count:
+                note_widget.value = (
+                    "<i>Min-Max uses the selected number of clusters and ignores d max settings.</i>"
+                )
+            elif auto_d_max:
+                note_widget.value = (
+                    "<i>Maximum separation finds as many connected clusters as the data supports. "
+                    "Number of clusters is not used.</i>"
+                )
+            else:
+                note_widget.value = (
+                    "<i>Maximum separation uses the manual d max cutoff and ignores Number of clusters.</i>"
+                )
+
+    cluster_tab_selection = widgets.Text(value='', placeholder='Ni3Al, Al')
+    cluster_tab_method = widgets.Dropdown(
+        options=[('Min-Max', 'min-max'), ('Maximum separation', 'maximum-separation')],
+        value='min-max',
+    )
+    cluster_tab_count = widgets.BoundedIntText(value=2, min=2, max=12)
+    cluster_tab_auto_dmax = widgets.Dropdown(options=[('True', True), ('False', False)], value=True)
+    cluster_tab_dmax = widgets.BoundedFloatText(value=1.0, min=0.0001, max=1_000_000.0, step=0.05)
+    cluster_tab_kth_neighbor = widgets.BoundedIntText(value=3, min=1, max=100)
+    cluster_tab_percentile = widgets.BoundedFloatText(value=50.0, min=1.0, max=99.9, step=1.0)
+    cluster_tab_min_size = widgets.BoundedIntText(value=25, min=2, max=1_000_000)
+    cluster_tab_note = widgets.HTML()
+
+    def _update_all_cluster_control_states(*_args):
+        _sync_cluster_method_controls(
+            cluster_method_3d,
+            cluster_count_3d,
+            cluster_auto_dmax_3d,
+            cluster_dmax_3d,
+            cluster_kth_neighbor_3d,
+            cluster_percentile_3d,
+            cluster_min_size_3d,
+        )
+        _sync_cluster_method_controls(
+            cluster_method_iso,
+            cluster_count_iso,
+            cluster_auto_dmax_iso,
+            cluster_dmax_iso,
+            cluster_kth_neighbor_iso,
+            cluster_percentile_iso,
+            cluster_min_size_iso,
+        )
+        _sync_cluster_method_controls(
+            cluster_tab_method,
+            cluster_tab_count,
+            cluster_tab_auto_dmax,
+            cluster_tab_dmax,
+            cluster_tab_kth_neighbor,
+            cluster_tab_percentile,
+            cluster_tab_min_size,
+            note_widget=cluster_tab_note,
+        )
+
+    for widget in (
+        cluster_method_3d,
+        cluster_auto_dmax_3d,
+        cluster_method_iso,
+        cluster_auto_dmax_iso,
+        cluster_tab_method,
+        cluster_tab_auto_dmax,
+    ):
+        widget.observe(_update_all_cluster_control_states, names='value')
+
+    _update_all_cluster_control_states()
+
+    def plot_3d_iso(b, variables, out, cluster_display_mode='overlay'):
         plot_3d_button_iso.disabled = True
-        with out:
-            try:
-                range_sequence, range_mc, range_detx, range_dety, range_x, range_y, range_z, range_vol = _parse_common_ranges(
-                    range_sequence_3d_iso,
-                    range_mc_3d_iso,
-                    range_detx_3d_iso,
-                    range_dety_3d_iso,
-                    range_x_3d_iso,
-                    range_y_3d_iso,
-                    range_z_3d_iso,
-                    range_vol_3d_iso,
+        try:
+            with out:
+                try:
+                    range_sequence, range_mc, range_detx, range_dety, range_x, range_y, range_z, range_vol = _parse_common_ranges(
+                        range_sequence_3d_iso,
+                        range_mc_3d_iso,
+                        range_detx_3d_iso,
+                        range_dety_3d_iso,
+                        range_x_3d_iso,
+                        range_y_3d_iso,
+                        range_z_3d_iso,
+                        range_vol_3d_iso,
+                    )
+                    isosurface_dic_p3_iso_value = _parse_isosurface_dict(
+                        isosurface_dic_p3_iso.value,
+                        allow_multiple=True,
+                        field_name='Iso surface dictionary',
+                    )
+                    element_percentage_list_iso = _build_element_percentage_list(element_percentage_p3_iso.value)
+                except (json.JSONDecodeError, ValueError, SyntaxError) as exc:
+                    print(f'Invalid iso plot input: {exc}')
+                    return
+
+                cluster_result = _run_cluster_segmentation(
+                    enabled=cluster_precipitate_iso.value,
+                    selection_text=cluster_labels_iso.value,
+                    method_value=cluster_method_iso.value,
+                    cluster_count_value=cluster_count_iso.value,
+                    d_max_value=cluster_dmax_iso.value,
+                    auto_d_max_value=cluster_auto_dmax_iso.value,
+                    kth_neighbor_value=cluster_kth_neighbor_iso.value,
+                    percentile_value=cluster_percentile_iso.value,
+                    n_min_value=cluster_min_size_iso.value,
+                    context_label='Iso-surface clustering',
                 )
-                isosurface_dic_p3_iso_value = _parse_isosurface_dict(
-                    isosurface_dic_p3_iso.value,
-                    allow_multiple=True,
-                    field_name='Iso surface dictionary',
-                )
-                element_percentage_list_iso = _build_element_percentage_list(element_percentage_p3_iso.value)
-            except (json.JSONDecodeError, ValueError, SyntaxError) as exc:
-                print(f'Invalid iso plot input: {exc}')
-                plot_3d_button_iso.disabled = False
-                return
 
-            cluster_result = _run_cluster_segmentation(
-                enabled=cluster_precipitate_iso.value,
-                selection_text=cluster_labels_iso.value,
-                method_value=cluster_method_iso.value,
-                cluster_count_value=cluster_count_iso.value,
-                d_max_value=cluster_dmax_iso.value,
-                auto_d_max_value=cluster_auto_dmax_iso.value,
-                kth_neighbor_value=cluster_kth_neighbor_iso.value,
-                percentile_value=cluster_percentile_iso.value,
-                n_min_value=cluster_min_size_iso.value,
-                context_label='Iso-surface clustering',
-            )
-
-            iso_surface.reconstruction_plot(variables, element_percentage_list_iso, opacity_iso.value,
-                                               rotary_fig_save_p3_iso.value, figname_3d_iso.value,
-                                               save_3d_iso.value, make_gif_p3_iso.value,
-                                               range_sequence,
-                                               range_mc, range_detx, range_dety, range_x, range_y, range_z, range_vol,
-                                               ions_individually_plots_iso.value,
-                                               max_num_ions=None, min_num_ions=None,
-                                               isosurface_dic=isosurface_dic_p3_iso_value,
-                                               detailed_isotope_charge=detailed_isotope_charge_3d_iso.value,
-                                               only_iso=only_iso_3d_iso.value,
-                                               cluster_result=cluster_result,
-                                               smoothing_sigma=smoothing_sigma_iso.value,
-                                               manual_iso_value=(manual_iso_value_iso.value
-                                                                 if manual_iso_value_iso.value > 0 else None),
-                                               min_atoms_per_voxel=min_atoms_per_voxel_iso.value,
-                                               min_isosurface_vertices=min_vertices_iso.value,
-                                               pure_element_only=pure_element_only_iso.value)
-
-        plot_3d_button_iso.disabled = False
+                iso_surface.reconstruction_plot(variables, element_percentage_list_iso, opacity_iso.value,
+                                                   rotary_fig_save_p3_iso.value, figname_3d_iso.value,
+                                                   save_3d_iso.value, make_gif_p3_iso.value,
+                                                   range_sequence,
+                                                   range_mc, range_detx, range_dety, range_x, range_y, range_z, range_vol,
+                                                   ions_individually_plots_iso.value,
+                                                   max_num_ions=None, min_num_ions=None,
+                                                   isosurface_dic=isosurface_dic_p3_iso_value,
+                                                   detailed_isotope_charge=detailed_isotope_charge_3d_iso.value,
+                                                   only_iso=only_iso_3d_iso.value,
+                                                   cluster_result=cluster_result,
+                                                   smoothing_sigma=smoothing_sigma_iso.value,
+                                                   manual_iso_value=(manual_iso_value_iso.value
+                                                                     if manual_iso_value_iso.value > 0 else None),
+                                                   min_atoms_per_voxel=min_atoms_per_voxel_iso.value,
+                                                   min_isosurface_vertices=min_vertices_iso.value,
+                                                   pure_element_only=pure_element_only_iso.value,
+                                                   cluster_display_mode=cluster_display_mode)
+        finally:
+            plot_3d_button_iso.disabled = False
 
     #############
     plot_proxigram_button = widgets.Button(description='plot proxigram')
@@ -1238,15 +1325,73 @@ def call_visualization(variables, colab=False):
             print('')
 
     plot_clustered_3d_button = widgets.Button(description='plot clustered 3D')
-    plot_clustered_iso_button = widgets.Button(description='plot clustered iso surface')
+    plot_clustered_iso_button = widgets.Button(description='plot clustered iso')
+
+    def _apply_cluster_tab_settings():
+        cluster_labels_3d.value = cluster_tab_selection.value
+        cluster_labels_iso.value = cluster_tab_selection.value
+        cluster_method_3d.value = cluster_tab_method.value
+        cluster_method_iso.value = cluster_tab_method.value
+        cluster_count_3d.value = cluster_tab_count.value
+        cluster_count_iso.value = cluster_tab_count.value
+        cluster_auto_dmax_3d.value = cluster_tab_auto_dmax.value
+        cluster_auto_dmax_iso.value = cluster_tab_auto_dmax.value
+        cluster_dmax_3d.value = cluster_tab_dmax.value
+        cluster_dmax_iso.value = cluster_tab_dmax.value
+        cluster_kth_neighbor_3d.value = cluster_tab_kth_neighbor.value
+        cluster_kth_neighbor_iso.value = cluster_tab_kth_neighbor.value
+        cluster_percentile_3d.value = cluster_tab_percentile.value
+        cluster_percentile_iso.value = cluster_tab_percentile.value
+        cluster_min_size_3d.value = cluster_tab_min_size.value
+        cluster_min_size_iso.value = cluster_tab_min_size.value
+        _update_all_cluster_control_states()
+
+    def _set_cluster_buttons_disabled(disabled):
+        plot_clustered_3d_button.disabled = disabled
+        plot_clustered_iso_button.disabled = disabled
+
+    def _validate_cluster_plot_request(selection_text, context_label):
+        if getattr(variables, 'range_data', None) is None or variables.range_data.empty:
+            print(f'{context_label} requires range data. Load a range file first.')
+            return False
+        if not clustering.parse_label_selection(selection_text):
+            print(f'{context_label}: enter one or more cluster ions/elements first.')
+            return False
+        return True
 
     def plot_clustered_3d(b):
-        cluster_precipitate_3d.value = True
-        plot_3d(b, variables, out)
+        _set_cluster_buttons_disabled(True)
+        try:
+            with out:
+                out.clear_output()
+                if not _validate_cluster_plot_request(cluster_tab_selection.value, '3D clustering'):
+                    return
+                _apply_cluster_tab_settings()
+                if cluster_tab_method.value == 'min-max':
+                    print(f'Launching clustered 3D plot with Min-Max ({cluster_tab_count.value} clusters).')
+                else:
+                    print('Launching clustered 3D plot with maximum separation.')
+            cluster_precipitate_3d.value = True
+            plot_3d(b, variables, out, cluster_display_mode='clusters-only')
+        finally:
+            _set_cluster_buttons_disabled(False)
 
     def plot_clustered_iso(b):
-        cluster_precipitate_iso.value = True
-        plot_3d_iso(b, variables, out)
+        _set_cluster_buttons_disabled(True)
+        try:
+            with out:
+                out.clear_output()
+                if not _validate_cluster_plot_request(cluster_tab_selection.value, 'Iso-surface clustering'):
+                    return
+                _apply_cluster_tab_settings()
+                if cluster_tab_method.value == 'min-max':
+                    print(f'Launching clustered iso-surface plot with Min-Max ({cluster_tab_count.value} clusters).')
+                else:
+                    print('Launching clustered iso-surface plot with maximum separation.')
+            cluster_precipitate_iso.value = True
+            plot_3d_iso(b, variables, out, cluster_display_mode='clusters-only')
+        finally:
+            _set_cluster_buttons_disabled(False)
 
     plot_clustered_3d_button.on_click(plot_clustered_3d)
     plot_clustered_iso_button.on_click(plot_clustered_iso)
@@ -1569,37 +1714,25 @@ def call_visualization(variables, colab=False):
         widgets.HTML(
             value=(
                 "<b>Precipitate clustering</b><br>"
-                "Use the faster maximum-separation method for connected precipitates, or keep Min-Max for a fixed-number split."
+                "Use <b>Min-Max</b> when you want an exact number of clusters. "
+                "Use <b>Maximum separation</b> when you want PyCCAPT to find connected precipitates automatically."
             )
         ),
         widgets.HTML(
             value=(
-                "For <b>maximum separation</b>, keep <code>Auto estimate d max</code> enabled in most cases. "
-                "PyCCAPT will estimate the cutoff from the selected ions' k-th nearest-neighbor distances."
+                "This tab uses one shared clustering setup for both 3D and iso-surface views."
             )
         ),
-        widgets.HTML(value="<b>3D clustering</b>"),
-        widgets.HBox([widgets.Label(value='Enable clustering:', layout=label_layout), cluster_precipitate_3d]),
-        widgets.HBox([widgets.Label(value='Cluster ions/elements:', layout=label_layout), cluster_labels_3d]),
-        widgets.HBox([widgets.Label(value='Method:', layout=label_layout), cluster_method_3d]),
-        widgets.HBox([widgets.Label(value='Number of clusters:', layout=label_layout), cluster_count_3d]),
-        widgets.HBox([widgets.Label(value='Auto estimate d max:', layout=label_layout), cluster_auto_dmax_3d]),
-        widgets.HBox([widgets.Label(value='d max:', layout=label_layout), cluster_dmax_3d]),
-        widgets.HBox([widgets.Label(value='k-th NN:', layout=label_layout), cluster_kth_neighbor_3d]),
-        widgets.HBox([widgets.Label(value='NN percentile:', layout=label_layout), cluster_percentile_3d]),
-        widgets.HBox([widgets.Label(value='Min cluster size:', layout=label_layout), cluster_min_size_3d]),
-        widgets.HBox([plot_clustered_3d_button]),
-        widgets.HTML(value="<b>Iso-surface clustering</b>"),
-        widgets.HBox([widgets.Label(value='Enable clustering:', layout=label_layout), cluster_precipitate_iso]),
-        widgets.HBox([widgets.Label(value='Cluster ions/elements:', layout=label_layout), cluster_labels_iso]),
-        widgets.HBox([widgets.Label(value='Method:', layout=label_layout), cluster_method_iso]),
-        widgets.HBox([widgets.Label(value='Number of clusters:', layout=label_layout), cluster_count_iso]),
-        widgets.HBox([widgets.Label(value='Auto estimate d max:', layout=label_layout), cluster_auto_dmax_iso]),
-        widgets.HBox([widgets.Label(value='d max:', layout=label_layout), cluster_dmax_iso]),
-        widgets.HBox([widgets.Label(value='k-th NN:', layout=label_layout), cluster_kth_neighbor_iso]),
-        widgets.HBox([widgets.Label(value='NN percentile:', layout=label_layout), cluster_percentile_iso]),
-        widgets.HBox([widgets.Label(value='Min cluster size:', layout=label_layout), cluster_min_size_iso]),
-        widgets.HBox([plot_clustered_iso_button]),
+        widgets.HBox([widgets.Label(value='Cluster ions/elements:', layout=label_layout), cluster_tab_selection]),
+        widgets.HBox([widgets.Label(value='Method:', layout=label_layout), cluster_tab_method]),
+        widgets.HBox([widgets.Label(value='Number of clusters:', layout=label_layout), cluster_tab_count]),
+        widgets.HBox([widgets.Label(value='Auto estimate d max:', layout=label_layout), cluster_tab_auto_dmax]),
+        widgets.HBox([widgets.Label(value='d max:', layout=label_layout), cluster_tab_dmax]),
+        widgets.HBox([widgets.Label(value='k-th NN:', layout=label_layout), cluster_tab_kth_neighbor]),
+        widgets.HBox([widgets.Label(value='NN percentile:', layout=label_layout), cluster_tab_percentile]),
+        widgets.HBox([widgets.Label(value='Min cluster size:', layout=label_layout), cluster_tab_min_size]),
+        cluster_tab_note,
+        widgets.HBox([plot_clustered_3d_button, plot_clustered_iso_button]),
         widgets.HBox([clear_button]),
     ])
 

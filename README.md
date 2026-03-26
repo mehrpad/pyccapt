@@ -183,7 +183,8 @@ Google Colab notebooks currently supported:
 Additional Jupyter-only widget workflows are available under
 `pyccapt/calibration/tutorials/jupyter_files`, including
 `L_and_t0_determination.ipynb`, `raw_data_analysis.ipynb`,
-`cameca_raw_import.ipynb`, and `tapsim_node_builder.ipynb`.
+`cameca_raw_import.ipynb`, `reflectron_correction.ipynb`,
+and `tapsim_node_builder.ipynb`.
 
 ## Data Structures
 

@@ -11,6 +11,7 @@ Additional widget-based Jupyter workflows are available under
 - raw detector analysis (RoentDek, Surface Concept, and LEAP/Cameca imports)
 - `t0` and flight-path estimation
 - Cameca RHIT/STR/HITS import
+- reflectron detector correction for LEAP EPOS datasets
 - TAPSim node/specimen generation
 
 Google Colab support is currently provided for the

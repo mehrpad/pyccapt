@@ -4,6 +4,9 @@ import numpy as np
 import pandas as pd
 
 from pyccapt.calibration.clustering import (
+    MinMaxClusterResult,
+    build_cluster_context_trace,
+    build_cluster_scatter_traces,
     estimate_maximum_separation_distance,
     maximum_separation_clustering,
     min_max_clustering,
@@ -116,3 +119,37 @@ def test_estimate_maximum_separation_distance_returns_positive_value():
 
     assert np.isfinite(d_max)
     assert d_max > 0
+
+
+def test_cluster_plot_traces_are_named_by_cluster_and_respect_masks():
+    variables = Variables()
+    variables.x = np.array([0.0, 1.0, 2.0, 3.0])
+    variables.y = np.array([0.0, 0.0, 1.0, 1.0])
+    variables.z = np.array([0.0, 0.5, 1.0, 1.5])
+
+    cluster_result = MinMaxClusterResult(
+        labels=np.array([0, 0, 1, -1]),
+        selected_mask=np.array([True, True, True, True]),
+        selected_indices=np.array([0, 1, 2, 3]),
+        centers=np.array([[0.5, 0.0, 0.25], [2.0, 1.0, 1.0]]),
+        ion_names=("Ni3Al",),
+        cluster_column="cluster_minmax",
+    )
+
+    traces = build_cluster_scatter_traces(
+        variables,
+        cluster_result,
+        valid_mask=np.array([True, False, True, True]),
+    )
+
+    assert [trace.name for trace in traces] == ["Cluster 1 (n=1)", "Cluster 2 (n=1)"]
+    assert len(traces[0].x) == 1
+    assert len(traces[1].x) == 1
+
+    background = build_cluster_context_trace(
+        variables,
+        mask=np.array([False, False, False, True]),
+        name="Background specimen",
+    )
+    assert background is not None
+    assert background.name == "Background specimen"

@@ -84,6 +84,7 @@ package_data = {
         "files/*.txt",
         "files/PyQt6_UI/*.ui",
         "files/PyQt6_UI/*.md",
+        "calibration/reflectron_correction/data/presets/*.csv",
         "control/*/*.dll",
         "control/*/*.lib",
         "control/*/*.exp",

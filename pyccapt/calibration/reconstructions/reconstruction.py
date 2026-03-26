@@ -10,7 +10,7 @@ from matplotlib.animation import FuncAnimation
 from plotly.subplots import make_subplots
 
 # Local module and scripts
-from pyccapt.calibration.clustering import build_cluster_scatter_traces
+from pyccapt.calibration.clustering import build_cluster_context_trace, build_cluster_scatter_traces
 from pyccapt.calibration.data_tools import data_loadcrop, selectors_data
 from pyccapt.calibration.reconstructions.io_utils import (
     resolve_result_file,
@@ -246,7 +246,8 @@ def draw_qube(fig, range, col=None, row=None):
 def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save, figname, save, make_gif=False,
                         make_evaporation_gif=False, range_sequence=[], range_mc=[], range_detx=[], range_dety=[],
                         range_x=[], range_y=[], range_z=[], range_vol=[], ions_individually_plots=False,
-                        detailed_isotope_charge=False, colab=False, cluster_result=None):
+                        detailed_isotope_charge=False, colab=False, cluster_result=None,
+                        cluster_display_mode='overlay'):
     """
     Generate a 3D plot for atom probe reconstruction data.
 
@@ -271,6 +272,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
         detailed_isotope_charge (bool): Whether to plot detailed isotope and charge information.
         colab (bool): Whether to run in Google Colab.
         cluster_result: Optional Min-Max segmentation result for precipitate overlays.
+        cluster_display_mode (str): `overlay` or `clusters-only`.
     Returns:
         None
     """
@@ -328,6 +330,8 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
     z_range = [min(variables.z), max(variables.z)]
     range_cube = [x_range, y_range, z_range]
 
+    cluster_only = cluster_result is not None and str(cluster_display_mode).strip().lower() == 'clusters-only'
+
     # Create a subplots with shared axes
     if ions_individually_plots:
         num_plots = len(ion)
@@ -378,39 +382,67 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
             print("Cluster overlay is shown only in the combined 3D plot mode.")
     else:
         fig = go.Figure()
-        for index, elemen in enumerate(ion):
-            mask = (variables.mc > mc_low[index]) & (variables.mc < mc_up[index])
-            mask = mask & mask_f
-            size = int(len(mask[mask == True]) * float(element_percentage[index]))
-            # Find indices where the original mask is True
-            true_indices = np.where(mask)[0]
-            # Randomly choose 100 indices from the true indices
-            random_true_indices = np.random.choice(true_indices, size=size, replace=False)
-            # Create a new mask with the same length as the original, initialized with False
-            new_mask = np.full(len(variables.dld_t), False)
-            # Set the selected indices to True in the new mask
-            new_mask[random_true_indices] = True
-            # Apply the new mask to the original mask
-            mask = mask & new_mask
+        if not cluster_only:
+            for index, elemen in enumerate(ion):
+                mask = (variables.mc > mc_low[index]) & (variables.mc < mc_up[index])
+                mask = mask & mask_f
+                size = int(len(mask[mask == True]) * float(element_percentage[index]))
+                # Find indices where the original mask is True
+                true_indices = np.where(mask)[0]
+                # Randomly choose 100 indices from the true indices
+                random_true_indices = np.random.choice(true_indices, size=size, replace=False)
+                # Create a new mask with the same length as the original, initialized with False
+                new_mask = np.full(len(variables.dld_t), False)
+                # Set the selected indices to True in the new mask
+                new_mask[random_true_indices] = True
+                # Apply the new mask to the original mask
+                mask = mask & new_mask
 
-            fig.add_trace(
-                go.Scatter3d(
-                    x=variables.x[mask],
-                    y=variables.y[mask],
-                    z=variables.z[mask],
-                    mode='markers',
-                    name=ion[index],
-                    showlegend=True,
-                    marker=dict(
-                        size=1,
-                        color=colors[index],
-                        opacity=opacity,
+                fig.add_trace(
+                    go.Scatter3d(
+                        x=variables.x[mask],
+                        y=variables.y[mask],
+                        z=variables.z[mask],
+                        mode='markers',
+                        name=ion[index],
+                        showlegend=True,
+                        marker=dict(
+                            size=1,
+                            color=colors[index],
+                            opacity=opacity,
+                        )
                     )
                 )
-            )
 
         if cluster_result is not None:
-            for trace in build_cluster_scatter_traces(variables, cluster_result, opacity=min(1.0, opacity + 0.25)):
+            if cluster_only:
+                background_trace = build_cluster_context_trace(
+                    variables,
+                    mask=mask_f & ~cluster_result.selected_mask,
+                    name='Background specimen',
+                    opacity=min(0.18, max(0.04, opacity * 0.3)),
+                    marker_size=0.9,
+                )
+                if background_trace is not None:
+                    fig.add_trace(background_trace)
+
+                unclustered_trace = build_cluster_context_trace(
+                    variables,
+                    mask=mask_f & cluster_result.selected_mask & (cluster_result.labels < 0),
+                    name='Selected ions outside clusters',
+                    color='rgba(120,120,120,0.85)',
+                    opacity=min(0.35, max(0.10, opacity * 0.55)),
+                    marker_size=1.4,
+                )
+                if unclustered_trace is not None:
+                    fig.add_trace(unclustered_trace)
+
+            for trace in build_cluster_scatter_traces(
+                variables,
+                cluster_result,
+                opacity=min(1.0, opacity + 0.25),
+                valid_mask=mask_f,
+            ):
                 fig.add_trace(trace)
 
         fig = draw_qube(fig, range_cube)

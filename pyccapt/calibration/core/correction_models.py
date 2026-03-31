@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+from collections.abc import Mapping
 
 
 def voltage_corr(x, a, b, c):
@@ -15,6 +16,14 @@ def bowl_corr(data_xy, a, b, c, d, e, f):
     x = data_xy[0]
     y = data_xy[1]
     return a + b * x + c * y + d * (x ** 2) + e * x * y + f * (y ** 2)
+
+
+def bowl_corr_radial(data_xy, a, b, c, d, e):
+    """Radial-dominant bowl correction model using r^2 as the primary term."""
+    x = np.asarray(data_xy[0], dtype=float)
+    y = np.asarray(data_xy[1], dtype=float)
+    r2 = x ** 2 + y ** 2
+    return a + b * r2 + c * (r2 ** 2) + d * x + e * y
 
 
 def robust_voltage_fit(dld_high_voltage, dld_t):
@@ -71,6 +80,12 @@ def _predict_voltage_model(model_name, fitresult, voltage_values):
 
 def _predict_bowl_model(fit_mode, parameters, dld_x, dld_y):
     """Predict bowl correction values for the selected fitting mode."""
+    if isinstance(parameters, Mapping) and parameters.get("model") in {"radial_curve_fit", "radial_linear"}:
+        coeffs = np.asarray(parameters.get("parameters", ()), dtype=float)
+        if coeffs.shape[0] != 5:
+            raise ValueError("Radial bowl model requires exactly 5 parameters")
+        return bowl_corr_radial([dld_x, dld_y], *coeffs)
+
     if fit_mode == "curve_fit":
         return bowl_corr([dld_x, dld_y], *parameters)
     return parameters.predict(np.column_stack((dld_x, dld_y)))
@@ -79,6 +94,7 @@ def _predict_bowl_model(fit_mode, parameters, dld_x, dld_y):
 __all__ = [
     "voltage_corr",
     "bowl_corr",
+    "bowl_corr_radial",
     "robust_voltage_fit",
     "hybrid_calibration_model",
     "robust_fit",

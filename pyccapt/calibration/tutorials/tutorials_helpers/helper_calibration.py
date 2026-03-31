@@ -125,9 +125,24 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     figure_v_size_y = widgets.FloatText(value=5.0, description="Fig. size H:", layout=label_layout)
 
     sample_size_b = widgets.IntText(value=5, description='sample size:', layout=label_layout)
+    sample_size_b_help = widgets.HTML(
+        value=(
+            '<span style="font-size:11px; color:#555;">'
+            'In <b>polar</b> mode, sample size sets ring width and target sector arc length. '
+            'In <b>cartesian</b> mode, it is the grid cell width (mm).'
+            '</span>'
+        ),
+        layout=widgets.Layout(width='300px'),
+    )
     fit_mode_b = widgets.Dropdown(
         options=[('robust_fit', 'robust_fit'), ('curve_fit', 'curve_fit')],
         description='fit mode:',
+        layout=label_layout,
+    )
+    sampling_mode_b = widgets.Dropdown(
+        options=[('polar (default)', 'polar'), ('cartesian (legacy)', 'cartesian')],
+        value=getattr(variables, 'bowl_sampling_mode', 'polar'),
+        description='sampling mode:',
         layout=label_layout,
     )
     index_fig_b = widgets.IntText(value=1, description='fig index:', layout=label_layout)
@@ -217,6 +232,10 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         mask = np.logical_and(data > variables.selected_x1, data < variables.selected_x2)
         if np.any(mask):
             variables.set_calibration_selection_mask(calibration_key, mask)
+
+    def _sampling_mode_value():
+        variables.bowl_sampling_mode = sampling_mode_b.value
+        return sampling_mode_b.value
 
     def _state_is_valid(state):
         state = np.asarray(state, dtype=float)
@@ -531,6 +550,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             fast_calibration=fast_calibration.value,
             bin_size=bin_size_b.value,
             peak_maximum=peak_val.value,
+            sampling_mode=_sampling_mode_value(),
         )
 
     def _run_multi_peak_calibration():
@@ -562,6 +582,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             n_peaks=3,
             prominence=prominence.value,
             distance=distance.value,
+            sampling_mode=_sampling_mode_value(),
         )
         print(f'Used {n_peaks_b} peaks for bowl correction')
         print('Bowl fit parameters:', fit_b)
@@ -579,6 +600,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             n_peaks=4,
             prominence=prominence.value,
             distance=distance.value,
+            sampling_mode=_sampling_mode_value(),
         )
         print(f'Used {len(peak_info)} peaks for joint voltage+bowl refinement')
         print('Joint model parameters:', joint_model['parameters'])
@@ -887,6 +909,10 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     gaussian_mrp_button.on_click(on_gaussian_mrp)
     multi_peak_button.on_click(on_multi_peak_calibrate)
     auto_optimize_button.on_click(on_auto_optimize)
+    sampling_mode_b.observe(
+        lambda change: setattr(variables, 'bowl_sampling_mode', change['new']),
+        names='value',
+    )
 
     plot_button.click()
     sample_size_v_set(sample_size_v)
@@ -915,8 +941,10 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     ])
     column22 = widgets.VBox([
         sample_size_b,
+        sample_size_b_help,
         bin_size_b,
         fit_mode_b,
+        sampling_mode_b,
         maximum_cal_method_b,
         maximum_sample_method_b,
         plot_b,

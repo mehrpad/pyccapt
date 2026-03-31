@@ -321,6 +321,7 @@ class Variables(SharedVariablesBase):
         self.range_data_backup = None
         self.animation_detector_html = None
         self.calibration_selection_masks = {}
+        self.bowl_sampling_mode = "polar"
 
     @property
     def dld_highVoltage(self):

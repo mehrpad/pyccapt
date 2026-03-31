@@ -12,6 +12,14 @@ CALIBRATION_MODES = {"tof", "mc"}
 VOLTAGE_MODES = {"ion_seq", "voltage"}
 SAMPLE_METHODS = {"histogram", "mean", "median"}
 BOWL_SAMPLE_METHODS = {"histogram", "mean"}
+SAMPLING_MODES = {"polar", "cartesian"}
+SAMPLING_MODE_ALIASES = {
+    "polar": "polar",
+    "radial": "polar",
+    "cartesian": "cartesian",
+    "rect": "cartesian",
+    "grid": "cartesian",
+}
 VOLTAGE_MODEL_ALIASES = {
     "poly": "curve_fit",
     "curve_fit": "curve_fit",
@@ -66,6 +74,17 @@ def normalize_voltage_model(model: str) -> str:
     if normalized is None:
         allowed = ", ".join(VOLTAGE_MODEL_ALIASES.keys())
         raise CalibrationInputError(f"Invalid 'model': {model!r}. Allowed values are: {allowed}")
+    return normalized
+
+
+def normalize_sampling_mode(mode: str | None) -> str:
+    """Normalize sampling mode names to supported internal identifiers."""
+    if mode is None:
+        return "polar"
+    normalized = SAMPLING_MODE_ALIASES.get(str(mode).strip().lower())
+    if normalized is None:
+        allowed = ", ".join(sorted(SAMPLING_MODES))
+        raise CalibrationInputError(f"Invalid 'sampling_mode': {mode!r}. Allowed values are: {allowed}")
     return normalized
 
 

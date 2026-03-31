@@ -95,12 +95,24 @@ def call_joint_tof_mc_calibration(variables, det_diam, flight_path_length, pulse
 
     status_html = widgets.HTML(value='<b>Ready</b>', layout=_LABEL_LAYOUT)
 
-    # Link ToF/m/c weight sliders
+    # Link ToF/m/c weight sliders (guard against circular updates)
+    _syncing = False
+
     def _sync_mc_weight(change):
+        nonlocal _syncing
+        if _syncing:
+            return
+        _syncing = True
         mc_weight_w.value = round(1.0 - change['new'], 2)
+        _syncing = False
 
     def _sync_tof_weight(change):
+        nonlocal _syncing
+        if _syncing:
+            return
+        _syncing = True
         tof_weight_w.value = round(1.0 - change['new'], 2)
+        _syncing = False
 
     tof_weight_w.observe(_sync_mc_weight, names='value')
     mc_weight_w.observe(_sync_tof_weight, names='value')
@@ -163,6 +175,11 @@ def call_joint_tof_mc_calibration(variables, det_diam, flight_path_length, pulse
         with out_status:
             out_status.clear_output()
             try:
+                if variables.data is None:
+                    raise RuntimeError("No dataset loaded in variables.data")
+                for col in ('t (ns)', 'mc_uc (Da)'):
+                    if col not in variables.data.columns:
+                        raise KeyError(f"Expected column '{col}' not found in dataset")
                 variables.dld_t_calib = variables.data['t (ns)'].to_numpy()
                 variables.mc_calib = variables.data['mc_uc (Da)'].to_numpy()
                 print('Reset to uncalibrated arrays.')

@@ -43,6 +43,9 @@ _BETA = 0.7                # pulse timing factor
 
 _MIN_IONS_PER_PEAK = 50
 _MIN_PEAK_COUNT = 2
+_MAX_RELATIVE_WIDTH_FOR_PEAK_CONFIRMATION = 0.05
+_PROMINENCE_FALLBACK_FACTORS = (1.0, 0.5, 0.25)
+_PROMINENCE_FALLBACK_FRACTION = 0.05
 
 
 # ---------------------------------------------------------------------------
@@ -152,8 +155,8 @@ def _detect_peaks_1d(arr, n_peaks, prominence_threshold, distance, bin_size):
     else:
         counts_smooth = counts
 
-    for prom in [prominence_threshold, prominence_threshold * 0.5,
-                 prominence_threshold * 0.25, max(1.0, float(np.max(counts_smooth)) * 0.05)]:
+    for prom in [prominence_threshold * f for f in _PROMINENCE_FALLBACK_FACTORS] + [
+                 max(1.0, float(np.max(counts_smooth)) * _PROMINENCE_FALLBACK_FRACTION)]:
         found, _ = find_peaks(counts_smooth, prominence=max(1.0, prom),
                               distance=max(1, int(distance)), height=0)
         if len(found) > 0:
@@ -258,7 +261,7 @@ def dual_space_peak_detection(
             tof_fwhm_val, tof_center = _peak_fwhm(peak_tof, bin_size_tof)
             if np.isfinite(tof_fwhm_val) and tof_center > 0:
                 relative_width = tof_fwhm_val / tof_center
-                if relative_width < 0.05:
+                if relative_width < _MAX_RELATIVE_WIDTH_FOR_PEAK_CONFIRMATION:
                     confirmed = True
 
         if not confirmed:

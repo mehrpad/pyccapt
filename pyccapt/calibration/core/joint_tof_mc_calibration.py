@@ -2,7 +2,7 @@
 Physics-Constrained Iterative Co-Calibration (Joint ToF + m/c).
 
 This module implements a novel calibration method that simultaneously
-optimises voltage and bowl corrections by working in both time-of-flight
+optimizes voltage and bowl corrections by working in both time-of-flight
 (ToF) and mass-to-charge (m/c) domains.
 
 Algorithm outline
@@ -11,8 +11,8 @@ Algorithm outline
 2. Convert raw ToF to uncalibrated m/c.
 3. Identify reference peaks in **both** domains simultaneously
    (dual-space peak lock).
-4. Joint optimisation of voltage (f_v) and bowl (f_bowl) corrections,
-   minimising a combined loss that penalises peak width in ToF space
+4. Joint optimization of voltage (f_v) and bowl (f_bowl) corrections,
+   minimizing a combined loss that penalizes peak width in ToF space
    while constraining peak-position consistency in m/c space.
 5. Apply the resulting correction through a single, consistent path.
 """
@@ -290,7 +290,7 @@ def dual_space_peak_detection(
 
 
 # ---------------------------------------------------------------------------
-# Step 4 – Joint optimisation helpers
+# Step 4 – Joint optimization helpers
 # ---------------------------------------------------------------------------
 
 def _build_correction_feature_matrix(voltage, x_det_mm, y_det_mm, v_center, v_scale, s_scale):
@@ -320,7 +320,7 @@ def _joint_tof_mc_loss(
     bin_size_mc,
 ):
     """
-    Combined loss function for the joint ToF + m/c optimisation.
+    Combined loss function for the joint ToF + m/c optimization.
 
     The loss has two terms:
 
@@ -411,7 +411,7 @@ def joint_tof_mc_calibration(
     Physics-Constrained Iterative Co-Calibration.
 
     Performs a joint ToF + m/c calibration that identifies reference peaks
-    in both domains and iteratively optimises voltage and bowl corrections.
+    in both domains and iteratively optimizes voltage and bowl corrections.
 
     Parameters
     ----------
@@ -433,7 +433,7 @@ def joint_tof_mc_calibration(
     bin_size_mc, bin_size_tof : float
         Histogram bin widths for the two domains.
     max_iterations : int
-        Maximum number of optimisation iterations.
+        Maximum number of optimization iterations.
     convergence_tol : float
         Stop when relative loss improvement falls below this threshold.
     tof_weight, mc_weight : float
@@ -455,7 +455,7 @@ def joint_tof_mc_calibration(
     CalibrationInputError
         If required data arrays are missing or too short.
     CalibrationStateError
-        If the optimisation fails to converge to a valid solution.
+        If the optimization fails to converge to a valid solution.
     """
     # ---- validate inputs ---------------------------------------------------
     tof_weight = float(tof_weight)
@@ -536,7 +536,7 @@ def joint_tof_mc_calibration(
                 f"ions={pk['n_ions']:,}"
             )
 
-    # ---- Step 4: joint optimisation ----------------------------------------
+    # ---- Step 4: joint optimization ----------------------------------------
     x_det_mm = x_det * 10.0   # cm → mm
     y_det_mm = y_det * 10.0
 
@@ -630,7 +630,7 @@ def joint_tof_mc_calibration(
 
     # ---- Step 5: apply final correction ------------------------------------
     if not np.all(np.isfinite(best_params)):
-        raise CalibrationStateError("Joint optimisation produced invalid parameters")
+        raise CalibrationStateError("Joint optimization produced invalid parameters")
 
     final_correction = np.clip(feature_matrix @ best_params, np.finfo(float).eps, None)
 

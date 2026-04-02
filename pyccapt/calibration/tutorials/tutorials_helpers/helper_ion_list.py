@@ -90,12 +90,12 @@ def call_ion_list(variables, selector, path='../../../files/'):
     figure_mc_size_y = widgets.FloatText(value=5.0)
 
     # Create a button widget to trigger the function
-    button_plot = widgets.Button(description="plot")
+    button_plot = widgets.Button(description="Plot")
     reset_back_button = widgets.Button(
         description='reset back correction',
         layout=label_layout
     )
-    button_fit = widgets.Button(description="fit")
+    button_fit = widgets.Button(description="Fit")
     calibration_mode = widgets.Dropdown(
         options=[('mass_to_charge', 'mc_calib'), ('time_of_flight', 'tof_calib')])
 
@@ -147,7 +147,7 @@ def call_ion_list(variables, selector, path='../../../files/'):
                 print('parametric fit done')
         button_fit.disabled = False
 
-    button_plot_result = widgets.Button(description="plot result")
+    button_plot_result = widgets.Button(description="Plot result")
 
     def plot_fit_result(b, variables, calibration_mode, out_mc):
         button_plot_result.disabled = True

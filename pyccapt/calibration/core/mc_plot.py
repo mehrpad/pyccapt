@@ -88,6 +88,7 @@ class AptHistPlotter:
         self.mc_tof = mc_tof
         self.variables = variables
         self.x = None
+        self.x_centers = None
         self.y = None
         self.peak_annotates = []
         self.annotates = []
@@ -141,6 +142,7 @@ class AptHistPlotter:
         else:
             self.y, self.x, self.patches = self.ax.hist(self.mc_tof, bins=self.bins, alpha=alpha, color='slategray',
                                                         edgecolor=edgecolor, histtype=steps)
+        self.x_centers = (self.x[:-1] + self.x[1:]) * 0.5
         self.ax.set_xlabel('Mass/Charge [Da]' if label == 'mc' else 'Time of Flight [ns]')
         self.ax.set_ylabel('Event Counts')
         self.ax.set_yscale('log' if log else 'linear')

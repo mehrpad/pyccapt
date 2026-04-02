@@ -30,7 +30,7 @@ def call_specimen_dataset_workflow(variables=None):
         value=variables is not None,
         description='load data:',
     )
-    build_button = widgets.Button(description='build specimen dataset')
+    build_button = widgets.Button(description='Build specimen dataset')
 
     def on_build(_):
         build_button.disabled = True

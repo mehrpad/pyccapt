@@ -14,25 +14,26 @@ from pyccapt.calibration.core.mc_plot_peak_helpers import gaussian_mrp_report
 from pyccapt.calibration.data_tools import data_loadcrop
 from pyccapt.calibration.reconstructions import reconstruction, sdm, rdf, density_map
 from pyccapt.calibration.reconstructions import iso_surface, proxigram
+from pyccapt.calibration.tutorials.tutorials_helpers.helper_peak_spectral_analysis import build_peak_spectral_analysis_panel
 
 # Define a layout for labels to make them a fixed width
 label_layout = widgets.Layout(width='200px')
 
 
 def call_visualization(variables, colab=False):
-    plot_mc_button = widgets.Button(description='plot mc')
-    plot_3d_button = widgets.Button(description='plot 3D')
-    plot_3d_button_iso = widgets.Button(description='plot 3D iso surface')
-    plot_heatmap_button = widgets.Button(description='plot heatmap')
-    plot_projection_button = widgets.Button(description='plot projection')
+    plot_mc_button = widgets.Button(description='Plot mc')
+    plot_3d_button = widgets.Button(description='Plot 3D')
+    plot_3d_button_iso = widgets.Button(description='Plot 3D iso surface')
+    plot_heatmap_button = widgets.Button(description='Plot heatmap')
+    plot_projection_button = widgets.Button(description='Plot projection')
     clear_button = widgets.Button(description='Clear plots')
-    plot_fdm_button = widgets.Button(description="plot FDM")
-    plot_experiment_button = widgets.Button(description="plot experiment history")
-    density_map_button = widgets.Button(description="plot density map")
-    plot_sdm_button = widgets.Button(description='plot SDM')
-    plot_rdf_button = widgets.Button(description='plot RDF')
-    show_color = widgets.Button(description='show color')
-    change_color = widgets.Button(description='change color')
+    plot_fdm_button = widgets.Button(description="Plot FDM")
+    plot_experiment_button = widgets.Button(description="Plot experiment history")
+    density_map_button = widgets.Button(description="Plot density map")
+    plot_sdm_button = widgets.Button(description='Plot SDM')
+    plot_rdf_button = widgets.Button(description='Plot RDF')
+    show_color = widgets.Button(description='Show color')
+    change_color = widgets.Button(description='Change color')
 
 
     if variables.range_data.empty or variables.range_data['ion'].iloc[0] == 'unranged':
@@ -78,7 +79,7 @@ def call_visualization(variables, colab=False):
     grid_mc = widgets.Dropdown(options=[('False', False), ('True', True)])
     mrp_left_mc = widgets.FloatText(value=0.0)
     mrp_right_mc = widgets.FloatText(value=0.0)
-    load_mrp_window_mc_button = widgets.Button(description='load selection')
+    load_mrp_window_mc_button = widgets.Button(description='Load selection')
     gaussian_mrp_mc_button = widgets.Button(description='Gaussian MRP')
     range_sequence_mc = widgets.Textarea(value='[0,0]')
     range_detx_mc = widgets.Textarea(value='[0,0]')
@@ -186,27 +187,31 @@ def call_visualization(variables, colab=False):
         print('=' * 60)
         print('PEAK PROFILE MRP REPORT')
         print('=' * 60)
+        print(f'MRP model: {result["recommended_label"]}')
+        print(f'MRP bin size used: {result["bin_size"]} ({result["num_bins"]} bins)')
         print(f'Peak position: {result["peak_position"]:.4f}')
         print(f'Ions in range: {result["num_ions"]:,}')
-        print(f'Bin size used: {result["bin_size"]} ({result["num_bins"]} bins)')
+        print(f'Recommended FWHM MRP: {result["formatted_recommended_mrp"][0]}')
+        if result["window_warning"]:
+            print(result["window_warning"])
         print()
         print('Gaussian fit MRP:' if result['gaussian_ok'] else 'Gaussian fit FAILED')
         if result['gaussian_ok']:
-            print(f'  MRP(0.5)  = {result["gaussian_mrp"][0]:.2f}')
-            print(f'  MRP(0.1)  = {result["gaussian_mrp"][1]:.2f}')
-            print(f'  MRP(0.01) = {result["gaussian_mrp"][2]:.2f}')
+            print(f'  MRP(0.5)  = {result["formatted_gaussian_mrp"][0]}')
+            print(f'  MRP(0.1)  = {result["formatted_gaussian_mrp"][1]}')
+            print(f'  MRP(0.01) = {result["formatted_gaussian_mrp"][2]}')
         print()
         print('Voigt fit MRP:' if result['voigt_ok'] else 'Voigt fit FAILED')
         if result['voigt_ok']:
-            print(f'  MRP(0.5)  = {result["voigt_mrp"][0]:.2f}')
-            print(f'  MRP(0.1)  = {result["voigt_mrp"][1]:.2f}')
-            print(f'  MRP(0.01) = {result["voigt_mrp"][2]:.2f}')
+            print(f'  MRP(0.5)  = {result["formatted_voigt_mrp"][0]}')
+            print(f'  MRP(0.1)  = {result["formatted_voigt_mrp"][1]}')
+            print(f'  MRP(0.01) = {result["formatted_voigt_mrp"][2]}')
             print(f'  Voigt FWHM = {result["voigt_fwhm"]:.6f}')
         print()
         print('Histogram-based MRP:')
-        print(f'  MRP(0.5)  = {result["histogram_mrp"][0]:.2f}')
-        print(f'  MRP(0.1)  = {result["histogram_mrp"][1]:.2f}')
-        print(f'  MRP(0.01) = {result["histogram_mrp"][2]:.2f}')
+        print(f'  MRP(0.5)  = {result["formatted_histogram_mrp"][0]}')
+        print(f'  MRP(0.1)  = {result["formatted_histogram_mrp"][1]}')
+        print(f'  MRP(0.01) = {result["formatted_histogram_mrp"][2]}')
         print('=' * 60)
 
     def load_mc_gaussian_window(_):
@@ -230,7 +235,7 @@ def call_visualization(variables, colab=False):
                     _resolve_visualization_hist_array(),
                     mrp_left_mc.value,
                     mrp_right_mc.value,
-                    bin_size=0.01,
+                    bin_size=0.001,
                 )
                 if result is None:
                     print('Gaussian MRP: insufficient data in selected range')
@@ -517,7 +522,7 @@ def call_visualization(variables, colab=False):
     figure_size_y_anim = widgets.FloatText(value=5.0)
     ranged_anim = widgets.Dropdown(options=[('False', False), ('True', True)])
 
-    plot_animated_heatmap_button = widgets.Button(description="plot animated heatmap")
+    plot_animated_heatmap_button = widgets.Button(description="Plot animated heatmap")
 
     def plot_animated_heatmap(b, variables, out):
 
@@ -1215,7 +1220,7 @@ def call_visualization(variables, colab=False):
             plot_3d_button_iso.disabled = False
 
     #############
-    plot_proxigram_button = widgets.Button(description='plot proxigram')
+    plot_proxigram_button = widgets.Button(description='Plot proxigram')
     figname_proxigram = widgets.Text(value='proxigram')
     proxigram_isosurface_dic = widgets.Textarea(
         value="{Al: [3,3,3]}",
@@ -1324,8 +1329,8 @@ def call_visualization(variables, colab=False):
             clear_output(True)
             print('')
 
-    plot_clustered_3d_button = widgets.Button(description='plot clustered 3D')
-    plot_clustered_iso_button = widgets.Button(description='plot clustered iso')
+    plot_clustered_3d_button = widgets.Button(description='Plot clustered 3D')
+    plot_clustered_iso_button = widgets.Button(description='Plot clustered iso')
 
     def _apply_cluster_tab_settings():
         cluster_labels_3d.value = cluster_tab_selection.value
@@ -1736,7 +1741,9 @@ def call_visualization(variables, colab=False):
         widgets.HBox([clear_button]),
     ])
 
-    tab13 = widgets.VBox([
+    tab13 = build_peak_spectral_analysis_panel(variables, label_layout=label_layout)
+
+    tab14 = widgets.VBox([
         widgets.HBox([widgets.Label(value='Index row:', layout=label_layout), row_index]),
         widgets.HBox([widgets.Label(value='Color:', layout=label_layout), color_picker]),
         widgets.VBox([show_color, change_color, clear_button]),
@@ -1744,7 +1751,7 @@ def call_visualization(variables, colab=False):
 
     if not colab:
         tab = widgets.Tab([tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11,
-                                    tab12, tab13])
+                                    tab12, tab13, tab14])
         tab.set_title(0, 'mc')
         tab.set_title(1, 'Experiment history')
         tab.set_title(2, 'FDM')
@@ -1759,7 +1766,8 @@ def call_visualization(variables, colab=False):
         tab.set_title(10, 'Iso surface')
         tab.set_title(11, 'Proxigram')
         tab.set_title(12, 'Clustering')
-        tab.set_title(13, 'Change Color')
+        tab.set_title(13, 'Peak analysis')
+        tab.set_title(14, 'Change Color')
 
         out = Output()
 
@@ -1768,12 +1776,12 @@ def call_visualization(variables, colab=False):
     else:
         # Define the content for each tab
         content = [tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11,
-                                          tab12, tab13]
+                                          tab12, tab13, tab14]
 
         # Create buttons for each tab
         buttons = [widgets.Button(description=title) for title in [
             'mc', 'Experiment history', 'FDM', '3D', 'Hitmap', 'Animated hitmap',
-            'Projection', 'Disparity map', 'SDM', 'RDF', 'Iso surface', 'Proxigram', 'Clustering', 'Change Color'
+            'Projection', 'Disparity map', 'SDM', 'RDF', 'Iso surface', 'Proxigram', 'Clustering', 'Peak analysis', 'Change Color'
         ]]
 
         # Output widget to display the content

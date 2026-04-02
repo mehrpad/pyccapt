@@ -447,6 +447,12 @@ def _resolve_sampling_mode(sampling_mode, variables=None):
 def _cell_peak_value(values, maximum_location, sample_range_max, bin_size):
     if sample_range_max == 'mean':
         return float(np.mean(values)) / maximum_location
+    values = np.asarray(values, dtype=float)
+    if values.size == 0:
+        return float('nan')
+    value_span = float(np.max(values) - np.min(values))
+    if not np.isfinite(value_span) or value_span <= 0:
+        return float(np.mean(values)) / maximum_location
     bins, n_bins = _build_histogram_bins(values, bin_size)
     y_hist = fast_histogram.histogram1d(
         values,
@@ -1103,7 +1109,8 @@ def multi_peak_voltage_corr_main(
         fitresult = robust_voltage_fit(v_arr, t_arr)
     elif model == 'curve_fit':
         fitresult, _ = curve_fit(voltage_corr, v_arr, t_arr)
-    if not np.all(np.isfinite(np.asarray(fitresult, dtype=float))):
+    predicted_fit = _predict_voltage_model(model, fitresult, v_arr)
+    if not np.all(np.isfinite(np.asarray(predicted_fit, dtype=float))):
         raise CalibrationInputError("Voltage fit returned invalid parameters")
 
     f_v = np.clip(
@@ -1234,6 +1241,9 @@ def multi_peak_bowl_corr_main(
 
     if isinstance(parameters, dict):
         is_finite = np.all(np.isfinite(np.asarray(parameters.get('parameters', []), dtype=float)))
+    elif fit_mode == 'robust_fit':
+        trial_prediction = _predict_bowl_model(fit_mode, parameters, x_arr, y_arr)
+        is_finite = np.all(np.isfinite(np.asarray(trial_prediction, dtype=float)))
     else:
         is_finite = np.all(np.isfinite(np.asarray(parameters, dtype=float)))
     if not is_finite:

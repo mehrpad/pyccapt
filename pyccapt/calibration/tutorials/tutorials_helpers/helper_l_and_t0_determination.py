@@ -73,14 +73,14 @@ def call_l_and_t0_determination_workflow(variables=None):
     assignments_out = Output()
 
     dataset_path = widgets.Text(value="", description="", layout=path_layout)
-    browse_button = widgets.Button(description="browse")
-    load_button = widgets.Button(description="load dataset")
-    crop_button = widgets.Button(description="experiment history")
-    tune_button = widgets.Button(description="fine tune t0")
-    plot_peaks_button = widgets.Button(description="plot / select peaks")
-    sync_peaks_button = widgets.Button(description="load selected peaks")
-    estimate_button = widgets.Button(description="estimate t0")
-    apply_button = widgets.Button(description="apply fitted values")
+    browse_button = widgets.Button(description="Browse")
+    load_button = widgets.Button(description="Load dataset")
+    crop_button = widgets.Button(description="Experiment history")
+    tune_button = widgets.Button(description="Fine tune t0")
+    plot_peaks_button = widgets.Button(description="Plot / select peaks")
+    sync_peaks_button = widgets.Button(description="Load selected peaks")
+    estimate_button = widgets.Button(description="Estimate t0")
+    apply_button = widgets.Button(description="Apply fitted values")
 
     tdc, pulse_mode, flight_path_length, t0_guess, max_mc, det_diam = core_widgets.dataset_instrument_specification_selection()
     detector_center_radius = widgets.FloatText(value=0.5, description="center r (cm):", layout=medium_layout)
@@ -125,7 +125,7 @@ def call_l_and_t0_determination_workflow(variables=None):
                 description="ideal mc:",
                 layout=medium_layout,
             )
-            suggest_button = widgets.Button(description="nearest isotope")
+            suggest_button = widgets.Button(description="Nearest isotope")
 
             def _update_ideal(_=None, *, isotope_control=isotope_widget, charge_control=charge_widget,
                               ideal_control=ideal_widget):

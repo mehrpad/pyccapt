@@ -124,8 +124,8 @@ def call_raw_data_workflow(variables=None):
 
     roentdek_events_path = widgets.Text(value='', description='', layout=field_layout)
     roentdek_values_path = widgets.Text(value='', description='', layout=field_layout)
-    roentdek_events_browse = widgets.Button(description='browse')
-    roentdek_values_browse = widgets.Button(description='browse')
+    roentdek_events_browse = widgets.Button(description='Browse')
+    roentdek_values_browse = widgets.Button(description='Browse')
     roentdek_signal_kind = widgets.Dropdown(
         options=[('TOF values', 'tof'), ('Mass/charge values', 'mc')],
         value='tof',
@@ -141,12 +141,12 @@ def call_raw_data_workflow(variables=None):
     roentdek_max_bins = widgets.IntText(value=20, description='stats bins:', layout=small_field_layout)
     roentdek_drift_segments = widgets.IntText(value=20, description='segments:', layout=small_field_layout)
     roentdek_save_hits_path = widgets.Text(value='', description='save hits:', layout=field_layout)
-    roentdek_analyze_button = widgets.Button(description='analyze RoentDek')
-    roentdek_save_button = widgets.Button(description='save hits')
+    roentdek_analyze_button = widgets.Button(description='Analyze RoentDek')
+    roentdek_save_button = widgets.Button(description='Save hits')
     roentdek_window_rows = _build_window_rows('peak ')
 
     surface_path = widgets.Text(value='', description='', layout=field_layout)
-    surface_browse = widgets.Button(description='browse')
+    surface_browse = widgets.Button(description='Browse')
     surface_signal_kind = widgets.Dropdown(
         options=[('TOF plots', 'tof'), ('Mass/charge plots', 'mc')],
         value='tof',
@@ -167,9 +167,9 @@ def call_raw_data_workflow(variables=None):
     surface_max_bins = widgets.IntText(value=20, description='stats bins:', layout=small_field_layout)
     surface_drift_segments = widgets.IntText(value=20, description='segments:', layout=small_field_layout)
     surface_save_processed_path = widgets.Text(value='', description='save processed:', layout=field_layout)
-    surface_analyze_button = widgets.Button(description='analyze Surface Concept')
-    surface_save_button = widgets.Button(description='save processed')
-    surface_load_button = widgets.Button(description='load into workflow')
+    surface_analyze_button = widgets.Button(description='Analyze Surface Concept')
+    surface_save_button = widgets.Button(description='Save processed')
+    surface_load_button = widgets.Button(description='Load into workflow')
     surface_window_rows = _build_window_rows('peak ')
 
     cameca_source = widgets.Dropdown(
@@ -181,17 +181,17 @@ def call_raw_data_workflow(variables=None):
     cameca_path = widgets.Text(value='', description='', layout=field_layout)
     cameca_epos_path = widgets.Text(value='', description='', layout=field_layout)
     cameca_rhit_path = widgets.Text(value='', description='', layout=field_layout)
-    cameca_browse = widgets.Button(description='browse')
-    cameca_epos_browse = widgets.Button(description='browse')
-    cameca_rhit_browse = widgets.Button(description='browse')
+    cameca_browse = widgets.Button(description='Browse')
+    cameca_epos_browse = widgets.Button(description='Browse')
+    cameca_rhit_browse = widgets.Button(description='Browse')
     cameca_bin_size = widgets.FloatText(value=0.1, description='bin size:', layout=small_field_layout)
     cameca_tof_max = widgets.FloatText(value=2000.0, description='tof max:', layout=small_field_layout)
     cameca_mc_max = widgets.FloatText(value=80.0, description='mc max:', layout=small_field_layout)
     cameca_drift_segments = widgets.IntText(value=20, description='segments:', layout=small_field_layout)
     cameca_save_path = widgets.Text(value='', description='save processed:', layout=field_layout)
-    cameca_analyze_button = widgets.Button(description='analyze LEAP raw')
-    cameca_save_button = widgets.Button(description='save processed')
-    cameca_load_button = widgets.Button(description='load into workflow')
+    cameca_analyze_button = widgets.Button(description='Analyze LEAP raw')
+    cameca_save_button = widgets.Button(description='Save processed')
+    cameca_load_button = widgets.Button(description='Load into workflow')
 
     def _print_roentdek_summary(result: dict):
         counters = result['counters']

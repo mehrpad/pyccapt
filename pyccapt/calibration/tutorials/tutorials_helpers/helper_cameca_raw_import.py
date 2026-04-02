@@ -61,9 +61,9 @@ def call_cameca_raw_import_workflow(variables=None):
     rhit_epos_path = widgets.Text(value="", description="match EPOS:")
     rhit_save_path = widgets.Text(value="", description="save dataset:")
     rhit_calibration_path = widgets.Text(value="", description="save calib:")
-    rhit_load_button = widgets.Button(description="load RHIT")
-    rhit_export_button = widgets.Button(description="export RHIT dataset")
-    rhit_save_calibration_button = widgets.Button(description="save RHIT calibration")
+    rhit_load_button = widgets.Button(description="Load RHIT")
+    rhit_export_button = widgets.Button(description="Export RHIT dataset")
+    rhit_save_calibration_button = widgets.Button(description="Save RHIT calibration")
     rhit_load_into_variables = widgets.Dropdown(
         options=[("True", True), ("False", False)],
         value=variables is not None,
@@ -74,8 +74,8 @@ def call_cameca_raw_import_workflow(variables=None):
     str_rhit_path = widgets.Text(value="", description="match RHIT:")
     str_epos_path = widgets.Text(value="", description="RHIT EPOS:")
     str_save_path = widgets.Text(value="", description="save dataset:")
-    str_load_button = widgets.Button(description="load/process STR")
-    str_export_button = widgets.Button(description="export STR dataset")
+    str_load_button = widgets.Button(description="Load/process STR")
+    str_export_button = widgets.Button(description="Export STR dataset")
     str_load_into_variables = widgets.Dropdown(
         options=[("True", True), ("False", False)],
         value=variables is not None,

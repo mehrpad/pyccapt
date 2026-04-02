@@ -29,7 +29,7 @@ def call_mc_plot(variables, selector):
     save = widgets.Dropdown(options=[('False', False), ('True', True)])
     mrp_left_widget = widgets.FloatText(value=0.0)
     mrp_right_widget = widgets.FloatText(value=0.0)
-    load_selection_button = widgets.Button(description='load selection')
+    load_selection_button = widgets.Button(description='Load selection')
     gaussian_mrp_button = widgets.Button(description='Gaussian MRP')
 
     def _resolve_hist_array():
@@ -54,27 +54,31 @@ def call_mc_plot(variables, selector):
         print('=' * 60)
         print('PEAK PROFILE MRP REPORT')
         print('=' * 60)
+        print(f'MRP model: {result["recommended_label"]}')
+        print(f'MRP bin size used: {result["bin_size"]} ({result["num_bins"]} bins)')
         print(f'Peak position: {result["peak_position"]:.4f}')
         print(f'Ions in range: {result["num_ions"]:,}')
-        print(f'Bin size used: {result["bin_size"]} ({result["num_bins"]} bins)')
+        print(f'Recommended FWHM MRP: {result["formatted_recommended_mrp"][0]}')
+        if result["window_warning"]:
+            print(result["window_warning"])
         print()
         print('Gaussian fit MRP:' if result['gaussian_ok'] else 'Gaussian fit FAILED')
         if result['gaussian_ok']:
-            print(f'  MRP(0.5)  = {result["gaussian_mrp"][0]:.2f}')
-            print(f'  MRP(0.1)  = {result["gaussian_mrp"][1]:.2f}')
-            print(f'  MRP(0.01) = {result["gaussian_mrp"][2]:.2f}')
+            print(f'  MRP(0.5)  = {result["formatted_gaussian_mrp"][0]}')
+            print(f'  MRP(0.1)  = {result["formatted_gaussian_mrp"][1]}')
+            print(f'  MRP(0.01) = {result["formatted_gaussian_mrp"][2]}')
         print()
         print('Voigt fit MRP:' if result['voigt_ok'] else 'Voigt fit FAILED')
         if result['voigt_ok']:
-            print(f'  MRP(0.5)  = {result["voigt_mrp"][0]:.2f}')
-            print(f'  MRP(0.1)  = {result["voigt_mrp"][1]:.2f}')
-            print(f'  MRP(0.01) = {result["voigt_mrp"][2]:.2f}')
+            print(f'  MRP(0.5)  = {result["formatted_voigt_mrp"][0]}')
+            print(f'  MRP(0.1)  = {result["formatted_voigt_mrp"][1]}')
+            print(f'  MRP(0.01) = {result["formatted_voigt_mrp"][2]}')
             print(f'  Voigt FWHM = {result["voigt_fwhm"]:.6f}')
         print()
         print('Histogram-based MRP:')
-        print(f'  MRP(0.5)  = {result["histogram_mrp"][0]:.2f}')
-        print(f'  MRP(0.1)  = {result["histogram_mrp"][1]:.2f}')
-        print(f'  MRP(0.01) = {result["histogram_mrp"][2]:.2f}')
+        print(f'  MRP(0.5)  = {result["formatted_histogram_mrp"][0]}')
+        print(f'  MRP(0.1)  = {result["formatted_histogram_mrp"][1]}')
+        print(f'  MRP(0.01) = {result["formatted_histogram_mrp"][2]}')
         print('=' * 60)
 
     def on_load_selection(_):
@@ -98,7 +102,7 @@ def call_mc_plot(variables, selector):
                     _resolve_hist_array(),
                     mrp_left_widget.value,
                     mrp_right_widget.value,
-                    bin_size=0.01,
+                    bin_size=0.001,
                 )
                 if result is None:
                     print('Gaussian MRP: insufficient data in selected range')
@@ -107,7 +111,7 @@ def call_mc_plot(variables, selector):
         gaussian_mrp_button.disabled = False
 
     # Create a button widget to trigger the function
-    button_plot = widgets.Button(description='plot')
+    button_plot = widgets.Button(description='Plot')
 
     def on_button_click(_, variables, selector):
         # Disable the button while the code is running

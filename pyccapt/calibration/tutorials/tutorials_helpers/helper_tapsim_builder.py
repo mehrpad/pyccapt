@@ -37,7 +37,7 @@ def call_tapsim_node_workflow():
     state: dict[str, object] = {"result": None}
 
     preset = widgets.Dropdown(options=tapsim_builder.available_presets(), value="Nimonic 90")
-    load_preset_button = widgets.Button(description="load preset")
+    load_preset_button = widgets.Button(description="Load preset")
     mode = widgets.Dropdown(
         options=[("gamma-gamma-prime", "gamma-gamma-prime"), ("single-phase", "single-phase")],
         value="gamma-gamma-prime",
@@ -82,8 +82,8 @@ def call_tapsim_node_workflow():
     write_csv = widgets.Dropdown(options=[("True", True), ("False", False)], value=True)
     write_hdf = widgets.Dropdown(options=[("True", True), ("False", False)], value=True)
     write_range_hdf = widgets.Dropdown(options=[("True", True), ("False", False)], value=True)
-    preview_button = widgets.Button(description="preview specimen")
-    export_button = widgets.Button(description="export TAPSim files")
+    preview_button = widgets.Button(description="Preview specimen")
+    export_button = widgets.Button(description="Export TAPSim files")
 
     def apply_preset(_=None):
         config = tapsim_builder.get_preset_config(preset.value)

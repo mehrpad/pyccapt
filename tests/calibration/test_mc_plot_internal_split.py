@@ -3,6 +3,7 @@
 import pandas as pd
 
 from pyccapt.calibration.core import mc_plot
+from pyccapt.calibration.core.mc_plot_peak_helpers import gaussian_mrp_report
 from pyccapt.calibration.core.share_variables import Variables
 
 
@@ -99,4 +100,17 @@ def test_plot_peaks_handles_range_center_past_histogram_edge():
     plotter.plot_peaks(range_data=range_data)
 
     assert len(plotter.peak_annotates) == 1
+
+
+def test_gaussian_mrp_report_rejects_implausibly_narrow_subpeak():
+    rng = np.random.default_rng(42)
+    broad_peak = rng.normal(32.95, 0.035, 160000)
+    narrow_spike = rng.normal(32.951, 0.00035, 1200)
+    values = np.concatenate([broad_peak, narrow_spike])
+
+    report = gaussian_mrp_report(values, 32.75, 33.15, bin_size=0.001, peak_center=32.95)
+
+    assert report is not None
+    assert report['recommended_label'].startswith('Histogram')
+    assert float(report['recommended_mrp'][0]) < float(report['gaussian_mrp'][0])
 

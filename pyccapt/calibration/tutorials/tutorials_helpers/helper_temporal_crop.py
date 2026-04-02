@@ -81,10 +81,10 @@ def call_plot_crop_experiment(variables, pulse_mode):
     figname_widget = widgets.Text(value='hist_ini')
     figname_label = widgets.Label(value="Figure Name:", layout=label_layout)
 
-    button_plot = widgets.Button(description="plot")
-    button_apply = widgets.Button(description="apply crop")
-    button_reset = widgets.Button(description="reset")
-    button_sync = widgets.Button(description="load drawn values")
+    button_plot = widgets.Button(description="Plot")
+    button_apply = widgets.Button(description="Apply crop")
+    button_reset = widgets.Button(description="Reset")
+    button_sync = widgets.Button(description="Load drawn values")
 
     out = Output()
 

@@ -1,0 +1,5515 @@
+{
+  "dataset": "E:\\APT_data\\2470_Apr-17-2025_13-10_NiC2_Nimonic90_HT_HPCF_1.h5",
+  "n_ions": 2687492,
+  "flight_path_mm": 118.8102972905598,
+  "det_diam_mm": 60.142116848971874,
+  "joint_t0_ns": 0.0,
+  "results": [
+    {
+      "name": "baseline_mc",
+      "mode": "mc",
+      "runtime_s": 9.00006853044033e-07,
+      "status": "ok",
+      "extra": {},
+      "mc_eval": {
+        "score": 20.219385170878834,
+        "dominant_mrp50": 20.82,
+        "peaks": [
+          {
+            "position": 32.95506806000293,
+            "window": [
+              30.903396567112992,
+              34.904783737571286
+            ],
+            "n_ions": 1425058,
+            "mrp": [
+              20.82,
+              11.42,
+              8.08
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 29.20508393356677,
+            "window": [
+              27.766348053609228,
+              30.628767784456393
+            ],
+            "n_ions": 427679,
+            "mrp": [
+              34.47,
+              18.91,
+              13.37
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 15.205143194871763,
+            "window": [
+              14.345280035524496,
+              15.951170094051538
+            ],
+            "n_ions": 74058,
+            "mrp": [
+              23.93,
+              13.13,
+              9.28
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 2.3551975882838514,
+            "window": [
+              1.7933205011044266,
+              2.6915620420169537
+            ],
+            "n_ions": 17743,
+            "mrp": [
+              21.0,
+              11.52,
+              8.15
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "mc_initial",
+      "mode": "mc",
+      "runtime_s": 0.9643205000029411,
+      "status": "ok",
+      "extra": {},
+      "mc_eval": {
+        "score": 126.64493025208056,
+        "dominant_mrp50": 156.25,
+        "peaks": [
+          {
+            "position": 33.05649043037501,
+            "window": [
+              32.41377341222473,
+              33.87803512572232
+            ],
+            "n_ions": 1001573,
+            "mrp": [
+              156.25,
+              85.73,
+              60.62
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 29.656525093044273,
+            "window": [
+              29.106545202709,
+              30.089228227571226
+            ],
+            "n_ions": 336129,
+            "mrp": [
+              169.64,
+              93.08,
+              65.81
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 15.406670370408115,
+            "window": [
+              14.866956267440187,
+              15.7708446740805
+            ],
+            "n_ions": 71411,
+            "mrp": [
+              167.36,
+              91.83,
+              64.93
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 2.206804943124098,
+            "window": [
+              1.8116574047222724,
+              2.710844248830599
+            ],
+            "n_ions": 17710,
+            "mrp": [
+              96.24,
+              52.8,
+              37.34
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "mc_voltage",
+      "mode": "mc",
+      "runtime_s": 0.3034938999917358,
+      "status": "ok",
+      "extra": {},
+      "mc_eval": {
+        "score": 19.274729243249766,
+        "dominant_mrp50": 17.53,
+        "peaks": [
+          {
+            "position": 33.00465979573514,
+            "window": [
+              30.929832862448166,
+              34.93282176258589
+            ],
+            "n_ions": 1424710,
+            "mrp": [
+              17.53,
+              9.62,
+              6.8
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 29.204727985406393,
+            "window": [
+              27.79820897601821,
+              30.64300208807385
+            ],
+            "n_ions": 426728,
+            "mrp": [
+              36.8,
+              20.19,
+              14.28
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 15.204979210511015,
+            "window": [
+              14.352623407840708,
+              15.970249871798869
+            ],
+            "n_ions": 74089,
+            "mrp": [
+              22.98,
+              12.61,
+              8.91
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 2.355209799267758,
+            "window": [
+              1.7950827149442918,
+              2.693352753642298
+            ],
+            "n_ions": 17742,
+            "mrp": [
+              21.14,
+              11.6,
+              8.2
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "mc_voltage_bowl",
+      "mode": "mc",
+      "runtime_s": 1.1749417000100948,
+      "status": "ok",
+      "extra": {},
+      "mc_eval": {
+        "score": 89.6921396301591,
+        "dominant_mrp50": 108.75,
+        "peaks": [
+          {
+            "position": 33.10665124932293,
+            "window": [
+              32.419807159046805,
+              34.03628870466677
+            ],
+            "n_ions": 1037059,
+            "mrp": [
+              108.75,
+              59.67,
+              42.19
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 29.656705710113123,
+            "window": [
+              29.138697360334284,
+              30.16836995316031
+            ],
+            "n_ions": 343655,
+            "mrp": [
+              120.85,
+              66.3,
+              46.88
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 15.406930656855245,
+            "window": [
+              14.89071916421679,
+              15.79854330581836
+            ],
+            "n_ions": 71415,
+            "mrp": [
+              117.01,
+              64.2,
+              45.4
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 2.2071390285742636,
+            "window": [
+              1.8134501138439347,
+              2.7127534314585073
+            ],
+            "n_ions": 17704,
+            "mrp": [
+              82.42,
+              45.22,
+              31.98
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "mc_auto_bowl",
+      "mode": "mc",
+      "runtime_s": 6.557294099999126,
+      "status": "ok",
+      "extra": {
+        "initial_quality": {
+          "train_score": 14.51,
+          "train_details": [
+            {
+              "label": "selected",
+              "score": 14.51,
+              "weight": 1197.2301366069933,
+              "position": 32.91867935570723,
+              "num_ions": 1433360
+            }
+          ],
+          "holdout_score": NaN,
+          "holdout_details": [],
+          "selected_score": 14.51
+        },
+        "final_quality": {
+          "train_score": 135.798,
+          "train_details": [
+            {
+              "label": "selected",
+              "score": 135.798,
+              "weight": 1197.2301366069933,
+              "position": 32.91867935570723,
+              "num_ions": 1433360
+            }
+          ],
+          "holdout_score": NaN,
+          "holdout_details": [],
+          "selected_score": 135.798
+        },
+        "history": [
+          {
+            "iteration": 1,
+            "actions": [
+              {
+                "name": "Bowl correction",
+                "accepted": true,
+                "quality": {
+                  "train_score": 134.449,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 134.449,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 134.449
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 2,
+            "actions": [
+              {
+                "name": "Bowl correction",
+                "accepted": true,
+                "quality": {
+                  "train_score": 134.85900000000004,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 134.85900000000004,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 134.85900000000004
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 3,
+            "actions": [
+              {
+                "name": "Bowl correction",
+                "accepted": true,
+                "quality": {
+                  "train_score": 135.798,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 135.798,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 135.798
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 4,
+            "actions": [
+              {
+                "name": "Bowl correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 129.282,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 129.282,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 129.282
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 5,
+            "actions": [
+              {
+                "name": "Bowl correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 129.282,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 129.282,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 129.282
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 6,
+            "actions": [
+              {
+                "name": "Bowl correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 129.282,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 129.282,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 129.282
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "mc_eval": {
+        "score": 128.03221946080225,
+        "dominant_mrp50": 159.81,
+        "peaks": [
+          {
+            "position": 34.16104235376176,
+            "window": [
+              33.59612260257137,
+              34.72497097390604
+            ],
+            "n_ions": 871562,
+            "mrp": [
+              159.81,
+              87.68,
+              62.0
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 30.61106765407044,
+            "window": [
+              30.094144248178992,
+              31.071671042900597
+            ],
+            "n_ions": 331801,
+            "mrp": [
+              170.26,
+              93.41,
+              66.05
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 15.911172418728924,
+            "window": [
+              15.375546336146783,
+              16.279937580616263
+            ],
+            "n_ions": 71308,
+            "mrp": [
+              166.1,
+              91.13,
+              64.44
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 2.2612697001975137,
+            "window": [
+              1.8923412149424845,
+              2.7914328586835015
+            ],
+            "n_ions": 17581,
+            "mrp": [
+              95.34,
+              52.31,
+              36.99
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "mc_auto_calibration",
+      "mode": "mc",
+      "runtime_s": 14.083923300000606,
+      "status": "ok",
+      "extra": {
+        "initial_quality": {
+          "train_score": 14.51,
+          "train_details": [
+            {
+              "label": "selected",
+              "score": 14.51,
+              "weight": 1197.2301366069933,
+              "position": 32.91867935570723,
+              "num_ions": 1433360
+            }
+          ],
+          "holdout_score": NaN,
+          "holdout_details": [],
+          "selected_score": 14.51
+        },
+        "final_quality": {
+          "train_score": 223.43300000000002,
+          "train_details": [
+            {
+              "label": "selected",
+              "score": 223.43300000000005,
+              "weight": 1197.2301366069933,
+              "position": 32.91867935570723,
+              "num_ions": 1433360
+            }
+          ],
+          "holdout_score": NaN,
+          "holdout_details": [],
+          "selected_score": 223.43300000000005
+        },
+        "history": [
+          {
+            "iteration": 1,
+            "actions": [
+              {
+                "name": "Voltage correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 14.229000000000003,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 14.229000000000001,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 14.229000000000001
+                }
+              },
+              {
+                "name": "Bowl correction",
+                "accepted": true,
+                "quality": {
+                  "train_score": 134.449,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 134.449,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 134.449
+                }
+              },
+              {
+                "name": "Joint voltage+bowl refinement",
+                "accepted": true,
+                "quality": {
+                  "train_score": 173.02900000000002,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 173.02900000000002,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 173.02900000000002
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 2,
+            "actions": [
+              {
+                "name": "Voltage correction",
+                "accepted": true,
+                "quality": {
+                  "train_score": 213.14700000000005,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 213.14700000000005,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 213.14700000000005
+                }
+              },
+              {
+                "name": "Bowl correction",
+                "accepted": true,
+                "quality": {
+                  "train_score": 221.01500000000001,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 221.01500000000001,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 221.01500000000001
+                }
+              },
+              {
+                "name": "Joint voltage+bowl refinement",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 207.06600000000003,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 207.06600000000003,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 207.06600000000003
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 3,
+            "actions": [
+              {
+                "name": "Voltage correction",
+                "accepted": true,
+                "quality": {
+                  "train_score": 223.43300000000002,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 223.43300000000005,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 223.43300000000005
+                }
+              },
+              {
+                "name": "Bowl correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 201.10500000000002,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 201.10500000000002,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 201.10500000000002
+                }
+              },
+              {
+                "name": "Joint voltage+bowl refinement",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 196.535,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 196.535,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 196.535
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 4,
+            "actions": [
+              {
+                "name": "Voltage correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 202.335,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 202.335,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 202.335
+                }
+              },
+              {
+                "name": "Bowl correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 201.10500000000002,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 201.10500000000002,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 201.10500000000002
+                }
+              },
+              {
+                "name": "Joint voltage+bowl refinement",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 196.535,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 196.535,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 196.535
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 5,
+            "actions": [
+              {
+                "name": "Voltage correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 202.335,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 202.335,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 202.335
+                }
+              },
+              {
+                "name": "Bowl correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 201.10500000000002,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 201.10500000000002,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 201.10500000000002
+                }
+              },
+              {
+                "name": "Joint voltage+bowl refinement",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 196.535,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 196.535,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 196.535
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 6,
+            "actions": [
+              {
+                "name": "Voltage correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 202.335,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 202.335,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 202.335
+                }
+              },
+              {
+                "name": "Bowl correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 201.10500000000002,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 201.10500000000002,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 201.10500000000002
+                }
+              },
+              {
+                "name": "Joint voltage+bowl refinement",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 196.535,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 196.535,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 196.535
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "mc_eval": {
+        "score": 245.4162433863135,
+        "dominant_mrp50": 309.78,
+        "peaks": [
+          {
+            "position": 34.76355171978204,
+            "window": [
+              34.19960391466715,
+              35.147370424762215
+            ],
+            "n_ions": 710572,
+            "mrp": [
+              309.78,
+              169.97,
+              120.18
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 31.163558795887834,
+            "window": [
+              30.604933987175983,
+              31.5354352580189
+            ],
+            "n_ions": 321835,
+            "mrp": [
+              336.6,
+              184.68,
+              130.59
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 16.21358818138272,
+            "window": [
+              15.632584991592848,
+              16.534489042857565
+            ],
+            "n_ions": 71233,
+            "mrp": [
+              327.75,
+              179.83,
+              127.16
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 2.3136155030134145,
+            "window": [
+              1.9213551681228036,
+              2.8207564561157312
+            ],
+            "n_ions": 17542,
+            "mrp": [
+              99.84,
+              54.78,
+              38.73
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "mc_auto_multi_peak",
+      "mode": "mc",
+      "runtime_s": 10.020375400024932,
+      "status": "ok",
+      "extra": {
+        "initial_quality": {
+          "train_score": 14.51,
+          "train_details": [
+            {
+              "label": "selected",
+              "score": 14.51,
+              "weight": 1197.2301366069933,
+              "position": 32.91867935570723,
+              "num_ions": 1433360
+            }
+          ],
+          "holdout_score": NaN,
+          "holdout_details": [],
+          "selected_score": 14.51
+        },
+        "final_quality": {
+          "train_score": 195.04000000000005,
+          "train_details": [
+            {
+              "label": "selected",
+              "score": 195.04000000000005,
+              "weight": 1197.2301366069933,
+              "position": 32.91867935570723,
+              "num_ions": 1433360
+            }
+          ],
+          "holdout_score": NaN,
+          "holdout_details": [],
+          "selected_score": 195.04000000000005
+        },
+        "history": [
+          {
+            "iteration": 1,
+            "actions": [
+              {
+                "name": "Auto multi-peak calibration",
+                "accepted": true,
+                "quality": {
+                  "train_score": 111.75900000000003,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 111.75900000000003,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 111.75900000000003
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 2,
+            "actions": [
+              {
+                "name": "Auto multi-peak calibration",
+                "accepted": true,
+                "quality": {
+                  "train_score": 129.59700000000004,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 129.59700000000004,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 129.59700000000004
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 3,
+            "actions": [
+              {
+                "name": "Auto multi-peak calibration",
+                "accepted": true,
+                "quality": {
+                  "train_score": 190.60500000000002,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 190.60500000000002,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 190.60500000000002
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 4,
+            "actions": [
+              {
+                "name": "Auto multi-peak calibration",
+                "accepted": true,
+                "quality": {
+                  "train_score": 195.04000000000005,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 195.04000000000005,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 195.04000000000005
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 5,
+            "actions": [
+              {
+                "name": "Auto multi-peak calibration",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 177.63100000000003,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 177.63100000000003,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 177.63100000000003
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 6,
+            "actions": [
+              {
+                "name": "Auto multi-peak calibration",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 177.63100000000003,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 177.63100000000003,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 177.63100000000003
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 7,
+            "actions": [
+              {
+                "name": "Auto multi-peak calibration",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 177.63100000000003,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 177.63100000000003,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 177.63100000000003
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "mc_eval": {
+        "score": 117.77774442727596,
+        "dominant_mrp50": 149.42,
+        "peaks": [
+          {
+            "position": 29.64265333900939,
+            "window": [
+              28.98502924518702,
+              30.45382338857653
+            ],
+            "n_ions": 1033671,
+            "mrp": [
+              149.42,
+              81.98,
+              57.97
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 26.592711587943192,
+            "window": [
+              26.040293360323197,
+              27.01438503977643
+            ],
+            "n_ions": 349593,
+            "mrp": [
+              145.2,
+              79.66,
+              56.33
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 13.842955087584503,
+            "window": [
+              13.273359278704898,
+              14.177060656207871
+            ],
+            "n_ions": 71826,
+            "mrp": [
+              161.57,
+              88.65,
+              62.68
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 1.9431823539163937,
+            "window": [
+              1.5907542121730773,
+              2.4897453299271124
+            ],
+            "n_ions": 18097,
+            "mrp": [
+              101.63,
+              55.76,
+              39.43
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "mc_auto_optimize",
+      "mode": "mc",
+      "runtime_s": 21.6054244999832,
+      "status": "ok",
+      "extra": {
+        "initial_quality": {
+          "train_score": 14.51,
+          "train_details": [
+            {
+              "label": "selected",
+              "score": 14.51,
+              "weight": 1197.2301366069933,
+              "position": 32.91867935570723,
+              "num_ions": 1433360
+            }
+          ],
+          "holdout_score": NaN,
+          "holdout_details": [],
+          "selected_score": 14.51
+        },
+        "final_quality": {
+          "train_score": 223.43300000000002,
+          "train_details": [
+            {
+              "label": "selected",
+              "score": 223.43300000000005,
+              "weight": 1197.2301366069933,
+              "position": 32.91867935570723,
+              "num_ions": 1433360
+            }
+          ],
+          "holdout_score": NaN,
+          "holdout_details": [],
+          "selected_score": 223.43300000000005
+        },
+        "history": [
+          {
+            "iteration": 1,
+            "actions": [
+              {
+                "name": "Voltage correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 14.229000000000003,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 14.229000000000001,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 14.229000000000001
+                }
+              },
+              {
+                "name": "Bowl correction",
+                "accepted": true,
+                "quality": {
+                  "train_score": 134.449,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 134.449,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 134.449
+                }
+              },
+              {
+                "name": "Auto multi-peak calibration",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 134.578,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 134.578,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 134.578
+                }
+              },
+              {
+                "name": "Joint voltage+bowl refinement",
+                "accepted": true,
+                "quality": {
+                  "train_score": 173.02900000000002,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 173.02900000000002,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 173.02900000000002
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 2,
+            "actions": [
+              {
+                "name": "Voltage correction",
+                "accepted": true,
+                "quality": {
+                  "train_score": 213.14700000000005,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 213.14700000000005,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 213.14700000000005
+                }
+              },
+              {
+                "name": "Bowl correction",
+                "accepted": true,
+                "quality": {
+                  "train_score": 221.01500000000001,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 221.01500000000001,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 221.01500000000001
+                }
+              },
+              {
+                "name": "Auto multi-peak calibration",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 215.32500000000002,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 215.32500000000002,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 215.32500000000002
+                }
+              },
+              {
+                "name": "Joint voltage+bowl refinement",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 207.06600000000003,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 207.06600000000003,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 207.06600000000003
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 3,
+            "actions": [
+              {
+                "name": "Voltage correction",
+                "accepted": true,
+                "quality": {
+                  "train_score": 223.43300000000002,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 223.43300000000005,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 223.43300000000005
+                }
+              },
+              {
+                "name": "Bowl correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 201.10500000000002,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 201.10500000000002,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 201.10500000000002
+                }
+              },
+              {
+                "name": "Auto multi-peak calibration",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 215.04500000000002,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 215.04500000000002,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 215.04500000000002
+                }
+              },
+              {
+                "name": "Joint voltage+bowl refinement",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 196.535,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 196.535,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 196.535
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 4,
+            "actions": [
+              {
+                "name": "Voltage correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 202.335,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 202.335,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 202.335
+                }
+              },
+              {
+                "name": "Bowl correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 201.10500000000002,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 201.10500000000002,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 201.10500000000002
+                }
+              },
+              {
+                "name": "Auto multi-peak calibration",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 215.04500000000002,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 215.04500000000002,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 215.04500000000002
+                }
+              },
+              {
+                "name": "Joint voltage+bowl refinement",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 196.535,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 196.535,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 196.535
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 5,
+            "actions": [
+              {
+                "name": "Voltage correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 202.335,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 202.335,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 202.335
+                }
+              },
+              {
+                "name": "Bowl correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 201.10500000000002,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 201.10500000000002,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 201.10500000000002
+                }
+              },
+              {
+                "name": "Auto multi-peak calibration",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 215.04500000000002,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 215.04500000000002,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 215.04500000000002
+                }
+              },
+              {
+                "name": "Joint voltage+bowl refinement",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 196.535,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 196.535,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 196.535
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 6,
+            "actions": [
+              {
+                "name": "Voltage correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 202.335,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 202.335,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 202.335
+                }
+              },
+              {
+                "name": "Bowl correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 201.10500000000002,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 201.10500000000002,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 201.10500000000002
+                }
+              },
+              {
+                "name": "Auto multi-peak calibration",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 215.04500000000002,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 215.04500000000002,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 215.04500000000002
+                }
+              },
+              {
+                "name": "Joint voltage+bowl refinement",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 196.535,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 196.535,
+                      "weight": 1197.2301366069933,
+                      "position": 32.91867935570723,
+                      "num_ions": 1433360
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 196.535
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "mc_eval": {
+        "score": 245.4162433863135,
+        "dominant_mrp50": 309.78,
+        "peaks": [
+          {
+            "position": 34.76355171978204,
+            "window": [
+              34.19960391466715,
+              35.147370424762215
+            ],
+            "n_ions": 710572,
+            "mrp": [
+              309.78,
+              169.97,
+              120.18
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 31.163558795887834,
+            "window": [
+              30.604933987175983,
+              31.5354352580189
+            ],
+            "n_ions": 321835,
+            "mrp": [
+              336.6,
+              184.68,
+              130.59
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 16.21358818138272,
+            "window": [
+              15.632584991592848,
+              16.534489042857565
+            ],
+            "n_ions": 71233,
+            "mrp": [
+              327.75,
+              179.83,
+              127.16
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 2.3136155030134145,
+            "window": [
+              1.9213551681228036,
+              2.8207564561157312
+            ],
+            "n_ions": 17542,
+            "mrp": [
+              99.84,
+              54.78,
+              38.73
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "mc_adaptive_residual",
+      "mode": "mc",
+      "runtime_s": 23.592344100004993,
+      "status": "ok",
+      "extra": {
+        "reference_peaks": {
+          "train": [
+            {
+              "position": 32.98674398598975,
+              "x1": 32.78587790266484,
+              "x2": 33.22027127417012,
+              "prominence": 24964.111111111113,
+              "width": 0.21719668575263995,
+              "n_ions": 596615,
+              "weight": 772.4085706412119
+            },
+            {
+              "position": 29.556752558281403,
+              "x1": 29.37231586632206,
+              "x2": 29.7639899981028,
+              "prominence": 11951.555555555555,
+              "width": 0.19583706589036964,
+              "n_ions": 263937,
+              "weight": 513.7479926968085
+            },
+            {
+              "position": 33.54674258643193,
+              "x1": 33.399092541499186,
+              "x2": 33.711260567214836,
+              "prominence": 6297.111111111113,
+              "width": 0.15608401285782492,
+              "n_ions": 246323,
+              "weight": 496.3093793189889
+            },
+            {
+              "position": 34.1267411368899,
+              "x1": 33.94855605469705,
+              "x2": 34.31456101815115,
+              "prominence": 7384.888888888888,
+              "width": 0.18300248172705125,
+              "n_ions": 240936,
+              "weight": 490.8523199496973
+            }
+          ],
+          "holdout": [
+            {
+              "position": 15.30678817202952,
+              "x1": 15.184010717094274,
+              "x2": 15.433065676856202,
+              "prominence": 4564.333333333333,
+              "width": 0.12452747988096391,
+              "n_ions": 61961,
+              "weight": 248.9196657558418
+            },
+            {
+              "position": 27.256758306465308,
+              "x1": 27.095198913265683,
+              "x2": 27.444572067143937,
+              "prominence": 2140.8888888888887,
+              "width": 0.17468657693912704,
+              "n_ions": 42171,
+              "weight": 205.35578881541178
+            }
+          ]
+        },
+        "baseline_quality": {
+          "train_score": 5.100715607059331,
+          "holdout_score": 5.316514634299899
+        },
+        "final_quality": {
+          "train_score": 5.5378008026125505,
+          "holdout_score": 5.465313423074953
+        },
+        "accepted_steps": [
+          "temporal@32.9867",
+          "spatial@34.1267"
+        ],
+        "temporal_info": {
+          "n_observations": 24,
+          "peak_center": 32.98674398598975,
+          "scale": 1.0,
+          "threshold": 40
+        },
+        "spatial_info": {
+          "n_cells": 132,
+          "peak_center": 34.1267411368899,
+          "scale": 1.0,
+          "threshold": 35
+        },
+        "used_spatial": true,
+        "iteration_history": [
+          {
+            "round": 1,
+            "baseline_quality": {
+              "train_score": 5.100715607059331,
+              "holdout_score": 5.316514634299899
+            },
+            "final_quality": {
+              "train_score": 5.5378008026125505,
+              "holdout_score": 5.465313423074953
+            },
+            "accepted_steps": [
+              "temporal@32.9867",
+              "spatial@34.1267"
+            ]
+          },
+          {
+            "round": 2,
+            "baseline_quality": {
+              "train_score": 5.59042340689609,
+              "holdout_score": 5.509653019603863
+            },
+            "final_quality": {
+              "train_score": 5.59042340689609,
+              "holdout_score": 5.509653019603863
+            },
+            "accepted_steps": []
+          }
+        ],
+        "n_iterations": 2,
+        "stop_reason": "no_improvement"
+      },
+      "mc_eval": {
+        "score": 155.83727084794882,
+        "dominant_mrp50": 190.38,
+        "peaks": [
+          {
+            "position": 33.058284586969236,
+            "window": [
+              32.45493858551545,
+              33.74855960154986
+            ],
+            "n_ions": 961475,
+            "mrp": [
+              190.38,
+              104.46,
+              73.86
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 29.658309535864994,
+            "window": [
+              29.112303862128066,
+              30.069000117380718
+            ],
+            "n_ions": 331211,
+            "mrp": [
+              205.08,
+              112.52,
+              79.56
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 15.458413734194323,
+            "window": [
+              14.865721311716348,
+              15.767456517510842
+            ],
+            "n_ions": 71408,
+            "mrp": [
+              251.13,
+              137.79,
+              97.43
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 2.2085109615086624,
+            "window": [
+              1.8131094407873038,
+              2.712422393669447
+            ],
+            "n_ions": 17715,
+            "mrp": [
+              57.65,
+              31.63,
+              22.37
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "baseline_tof",
+      "mode": "tof",
+      "runtime_s": 1.100008375942707e-06,
+      "status": "ok",
+      "extra": {},
+      "tof_eval": {
+        "score": 17.140894894696654,
+        "dominant_mrp50": 12.56,
+        "peaks": [
+          {
+            "position": 605.220003065934,
+            "window": [
+              561.936970025436,
+              650.0401260878348
+            ],
+            "n_ions": 1869977,
+            "mrp": [
+              12.56,
+              6.89,
+              4.87
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 428.2371545604395,
+            "window": [
+              398.8687489687693,
+              450.3424210947479
+            ],
+            "n_ions": 78946,
+            "mrp": [
+              48.9,
+              26.83,
+              18.97
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 186.2606046263736,
+            "window": [
+              176.40163347696495,
+              198.01768366518746
+            ],
+            "n_ions": 16722,
+            "mrp": [
+              54.25,
+              29.77,
+              21.05
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      },
+      "derived_mc_eval": {
+        "score": 18.594464036814543,
+        "dominant_mrp50": 25.13,
+        "peaks": [
+          {
+            "position": 32.200490772244045,
+            "window": [
+              30.302727571166734,
+              34.122651490096096
+            ],
+            "n_ions": 1432721,
+            "mrp": [
+              25.13,
+              13.79,
+              9.75
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 28.75050562515091,
+            "window": [
+              27.454261901607538,
+              30.143184752305807
+            ],
+            "n_ions": 429628,
+            "mrp": [
+              21.26,
+              11.67,
+              8.25
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 15.700561807885592,
+            "window": [
+              14.932503912728501,
+              16.50471847706511
+            ],
+            "n_ions": 74167,
+            "mrp": [
+              18.57,
+              10.19,
+              7.2
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 3.1006160532845923,
+            "window": [
+              2.5882501933451363,
+              3.4868837455819848
+            ],
+            "n_ions": 17460,
+            "mrp": [
+              23.92,
+              13.13,
+              9.28
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "tof_initial",
+      "mode": "tof",
+      "runtime_s": 1.326670300011756,
+      "status": "ok",
+      "extra": {},
+      "tof_eval": {
+        "score": 193.40713349278684,
+        "dominant_mrp50": 272.48,
+        "peaks": [
+          {
+            "position": 605.0748247418185,
+            "window": [
+              592.3255173557142,
+              618.6430687330272
+            ],
+            "n_ions": 1384950,
+            "mrp": [
+              272.48,
+              149.5,
+              105.71
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 424.08640780021744,
+            "window": [
+              413.5710870272319,
+              431.7102998425611
+            ],
+            "n_ions": 73936,
+            "mrp": [
+              190.57,
+              104.56,
+              73.93
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 553.0781524713033,
+            "window": [
+              543.2015621022185,
+              559.4715561451167
+            ],
+            "n_ions": 60752,
+            "mrp": [
+              224.61,
+              123.24,
+              87.14
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 187.10157456729226,
+            "window": [
+              176.73180287260476,
+              194.76033566633845
+            ],
+            "n_ions": 16315,
+            "mrp": [
+              86.19,
+              47.29,
+              33.44
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      },
+      "derived_mc_eval": {
+        "score": 6.377642277464041,
+        "dominant_mrp50": 7.82,
+        "peaks": [
+          {
+            "position": 32.895277501811236,
+            "window": [
+              26.551357606659067,
+              36.80373199959833
+            ],
+            "n_ions": 1935872,
+            "mrp": [
+              7.82,
+              4.29,
+              3.03
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 15.895280967397115,
+            "window": [
+              13.548939953637722,
+              17.524498816108036
+            ],
+            "n_ions": 79413,
+            "mrp": [
+              9.5,
+              5.21,
+              3.69
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 2.9952835971652245,
+            "window": [
+              2.514246675436021,
+              3.48825230853626
+            ],
+            "n_ions": 17787,
+            "mrp": [
+              5.88,
+              3.23,
+              2.28
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "tof_voltage",
+      "mode": "tof",
+      "runtime_s": 0.22636669999337755,
+      "status": "ok",
+      "extra": {},
+      "tof_eval": {
+        "score": 26.515546518333185,
+        "dominant_mrp50": 23.32,
+        "peaks": [
+          {
+            "position": 605.3812378045351,
+            "window": [
+              579.461739645802,
+              635.6533033851022
+            ],
+            "n_ions": 1589924,
+            "mrp": [
+              23.32,
+              12.79,
+              9.05
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 425.3938833732602,
+            "window": [
+              406.5312059027198,
+              443.8178146341035
+            ],
+            "n_ions": 76846,
+            "mrp": [
+              69.71,
+              38.25,
+              27.04
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 187.41060362524115,
+            "window": [
+              177.52394693470274,
+              196.16598614250069
+            ],
+            "n_ions": 16370,
+            "mrp": [
+              48.93,
+              26.85,
+              18.98
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      },
+      "derived_mc_eval": {
+        "score": 10.144521396083187,
+        "dominant_mrp50": 11.56,
+        "peaks": [
+          {
+            "position": 32.19968114137377,
+            "window": [
+              29.520466495056752,
+              34.94347484864857
+            ],
+            "n_ions": 1559003,
+            "mrp": [
+              11.56,
+              6.34,
+              4.49
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 15.649819105940978,
+            "window": [
+              14.600548984338268,
+              16.703637265054546
+            ],
+            "n_ions": 75167,
+            "mrp": [
+              18.08,
+              9.92,
+              7.02
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 3.0499241424090657,
+            "window": [
+              2.5824374226414113,
+              3.4808134536468707
+            ],
+            "n_ions": 17477,
+            "mrp": [
+              11.4,
+              6.25,
+              4.42
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "tof_voltage_bowl",
+      "mode": "tof",
+      "runtime_s": 1.4524368999991566,
+      "status": "ok",
+      "extra": {},
+      "tof_eval": {
+        "score": 43.29695515650044,
+        "dominant_mrp50": 28.17,
+        "peaks": [
+          {
+            "position": 603.8130989005615,
+            "window": [
+              583.389863605825,
+              625.2941721197762
+            ],
+            "n_ions": 1476253,
+            "mrp": [
+              28.17,
+              15.46,
+              10.93
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 421.84536651738733,
+            "window": [
+              409.42030831293505,
+              433.44344829887757
+            ],
+            "n_ions": 74681,
+            "mrp": [
+              80.16,
+              43.98,
+              31.1
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 185.88720804250215,
+            "window": [
+              176.14225120210108,
+              194.19128327872903
+            ],
+            "n_ions": 16321,
+            "mrp": [
+              51.21,
+              28.1,
+              19.87
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 549.8226728088505,
+            "window": [
+              542.5799612391793,
+              559.3678662904147
+            ],
+            "n_ions": 66460,
+            "mrp": [
+              148.6,
+              81.53,
+              57.65
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      },
+      "derived_mc_eval": {
+        "score": 10.813382257935372,
+        "dominant_mrp50": 11.45,
+        "peaks": [
+          {
+            "position": 31.741324782256253,
+            "window": [
+              29.15686999096417,
+              34.47574690571615
+            ],
+            "n_ions": 1569009,
+            "mrp": [
+              11.45,
+              6.28,
+              4.44
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 15.44145746405632,
+            "window": [
+              14.275638060937325,
+              16.640611211004018
+            ],
+            "n_ions": 75982,
+            "mrp": [
+              23.24,
+              12.75,
+              9.02
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 2.991558806903609,
+            "window": [
+              2.5273051130487527,
+              3.4283496079606586
+            ],
+            "n_ions": 17529,
+            "mrp": [
+              12.12,
+              6.65,
+              4.7
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "tof_auto_bowl",
+      "mode": "tof",
+      "runtime_s": 13.417727900028694,
+      "status": "ok",
+      "extra": {
+        "initial_quality": {
+          "train_score": 16.887257899862252,
+          "train_details": [
+            {
+              "label": "selected",
+              "score": 10.090000000000002,
+              "weight": 1367.4710234589982,
+              "position": 605.9885480566354,
+              "num_ions": 1869977
+            },
+            {
+              "label": "auto@426.52",
+              "score": 38.07300000000001,
+              "weight": 279.93392077417127,
+              "position": 426.5160375709459,
+              "num_ions": 78363
+            },
+            {
+              "label": "auto@187.72",
+              "score": 43.25500000000001,
+              "weight": 127.59702190882042,
+              "position": 187.71973951526374,
+              "num_ions": 16281
+            }
+          ],
+          "holdout_score": NaN,
+          "holdout_details": [],
+          "selected_score": 10.090000000000002
+        },
+        "final_quality": {
+          "train_score": 28.39342392197472,
+          "train_details": [
+            {
+              "label": "selected",
+              "score": 16.622000000000003,
+              "weight": 1367.4710234589982,
+              "position": 605.9885480566354,
+              "num_ions": 1869977
+            },
+            {
+              "label": "auto@426.52",
+              "score": 66.56900000000002,
+              "weight": 279.93392077417127,
+              "position": 426.5160375709459,
+              "num_ions": 78363
+            },
+            {
+              "label": "auto@187.72",
+              "score": 70.796,
+              "weight": 127.59702190882042,
+              "position": 187.71973951526374,
+              "num_ions": 16281
+            }
+          ],
+          "holdout_score": NaN,
+          "holdout_details": [],
+          "selected_score": 16.622000000000003
+        },
+        "history": [
+          {
+            "iteration": 1,
+            "actions": [
+              {
+                "name": "Bowl correction",
+                "accepted": true,
+                "quality": {
+                  "train_score": 28.39342392197472,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 16.622000000000003,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 66.56900000000002,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 70.796,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 16.622000000000003
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 2,
+            "actions": [
+              {
+                "name": "Bowl correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 25.180484337687364,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 16.672000000000004,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 65.66100000000002,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 27.557000000000002,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 16.672000000000004
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 3,
+            "actions": [
+              {
+                "name": "Bowl correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 25.180484337687364,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 16.672000000000004,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 65.66100000000002,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 27.557000000000002,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 16.672000000000004
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 4,
+            "actions": [
+              {
+                "name": "Bowl correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 25.180484337687364,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 16.672000000000004,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 65.66100000000002,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 27.557000000000002,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 16.672000000000004
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "tof_eval": {
+        "score": 30.057207510253356,
+        "dominant_mrp50": 23.65,
+        "peaks": [
+          {
+            "position": 605.0507089429336,
+            "window": [
+              576.8450291216056,
+              654.3754590362189
+            ],
+            "n_ions": 1768326,
+            "mrp": [
+              23.65,
+              12.97,
+              9.17
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 424.08183656458755,
+            "window": [
+              407.6998697195332,
+              453.2967569284679
+            ],
+            "n_ions": 78140,
+            "mrp": [
+              86.51,
+              47.47,
+              33.56
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 189.12225087999454,
+            "window": [
+              178.54514181992835,
+              198.85449669127308
+            ],
+            "n_ions": 16538,
+            "mrp": [
+              73.03,
+              40.07,
+              28.33
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      },
+      "derived_mc_eval": {
+        "score": 24.689120739218655,
+        "dominant_mrp50": 32.97,
+        "peaks": [
+          {
+            "position": 33.160570429333845,
+            "window": [
+              31.256907510714353,
+              34.732037068784564
+            ],
+            "n_ions": 1413378,
+            "mrp": [
+              32.97,
+              18.09,
+              12.79
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 29.860623998497868,
+            "window": [
+              28.242662203491804,
+              30.927746051942698
+            ],
+            "n_ions": 424507,
+            "mrp": [
+              30.25,
+              16.6,
+              11.74
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 16.160846391693983,
+            "window": [
+              15.227604527379647,
+              16.898283728300708
+            ],
+            "n_ions": 74385,
+            "mrp": [
+              28.56,
+              15.67,
+              11.08
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 3.1110582333880914,
+            "window": [
+              2.6519406922103093,
+              3.5507468789920784
+            ],
+            "n_ions": 17404,
+            "mrp": [
+              17.41,
+              9.55,
+              6.75
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "tof_auto_calibration",
+      "mode": "tof",
+      "runtime_s": 23.316514200007077,
+      "status": "ok",
+      "extra": {
+        "initial_quality": {
+          "train_score": 16.887257899862252,
+          "train_details": [
+            {
+              "label": "selected",
+              "score": 10.090000000000002,
+              "weight": 1367.4710234589982,
+              "position": 605.9885480566354,
+              "num_ions": 1869977
+            },
+            {
+              "label": "auto@426.52",
+              "score": 38.07300000000001,
+              "weight": 279.93392077417127,
+              "position": 426.5160375709459,
+              "num_ions": 78363
+            },
+            {
+              "label": "auto@187.72",
+              "score": 43.25500000000001,
+              "weight": 127.59702190882042,
+              "position": 187.71973951526374,
+              "num_ions": 16281
+            }
+          ],
+          "holdout_score": NaN,
+          "holdout_details": [],
+          "selected_score": 10.090000000000002
+        },
+        "final_quality": {
+          "train_score": 297.67687384518325,
+          "train_details": [
+            {
+              "label": "selected",
+              "score": 325.25600000000003,
+              "weight": 1367.4710234589982,
+              "position": 605.9885480566354,
+              "num_ions": 1869977
+            },
+            {
+              "label": "auto@426.52",
+              "score": 254.999,
+              "weight": 279.93392077417127,
+              "position": 426.5160375709459,
+              "num_ions": 78363
+            },
+            {
+              "label": "auto@187.72",
+              "score": 95.739,
+              "weight": 127.59702190882042,
+              "position": 187.71973951526374,
+              "num_ions": 16281
+            }
+          ],
+          "holdout_score": NaN,
+          "holdout_details": [],
+          "selected_score": 325.25600000000003
+        },
+        "history": [
+          {
+            "iteration": 1,
+            "actions": [
+              {
+                "name": "Voltage correction",
+                "accepted": true,
+                "quality": {
+                  "train_score": 24.213115124881725,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 18.245000000000005,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 47.800000000000004,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 36.42700000000001,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 18.245000000000005
+                }
+              },
+              {
+                "name": "Bowl correction",
+                "accepted": true,
+                "quality": {
+                  "train_score": 27.70413375757974,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 25.196,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 33.864000000000004,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 41.07,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 25.196
+                }
+              },
+              {
+                "name": "Joint voltage+bowl refinement",
+                "accepted": true,
+                "quality": {
+                  "train_score": 69.10727655700235,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 45.792,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 162.83100000000005,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 113.36000000000001,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 45.792
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 2,
+            "actions": [
+              {
+                "name": "Voltage correction",
+                "accepted": true,
+                "quality": {
+                  "train_score": 193.28337076318064,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 196.75800000000004,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 216.88500000000002,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 104.266,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 196.75800000000004
+                }
+              },
+              {
+                "name": "Bowl correction",
+                "accepted": true,
+                "quality": {
+                  "train_score": 198.3786423540261,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 199.31500000000003,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 230.62300000000002,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 117.603,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 199.31500000000003
+                }
+              },
+              {
+                "name": "Joint voltage+bowl refinement",
+                "accepted": true,
+                "quality": {
+                  "train_score": 236.33010195221183,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 226.758,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 342.697,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 105.55799999999999,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 226.758
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 3,
+            "actions": [
+              {
+                "name": "Voltage correction",
+                "accepted": true,
+                "quality": {
+                  "train_score": 239.72710198266194,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 233.643,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 333.24000000000007,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 99.774,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 233.643
+                }
+              },
+              {
+                "name": "Bowl correction",
+                "accepted": true,
+                "quality": {
+                  "train_score": 274.77690096156033,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 286.39200000000005,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 299.4580000000001,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 96.14900000000002,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 286.39200000000005
+                }
+              },
+              {
+                "name": "Joint voltage+bowl refinement",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 263.32113576747435,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 273.12100000000004,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 291.14200000000005,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 97.25900000000001,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 273.12100000000004
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 4,
+            "actions": [
+              {
+                "name": "Voltage correction",
+                "accepted": true,
+                "quality": {
+                  "train_score": 289.0798514549447,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 307.47400000000005,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 287.2050000000001,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 96.06099999999999,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 307.47400000000005
+                }
+              },
+              {
+                "name": "Bowl correction",
+                "accepted": true,
+                "quality": {
+                  "train_score": 297.67687384518325,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 325.25600000000003,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 254.999,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 95.739,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 325.25600000000003
+                }
+              },
+              {
+                "name": "Joint voltage+bowl refinement",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 291.937717417918,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 314.8090000000001,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 269.23500000000007,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 96.631,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 314.8090000000001
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 5,
+            "actions": [
+              {
+                "name": "Voltage correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 247.19314051442925,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 260.6380000000001,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 251.31100000000004,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 94.06900000000003,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 260.6380000000001
+                }
+              },
+              {
+                "name": "Bowl correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 223.4817374474103,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 228.94300000000004,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 255.13500000000002,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 95.509,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 228.94300000000004
+                }
+              },
+              {
+                "name": "Joint voltage+bowl refinement",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 291.937717417918,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 314.8090000000001,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 269.23500000000007,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 96.631,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 314.8090000000001
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 6,
+            "actions": [
+              {
+                "name": "Voltage correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 247.19314051442925,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 260.6380000000001,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 251.31100000000004,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 94.06900000000003,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 260.6380000000001
+                }
+              },
+              {
+                "name": "Bowl correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 223.4817374474103,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 228.94300000000004,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 255.13500000000002,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 95.509,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 228.94300000000004
+                }
+              },
+              {
+                "name": "Joint voltage+bowl refinement",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 291.937717417918,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 314.8090000000001,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 269.23500000000007,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 96.631,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 314.8090000000001
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 7,
+            "actions": [
+              {
+                "name": "Voltage correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 247.19314051442925,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 260.6380000000001,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 251.31100000000004,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 94.06900000000003,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 260.6380000000001
+                }
+              },
+              {
+                "name": "Bowl correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 223.4817374474103,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 228.94300000000004,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 255.13500000000002,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 95.509,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 228.94300000000004
+                }
+              },
+              {
+                "name": "Joint voltage+bowl refinement",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 291.937717417918,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 314.8090000000001,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 269.23500000000007,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 96.631,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 314.8090000000001
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "tof_eval": {
+        "score": 366.3989341025829,
+        "dominant_mrp50": 480.06,
+        "peaks": [
+          {
+            "position": 591.3154794676055,
+            "window": [
+              578.0402017959992,
+              603.9659487822652
+            ],
+            "n_ions": 1388917,
+            "mrp": [
+              480.06,
+              263.39,
+              186.25
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 415.32135814985594,
+            "window": [
+              403.56427470766357,
+              421.5930973385631
+            ],
+            "n_ions": 74009,
+            "mrp": [
+              451.94,
+              247.96,
+              175.33
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 541.3171495477903,
+            "window": [
+              530.0083678748424,
+              546.7878318968981
+            ],
+            "n_ions": 61054,
+            "mrp": [
+              520.3,
+              285.47,
+              201.86
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 182.3291407235169,
+            "window": [
+              172.35057113236144,
+              190.37069108154793
+            ],
+            "n_ions": 16354,
+            "mrp": [
+              119.57,
+              65.61,
+              46.39
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      },
+      "derived_mc_eval": {
+        "score": 6.854595611754773,
+        "dominant_mrp50": 8.46,
+        "peaks": [
+          {
+            "position": 31.221892385385694,
+            "window": [
+              25.46765302971442,
+              34.86673311641038
+            ],
+            "n_ions": 1926974,
+            "mrp": [
+              8.46,
+              4.64,
+              3.28
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 15.122213557868365,
+            "window": [
+              13.024118811659603,
+              16.613767519201375
+            ],
+            "n_ions": 79008,
+            "mrp": [
+              9.94,
+              5.45,
+              3.86
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 2.8724579282356153,
+            "window": [
+              2.3912368936180495,
+              3.331607023987622
+            ],
+            "n_ions": 17846,
+            "mrp": [
+              6.33,
+              3.47,
+              2.46
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "tof_auto_multi_peak",
+      "mode": "tof",
+      "runtime_s": 10.942430900002364,
+      "status": "ok",
+      "extra": {
+        "initial_quality": {
+          "train_score": 16.887257899862252,
+          "train_details": [
+            {
+              "label": "selected",
+              "score": 10.090000000000002,
+              "weight": 1367.4710234589982,
+              "position": 605.9885480566354,
+              "num_ions": 1869977
+            },
+            {
+              "label": "auto@426.52",
+              "score": 38.07300000000001,
+              "weight": 279.93392077417127,
+              "position": 426.5160375709459,
+              "num_ions": 78363
+            },
+            {
+              "label": "auto@187.72",
+              "score": 43.25500000000001,
+              "weight": 127.59702190882042,
+              "position": 187.71973951526374,
+              "num_ions": 16281
+            }
+          ],
+          "holdout_score": NaN,
+          "holdout_details": [],
+          "selected_score": 10.090000000000002
+        },
+        "final_quality": {
+          "train_score": 40.467291872630796,
+          "train_details": [
+            {
+              "label": "selected",
+              "score": 24.196,
+              "weight": 1367.4710234589982,
+              "position": 605.9885480566354,
+              "num_ions": 1869977
+            },
+            {
+              "label": "auto@426.52",
+              "score": 118.55799999999999,
+              "weight": 279.93392077417127,
+              "position": 426.5160375709459,
+              "num_ions": 78363
+            },
+            {
+              "label": "auto@187.72",
+              "score": 43.525999999999996,
+              "weight": 127.59702190882042,
+              "position": 187.71973951526374,
+              "num_ions": 16281
+            }
+          ],
+          "holdout_score": NaN,
+          "holdout_details": [],
+          "selected_score": 24.196
+        },
+        "history": [
+          {
+            "iteration": 1,
+            "actions": [
+              {
+                "name": "Auto multi-peak calibration",
+                "accepted": true,
+                "quality": {
+                  "train_score": 30.864307079788983,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 19.651000000000003,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 85.63300000000001,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 30.882,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 19.651000000000003
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 2,
+            "actions": [
+              {
+                "name": "Auto multi-peak calibration",
+                "accepted": true,
+                "quality": {
+                  "train_score": 40.467291872630796,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 24.196,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 118.55799999999999,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 43.525999999999996,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 24.196
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 3,
+            "actions": [
+              {
+                "name": "Auto multi-peak calibration",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 40.1535864833123,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 33.62200000000001,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 52.333000000000006,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 83.433,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 33.62200000000001
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 4,
+            "actions": [
+              {
+                "name": "Auto multi-peak calibration",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 40.1535864833123,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 33.62200000000001,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 52.333000000000006,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 83.433,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 33.62200000000001
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 5,
+            "actions": [
+              {
+                "name": "Auto multi-peak calibration",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 40.1535864833123,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 33.62200000000001,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 52.333000000000006,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 83.433,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 33.62200000000001
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "tof_eval": {
+        "score": 90.85201627442791,
+        "dominant_mrp50": 102.29,
+        "peaks": [
+          {
+            "position": 612.6377534528701,
+            "window": [
+              590.176481227938,
+              632.2421635914302
+            ],
+            "n_ions": 1467504,
+            "mrp": [
+              102.29,
+              56.13,
+              39.69
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 426.67350348901977,
+            "window": [
+              414.93836841578633,
+              439.34807472180916
+            ],
+            "n_ions": 74925,
+            "mrp": [
+              156.4,
+              85.81,
+              60.68
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 188.71924815893163,
+            "window": [
+              178.5951024656919,
+              196.64176168106772
+            ],
+            "n_ions": 16292,
+            "mrp": [
+              54.4,
+              29.85,
+              21.11
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 558.6481324956233,
+            "window": [
+              556.1029858987448,
+              562.3649899444663
+            ],
+            "n_ions": 29804,
+            "mrp": [
+              163.52,
+              89.72,
+              63.44
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      },
+      "derived_mc_eval": {
+        "score": 12.89469034655953,
+        "dominant_mrp50": 13.82,
+        "peaks": [
+          {
+            "position": 32.602066392318,
+            "window": [
+              30.14428927337878,
+              34.9873678294969
+            ],
+            "n_ions": 1495458,
+            "mrp": [
+              13.82,
+              7.58,
+              5.36
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 15.902375968459623,
+            "window": [
+              14.77513184067064,
+              16.92814590538722
+            ],
+            "n_ions": 74774,
+            "mrp": [
+              27.87,
+              15.29,
+              10.81
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 3.05261417525123,
+            "window": [
+              2.6068024557421996,
+              3.507089972072362
+            ],
+            "n_ions": 17453,
+            "mrp": [
+              12.24,
+              6.72,
+              4.75
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "tof_auto_optimize",
+      "mode": "tof",
+      "runtime_s": 44.63025909999851,
+      "status": "ok",
+      "extra": {
+        "initial_quality": {
+          "train_score": 16.887257899862252,
+          "train_details": [
+            {
+              "label": "selected",
+              "score": 10.090000000000002,
+              "weight": 1367.4710234589982,
+              "position": 605.9885480566354,
+              "num_ions": 1869977
+            },
+            {
+              "label": "auto@426.52",
+              "score": 38.07300000000001,
+              "weight": 279.93392077417127,
+              "position": 426.5160375709459,
+              "num_ions": 78363
+            },
+            {
+              "label": "auto@187.72",
+              "score": 43.25500000000001,
+              "weight": 127.59702190882042,
+              "position": 187.71973951526374,
+              "num_ions": 16281
+            }
+          ],
+          "holdout_score": NaN,
+          "holdout_details": [],
+          "selected_score": 10.090000000000002
+        },
+        "final_quality": {
+          "train_score": 63.27056418873359,
+          "train_details": [
+            {
+              "label": "selected",
+              "score": 29.934000000000005,
+              "weight": 1367.4710234589982,
+              "position": 605.9885480566354,
+              "num_ions": 1869977
+            },
+            {
+              "label": "auto@426.52",
+              "score": 196.12500000000003,
+              "weight": 279.93392077417127,
+              "position": 426.5160375709459,
+              "num_ions": 78363
+            },
+            {
+              "label": "auto@187.72",
+              "score": 129.07400000000004,
+              "weight": 127.59702190882042,
+              "position": 187.71973951526374,
+              "num_ions": 16281
+            }
+          ],
+          "holdout_score": NaN,
+          "holdout_details": [],
+          "selected_score": 29.934000000000005
+        },
+        "history": [
+          {
+            "iteration": 1,
+            "actions": [
+              {
+                "name": "Voltage correction",
+                "accepted": true,
+                "quality": {
+                  "train_score": 24.213115124881725,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 18.245000000000005,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 47.800000000000004,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 36.42700000000001,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 18.245000000000005
+                }
+              },
+              {
+                "name": "Bowl correction",
+                "accepted": true,
+                "quality": {
+                  "train_score": 27.70413375757974,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 25.196,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 33.864000000000004,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 41.07,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 25.196
+                }
+              },
+              {
+                "name": "Auto multi-peak calibration",
+                "accepted": true,
+                "quality": {
+                  "train_score": 38.62536926872267,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 32.93100000000001,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 51.892,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 70.54700000000001,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 32.93100000000001
+                }
+              },
+              {
+                "name": "Joint voltage+bowl refinement",
+                "accepted": true,
+                "quality": {
+                  "train_score": 59.06751699184138,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 32.153000000000006,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 166.04700000000003,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 112.81200000000003,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 32.153000000000006
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 2,
+            "actions": [
+              {
+                "name": "Voltage correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 48.93297308022681,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 40.701,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 87.619,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 52.283,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 40.701
+                }
+              },
+              {
+                "name": "Bowl correction",
+                "accepted": true,
+                "quality": {
+                  "train_score": 59.94191995072816,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 33.73500000000001,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 198.366,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 37.11700000000001,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 33.73500000000001
+                }
+              },
+              {
+                "name": "Auto multi-peak calibration",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 41.37709025782765,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 36.2,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 66.00800000000001,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 42.823,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 36.2
+                }
+              },
+              {
+                "name": "Joint voltage+bowl refinement",
+                "accepted": true,
+                "quality": {
+                  "train_score": 63.27056418873359,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 29.934000000000005,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 196.12500000000003,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 129.07400000000004,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 29.934000000000005
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 3,
+            "actions": [
+              {
+                "name": "Voltage correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 45.11560996705146,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 37.102000000000004,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 82.78400000000002,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 48.358000000000004,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 37.102000000000004
+                }
+              },
+              {
+                "name": "Bowl correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 62.84980945912904,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 30.126,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 191.70600000000002,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 130.858,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 30.126
+                }
+              },
+              {
+                "name": "Auto multi-peak calibration",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 59.98889168411627,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 34.498000000000005,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 192.56000000000003,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 42.331,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 34.498000000000005
+                }
+              },
+              {
+                "name": "Joint voltage+bowl refinement",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 53.88705388695508,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 30.457,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 139.268,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 117.67300000000002,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 30.457
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 4,
+            "actions": [
+              {
+                "name": "Voltage correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 45.11560996705146,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 37.102000000000004,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 82.78400000000002,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 48.358000000000004,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 37.102000000000004
+                }
+              },
+              {
+                "name": "Bowl correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 62.84980945912904,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 30.126,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 191.70600000000002,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 130.858,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 30.126
+                }
+              },
+              {
+                "name": "Auto multi-peak calibration",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 59.98889168411627,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 34.498000000000005,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 192.56000000000003,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 42.331,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 34.498000000000005
+                }
+              },
+              {
+                "name": "Joint voltage+bowl refinement",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 53.88705388695508,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 30.457,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 139.268,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 117.67300000000002,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 30.457
+                }
+              }
+            ]
+          },
+          {
+            "iteration": 5,
+            "actions": [
+              {
+                "name": "Voltage correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 45.11560996705146,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 37.102000000000004,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 82.78400000000002,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 48.358000000000004,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 37.102000000000004
+                }
+              },
+              {
+                "name": "Bowl correction",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 62.84980945912904,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 30.126,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 191.70600000000002,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 130.858,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 30.126
+                }
+              },
+              {
+                "name": "Auto multi-peak calibration",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 59.98889168411627,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 34.498000000000005,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 192.56000000000003,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 42.331,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 34.498000000000005
+                }
+              },
+              {
+                "name": "Joint voltage+bowl refinement",
+                "accepted": false,
+                "reason": "no_stable_improvement",
+                "quality": {
+                  "train_score": 53.88705388695508,
+                  "train_details": [
+                    {
+                      "label": "selected",
+                      "score": 30.457,
+                      "weight": 1367.4710234589982,
+                      "position": 605.9885480566354,
+                      "num_ions": 1869977
+                    },
+                    {
+                      "label": "auto@426.52",
+                      "score": 139.268,
+                      "weight": 279.93392077417127,
+                      "position": 426.5160375709459,
+                      "num_ions": 78363
+                    },
+                    {
+                      "label": "auto@187.72",
+                      "score": 117.67300000000002,
+                      "weight": 127.59702190882042,
+                      "position": 187.71973951526374,
+                      "num_ions": 16281
+                    }
+                  ],
+                  "holdout_score": NaN,
+                  "holdout_details": [],
+                  "selected_score": 30.457
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "tof_eval": {
+        "score": 171.71479256176156,
+        "dominant_mrp50": 218.03,
+        "peaks": [
+          {
+            "position": 594.1255615409561,
+            "window": [
+              579.2322400233202,
+              617.3305078674675
+            ],
+            "n_ions": 1456244,
+            "mrp": [
+              218.03,
+              119.63,
+              84.59
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 417.1494039648907,
+            "window": [
+              405.8916300625014,
+              427.1548876427168
+            ],
+            "n_ions": 73814,
+            "mrp": [
+              232.89,
+              127.78,
+              90.35
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 544.1322966889602,
+            "window": [
+              535.1702323320545,
+              553.9344969178686
+            ],
+            "n_ions": 70726,
+            "mrp": [
+              199.78,
+              109.61,
+              77.51
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 184.1807897545898,
+            "window": [
+              173.89482251167692,
+              192.04502197456884
+            ],
+            "n_ions": 16366,
+            "mrp": [
+              161.55,
+              88.64,
+              62.67
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      },
+      "derived_mc_eval": {
+        "score": 8.201224380465687,
+        "dominant_mrp50": 9.14,
+        "peaks": [
+          {
+            "position": 29.733220267538407,
+            "window": [
+              25.83892058312574,
+              36.19371060567747
+            ],
+            "n_ions": 1922956,
+            "mrp": [
+              9.14,
+              5.01,
+              3.55
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 14.433491269567146,
+            "window": [
+              12.746639088866647,
+              17.483520043593163
+            ],
+            "n_ions": 81004,
+            "mrp": [
+              9.8,
+              5.38,
+              3.8
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 2.9336949639024734,
+            "window": [
+              2.3567566644688815,
+              3.4606483522517504
+            ],
+            "n_ions": 18414,
+            "mrp": [
+              21.99,
+              12.07,
+              8.53
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "tof_adaptive_residual",
+      "mode": "tof",
+      "runtime_s": 63.945104500016896,
+      "status": "ok",
+      "extra": {
+        "reference_peaks": {
+          "train": [
+            {
+              "position": 602.6129541064666,
+              "x1": 599.9136895764739,
+              "x2": 605.3135755060921,
+              "prominence": 2286.7777777777774,
+              "width": 2.699942964809111,
+              "n_ions": 656990,
+              "weight": 810.5491965328199
+            },
+            {
+              "position": 572.6730041307178,
+              "x1": 570.0045176801862,
+              "x2": 574.9200731035439,
+              "prominence": 1065.9999999999998,
+              "width": 2.4577777116788866,
+              "n_ions": 287891,
+              "weight": 536.5547502352392
+            },
+            {
+              "position": 612.1829381167511,
+              "x1": 610.0289929976557,
+              "x2": 614.2164731806195,
+              "prominence": 613.7777777777776,
+              "width": 2.093740091481891,
+              "n_ions": 277953,
+              "weight": 527.2124808841309
+            },
+            {
+              "position": 607.4829459695894,
+              "x1": 605.6118721727391,
+              "x2": 608.8521744510865,
+              "prominence": 477.7777777777777,
+              "width": 1.6201511391736858,
+              "n_ions": 271359,
+              "weight": 520.9212992381863
+            }
+          ],
+          "holdout": [
+            {
+              "position": 422.72325466967794,
+              "x1": 420.1700581780326,
+              "x2": 424.7037627242429,
+              "prominence": 273.3333333333333,
+              "width": 2.266852273105144,
+              "n_ions": 65462,
+              "weight": 255.85542792757008
+            },
+            {
+              "position": 550.6130409889337,
+              "x1": 548.827668971968,
+              "x2": 553.5531610765238,
+              "prominence": 173.99999999999997,
+              "width": 2.3627460522778847,
+              "n_ions": 45545,
+              "weight": 213.41274563624359
+            }
+          ]
+        },
+        "baseline_quality": {
+          "train_score": 7.000446897071871,
+          "holdout_score": 6.477912036574493
+        },
+        "final_quality": {
+          "train_score": 7.307904814160602,
+          "holdout_score": 8.310579580030756
+        },
+        "accepted_steps": [
+          "temporal@612.1829",
+          "spatial@612.1829"
+        ],
+        "temporal_info": {
+          "n_observations": 24,
+          "peak_center": 612.1829381167511,
+          "scale": 1.0,
+          "threshold": 40
+        },
+        "spatial_info": {
+          "n_cells": 132,
+          "peak_center": 612.1829381167511,
+          "scale": 1.0,
+          "threshold": 35
+        },
+        "used_spatial": true,
+        "iteration_history": [
+          {
+            "round": 1,
+            "baseline_quality": {
+              "train_score": 7.000446897071871,
+              "holdout_score": 6.477912036574493
+            },
+            "final_quality": {
+              "train_score": 7.307904814160602,
+              "holdout_score": 8.310579580030756
+            },
+            "accepted_steps": [
+              "temporal@612.1829",
+              "spatial@612.1829"
+            ]
+          },
+          {
+            "round": 2,
+            "baseline_quality": {
+              "train_score": 7.433606429950176,
+              "holdout_score": 9.144490843284268
+            },
+            "final_quality": {
+              "train_score": 7.433606429950176,
+              "holdout_score": 9.144490843284268
+            },
+            "accepted_steps": []
+          }
+        ],
+        "n_iterations": 2,
+        "stop_reason": "no_improvement"
+      },
+      "tof_eval": {
+        "score": 208.0963652463056,
+        "dominant_mrp50": 291.77,
+        "peaks": [
+          {
+            "position": 605.0834142337662,
+            "window": [
+              592.3654753559406,
+              618.5166667015419
+            ],
+            "n_ions": 1383951,
+            "mrp": [
+              291.77,
+              160.09,
+              113.2
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 425.09510998618447,
+            "window": [
+              413.56539880465334,
+              431.64786637419604
+            ],
+            "n_ions": 73922,
+            "mrp": [
+              207.59,
+              113.9,
+              80.54
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 553.086793006687,
+            "window": [
+              543.1161265719195,
+              559.5153810787372
+            ],
+            "n_ions": 60775,
+            "mrp": [
+              245.38,
+              134.63,
+              95.2
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 187.11057436993758,
+            "window": [
+              176.6776072704614,
+              194.70589495141138
+            ],
+            "n_ions": 16312,
+            "mrp": [
+              93.16,
+              51.11,
+              36.14
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      },
+      "derived_mc_eval": {
+        "score": 9.044830001840612,
+        "dominant_mrp50": 7.82,
+        "peaks": [
+          {
+            "position": 32.89461150501322,
+            "window": [
+              26.590211953986376,
+              36.78300586652259
+            ],
+            "n_ions": 1934241,
+            "mrp": [
+              7.82,
+              4.29,
+              3.03
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 15.89479392382745,
+            "window": [
+              13.547822639936818,
+              17.519500834590733
+            ],
+            "n_ions": 79411,
+            "mrp": [
+              30.48,
+              16.72,
+              11.83
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 2.9949323475158898,
+            "window": [
+              2.516223187943138,
+              3.48082509633285
+            ],
+            "n_ions": 17747,
+            "mrp": [
+              6.5,
+              3.57,
+              2.52
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "joint_after_initial",
+      "mode": "joint",
+      "runtime_s": 264.4695688000065,
+      "status": "ok",
+      "extra": {
+        "matched_peaks": [
+          {
+            "mc_position": 33.281534242258594,
+            "mc_x1": 31.938602997790504,
+            "mc_x2": 34.722879880349446,
+            "mc_fwhm": 0.298312416323526,
+            "tof_position": 602.1980730421644,
+            "tof_x1": 597.2524974171632,
+            "tof_x2": 618.0211370314971,
+            "tof_fwhm": 3.916821983130035,
+            "n_ions": 1359367
+          },
+          {
+            "mc_position": 29.78156359389638,
+            "mc_x1": 28.71751981054966,
+            "mc_x2": 30.53280219032169,
+            "mc_fwhm": 0.2866152873787371,
+            "tof_position": 572.235576525962,
+            "tof_x1": 568.4956586049243,
+            "tof_x2": 580.9979062376333,
+            "tof_fwhm": 3.8137778366425437,
+            "n_ions": 389371
+          },
+          {
+            "mc_position": 15.581682677683949,
+            "mc_x1": 14.417107311162102,
+            "mc_x2": 16.21805671026622,
+            "mc_fwhm": 0.1894998913299233,
+            "tof_position": 422.32211611515015,
+            "tof_x1": 419.01902502224164,
+            "tof_x2": 428.5655180763446,
+            "tof_fwhm": 3.9889064507955823,
+            "n_ions": 74633
+          },
+          {
+            "mc_position": 27.48158288211549,
+            "mc_x1": 26.431846687238156,
+            "mc_x2": 28.153742396596797,
+            "mc_fwhm": 0.2868265921029973,
+            "tof_position": 551.2023129196448,
+            "tof_x1": 542.741975241129,
+            "tof_x2": 559.5986180368369,
+            "tof_fwhm": 3.872112614778871,
+            "n_ions": 60620
+          },
+          {
+            "mc_position": 1.981796729762186,
+            "mc_x1": 1.3843024144925618,
+            "mc_x2": 3.1754434801075515,
+            "mc_fwhm": 0.19899088892851546,
+            "tof_position": 185.68774856233387,
+            "tof_x1": 148.39940841136155,
+            "tof_x2": 217.2800288429191,
+            "tof_fwhm": 3.9928768540386272,
+            "n_ions": 21490
+          },
+          {
+            "mc_position": 24.88160468618927,
+            "mc_x1": 23.891726472204162,
+            "mc_x2": 25.73536922189838,
+            "mc_fwhm": 0.7759872260702885,
+            "tof_position": 527.2523681315218,
+            "tof_x1": 514.4889281314156,
+            "tof_x2": 540.2015306410974,
+            "tof_fwhm": 17.588213472848793,
+            "n_ions": 5890
+          }
+        ],
+        "parameters": [
+          1.0000000008829353,
+          3.851343334716293e-05,
+          -1.5514035393739057e-05,
+          -7.659873646095528e-06,
+          1.1045666487252257e-05,
+          1.765293417494584e-06,
+          -1.7285713467606365e-06,
+          -4.1201525483610357e-07,
+          3.672029056328343e-08,
+          1.0902744180691001e-05,
+          4.726860055048483e-06,
+          7.242168676841188e-08
+        ],
+        "feature_names": [
+          "bias",
+          "v",
+          "v2",
+          "x",
+          "y",
+          "x2",
+          "y2",
+          "xy",
+          "r2",
+          "v_r2",
+          "v_x",
+          "v_y"
+        ],
+        "voltage_center": 6558.82232879999,
+        "voltage_scale": 249.60779280886246,
+        "spatial_scale": 30.281572960706555,
+        "loss_history": [
+          0.010784635882871044,
+          0.01055342002802748,
+          0.01054466064740254,
+          0.01054466064740254
+        ],
+        "n_iterations": 3,
+        "final_loss": 0.01054466064740254,
+        "n_matched_peaks": 6,
+        "tof_weight": 0.7,
+        "mc_weight": 0.3
+      },
+      "tof_eval": {
+        "score": 195.25906077399875,
+        "dominant_mrp50": 274.99,
+        "peaks": [
+          {
+            "position": 605.0724887053635,
+            "window": [
+              592.3308882160553,
+              618.636669753609
+            ],
+            "n_ions": 1384880,
+            "mrp": [
+              274.99,
+              150.88,
+              106.69
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 424.0843412459184,
+            "window": [
+              413.57253286468324,
+              431.7118640467836
+            ],
+            "n_ions": 73937,
+            "mrp": [
+              192.54,
+              105.64,
+              74.7
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 553.0758938551362,
+            "window": [
+              543.1992698370361,
+              559.4824589130037
+            ],
+            "n_ions": 60748,
+            "mrp": [
+              227.64,
+              124.9,
+              88.32
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 187.09986087084383,
+            "window": [
+              176.73239482154273,
+              194.76044262669294
+            ],
+            "n_ions": 16314,
+            "mrp": [
+              85.91,
+              47.13,
+              33.33
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      },
+      "mc_eval": {
+        "score": 125.76163903613217,
+        "dominant_mrp50": 155.36,
+        "peaks": [
+          {
+            "position": 33.05643642472627,
+            "window": [
+              32.413730805279585,
+              33.88084020381038
+            ],
+            "n_ions": 1002114,
+            "mrp": [
+              155.36,
+              85.24,
+              60.27
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 29.656477536701004,
+            "window": [
+              29.107048121273003,
+              30.090164353077014
+            ],
+            "n_ions": 336249,
+            "mrp": [
+              167.47,
+              91.89,
+              64.97
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 15.406649844242194,
+            "window": [
+              14.867193602962576,
+              15.77109762837663
+            ],
+            "n_ions": 71410,
+            "mrp": [
+              167.08,
+              91.67,
+              64.82
+            ],
+            "gaussian_ok": true
+          },
+          {
+            "position": 2.2068094554382425,
+            "window": [
+              1.8116744970239846,
+              2.7108429104567318
+            ],
+            "n_ions": 17709,
+            "mrp": [
+              96.59,
+              52.99,
+              37.47
+            ],
+            "gaussian_ok": true
+          }
+        ]
+      }
+    }
+  ]
+}

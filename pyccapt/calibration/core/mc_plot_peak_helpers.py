@@ -870,9 +870,10 @@ def find_peaks_and_widths(plotter, prominence=None, distance=None, percent=50):
 def draw_rectangle(plotter):
     """Draw automatic selection rectangle around highest peak."""
     index_max_ini = np.argmax(plotter.prominences[0])
-    x_axis = plotter.x_centers if getattr(plotter, 'x_centers', None) is not None else plotter.x[:-1]
-    plotter.variables.selected_x1 = float(np.interp(plotter.peak_widths[2][index_max_ini], np.arange(len(x_axis)), x_axis))
-    plotter.variables.selected_x2 = float(np.interp(plotter.peak_widths[3][index_max_ini], np.arange(len(x_axis)), x_axis))
+    left_idx = int(np.clip(round(plotter.peak_widths[2][index_max_ini]), 0, max(0, len(plotter.x) - 1)))
+    right_idx = int(np.clip(round(plotter.peak_widths[3][index_max_ini]), 0, max(0, len(plotter.x) - 1)))
+    plotter.variables.selected_x1 = float(plotter.x[left_idx])
+    plotter.variables.selected_x2 = float(plotter.x[right_idx])
     plotter.variables.selected_y1 = 0
     plotter.variables.selected_y2 = float(plotter.prominences[0][index_max_ini])
 

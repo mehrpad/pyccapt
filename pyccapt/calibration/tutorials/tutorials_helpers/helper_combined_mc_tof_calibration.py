@@ -146,8 +146,12 @@ def build_combined_mc_tof_calibration_panel(
     initial_button.on_click(lambda _: _run_initial_all())
     auto_button.on_click(_run_auto_all)
     save_button.on_click(lambda _: save_both_corrections())
-    back_button.on_click(lambda _: restore_both_corrections())
-    reset_button.on_click(lambda _: reset_both_corrections())
+    back_button.on_click(
+        lambda _: (restore_both_corrections(), variables.clear_calibration_selection_mask(), variables.clear_calibration_peak_range())
+    )
+    reset_button.on_click(
+        lambda _: (reset_both_corrections(), variables.clear_calibration_selection_mask(), variables.clear_calibration_peak_range())
+    )
     clear_button.on_click(lambda _: clear_plots())
     gaussian_button.on_click(lambda _: _run_gaussian_all())
     stat_button.on_click(lambda _: _run_stat_all())

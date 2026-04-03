@@ -91,6 +91,45 @@ class SharedVariablesBase:
         self.selected_x1 = 0
         self.selected_x2 = 0
 
+    @staticmethod
+    def _coerce_peak_range(left: float, right: float) -> tuple[float, float]:
+        """Validate and normalize numeric peak-range boundaries."""
+        try:
+            left_value = float(left)
+            right_value = float(right)
+        except (TypeError, ValueError) as exc:
+            raise CalibrationInputError("Peak range boundaries must be numeric") from exc
+        if right_value <= left_value:
+            raise CalibrationInputError(
+                f"Invalid peak range: left={left_value}, right={right_value}. "
+                "'right' must be greater than 'left'."
+            )
+        return left_value, right_value
+
+    def set_calibration_peak_range(self, calibration_mode: str, left: float, right: float) -> tuple[float, float]:
+        """Store a calibration-only copy of the active peak window for one mode."""
+        mode = ensure_choice(calibration_mode, field_name="calibration_mode", allowed=CALIBRATION_MODES)
+        left_value, right_value = self._coerce_peak_range(left, right)
+        self.calibration_peak_ranges[mode] = (left_value, right_value)
+        return left_value, right_value
+
+    def get_calibration_peak_range(self, calibration_mode: str) -> tuple[float, float]:
+        """Return the active peak window for calibration, preferring the stored snapshot."""
+        mode = ensure_choice(calibration_mode, field_name="calibration_mode", allowed=CALIBRATION_MODES)
+        stored = self.calibration_peak_ranges.get(mode)
+        if stored is not None:
+            return float(stored[0]), float(stored[1])
+        self.ensure_valid_peak_range()
+        return float(self.selected_x1), float(self.selected_x2)
+
+    def clear_calibration_peak_range(self, calibration_mode: str | None = None) -> None:
+        """Clear one or all stored calibration-only peak windows."""
+        if calibration_mode is None:
+            self.calibration_peak_ranges.clear()
+            return
+        mode = ensure_choice(calibration_mode, field_name="calibration_mode", allowed=CALIBRATION_MODES)
+        self.calibration_peak_ranges.pop(mode, None)
+
     def ensure_valid_peak_range(self) -> None:
         """Validate that a peak range is selected and logically valid."""
         if self.selected_x1 == 0 and self.selected_x2 == 0:
@@ -115,8 +154,8 @@ class SharedVariablesBase:
                 raise CalibrationStateError(f"Locked calibration mask is empty for calibration_mode={mode!r}")
             return override.copy()
 
-        self.ensure_valid_peak_range()
-        mask = np.logical_and(data > self.selected_x1, data < self.selected_x2)
+        left, right = self.get_calibration_peak_range(mode)
+        mask = np.logical_and(data > left, data < right)
         if not np.any(mask):
             raise CalibrationStateError(
                 "Selected peak range does not include any ions for "
@@ -205,6 +244,7 @@ class SharedVariablesBase:
         self.y_hist = None
         self.h_line_pos = []
         self.clear_calibration_selection_mask()
+        self.clear_calibration_peak_range()
         if clear_selection:
             self.clear_peak_range()
             self.selected_x_fdm = 0
@@ -321,6 +361,7 @@ class Variables(SharedVariablesBase):
         self.range_data_backup = None
         self.animation_detector_html = None
         self.calibration_selection_masks = {}
+        self.calibration_peak_ranges = {}
         self.bowl_sampling_mode = "polar"
 
     @property

@@ -17,11 +17,15 @@ label_layout = widgets.Layout(width='300px')
 def reset_on_click(variables, calibration_mode):
     if calibration_mode.value == 'tof_calib': variables.dld_t_calib = variables.data['t (ns)'].to_numpy()
     elif calibration_mode.value == 'mc_calib': variables.mc_calib = variables.data['mc_uc (Da)'].to_numpy()
+    variables.clear_calibration_selection_mask()
+    variables.clear_calibration_peak_range()
 
 
 def reset_back_on_click(variables, calibration_mode):
     if calibration_mode.value == 'tof_calib': variables.dld_t_calib = np.copy(variables.dld_t_calib_backup)
     elif calibration_mode.value == 'mc_calib': variables.mc_calib = np.copy(variables.mc_calib_backup)
+    variables.clear_calibration_selection_mask()
+    variables.clear_calibration_peak_range()
 
 
 def save_on_click(variables, calibration_mode):
@@ -176,11 +180,13 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     )
     automatic_window_update = widgets.Dropdown(
         options=[('False', False), ('True', True)],
+        value=False,
         description='auto window update:',
         layout=label_layout,
     )
     lock_peak_selection = widgets.Dropdown(
-        options=[('True', True), ('False', False)],
+        options=[('False', False), ('True', True)],
+        value=False,
         description='lock peak ions:',
         layout=label_layout,
     )
@@ -211,10 +217,29 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             variables.mc_calib = np.copy(state)
 
     def _capture_selection():
-        return float(variables.selected_x1), float(variables.selected_x2)
+        mode_key = _calibration_mode_key()
+        calibration_range = variables.calibration_peak_ranges.get(mode_key)
+        calibration_mask = variables.calibration_selection_masks.get(mode_key)
+        return {
+            'mode': mode_key,
+            'selected_x1': float(variables.selected_x1),
+            'selected_x2': float(variables.selected_x2),
+            'calibration_range': None if calibration_range is None else tuple(calibration_range),
+            'calibration_mask': None if calibration_mask is None else np.copy(calibration_mask),
+        }
 
     def _restore_selection(selection):
-        variables.selected_x1, variables.selected_x2 = selection
+        mode_key = selection['mode']
+        variables.selected_x1 = selection['selected_x1']
+        variables.selected_x2 = selection['selected_x2']
+        if selection['calibration_range'] is None:
+            variables.clear_calibration_peak_range(mode_key)
+        else:
+            variables.set_calibration_peak_range(mode_key, *selection['calibration_range'])
+        if selection['calibration_mask'] is None:
+            variables.clear_calibration_selection_mask(mode_key)
+        else:
+            variables.set_calibration_selection_mask(mode_key, selection['calibration_mask'])
 
     def _get_calibration_array():
         if calibration_mode.value == 'tof_calib':
@@ -223,16 +248,21 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
 
     def _prepare_locked_selection():
         calibration_key = _calibration_mode_key()
-        if not lock_peak_selection.value:
+        if not _selected_peak_ready():
+            variables.clear_calibration_peak_range(calibration_key)
             variables.clear_calibration_selection_mask(calibration_key)
             return
-        if not _selected_peak_ready():
+
+        variables.set_calibration_peak_range(calibration_key, variables.selected_x1, variables.selected_x2)
+        if not lock_peak_selection.value:
             variables.clear_calibration_selection_mask(calibration_key)
             return
         data = _get_calibration_array()
         mask = np.logical_and(data > variables.selected_x1, data < variables.selected_x2)
         if np.any(mask):
             variables.set_calibration_selection_mask(calibration_key, mask)
+        else:
+            variables.clear_calibration_selection_mask(calibration_key)
 
     def _sampling_mode_value():
         variables.bowl_sampling_mode = sampling_mode_b.value
@@ -428,9 +458,10 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             plot_show=False,
             fast_calibration=fast_calibration.value,
         )
+        _prepare_locked_selection()
 
     def _refresh_peak_window_plot(figure_size):
-        if lock_peak_selection.value:
+        if not automatic_window_update.value or lock_peak_selection.value:
             return False
         before_selection = _capture_selection()
         with out:
@@ -455,6 +486,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                 figure_size=figure_size,
                 fast_calibration=fast_calibration.value,
             )
+        _prepare_locked_selection()
         after_selection = _capture_selection()
         return after_selection != before_selection and _selected_peak_ready()
 
@@ -667,7 +699,8 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             pb_vol.value = "<b>Starting...</b>"
             try:
                 _prepare_locked_selection()
-                print('Selected mc ranges are: (%s, %s)' % (variables.selected_x1, variables.selected_x2))
+                left_edge, right_edge = variables.get_calibration_peak_range(_calibration_mode_key())
+                print('Selected mc ranges are: (%s, %s)' % (left_edge, right_edge))
                 print('----------------Voltage Calibration-------------------')
                 _run_voltage_correction()
                 print('Voltage calibration finished successfully.')
@@ -683,7 +716,8 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             pb_bowl.value = "<b>Starting...</b>"
             try:
                 _prepare_locked_selection()
-                print('Selected mc ranges are: (%s, %s)' % (variables.selected_x1, variables.selected_x2))
+                left_edge, right_edge = variables.get_calibration_peak_range(_calibration_mode_key())
+                print('Selected mc ranges are: (%s, %s)' % (left_edge, right_edge))
                 print('------------------Bowl Calibration---------------------')
                 _run_bowl_correction()
                 print('Bowl calibration finished successfully.')
@@ -700,9 +734,11 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             if calibration_mode_widget.value == 'tof_calib':
                 variables.dld_t_calib = calibration.initial_calibration(variables.data, flight_path_length_value)
                 print('Initial ToF calibration is done')
+                _prepare_locked_selection()
                 _run_bowl_correction(plot_override=False, save_override=False)
                 print('Initial ToF calibration + bowl correction is done')
             else:
+                _prepare_locked_selection()
                 _run_bowl_correction(plot_override=False, save_override=False)
                 print('Initial m/c tab action applied bowl correction')
         initial_calib_button.disabled = False

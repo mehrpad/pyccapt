@@ -308,7 +308,8 @@ def voltage_corr_main(dld_highVoltage, variables, sample_size, mode, calibration
         field_names=("dld_highVoltage", f"{calibration_mode}_calibration_values"),
     )
 
-    print('The left and right side of the main peak is:', variables.selected_x1, variables.selected_x2)
+    left_edge, right_edge = variables.get_calibration_peak_range(calibration_mode)
+    print('The left and right side of the main peak is:', left_edge, right_edge)
     mask_temporal, dld_peak_b = _extract_peak_mask_and_values(variables, calibration_mode)
     dld_highVoltage_peak_v = np.asarray(dld_highVoltage)[mask_temporal]
 
@@ -768,7 +769,8 @@ def bowl_correction_main(dld_x, dld_y, dld_highVoltage, variables, det_diam, sam
         field_names=("dld_x", "dld_y", "dld_highVoltage", f"{calibration_mode}_calibration_values"),
     )
 
-    print('The left and right side of the main peak is:', variables.selected_x1, variables.selected_x2)
+    left_edge, right_edge = variables.get_calibration_peak_range(calibration_mode)
+    print('The left and right side of the main peak is:', left_edge, right_edge)
     mask_temporal, dld_peak = _extract_peak_mask_and_values(variables, calibration_mode)
     print('The number of ions is:', len(dld_peak))
 

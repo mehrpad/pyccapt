@@ -362,7 +362,12 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         if report is None:
             return float('nan'), None
 
-        mrp_values = report['gaussian_mrp'] if report['gaussian_ok'] else report['histogram_mrp']
+        # Use the recommended MRP which already applies the physical ceiling
+        # and cross-checks Voigt/Gaussian/histogram values for robustness.
+        # Previously this used raw gaussian_mrp/histogram_mrp, letting absurd
+        # values (e.g. 938,559) flow into the scoring and destabilise the
+        # _optimize_sequence holdout comparisons.
+        mrp_values = report['recommended_mrp']
         weights = [0.6, 0.3, 0.1]
         score = 0.0
         weight_sum = 0.0
@@ -434,6 +439,31 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             return False
         return candidate >= best - max(0.1, abs(best) * tolerance_ratio)
 
+    def _force_reselect_peak_window():
+        """Re-run peak detection on current data and auto-select a new peak window."""
+        mc_plot.hist_plot(
+            variables,
+            bin_size.value,
+            log=True,
+            target=calibration_mode.value,
+            normalize=False,
+            prominence=prominence.value,
+            distance=distance.value,
+            percent=percent.value,
+            selector='rect',
+            figname=index_fig.value,
+            lim=lim_tof.value,
+            save_fig=False,
+            peaks_find_plot=False,
+            draw_calib_rect=True,
+            print_info=False,
+            mrp_all=False,
+            figure_size=(figure_mc_size_x.value, figure_mc_size_y.value),
+            plot_show=False,
+            fast_calibration=False,
+            fast_histogram=True,
+        )
+
     def _update_peak_window(figure_size):
         if not automatic_window_update.value or lock_peak_selection.value:
             return
@@ -457,6 +487,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             figure_size=figure_size,
             plot_show=False,
             fast_calibration=fast_calibration.value,
+            fast_histogram=True,
         )
         _prepare_locked_selection()
 
@@ -485,6 +516,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                 mrp_all=False,
                 figure_size=figure_size,
                 fast_calibration=fast_calibration.value,
+                fast_histogram=True,
             )
         _prepare_locked_selection()
         after_selection = _capture_selection()
@@ -504,7 +536,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     def _reset_both_corrections():
         variables.dld_t_calib = variables.data['t (ns)'].to_numpy(); variables.mc_calib = variables.data['mc_uc (Da)'].to_numpy()
 
-    def _auto_select_peak_for_mode(mode_value, lim_value_override):
+    def _auto_select_peak_for_mode(mode_value, lim_value_override, initial_peak_selection=False):
         _run_with_mode(
             mode_value,
             lambda: mc_plot.hist_plot(
@@ -527,6 +559,8 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                 figure_size=(figure_mc_size_x.value, figure_mc_size_y.value),
                 plot_show=False,
                 fast_calibration=False,
+                fast_histogram=True,
+                initial_peak_selection=initial_peak_selection,
             ),
         )
 
@@ -569,6 +603,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             mrp_all=False,
             figure_size=(figure_mc_size_x.value, figure_mc_size_y.value),
             plot_show=False,
+            fast_histogram=True,
         )
 
         if calibration_mode.value == 'tof_calib':
@@ -608,6 +643,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                 mrp_all=True,
                 figure_size=figure_size,
                 fast_calibration=False,
+                fast_histogram=True,
             )
         plot_button.disabled = False
 
@@ -732,9 +768,21 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         with out, _verbosity_context():
             out.clear_output()
             if calibration_mode_widget.value == 'tof_calib':
+                # Step 1: Naive flight-path + voltage factor correction
                 variables.dld_t_calib = calibration.initial_calibration(variables.data, flight_path_length_value)
                 print('Initial ToF calibration is done')
+                # Step 2: Re-select peak window on the corrected data
+                _force_reselect_peak_window()
                 _prepare_locked_selection()
+                # Step 3: Voltage correction
+                try:
+                    _run_voltage_correction(plot_override=False, save_override=False)
+                except Exception as exc:
+                    print(f'Voltage correction during initial calibration skipped: {exc}')
+                # Step 4: Re-select peak window after voltage correction
+                _force_reselect_peak_window()
+                _prepare_locked_selection()
+                # Step 5: Bowl correction
                 _run_bowl_correction(plot_override=False, save_override=False)
                 print('Initial ToF calibration + bowl correction is done')
             else:

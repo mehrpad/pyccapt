@@ -43,6 +43,8 @@ def hist_plot(
     figure_size=(9, 5),
     plot_show=True,
     fast_calibration=False,
+    fast_histogram=True,
+    initial_peak_selection=False,
 ):
     """Plot a mass spectrum or tof spectrum and report MRP statistics."""
     assert target in ["mc", "mc_uc", "tof", "tof_c", "tof_calib", "mc_calib"], "Invalid target"
@@ -115,6 +117,7 @@ def hist_plot(
         hist = np.random.choice(hist, int(len(hist) * 0.1), replace=False)
 
     steps = "bar" if (plot_ranged_peak or plot_ranged_colors) else "stepfilled"
+    use_fast = fast_histogram and steps != "bar"
 
     mc_hist = AptHistPlotter(hist[hist < lim], variables)
     y_values, x_values = mc_hist.plot_histogram(
@@ -126,6 +129,7 @@ def hist_plot(
         grid=grid,
         fig_size=figure_size,
         plot_show=plot_show,
+        fast=use_fast,
     )
 
     variables.AptHistPlotter = mc_hist
@@ -143,7 +147,7 @@ def hist_plot(
             percent=percent,
         )
         if draw_calib_rect:
-            mc_hist.draw_rectangle()
+            mc_hist.draw_rectangle(initial=initial_peak_selection)
         if peaks_find_plot:
             mc_hist.plot_peaks()
         mc_hist.plot_hist_info_legend(label=label, mrp_all=mrp_all, background=None, legend_mode=legend_mode, loc="right")

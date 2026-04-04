@@ -67,13 +67,15 @@ def _peak_quality_score(calibration_array, peak):
     report = gaussian_mrp_report(calibration_array, peak["x1"], peak["x2"], bin_size=local_bin_size)
     if report is None:
         return float("nan")
-    mrp_values = report["gaussian_mrp"] if report["gaussian_ok"] else report["histogram_mrp"]
+    # Use recommended_mrp which applies the physical ceiling and cross-checks
+    # Voigt/Gaussian/histogram values, preventing absurd scores.
+    mrp_values = report["recommended_mrp"]
     weights = (0.6, 0.3, 0.1)
     score = 0.0
     weight_sum = 0.0
     for weight, value in zip(weights, mrp_values):
         if np.isfinite(value):
-            score += weight * float(np.log1p(max(0.0, value)))
+            score += weight * float(max(0.0, value))
             weight_sum += weight
     return float("nan") if weight_sum == 0 else score / weight_sum
 

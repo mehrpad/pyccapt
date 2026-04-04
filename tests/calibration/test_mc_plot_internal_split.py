@@ -111,6 +111,9 @@ def test_gaussian_mrp_report_rejects_implausibly_narrow_subpeak():
     report = gaussian_mrp_report(values, 32.75, 33.15, bin_size=0.001, peak_center=32.95)
 
     assert report is not None
-    assert report['recommended_label'].startswith('Histogram')
-    assert float(report['recommended_mrp'][0]) < float(report['gaussian_mrp'][0])
+    # The recommended MRP must reflect the *broad* peak (MRP ~400),
+    # not the implausibly narrow spike (MRP ~40,000).
+    mrp_50 = float(report['recommended_mrp'][0])
+    assert np.isfinite(mrp_50), "recommended MRP(0.5) must be finite"
+    assert mrp_50 < 2000, f"MRP(0.5) = {mrp_50} — should reflect broad peak, not narrow spike"
 

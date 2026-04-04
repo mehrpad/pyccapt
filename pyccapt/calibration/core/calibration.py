@@ -1009,7 +1009,7 @@ def _auto_detect_peaks(calibration_array, n_peaks=3, prominence=100, distance=50
         left = float(np.interp(pw[2][pi], np.arange(len(hist_x)), hist_x))
         right = float(np.interp(pw[3][pi], np.arange(len(hist_x)), hist_x))
         width = max(right - left, float(hist_bin_size) * 3)
-        margin = max(float(hist_bin_size) * 2, width * 0.5)
+        margin = max(float(hist_bin_size) * 2, width * 0.25)
         x1 = max(mc_min, left - margin)
         x2 = min(mc_max, right + margin)
         if x2 <= x1:

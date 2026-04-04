@@ -102,7 +102,7 @@ class AptHistPlotter:
         self.legend_colors = []
 
     def plot_histogram(self, bin_width=0.1, normalize=False, label='mc', log=True, grid=False, steps='stepfilled',
-                       fig_size=(9, 5), plot_show=True):
+                       fig_size=(9, 5), plot_show=True, fast=False):
         """
         Plot the histogram of the mc or tof data.
 
@@ -115,6 +115,7 @@ class AptHistPlotter:
             steps (str): The type of the histogram ('stepfilled' or 'bar').
             fig_size (tuple): The size of the figure.
             plot_show (bool): Whether to show the plot.
+            fast (bool): Use np.histogram + fill_between instead of ax.hist for speed.
 
         Returns:
             tuple: A tuple of the y and x values of the histogram.
@@ -128,21 +129,30 @@ class AptHistPlotter:
         # Plot the histogram directly
         self.fig, self.ax = plt.subplots(figsize=fig_size)
 
-        if steps == 'bar':
-            edgecolor = None
-            alpha = 1
+        # Force fast mode for bar-incompatible rendering or large datasets
+        if fast and steps != 'bar':
+            self.y, self.x = np.histogram(self.mc_tof, bins=self.bins, density=normalize)
+            self.x_centers = (self.x[:-1] + self.x[1:]) * 0.5
+            self.ax.fill_between(self.x_centers, self.y, step='mid', alpha=0.9, color='slategray')
+            self.ax.step(self.x_centers, self.y, where='mid', color='k', linewidth=0.5)
+            self.patches = []
         else:
-            edgecolor = 'k'
-            alpha = 0.9
+            if steps == 'bar':
+                edgecolor = None
+                alpha = 1
+            else:
+                edgecolor = 'k'
+                alpha = 0.9
 
-        if normalize:
-            self.y, self.x, self.patches = self.ax.hist(self.mc_tof, bins=self.bins, alpha=alpha,
-                                                        color='slategray', edgecolor=edgecolor, histtype=steps,
-                                                        density=True)
-        else:
-            self.y, self.x, self.patches = self.ax.hist(self.mc_tof, bins=self.bins, alpha=alpha, color='slategray',
-                                                        edgecolor=edgecolor, histtype=steps)
-        self.x_centers = (self.x[:-1] + self.x[1:]) * 0.5
+            if normalize:
+                self.y, self.x, self.patches = self.ax.hist(self.mc_tof, bins=self.bins, alpha=alpha,
+                                                            color='slategray', edgecolor=edgecolor, histtype=steps,
+                                                            density=True)
+            else:
+                self.y, self.x, self.patches = self.ax.hist(self.mc_tof, bins=self.bins, alpha=alpha, color='slategray',
+                                                            edgecolor=edgecolor, histtype=steps)
+            self.x_centers = (self.x[:-1] + self.x[1:]) * 0.5
+
         self.ax.set_xlabel('Mass/Charge [Da]' if label == 'mc' else 'Time of Flight [ns]')
         self.ax.set_ylabel('Event Counts')
         self.ax.set_yscale('log' if log else 'linear')
@@ -151,9 +161,6 @@ class AptHistPlotter:
         if self.original_x_limits is None:
             self.original_x_limits = self.ax.get_xlim()  # Store the original x-axis limits
         plt.tight_layout()
-        # Set the limits for both x and y axes using plt.ylim
-        # plt.ylim(bottom=plt.yticks()[0][0], top=plt.yticks()[0][-1])
-        # plt.xlim(left=plt.xticks()[0][0], right=plt.xticks()[0][-1])
         if plot_show:
             plt.show()
         else:
@@ -506,9 +513,9 @@ class AptHistPlotter:
         """Find peaks and widths and update shared variables."""
         return _find_peaks_and_widths(self, prominence=prominence, distance=distance, percent=percent)
 
-    def draw_rectangle(self, ):
+    def draw_rectangle(self, initial=False):
         """Draw auto-selected peak rectangle."""
-        return _draw_rectangle(self)
+        return _draw_rectangle(self, initial=initial)
 
     def selector(self, selector='rect'):
         """Attach interaction selector handlers."""
@@ -564,7 +571,8 @@ def hist_plot(variables, bin_size, log, target, normalize, prominence, distance,
               peaks_find=True, peaks_find_plot=False, plot_ranged_peak=False, plot_ranged_colors=False, mrp_all=False,
               background=None, grid=False, ranging_mode=False, range_sequence=[], range_mc=[], range_detx=[],
               range_dety=[], range_x=[], range_y=[], range_z=[], range_vol=[], save_fig=True, print_info=True,
-              legend_mode='long', draw_calib_rect=False, figure_size=(9, 5), plot_show=True, fast_calibration=False):
+              legend_mode='long', draw_calib_rect=False, figure_size=(9, 5), plot_show=True, fast_calibration=False,
+              fast_histogram=True, initial_peak_selection=False):
     """Backward-compatible wrapper delegating to :mod:`mc_plot_api`."""
     from pyccapt.calibration.core.mc_plot_api import hist_plot as _hist_plot
 
@@ -603,6 +611,8 @@ def hist_plot(variables, bin_size, log, target, normalize, prominence, distance,
         figure_size=figure_size,
         plot_show=plot_show,
         fast_calibration=fast_calibration,
+        fast_histogram=fast_histogram,
+        initial_peak_selection=initial_peak_selection,
     )
 
 

@@ -15,6 +15,9 @@ _MRP_MIN_BINS = 60
 _MRP_EXPANSION_FACTOR = 3.0
 _MRP_REFERENCE_GUARD_FACTOR = 3.0
 _MRP_REFERENCE_MIN_WIDTH_RATIO = 0.35
+# No single-run APT instrument physically achieves FWHM MRP above this value;
+# anything higher is a fitting artefact from a narrow sub-peak or noise spike.
+_MRP_PHYSICAL_CEILING = 1500.0
 
 
 def _gaussian(x, amp, mu, sigma, bg):
@@ -34,7 +37,11 @@ def _fit_gaussian_mrp(x, y, peak_idx):
     if amp0 <= 0:
         return nan3, False
 
-    hw = min(15, peak_idx, len(x) - 1 - peak_idx)
+    # Use a data-adaptive half-window: at least ±0.3 Da worth of bins,
+    # so the fitting window is physically meaningful regardless of bin size.
+    bin_step = float(x[1] - x[0]) if len(x) > 1 else 1.0
+    min_hw_bins = max(15, int(np.ceil(0.3 / max(bin_step, 1e-9))))
+    hw = min(min_hw_bins, peak_idx, len(x) - 1 - peak_idx)
     sl = slice(peak_idx - hw, peak_idx + hw + 1)
     xw, yw = x[sl], y[sl].astype(float)
 
@@ -184,7 +191,11 @@ def _fit_voigt_mrp(x, y, peak_idx):
     if amp0 <= 0:
         return nan3, False, float('nan'), 'unknown'
 
-    hw = min(15, peak_idx, len(x) - 1 - peak_idx)
+    # Use a data-adaptive half-window: at least ±0.3 Da worth of bins,
+    # so the fitting window is physically meaningful regardless of bin size.
+    bin_step = float(x[1] - x[0]) if len(x) > 1 else 1.0
+    min_hw_bins = max(15, int(np.ceil(0.3 / max(bin_step, 1e-9))))
+    hw = min(min_hw_bins, peak_idx, len(x) - 1 - peak_idx)
     sl = slice(peak_idx - hw, peak_idx + hw + 1)
     xw, yw = x[sl], y[sl].astype(float)
 
@@ -277,6 +288,7 @@ def _recommended_mrp_payload(report):
         report.get('voigt_ok')
         and np.isfinite(voigt_values[0])
         and (not histogram_valid or voigt_values[0] <= histogram_values[0] * _MRP_REFERENCE_GUARD_FACTOR)
+        and voigt_values[0] <= _MRP_PHYSICAL_CEILING
     )
     if voigt_valid:
         return report['voigt_mrp'], f'Voigt ({report["profile_type"]})'
@@ -285,9 +297,13 @@ def _recommended_mrp_payload(report):
         report.get('gaussian_ok')
         and np.isfinite(gaussian_values[0])
         and (not histogram_valid or gaussian_values[0] <= histogram_values[0] * _MRP_REFERENCE_GUARD_FACTOR)
+        and gaussian_values[0] <= _MRP_PHYSICAL_CEILING
     )
     if gaussian_valid:
         return report['gaussian_mrp'], 'Gaussian'
+    # Cap histogram fallback: replace values above the physical ceiling with NaN
+    if histogram_valid and histogram_values[0] > _MRP_PHYSICAL_CEILING:
+        return [float('nan')] * 3, 'Histogram (above physical ceiling)'
     return histogram_values, 'Histogram'
 
 
@@ -644,11 +660,36 @@ def calculate_mrp(plotter):
 
 
 def fast_mrp(calibration_array, x1, x2, bin_size=0.1):
-    """Calculate MRP at (0.5, 0.1, 0.01) using Gaussian peak fitting."""
+    """Calculate MRP at (0.5, 0.1, 0.01) using Gaussian peak fitting.
+
+    If the requested *bin_size* produces too-sparse histograms (leading to all-NaN
+    results), the function automatically retries with progressively larger bin sizes.
+    """
     nan3 = [float('nan')] * 3
     data = calibration_array[(calibration_array > x1) & (calibration_array < x2)]
     if len(data) < 10:
         return nan3
+
+    # Build a unique, ordered list of bin sizes to try.
+    _candidates = [bin_size, bin_size * 3, bin_size * 10, 0.01, 0.05, 0.1]
+    seen = set()
+    fallback_sizes = []
+    for bs in _candidates:
+        rounded = round(bs, 8)
+        if rounded not in seen and rounded > 0:
+            seen.add(rounded)
+            fallback_sizes.append(rounded)
+
+    for attempt_bin in fallback_sizes:
+        result = _fast_mrp_core(data, x1, x2, attempt_bin)
+        if result is not None and any(np.isfinite(v) for v in result):
+            return result
+    return nan3
+
+
+def _fast_mrp_core(data, x1, x2, bin_size):
+    """Single-attempt MRP calculation for *fast_mrp*."""
+    nan3 = [float('nan')] * 3
 
     n_bins = max(2, int((x2 - x1) / bin_size))
     y, edges = np.histogram(data, bins=n_bins)
@@ -657,9 +698,9 @@ def fast_mrp(calibration_array, x1, x2, bin_size=0.1):
     try:
         peaks, _ = find_peaks(y, height=0)
     except ValueError:
-        return nan3
+        return None
     if len(peaks) == 0:
-        return nan3
+        return None
 
     prom = peak_prominences(y, peaks)
     idx = np.argmax(prom[0])
@@ -678,11 +719,37 @@ def fast_mrp(calibration_array, x1, x2, bin_size=0.1):
             result.append(round(float(x[peaks[idx]] / width), 2) if width > 0 else float('nan'))
         except (ValueError, IndexError):
             result.append(float('nan'))
-    return result
+    return result if any(np.isfinite(v) for v in result) else None
 
 
 def gaussian_mrp_report(calibration_array, x1, x2, bin_size=_MRP_INTERNAL_BIN_SIZE, peak_center=None, _reference_guard=True):
-    """Compute a robust high-resolution MRP report for the selected peak window."""
+    """Compute a robust high-resolution MRP report for the selected peak window.
+
+    If the requested *bin_size* is too fine to find any peaks, the function
+    retries with progressively larger bin sizes before giving up.
+    """
+    report = _gaussian_mrp_report_core(calibration_array, x1, x2, bin_size=bin_size,
+                                        peak_center=peak_center, _reference_guard=_reference_guard)
+    if report is not None:
+        return report
+
+    # Retry with coarser bin sizes when the fine resolution fails
+    _candidates = [bin_size * 3, bin_size * 10, _MRP_REFERENCE_BIN_SIZE, 0.05, 0.1]
+    seen = {round(bin_size, 8)}
+    for candidate in _candidates:
+        rounded = round(candidate, 8)
+        if rounded in seen or rounded <= 0:
+            continue
+        seen.add(rounded)
+        report = _gaussian_mrp_report_core(calibration_array, x1, x2, bin_size=rounded,
+                                            peak_center=peak_center, _reference_guard=_reference_guard)
+        if report is not None:
+            return report
+    return None
+
+
+def _gaussian_mrp_report_core(calibration_array, x1, x2, bin_size=_MRP_INTERNAL_BIN_SIZE, peak_center=None, _reference_guard=True):
+    """Single-attempt MRP report computation (inner implementation)."""
     values = np.asarray(calibration_array, dtype=float)
     values = values[np.isfinite(values)]
     if values.size < 10:
@@ -867,19 +934,51 @@ def find_peaks_and_widths(plotter, prominence=None, distance=None, percent=50):
     return plotter.peaks, plotter.properties, plotter.peak_widths, plotter.prominences
 
 
-def draw_rectangle(plotter):
-    """Draw automatic selection rectangle around highest peak."""
+def draw_rectangle(plotter, initial=False):
+    """Draw automatic selection rectangle around highest peak.
+
+    Parameters
+    ----------
+    plotter : AptHistPlotter
+        The histogram plotter instance.
+    initial : bool, optional
+        When *True* a wider minimum selection width is enforced so that the
+        **initial** calibration step always operates on a physically meaningful
+        number of ions.  For subsequent optimisation iterations this should
+        remain *False* so that the precise peak-width measurement from
+        ``scipy.signal.peak_widths`` is used as-is.
+    """
     index_max_ini = np.argmax(plotter.prominences[0])
     left_idx = int(np.clip(round(plotter.peak_widths[2][index_max_ini]), 0, max(0, len(plotter.x) - 1)))
     right_idx = int(np.clip(round(plotter.peak_widths[3][index_max_ini]), 0, max(0, len(plotter.x) - 1)))
-    plotter.variables.selected_x1 = float(plotter.x[left_idx])
-    plotter.variables.selected_x2 = float(plotter.x[right_idx])
+    sel_x1 = float(plotter.x[left_idx])
+    sel_x2 = float(plotter.x[right_idx])
+
+    if initial:
+        # Enforce a minimum selection width so that the initial calibration
+        # always operates on a physically meaningful number of ions.  The
+        # minimum scales with the data range so that ToF spectra (range
+        # ~1000 ns) get at least ~5 ns instead of the sub-nanosecond windows
+        # that scipy peak_widths can produce when many sub-peaks cluster
+        # together.
+        bin_w = float(plotter.bin_width) if plotter.bin_width else 0.1
+        data_min = float(np.min(plotter.mc_tof))
+        data_max = float(np.max(plotter.mc_tof))
+        data_range = max(data_max - data_min, 1.0)
+        min_width = max(bin_w * 20.0, data_range * 0.005, 0.5)
+        if sel_x2 - sel_x1 < min_width:
+            center = 0.5 * (sel_x1 + sel_x2)
+            sel_x1 = max(data_min, center - min_width / 2.0)
+            sel_x2 = min(data_max, center + min_width / 2.0)
+
+    plotter.variables.selected_x1 = sel_x1
+    plotter.variables.selected_x2 = sel_x2
     plotter.variables.selected_y1 = 0
     plotter.variables.selected_y2 = float(plotter.prominences[0][index_max_ini])
 
     plotter.rectangle = plt.Rectangle(
-        (plotter.variables.selected_x1, plotter.variables.selected_y1),
-        plotter.variables.selected_x2 - plotter.variables.selected_x1,
+        (sel_x1, plotter.variables.selected_y1),
+        sel_x2 - sel_x1,
         plotter.variables.selected_y2,
         edgecolor='g',
         facecolor=(0, 1, 0, 0.5),

@@ -18,7 +18,10 @@ import pandas as pd
 
 from pyccapt.calibration.core import calibration
 from pyccapt.calibration.core.adaptive_residual_calibration import adaptive_residual_calibration
-from pyccapt.calibration.core.joint_tof_mc_calibration import joint_tof_mc_calibration
+try:
+    from pyccapt.calibration.core.joint_tof_mc_calibration import joint_tof_mc_calibration
+except ImportError:
+    joint_tof_mc_calibration = None
 from pyccapt.calibration.core.mc_plot_peak_helpers import gaussian_mrp_report
 from pyccapt.calibration.core.share_variables import Variables
 
@@ -445,6 +448,11 @@ def run_mc_initial(variables: Variables, det_diam: float) -> None:
 
 def run_tof_initial(variables: Variables, flight_path_mm: float, det_diam: float) -> None:
     variables.dld_t_calib = calibration.initial_calibration(variables.data, flight_path_mm)
+    # Re-select peak on the corrected data before voltage + bowl corrections
+    select_and_lock_peak(variables, "tof")
+    run_voltage(variables, "tof")
+    # Re-select peak after voltage correction for accurate bowl correction
+    select_and_lock_peak(variables, "tof")
     calibration.bowl_correction_main(
         variables.dld_x_det,
         variables.dld_y_det,
@@ -704,6 +712,8 @@ def benchmark_method(data: pd.DataFrame, name: str, mode: str, flight_path_mm: f
                     verbose=False,
                 )
         elif name == "joint_after_initial":
+            if joint_tof_mc_calibration is None:
+                raise RuntimeError("joint_tof_mc_calibration module not available")
             with redirect_stdout(io.StringIO()):
                 run_mc_initial(variables, det_diam)
                 run_tof_initial(variables, flight_path_mm, det_diam)

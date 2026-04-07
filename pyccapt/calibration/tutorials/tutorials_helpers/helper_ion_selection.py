@@ -9,24 +9,24 @@ from pyccapt.calibration.core import ion_selection, mc_plot
 from pyccapt.calibration.core.mc_plot_peak_helpers import gaussian_mrp_report
 
 
-def call_ion_selection(variables, colab=False):
+def call_ion_selection(variables, colab=False, show_gaussian_controls=False):
 	out = Output()
 	output2 = Output()
 	output3 = Output()
 
-	bin_size = widgets.FloatText(value=0.1, description='bin size:')
-	prominence = widgets.IntText(value=50, description='peak prominence:')
-	distance = widgets.IntText(value=1, description='peak distance:')
-	lim_tof = widgets.IntText(value=400, description='lim tof/mc:')
-	percent = widgets.IntText(value=50, description='percent MRP:')
-	index_fig = widgets.IntText(value=1, description='fig index:')
+	bin_size = widgets.FloatText(value=0.1, description='Bin size:')
+	prominence = widgets.IntText(value=50, description='Peak prominence:')
+	distance = widgets.IntText(value=1, description='Peak distance:')
+	lim_tof = widgets.IntText(value=400, description='Lim tof/mc:')
+	percent = widgets.IntText(value=50, description='Percent MRP:')
+	index_fig = widgets.IntText(value=1, description='Fig index:')
 	plot_peak = widgets.Dropdown(
 		options=[('True', True), ('False', False)],
-		description='plot peak:'
+		description='Plot peak:'
 	)
 	save_fig = widgets.Dropdown(
 		options=[('False', False), ('True', True)],
-		description='save fig:'
+		description='Save fig:'
 	)
 	mrp_left = widgets.FloatText(value=0.0, description='MRP left:')
 	mrp_right = widgets.FloatText(value=0.0, description='MRP right:')
@@ -109,18 +109,20 @@ def call_ion_selection(variables, colab=False):
 
 	def run_gaussian_mrp(b):
 		gaussian_mrp_button.disabled = True
-		with out:
-			window = _resolve_gaussian_window()
-			if window is None:
-				print('No valid peak window found. Set MRP left/right or load the current peak range.')
-			else:
-				mrp_left.value, mrp_right.value = window
-				result = gaussian_mrp_report(_current_hist_array(), mrp_left.value, mrp_right.value, bin_size=0.001)
-				if result is None:
-					print('Gaussian MRP: insufficient data in selected range')
+		try:
+			with out:
+				window = _resolve_gaussian_window()
+				if window is None:
+					print('No valid peak window found. Set MRP left/right or load the current peak range.')
 				else:
-					_print_gaussian_report(result)
-		gaussian_mrp_button.disabled = False
+					mrp_left.value, mrp_right.value = window
+					result = gaussian_mrp_report(_current_hist_array(), mrp_left.value, mrp_right.value, bin_size=0.001)
+					if result is None:
+						print('Gaussian MRP: insufficient data in selected range')
+					else:
+						_print_gaussian_report(result)
+		finally:
+			gaussian_mrp_button.disabled = False
 
 	load_mrp_window_button.on_click(load_gaussian_window)
 	gaussian_mrp_button.on_click(run_gaussian_mrp)
@@ -134,7 +136,8 @@ def call_ion_selection(variables, colab=False):
 			mc_plot.hist_plot(variables, bin_size.value, log=True, target='mc', normalize=False,
 			                  prominence=prominence.value, distance=distance.value, percent=percent.value,
 			                  selector='peak', figname=index_fig.value, lim=lim_tof.value,
-			                  peaks_find_plot=plot_peak.value, print_info=False, save_fig=save_fig.value)
+			                  peaks_find_plot=plot_peak.value, print_info=False, save_fig=save_fig.value,
+			                  compute_mrp=False)
 
 	def hist_plot_r(variables, out):
 		with out:
@@ -149,20 +152,20 @@ def call_ion_selection(variables, colab=False):
 			mc_plot.hist_plot(variables, bin_size.value, log=True, target='mc', normalize=False,
 			                  prominence=prominence.value, distance=distance.value, percent=percent.value,
 			                  selector='range', figname=index_fig.value, lim=lim_tof.value, peaks_find_plot=True,
-			                  ranging_mode=True, save_fig=False, print_info=False)
+			                  ranging_mode=True, save_fig=False, print_info=False, compute_mrp=False)
 
 	##############################################
 	# element calculate
-	peak_val = widgets.FloatText(value=1.1, description='peak value:')
+	peak_val = widgets.FloatText(value=1.1, description='Peak value:')
 
-	mass_difference = widgets.FloatText(value=2, description='mass range:')
+	mass_difference = widgets.FloatText(value=2, description='Mass range:')
 	charge = widgets.Dropdown(
 		options=[('1', 1), ('2', 2), ('3', 3), ('4', 4), ('5', 5), ('6', 6)],
 		value=3,
-		description='charge:'
+		description='Charge:'
 	)
-	aboundance_threshold = widgets.FloatText(value=0.0, description='threshold aboundance:', min=0, max=1, step=0.1)
-	num_element = widgets.IntText(value=5, description='num element:')
+	aboundance_threshold = widgets.FloatText(value=0.0, description='Threshold aboundance:', min=0, max=1, step=0.1)
+	num_element = widgets.IntText(value=5, description='Num element:')
 	# formula calculate
 	formula_m = widgets.Text(
 		value='{12}C1{16}O2',
@@ -174,7 +177,7 @@ def call_ion_selection(variables, colab=False):
 	molecule_charge = widgets.Dropdown(
 		options=[('1', 1), ('2', 2), ('3', 3), ('4', 4), ('5', 5), ('6', 6)],
 		value=3,
-		description='charge:'
+		description='Charge:'
 	)
 
 	# molecule create
@@ -187,73 +190,80 @@ def call_ion_selection(variables, colab=False):
 	complexity = widgets.Dropdown(
 		options=[('1', 1), ('2', 2), ('3', 3), ('4', 4), ('5', 5), ('6', 6)],
 		value=3,
-		description='complexity:'
+		description='Complexity:'
 	)
 
 	charge_com = widgets.Dropdown(
 		options=[('1', 1), ('2', 2), ('3', 3), ('4', 4), ('5', 5), ('6', 6)],
 		value=3,
-		description='charge:'
+		description='Charge:'
 	)
 
 	##############################################
 	plot_button_p = widgets.Button(
-		description='plot hist',
+		description='Plot hist',
 	)
 
 	plot_button_r = widgets.Button(
-		description='plot hist',
+		description='Plot hist',
 	)
 
 	plot_button = widgets.Button(
-		description='plot hist',
+		description='Plot hist',
 	)
 
 	find_elem_button = widgets.Button(
-		description='find element',
+		description='Find element',
 	)
 
 	plot_element = widgets.Button(
-		description='plot element',
+		description='Plot element',
 	)
 
 	formula_button = widgets.Button(
-		description='manual formula',
+		description='Manual formula',
 	)
 
 	add_ion_button = widgets.Button(
-		description='add ion',
+		description='Add ion',
 	)
 	romove_ion_button = widgets.Button(
-		description='remove ion',
+		description='Remove ion',
 	)
 	show_color = widgets.Button(
-		description='show color',
+		description='Show color',
 	)
 	change_color = widgets.Button(
-		description='change color',
+		description='Change color',
 	)
 
 	change_row = widgets.Button(
-		description='change row',
+		description='Change row',
 	)
 
+	del_row_index = widgets.IntText(value=0, description='Del. row:')
+	delete_row_button = widgets.Button(description='Delete')
+
 	color_picker = widgets.ColorPicker(description='Select a color:')
-	row_index = widgets.IntText(value=0, description='index row:')
+	row_index = widgets.IntText(value=0, description='Index row:')
 
 	plot_button_p.on_click(lambda b: plot_on_click_p(b, variables, out))
 
 	def plot_on_click_p(b, variables, out):
 		plot_button_p.disabled = True
-		hist_plot_p(variables, out)
-		plot_button_p.disabled = False
+		try:
+			hist_plot_p(variables, out)
+		finally:
+			plot_button_p.disabled = False
 
 	plot_button_r.on_click(lambda b: plot_on_click_r(b, variables, out))
 
 	def plot_on_click_r(b, variables, out):
 		plot_button_r.disabled = True
-		hist_plot_r(variables, out)
-		plot_button_r.disabled = False
+		try:
+			hist_plot_r(variables, out)
+		finally:
+			plot_button_r.disabled = False
 
 	def plot_found_element(b, variables):
 		variables.AptHistPlotter.plot_founded_range_loc(variables.ions_list_data, remove_lines=False)
@@ -345,9 +355,27 @@ def call_ion_selection(variables, colab=False):
 
 	change_row.on_click(lambda b: move_and_sort_dataframe(b, variables, row_index_source.value, row_index_dest.value,
 	                                                      output3))
+	delete_row_button.on_click(lambda b: delete_row_from_range_dataset(b, variables, del_row_index.value, output3))
 
 	row_index_source = widgets.IntText(value=0, description='Target index:')
-	row_index_dest = widgets.IntText(value=0, description='destination index:')
+	row_index_dest = widgets.IntText(value=0, description='Destination index:')
+
+	def delete_row_from_range_dataset(b, variables, row_to_delete, output3):
+		with output3:
+			if variables.range_data.empty:
+				clear_output(True)
+				print('No rows to delete.')
+				return
+
+			if row_to_delete < 0 or row_to_delete >= len(variables.range_data):
+				clear_output(True)
+				print(f'Invalid Del. row index: {row_to_delete}. Valid range is 0 to {len(variables.range_data) - 1}.')
+				display(variables.range_data)
+				return
+
+			variables.range_data = variables.range_data.drop(index=row_to_delete).reset_index(drop=True)
+			clear_output(True)
+			display(variables.range_data)
 
 	def move_and_sort_dataframe(b, variables, row_index, destination_index, output3):
 		# Check if the indices are valid
@@ -438,7 +466,7 @@ def call_ion_selection(variables, colab=False):
 		widgets.VBox([formula_m, molecule_charge, formula_button]),
 		widgets.VBox([row_index, color_picker, add_ion_button, romove_ion_button,
 		                       show_color, change_color]),
-		widgets.VBox([row_index_source, row_index_dest, change_row])
+		widgets.VBox([del_row_index, delete_row_button, row_index_source, row_index_dest, change_row])
 	])])
 
 	if not colab:
@@ -458,8 +486,9 @@ def call_ion_selection(variables, colab=False):
 		# Create a VBox to display the output widgets below the buttons
 		output_layout = widgets.HBox([out, widgets.VBox([output3, output2])])
 
+		controls_layout = widgets.VBox([buttons_layout, gaussian_controls]) if show_gaussian_controls else buttons_layout
 		# Display the buttons and the output widgets
-		display(widgets.VBox([buttons_layout, gaussian_controls]), output_layout)
+		display(controls_layout, output_layout)
 
 		with output3:
 			display(variables.range_data)
@@ -499,8 +528,9 @@ def call_ion_selection(variables, colab=False):
 		buttons_layout = widgets.HBox(buttons)
 		output_layout = widgets.HBox([widgets.VBox([out_tab, out]), widgets.VBox([output3, output2])])
 
+		controls_layout = widgets.VBox([buttons_layout, gaussian_controls]) if show_gaussian_controls else buttons_layout
 		# Display the buttons and output areas
-		display(buttons_layout, gaussian_controls, output_layout)
+		display(controls_layout, output_layout)
 
 		# Initial display
 		with out_tab:

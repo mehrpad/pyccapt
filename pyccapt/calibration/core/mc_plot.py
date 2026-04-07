@@ -572,7 +572,7 @@ def hist_plot(variables, bin_size, log, target, normalize, prominence, distance,
               background=None, grid=False, ranging_mode=False, range_sequence=[], range_mc=[], range_detx=[],
               range_dety=[], range_x=[], range_y=[], range_z=[], range_vol=[], save_fig=True, print_info=True,
               legend_mode='long', draw_calib_rect=False, figure_size=(9, 5), plot_show=True, fast_calibration=False,
-              fast_histogram=True, initial_peak_selection=False):
+              fast_histogram=True, initial_peak_selection=False, compute_mrp=True):
     """Backward-compatible wrapper delegating to :mod:`mc_plot_api`."""
     from pyccapt.calibration.core.mc_plot_api import hist_plot as _hist_plot
 
@@ -613,6 +613,7 @@ def hist_plot(variables, bin_size, log, target, normalize, prominence, distance,
         fast_calibration=fast_calibration,
         fast_histogram=fast_histogram,
         initial_peak_selection=initial_peak_selection,
+        compute_mrp=compute_mrp,
     )
 
 

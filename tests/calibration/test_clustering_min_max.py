@@ -10,6 +10,7 @@ from pyccapt.calibration.clustering import (
     estimate_maximum_separation_distance,
     maximum_separation_clustering,
     min_max_clustering,
+    normalize_clustering_method,
     segment_ions_by_maximum_separation,
     segment_ions_by_min_max,
 )
@@ -153,3 +154,12 @@ def test_cluster_plot_traces_are_named_by_cluster_and_respect_masks():
     )
     assert background is not None
     assert background.name == "Background specimen"
+
+
+def test_normalize_clustering_method_supports_new_aliases():
+    assert normalize_clustering_method("mmax sepretion") == "maximum-separation"
+    assert normalize_clustering_method("HDBSCAN") == "hdbscan"
+    assert normalize_clustering_method("Comp-Seeded Support HDBSCAN") == "comp-seeded-support-hdbscan"
+    assert normalize_clustering_method("Composition GMM Voxel") == "composition-gmm-voxel"
+    assert normalize_clustering_method("CompSpace Agnostic + Seeded") == "compspace-agnostic-seeded"
+

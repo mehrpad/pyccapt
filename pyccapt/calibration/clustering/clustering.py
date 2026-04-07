@@ -18,7 +18,14 @@ DEFAULT_CLUSTER_COLORS = (
     "#FFA15A",
 )
 
-SUPPORTED_CLUSTERING_METHODS = ("min-max", "maximum-separation")
+SUPPORTED_CLUSTERING_METHODS = (
+    "min-max",
+    "maximum-separation",
+    "hdbscan",
+    "comp-seeded-support-hdbscan",
+    "composition-gmm-voxel",
+    "compspace-agnostic-seeded",
+)
 
 
 @dataclass(frozen=True)
@@ -55,15 +62,31 @@ def parse_label_selection(selection: str | Iterable[str]) -> tuple[str, ...]:
 
 def normalize_clustering_method(method: str) -> str:
     """Return the canonical clustering method identifier."""
-    normalized = str(method).strip().lower().replace("_", "-").replace(" ", "-")
+    normalized = str(method).strip().lower().replace("_", "-").replace("+", "-").replace(" ", "-")
+    while "--" in normalized:
+        normalized = normalized.replace("--", "-")
     aliases = {
         "min-max": "min-max",
         "minmax": "min-max",
+        "composition-gmm-voxel": "composition-gmm-voxel",
+        "composition-gmm": "composition-gmm-voxel",
+        "gmm-voxel": "composition-gmm-voxel",
+        "compspace-agnostic-seeded": "compspace-agnostic-seeded",
+        "comp-space-agnostic-seeded": "compspace-agnostic-seeded",
+        "agnostic-seeded": "compspace-agnostic-seeded",
         "maximum-separation": "maximum-separation",
         "max-separation": "maximum-separation",
         "maximumseparation": "maximum-separation",
         "maximum-seperation": "maximum-separation",
         "max-seperation": "maximum-separation",
+        "mmax-separation": "maximum-separation",
+        "mmax-seperation": "maximum-separation",
+        "mmax-sepretion": "maximum-separation",
+        "hdbscan": "hdbscan",
+        "comp-seeded-support-hdbscan": "comp-seeded-support-hdbscan",
+        "comp-seeded-hdbscan": "comp-seeded-support-hdbscan",
+        "comp-seeded-support": "comp-seeded-support-hdbscan",
+        "comp-seeded": "comp-seeded-support-hdbscan",
     }
     resolved = aliases.get(normalized)
     if resolved is None:
@@ -161,6 +184,36 @@ def _build_cluster_result(
         algorithm=algorithm,
         parameters=parameters,
     )
+
+
+def _centers_from_labeled_points(points: np.ndarray, labels: np.ndarray) -> np.ndarray:
+    """Compute cluster centers for non-negative labels."""
+    labels = np.asarray(labels, dtype=int)
+    valid = labels >= 0
+    if not np.any(valid):
+        return np.empty((0, 3), dtype=float)
+    centers = []
+    for label in sorted(np.unique(labels[valid]).tolist()):
+        centers.append(np.asarray(points[labels == label], dtype=float).mean(axis=0))
+    return np.asarray(centers, dtype=float)
+
+
+def _drop_small_clusters(labels: np.ndarray, *, n_min: int) -> np.ndarray:
+    """Mark clusters smaller than n_min as noise and compact surviving labels."""
+    labels = np.asarray(labels, dtype=int).copy()
+    if n_min <= 1:
+        return labels
+    valid = labels >= 0
+    if not np.any(valid):
+        return labels
+    unique, counts = np.unique(labels[valid], return_counts=True)
+    keep = {int(label) for label, count in zip(unique, counts) if int(count) >= int(n_min)}
+    labels = np.array([label if int(label) in keep else -1 for label in labels], dtype=int)
+    valid = labels >= 0
+    if not np.any(valid):
+        return labels
+    remap = {int(old): idx for idx, old in enumerate(sorted(np.unique(labels[valid]).tolist()))}
+    return np.array([remap[int(label)] if label >= 0 else -1 for label in labels], dtype=int)
 
 
 def min_max_clustering(points: np.ndarray, n_clusters: int = 2, max_iter: int = 50) -> tuple[np.ndarray, np.ndarray]:
@@ -321,6 +374,149 @@ def maximum_separation_clustering(
     return labels, centers
 
 
+def hdbscan_clustering(
+    points: np.ndarray,
+    *,
+    n_min: int,
+    min_samples: int = 3,
+    d_max: float | None = None,
+    auto_d_max: bool = True,
+    percentile: float = 50.0,
+) -> tuple[np.ndarray, np.ndarray, dict[str, float | int | bool]]:
+    """Cluster points using HDBSCAN when available, with DBSCAN fallback."""
+    points = np.asarray(points, dtype=float)
+    if points.ndim != 2 or points.shape[1] != 3:
+        raise ValueError("points must be a (N, 3) array")
+    if len(points) == 0:
+        raise ValueError("points cannot be empty")
+
+    n_min = max(2, int(n_min))
+    min_samples = max(1, int(min_samples))
+    parameters: dict[str, float | int | bool] = {
+        "n_min": int(n_min),
+        "min_samples": int(min_samples),
+    }
+
+    try:
+        import hdbscan as _hdbscan
+
+        clusterer = _hdbscan.HDBSCAN(min_cluster_size=n_min, min_samples=min_samples)
+        labels = np.asarray(clusterer.fit_predict(points), dtype=int)
+        labels = _drop_small_clusters(labels, n_min=n_min)
+        centers = _centers_from_labeled_points(points, labels)
+        parameters["backend"] = True
+        return labels, centers, parameters
+    except Exception:
+        # Fallback for environments without hdbscan: density clustering with DBSCAN.
+        from sklearn.cluster import DBSCAN
+
+        if auto_d_max or d_max is None:
+            eps = estimate_maximum_separation_distance(
+                points,
+                kth_neighbor=max(1, min_samples),
+                percentile=float(percentile),
+            )
+        else:
+            eps = float(d_max)
+        labels = np.asarray(DBSCAN(eps=eps, min_samples=n_min).fit_predict(points), dtype=int)
+        labels = _drop_small_clusters(labels, n_min=n_min)
+        centers = _centers_from_labeled_points(points, labels)
+        parameters.update({"backend": False, "d_max": float(eps), "auto_d_max": bool(auto_d_max), "percentile": float(percentile)})
+        return labels, centers, parameters
+
+
+def composition_gmm_voxel_clustering(
+    points: np.ndarray,
+    *,
+    n_clusters: int,
+    voxel_size: float = 1.0,
+    n_min: int = 2,
+) -> tuple[np.ndarray, np.ndarray, dict[str, float | int | bool]]:
+    """Cluster points by fitting a Gaussian mixture over voxelized spatial features."""
+    points = np.asarray(points, dtype=float)
+    if points.ndim != 2 or points.shape[1] != 3:
+        raise ValueError("points must be a (N, 3) array")
+    n_clusters = max(2, int(n_clusters))
+    voxel_size = float(voxel_size)
+    if not np.isfinite(voxel_size) or voxel_size <= 0:
+        raise ValueError("voxel_size must be a positive finite number")
+
+    voxel_index = np.floor(points / voxel_size).astype(int)
+    unique_voxels, inverse, counts = np.unique(voxel_index, axis=0, return_inverse=True, return_counts=True)
+    voxel_centers = (unique_voxels.astype(float) + 0.5) * voxel_size
+    # Include normalized occupancy as a weak composition-like signal per voxel.
+    occupancy = counts.astype(float) / max(float(np.max(counts)), 1.0)
+    features = np.column_stack((voxel_centers, occupancy))
+
+    from sklearn.mixture import GaussianMixture
+
+    n_components = min(n_clusters, len(features))
+    gmm = GaussianMixture(n_components=n_components, covariance_type="full", random_state=0)
+    voxel_labels = np.asarray(gmm.fit_predict(features), dtype=int)
+    point_labels = voxel_labels[inverse]
+    point_labels = _drop_small_clusters(point_labels, n_min=max(2, int(n_min)))
+    centers = _centers_from_labeled_points(points, point_labels)
+    params = {"n_clusters": int(n_clusters), "voxel_size": float(voxel_size), "n_min": int(max(2, int(n_min)))}
+    return point_labels, centers, params
+
+
+def _seed_points_from_selection(
+    variables,
+    seed_labels: Sequence[str] | str,
+) -> np.ndarray:
+    labels = parse_label_selection(seed_labels)
+    if not labels:
+        return np.empty((0, 3), dtype=float)
+    xyz = _resolve_xyz(variables)
+    seed_mask = _build_selection_mask(variables, labels)
+    return xyz[seed_mask]
+
+
+def compspace_agnostic_seeded_clustering(
+    points: np.ndarray,
+    *,
+    n_clusters: int,
+    seed_points: np.ndarray | None = None,
+    n_min: int = 2,
+) -> tuple[np.ndarray, np.ndarray, dict[str, float | int | bool]]:
+    """Cluster points with optional seeded initialization, agnostic to composition features."""
+    points = np.asarray(points, dtype=float)
+    if points.ndim != 2 or points.shape[1] != 3:
+        raise ValueError("points must be a (N, 3) array")
+    n_clusters = max(2, int(n_clusters))
+
+    from sklearn.cluster import KMeans
+
+    if seed_points is None:
+        seed_points = np.empty((0, 3), dtype=float)
+    seed_points = np.asarray(seed_points, dtype=float)
+    if seed_points.ndim != 2:
+        seed_points = np.empty((0, 3), dtype=float)
+    if seed_points.size and seed_points.shape[1] != 3:
+        seed_points = np.empty((0, 3), dtype=float)
+
+    init = "k-means++"
+    n_init: int | str = "auto"
+    if len(seed_points) > 0:
+        if len(seed_points) >= n_clusters:
+            init = seed_points[:n_clusters]
+        else:
+            remaining = n_clusters - len(seed_points)
+            # Add farthest points for missing seeds.
+            centroid = points.mean(axis=0)
+            distances = np.linalg.norm(points - centroid, axis=1)
+            extra = points[np.argsort(distances)[-remaining:]]
+            init = np.vstack((seed_points, extra))
+        n_init = 1
+
+    model = KMeans(n_clusters=n_clusters, init=init, n_init=n_init, random_state=0)
+    labels = np.asarray(model.fit_predict(points), dtype=int)
+    labels = _drop_small_clusters(labels, n_min=max(2, int(n_min)))
+    centers = _centers_from_labeled_points(points, labels)
+    params = {"n_clusters": int(n_clusters), "n_min": int(max(2, int(n_min))), "seeded": bool(len(seed_points) > 0)}
+    return labels, centers, params
+
+
 def segment_ions_by_min_max(
     variables,
     ion_names: Sequence[str] | str,
@@ -405,6 +601,8 @@ def segment_ions(
     auto_d_max: bool = True,
     kth_neighbor: int = 3,
     percentile: float = 50.0,
+    voxel_size: float = 1.0,
+    seed_labels: Sequence[str] | str | None = None,
     cluster_column: str | None = None,
 ) -> MinMaxClusterResult:
     """Cluster a selected ion population with the requested algorithm."""
@@ -416,15 +614,127 @@ def segment_ions(
             n_clusters=n_clusters,
             cluster_column=cluster_column or "cluster_minmax",
         )
-    return segment_ions_by_maximum_separation(
-        variables,
-        ion_names,
-        d_max=d_max,
+
+    ion_names_tuple = parse_label_selection(ion_names)
+    xyz = _resolve_xyz(variables)
+    selection_mask = _build_selection_mask(variables, ion_names_tuple)
+    selected_points = xyz[selection_mask]
+
+    if normalized_method == "maximum-separation":
+        d_max_value = (
+            estimate_maximum_separation_distance(selected_points, kth_neighbor=kth_neighbor, percentile=percentile)
+            if auto_d_max or d_max is None
+            else float(d_max)
+        )
+        labels, centers = maximum_separation_clustering(
+            selected_points,
+            d_max=d_max_value,
+            n_min=n_min,
+        )
+        params = {
+            "d_max": float(d_max_value),
+            "n_min": int(n_min),
+            "kth_neighbor": int(kth_neighbor),
+            "percentile": float(percentile),
+            "auto_d_max": bool(auto_d_max),
+        }
+        return _build_cluster_result(
+            variables,
+            ion_names=ion_names_tuple,
+            selection_mask=selection_mask,
+            labels=labels,
+            centers=centers,
+            cluster_column=cluster_column or "cluster_maxsep",
+            algorithm="maximum-separation",
+            parameters=params,
+        )
+
+    if normalized_method == "hdbscan":
+        labels, centers, params = hdbscan_clustering(
+            selected_points,
+            n_min=n_min,
+            min_samples=kth_neighbor,
+            d_max=d_max,
+            auto_d_max=auto_d_max,
+            percentile=percentile,
+        )
+        return _build_cluster_result(
+            variables,
+            ion_names=ion_names_tuple,
+            selection_mask=selection_mask,
+            labels=labels,
+            centers=centers,
+            cluster_column=cluster_column or "cluster_hdbscan",
+            algorithm="hdbscan",
+            parameters=params,
+        )
+
+    if normalized_method == "comp-seeded-support-hdbscan":
+        seed_points = _seed_points_from_selection(variables, seed_labels or ())
+        seeded_support = len(seed_points) >= 2
+        d_max_seed = d_max
+        auto_from_seed = auto_d_max
+        if seeded_support and (auto_d_max or d_max is None):
+            d_max_seed = estimate_maximum_separation_distance(
+                seed_points,
+                kth_neighbor=max(1, int(kth_neighbor)),
+                percentile=float(percentile),
+            )
+            auto_from_seed = False
+        labels, centers, params = hdbscan_clustering(
+            selected_points,
+            n_min=n_min,
+            min_samples=kth_neighbor,
+            d_max=d_max_seed,
+            auto_d_max=auto_from_seed,
+            percentile=percentile,
+        )
+        params.update({"seeded_support": bool(seeded_support)})
+        return _build_cluster_result(
+            variables,
+            ion_names=ion_names_tuple,
+            selection_mask=selection_mask,
+            labels=labels,
+            centers=centers,
+            cluster_column=cluster_column or "cluster_comp_seed_hdbscan",
+            algorithm="comp-seeded-support-hdbscan",
+            parameters=params,
+        )
+
+    if normalized_method == "composition-gmm-voxel":
+        labels, centers, params = composition_gmm_voxel_clustering(
+            selected_points,
+            n_clusters=n_clusters,
+            voxel_size=voxel_size,
+            n_min=n_min,
+        )
+        return _build_cluster_result(
+            variables,
+            ion_names=ion_names_tuple,
+            selection_mask=selection_mask,
+            labels=labels,
+            centers=centers,
+            cluster_column=cluster_column or "cluster_comp_gmm_voxel",
+            algorithm="composition-gmm-voxel",
+            parameters=params,
+        )
+
+    seed_points = _seed_points_from_selection(variables, seed_labels or ())
+    labels, centers, params = compspace_agnostic_seeded_clustering(
+        selected_points,
+        n_clusters=n_clusters,
+        seed_points=seed_points,
         n_min=n_min,
-        auto_d_max=auto_d_max,
-        kth_neighbor=kth_neighbor,
-        percentile=percentile,
-        cluster_column=cluster_column or "cluster_maxsep",
+    )
+    return _build_cluster_result(
+        variables,
+        ion_names=ion_names_tuple,
+        selection_mask=selection_mask,
+        labels=labels,
+        centers=centers,
+        cluster_column=cluster_column or "cluster_comp_seeded",
+        algorithm="compspace-agnostic-seeded",
+        parameters=params,
     )
 
 

@@ -247,7 +247,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                         make_evaporation_gif=False, range_sequence=[], range_mc=[], range_detx=[], range_dety=[],
                         range_x=[], range_y=[], range_z=[], range_vol=[], ions_individually_plots=False,
                         detailed_isotope_charge=False, colab=False, cluster_result=None,
-                        cluster_display_mode='overlay'):
+                        cluster_display_mode='overlay', cluster_opacity_override=None):
     """
     Generate a 3D plot for atom probe reconstruction data.
 
@@ -440,7 +440,11 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
             for trace in build_cluster_scatter_traces(
                 variables,
                 cluster_result,
-                opacity=min(1.0, opacity + 0.25),
+                opacity=(
+                    float(cluster_opacity_override)
+                    if cluster_opacity_override is not None
+                    else min(1.0, opacity + 0.25)
+                ),
                 valid_mask=mask_f,
             ):
                 fig.add_trace(trace)

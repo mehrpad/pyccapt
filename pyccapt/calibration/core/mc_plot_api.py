@@ -45,6 +45,7 @@ def hist_plot(
     fast_calibration=False,
     fast_histogram=True,
     initial_peak_selection=False,
+    compute_mrp=True,
 ):
     """Plot a mass spectrum or tof spectrum and report MRP statistics."""
     assert target in ["mc", "mc_uc", "tof", "tof_c", "tof_calib", "mc_calib"], "Invalid target"
@@ -187,7 +188,10 @@ def hist_plot(
     if save_fig:
         mc_hist.save_fig(label=label, fig_name=figname)
 
-    mrp_list, mrp_list_all_peak = mc_hist.mrp_calculation()
+    mrp_list = []
+    mrp_list_all_peak = {}
+    if compute_mrp:
+        mrp_list, mrp_list_all_peak = mc_hist.mrp_calculation()
 
     if background is not None:
         if background in ["aspls", "fabc", "manual@4", "manual@100"]:
@@ -195,7 +199,7 @@ def hist_plot(
         elif background == "user":
             mc_hist.manual_background_fit()
 
-    if peaks is not None and print_info:
+    if peaks is not None and print_info and compute_mrp:
         x_axis = mc_hist.x_centers if getattr(mc_hist, 'x_centers', None) is not None else x_values[:-1]
         auto_selection = _auto_peak_selection(mc_hist)
         if auto_selection is not None:

@@ -92,7 +92,7 @@ def call_ion_list(variables, selector, path='../../../files/'):
     # Create a button widget to trigger the function
     button_plot = widgets.Button(description="Plot")
     reset_back_button = widgets.Button(
-        description='reset back correction',
+        description='Reset back correction',
         layout=label_layout
     )
     button_fit = widgets.Button(description="Fit")

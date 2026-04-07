@@ -83,17 +83,17 @@ def call_l_and_t0_determination_workflow(variables=None):
     apply_button = widgets.Button(description="Apply fitted values")
 
     tdc, pulse_mode, flight_path_length, t0_guess, max_mc, det_diam = core_widgets.dataset_instrument_specification_selection()
-    detector_center_radius = widgets.FloatText(value=0.5, description="center r (cm):", layout=medium_layout)
-    voltage_tolerance = widgets.FloatText(value=0.0, description="dV +/- (V):", layout=medium_layout)
-    max_ions_per_peak = widgets.IntText(value=5000, description="max ions:", layout=medium_layout)
-    random_seed = widgets.IntText(value=13, description="seed:", layout=medium_layout)
+    detector_center_radius = widgets.FloatText(value=0.5, description="Center r (cm):", layout=medium_layout)
+    voltage_tolerance = widgets.FloatText(value=0.0, description="DV +/- (V):", layout=medium_layout)
+    max_ions_per_peak = widgets.IntText(value=5000, description="Max ions:", layout=medium_layout)
+    random_seed = widgets.IntText(value=13, description="Seed:", layout=medium_layout)
 
-    hist_bin_size = widgets.FloatText(value=0.1, description="bin size:", layout=medium_layout)
-    hist_prominence = widgets.IntText(value=100, description="prominence:", layout=medium_layout)
-    hist_distance = widgets.IntText(value=100, description="distance:", layout=medium_layout)
-    hist_percent = widgets.IntText(value=50, description="percent:", layout=medium_layout)
-    hist_limit = widgets.FloatText(value=80.0, description="plot max:", layout=medium_layout)
-    preview_mc_limit = widgets.FloatText(value=80.0, description="preview max:", layout=medium_layout)
+    hist_bin_size = widgets.FloatText(value=0.1, description="Bin size:", layout=medium_layout)
+    hist_prominence = widgets.IntText(value=100, description="Prominence:", layout=medium_layout)
+    hist_distance = widgets.IntText(value=100, description="Distance:", layout=medium_layout)
+    hist_percent = widgets.IntText(value=50, description="Percent:", layout=medium_layout)
+    hist_limit = widgets.FloatText(value=80.0, description="Plot max:", layout=medium_layout)
+    preview_mc_limit = widgets.FloatText(value=80.0, description="Preview max:", layout=medium_layout)
 
     peak_rows_box = widgets.VBox([])
 
@@ -109,20 +109,20 @@ def call_l_and_t0_determination_workflow(variables=None):
             charge_widget = widgets.Dropdown(
                 options=[("1+", 1), ("2+", 2), ("3+", 3), ("4+", 4)],
                 value=1,
-                description="charge:",
+                description="Charge:",
                 layout=medium_layout,
             )
             isotope_widget = widgets.Combobox(
                 options=isotope_options,
                 value="",
-                description="isotope:",
+                description="Isotope:",
                 ensure_option=False,
                 placeholder="optional isotope / manual search",
                 layout=wide_layout,
             )
             ideal_widget = widgets.FloatText(
                 value=float(peak["measured_mc"]),
-                description="ideal mc:",
+                description="Ideal mc:",
                 layout=medium_layout,
             )
             suggest_button = widgets.Button(description="Nearest isotope")

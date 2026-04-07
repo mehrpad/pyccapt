@@ -12,6 +12,32 @@ from pyccapt.calibration.core.exceptions import CalibrationInputError
 from pyccapt.calibration.core.mc_plot_peak_helpers import gaussian_mrp_report
 
 
+def _mode_aware_defaults(calibration_array, calibration_mode, user_template_bin_size, user_hist_bin_size=None):
+    """Return template_bin_size and hist_bin_size scaled for tof vs mc domains.
+
+    mc values live in ~0-400 Da where 0.01 Da bins are appropriate.
+    tof values live in ~200-800 ns where peaks are relatively narrower,
+    so we estimate a sensible bin size from the data range and typical
+    peak count rather than using a fixed constant.
+    """
+    if calibration_mode == "tof":
+        arr = np.asarray(calibration_array, dtype=float)
+        arr = arr[np.isfinite(arr) & (arr > 0)]
+        if arr.size > 100:
+            data_range = float(np.percentile(arr, 99.5) - np.percentile(arr, 0.5))
+        else:
+            data_range = float(np.ptp(arr)) if arr.size > 0 else 1.0
+        # For tof, a good template bin is ~0.1% of range (e.g. 0.5 ns for 500 ns span)
+        auto_template_bin = max(0.05, data_range * 0.001)
+        auto_hist_bin = max(0.1, data_range * 0.002)
+        template_bin_size = user_template_bin_size if user_template_bin_size > auto_template_bin * 0.5 else auto_template_bin
+        hist_bin_size = user_hist_bin_size if user_hist_bin_size is not None and user_hist_bin_size > auto_hist_bin * 0.5 else auto_hist_bin
+    else:
+        template_bin_size = max(user_template_bin_size, 1e-4)
+        hist_bin_size = user_hist_bin_size if user_hist_bin_size is not None else max(user_template_bin_size, 1e-4)
+    return float(template_bin_size), float(hist_bin_size)
+
+
 @dataclass
 class PeakTemplate:
     center: float
@@ -342,8 +368,14 @@ def adaptive_residual_calibration(
 
     calibration_key = "tof" if calibration_mode == "tof" else "mc"
     initial_array = np.asarray(variables.get_calibration_array(calibration_key), dtype=float)
+
+    # Scale bin sizes for tof vs mc domains
+    template_bin_size, hist_bin_size = _mode_aware_defaults(
+        initial_array, calibration_mode, template_bin_size,
+    )
+
     peaks = calibration_core.auto_detect_reference_peaks(
-        initial_array, n_peaks=max(3, int(n_peaks)), prominence=prominence, distance=distance, hist_bin_size=max(template_bin_size, 1e-4)
+        initial_array, n_peaks=max(3, int(n_peaks)), prominence=prominence, distance=distance, hist_bin_size=hist_bin_size
     )
     reference_peaks = _split_reference_peaks(initial_array, peaks)
     if len(reference_peaks["train"]) < 2:
@@ -359,7 +391,7 @@ def adaptive_residual_calibration(
 
     for round_index in range(max(1, int(max_rounds))):
         round_peaks = calibration_core.auto_detect_reference_peaks(
-            current_array, n_peaks=max(3, int(n_peaks)), prominence=prominence, distance=distance, hist_bin_size=max(template_bin_size, 1e-4)
+            current_array, n_peaks=max(3, int(n_peaks)), prominence=prominence, distance=distance, hist_bin_size=hist_bin_size
         )
         round_reference_peaks = _split_reference_peaks(current_array, round_peaks)
         if len(round_reference_peaks["train"]) < 2:

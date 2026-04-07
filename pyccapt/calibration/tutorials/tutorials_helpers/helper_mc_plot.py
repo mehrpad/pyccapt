@@ -162,7 +162,7 @@ def call_mc_plot(variables, selector):
     gaussian_mrp_button.on_click(on_gaussian_mrp)
 
     widget_container = widgets.VBox([
-        widgets.HBox([widgets.Label(value='target:', layout=label_layout), target_mode]),
+        widgets.HBox([widgets.Label(value='Target:', layout=label_layout), target_mode]),
         widgets.HBox([widgets.Label(value='Bin Size:', layout=label_layout), bin_size_widget]),
         widgets.HBox([widgets.Label(value='Log:', layout=label_layout), log_widget]),
         widgets.HBox([widgets.Label(value='Grid:', layout=label_layout), grid_widget]),

@@ -18,15 +18,15 @@ def build_combined_mc_tof_calibration_panel(
         save_both_corrections, restore_both_corrections, reset_both_corrections,
         clear_plots, print_gaussian_for_current_mode):
     """Build the simple combined mc+tof calibration tab."""
-    combined_bin_size = widgets.FloatText(value=bin_size.value, description='bin size:', layout=label_layout)
-    combined_lim_tof = widgets.IntText(value=variables.max_tof, description='lim ToF:', layout=label_layout)
-    combined_lim_mc = widgets.IntText(value=400, description='lim m/c:', layout=label_layout)
-    combined_percent = widgets.IntText(value=percent.value, description='percent MRP:', layout=label_layout)
-    combined_bin_fdm = widgets.IntText(value=bin_fdm.value, description='bin FDM:', layout=label_layout)
-    combined_plot_peak = widgets.Dropdown(options=plot_peak.options, value=plot_peak.value, description='plot peak', layout=label_layout)
-    combined_index_fig = widgets.IntText(value=index_fig.value, description='fig save index:', layout=label_layout)
-    combined_save = widgets.Dropdown(options=save.options, value=save.value, description='save fig:', layout=label_layout)
-    combined_verbose = widgets.Dropdown(options=verbose.options, value=False, description='verbose:', layout=label_layout)
+    combined_bin_size = widgets.FloatText(value=bin_size.value, description='Bin size:', layout=label_layout)
+    combined_lim_tof = widgets.IntText(value=variables.max_tof, description='Lim ToF:', layout=label_layout)
+    combined_lim_mc = widgets.IntText(value=400, description='Lim m/c:', layout=label_layout)
+    combined_percent = widgets.IntText(value=percent.value, description='Percent MRP:', layout=label_layout)
+    combined_bin_fdm = widgets.IntText(value=bin_fdm.value, description='Bin FDM:', layout=label_layout)
+    combined_plot_peak = widgets.Dropdown(options=plot_peak.options, value=plot_peak.value, description='Plot peak', layout=label_layout)
+    combined_index_fig = widgets.IntText(value=index_fig.value, description='Fig save index:', layout=label_layout)
+    combined_save = widgets.Dropdown(options=save.options, value=save.value, description='Save fig:', layout=label_layout)
+    combined_verbose = widgets.Dropdown(options=verbose.options, value=False, description='Verbose:', layout=label_layout)
     combined_fig_w = widgets.FloatText(value=figure_mc_size_x.value, description='Fig. size W:', layout=label_layout)
     combined_fig_h = widgets.FloatText(value=figure_mc_size_y.value, description='Fig. size H:', layout=label_layout)
 
@@ -51,8 +51,8 @@ def build_combined_mc_tof_calibration_panel(
         return (('mc_calib', 'm/c', combined_lim_mc.value), ('tof_calib', 'ToF', combined_lim_tof.value))
 
     all_buttons = [
-        plot_button, auto_fast_button, auto_best_button, save_button,
-        back_button, reset_button, clear_button, gaussian_button, stat_button,
+        plot_button, auto_fast_button, auto_best_button,
+        save_button, back_button, reset_button, clear_button, gaussian_button, stat_button,
     ]
 
     @contextmanager
@@ -65,6 +65,16 @@ def build_combined_mc_tof_calibration_panel(
         finally:
             for btn in all_buttons:
                 btn.disabled = False
+
+    def _replot_wide_window(mode_value, lim_override):
+        """Re-plot histogram with bin_size=0.1 and initial_peak_selection=True.
+
+        This matches the user's manual workflow: plotting with a coarse bin
+        size produces a wider peak selection window which is critical for
+        stable calibration.  Every auto method must call this between
+        calibration stages.
+        """
+        auto_select_peak_for_mode(mode_value, lim_override, initial_peak_selection=True)
 
     def _plot_histograms(_=None):
         with _lock_buttons():
@@ -85,7 +95,7 @@ def build_combined_mc_tof_calibration_panel(
             calibration_mode.value = previous_mode
 
     def _run_auto_fast(_):
-        """Initial → Voltage → Bowl → lightweight temporal residual for each mode (fast, ~5s)."""
+        """Initial → re-plot 0.1 → V+Bowl → re-plot 0.1 → temporal residual, for each mode."""
         with _lock_buttons():
             previous_mode = calibration_mode.value
             try:
@@ -95,7 +105,9 @@ def build_combined_mc_tof_calibration_panel(
                         calibration_mode.value = mode_value
                         mode_key = 'tof' if mode_value == 'tof_calib' else 'mc'
                         print(f'--- {title} auto calibration (fast) ---')
-                        auto_select_peak_for_mode(mode_value, lim_override, initial_peak_selection=True)
+
+                        # Step 1: Select wide peak window (bin_size=0.1, initial=True)
+                        _replot_wide_window(mode_value, lim_override)
                         if not selected_peak_ready():
                             print('Unable to auto-select a peak')
                             continue
@@ -103,21 +115,29 @@ def build_combined_mc_tof_calibration_panel(
                             'Initial stage window: '
                             f'({float(variables.selected_x1):.4f}, {float(variables.selected_x2):.4f})'
                         )
+
+                        # Step 2: Initial calibration
+                        # mc: bowl correction
+                        # tof: initial_tof + voltage + bowl
                         run_initial_current()
 
-                        auto_select_peak_for_mode(mode_value, lim_override)
+                        # Step 3: Re-plot with wide window after initial
+                        _replot_wide_window(mode_value, lim_override)
                         if not selected_peak_ready():
                             print('Unable to auto-select a peak after initial calibration')
                             continue
                         print(
-                            'Auto V+Bowl stage window: '
+                            'V+Bowl stage window: '
                             f'({float(variables.selected_x1):.4f}, {float(variables.selected_x2):.4f})'
                         )
+
+                        # Step 4: Voltage + Bowl optimization
                         run_auto_current()
 
-                        # Lightweight temporal residual correction to remove
-                        # left-shoulder drift that global V+Bowl cannot fix.
-                        # Skips spatial correction for speed (~2-3 s).
+                        # Step 5: Re-plot with wide window after V+Bowl
+                        _replot_wide_window(mode_value, lim_override)
+
+                        # Step 6: Lightweight temporal residual
                         print(f'Running lightweight temporal residual on {mode_key}...')
                         try:
                             result = adaptive_residual_calibration(
@@ -148,7 +168,7 @@ def build_combined_mc_tof_calibration_panel(
                 calibration_mode.value = previous_mode
 
     def _run_auto_best(_):
-        """Initial → Adaptive Residual for each mode (best quality, ~2 min)."""
+        """Initial → re-plot 0.1 → V+Bowl → re-plot 0.1 → full residual, for each mode."""
         with _lock_buttons():
             previous_mode = calibration_mode.value
             try:
@@ -159,8 +179,8 @@ def build_combined_mc_tof_calibration_panel(
                         mode_key = 'tof' if mode_value == 'tof_calib' else 'mc'
                         print(f'--- {title} auto calibration (best) ---')
 
-                        # Step 1: Initial calibration
-                        auto_select_peak_for_mode(mode_value, lim_override, initial_peak_selection=True)
+                        # Step 1: Wide peak window
+                        _replot_wide_window(mode_value, lim_override)
                         if not selected_peak_ready():
                             print('Unable to auto-select a peak')
                             continue
@@ -168,9 +188,27 @@ def build_combined_mc_tof_calibration_panel(
                             'Initial stage window: '
                             f'({float(variables.selected_x1):.4f}, {float(variables.selected_x2):.4f})'
                         )
+
+                        # Step 2: Initial calibration
                         run_initial_current()
 
-                        # Step 2: Adaptive residual calibration
+                        # Step 3: Re-plot wide window after initial
+                        _replot_wide_window(mode_value, lim_override)
+                        if not selected_peak_ready():
+                            print('Unable to auto-select a peak after initial calibration')
+                            continue
+                        print(
+                            'V+Bowl stage window: '
+                            f'({float(variables.selected_x1):.4f}, {float(variables.selected_x2):.4f})'
+                        )
+
+                        # Step 4: Voltage + Bowl optimization
+                        run_auto_current()
+
+                        # Step 5: Re-plot wide window before residual
+                        _replot_wide_window(mode_value, lim_override)
+
+                        # Step 6: Full adaptive residual calibration
                         print(f'Running adaptive residual calibration on {mode_key}...')
                         try:
                             result = adaptive_residual_calibration(
@@ -196,7 +234,7 @@ def build_combined_mc_tof_calibration_panel(
                                 print('Adaptive residual accepted no additional steps.')
                         except Exception as exc:
                             print(f'Adaptive residual failed: {exc}')
-                            print('Keeping the initial calibration result.')
+                            print('Keeping the V+Bowl calibration result.')
 
                         print(f'{title} best calibration done.')
             finally:
@@ -263,7 +301,7 @@ def build_combined_mc_tof_calibration_panel(
         combined_plot_peak, combined_index_fig, combined_save, combined_verbose, combined_fig_w, combined_fig_h,
     ])
     actions = widgets.VBox([
-        plot_button, auto_fast_button, auto_best_button, save_button, back_button,
-        reset_button, clear_button, gaussian_button, stat_button,
+        plot_button, auto_fast_button, auto_best_button,
+        save_button, back_button, reset_button, clear_button, gaussian_button, stat_button,
     ])
     return widgets.VBox([widgets.HBox([controls, actions]), widgets.VBox([out, out_status])])

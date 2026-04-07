@@ -12,7 +12,7 @@ label_layout = widgets.Layout(width='220px')
 def call_specimen_dataset_workflow(variables=None):
     out = Output()
 
-    preset = widgets.Dropdown(options=specimen_builder.available_presets(), value='Al', description='preset:')
+    preset = widgets.Dropdown(options=specimen_builder.available_presets(), value='Al', description='Preset:')
     supercell_x = widgets.IntText(value=20)
     supercell_y = widgets.IntText(value=20)
     supercell_z = widgets.IntText(value=20)
@@ -28,7 +28,7 @@ def call_specimen_dataset_workflow(variables=None):
     load_into_variables = widgets.Dropdown(
         options=[('True', True), ('False', False)],
         value=variables is not None,
-        description='load data:',
+        description='Load data:',
     )
     build_button = widgets.Button(description='Build specimen dataset')
 

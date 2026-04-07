@@ -59,78 +59,69 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         description='Auto Optimize MRP',
         layout=label_layout,
     )
-    auto_optimize_note = widgets.HTML(
-        value=(
-            '<span style="font-size:11px; color:#555;">'
-            'Auto Optimize MRP iterates voltage, bowl, and multi-peak calibration, '
-            'keeps the best in memory, and refreshes the selected peak window when progress stalls.'
-            '</span>'
-        ),
-        layout=label_layout,
-    )
     initial_calib_button = widgets.Button(description='Initial calibration', layout=label_layout)
     clear_plot = widgets.Button(description="Clear plots", layout=label_layout)
 
     calibration_mode = widgets.Dropdown(
         options=[('mass_to_charge', 'mc_calib'), ('time_of_flight', 'tof_calib')],
-        description='calibration mode:'
+        description='Calibration mode:'
     )
 
-    bin_size = widgets.FloatText(value=0.1, description='bin size:', layout=label_layout)
-    prominence = widgets.IntText(value=100, description='peak prominance:', layout=label_layout)
-    distance = widgets.IntText(value=500, description='peak distance:', layout=label_layout)
-    lim_tof = widgets.IntText(value=variables.max_tof, description='lim tof/mc:', layout=label_layout)
-    percent = widgets.IntText(value=50, description='percent MRP:', layout=label_layout)
-    index_fig = widgets.IntText(value=1, description='fig save index:', layout=label_layout)
+    bin_size = widgets.FloatText(value=0.1, description='Bin size:', layout=label_layout)
+    prominence = widgets.IntText(value=100, description='Peak prominance:', layout=label_layout)
+    distance = widgets.IntText(value=500, description='Peak distance:', layout=label_layout)
+    lim_tof = widgets.IntText(value=variables.max_tof, description='Lim tof/mc:', layout=label_layout)
+    percent = widgets.IntText(value=50, description='Percent MRP:', layout=label_layout)
+    index_fig = widgets.IntText(value=1, description='Fig save index:', layout=label_layout)
     plot_peak = widgets.Dropdown(
         options=[('True', True), ('False', False)],
-        description='plot peak',
+        description='Plot peak',
         layout=label_layout,
     )
     save = widgets.Dropdown(
         options=[('False', False), ('True', True)],
-        description='save fig:',
+        description='Save fig:',
         layout=label_layout,
     )
-    verbose = widgets.Dropdown(options=[('True', True), ('False', False)], description='verbose:', layout=label_layout)
+    verbose = widgets.Dropdown(options=[('True', True), ('False', False)], description='Verbose:', layout=label_layout)
     figure_mc_size_x = widgets.FloatText(value=9.0, description="Fig. size W:", layout=label_layout); figure_mc_size_y = widgets.FloatText(value=5.0, description="Fig. size H:", layout=label_layout)
 
-    sample_size_v = widgets.IntText(value=10000, description='sample size:', layout=label_layout)
-    index_fig_v = widgets.IntText(value=1, description='fig index:', layout=label_layout)
+    sample_size_v = widgets.IntText(value=10000, description='Sample size:', layout=label_layout)
+    index_fig_v = widgets.IntText(value=1, description='Fig index:', layout=label_layout)
     plot_v = widgets.Dropdown(
         options=[('False', False), ('True', True)],
-        description='plot fig:',
+        description='Plot fig:',
         layout=label_layout,
     )
     save_v = widgets.Dropdown(
         options=[('False', False), ('True', True)],
-        description='save fig:',
+        description='Save fig:',
         layout=label_layout,
     )
     mode_v = widgets.Dropdown(
         options=[('ion_seq', 'ion_seq'), ('voltage', 'voltage')],
-        description='sample mode:',
+        description='Sample mode:',
         layout=label_layout,
     )
     maximum_cal_method_v = widgets.Dropdown(
         options=[('mean', 'mean'), ('histogram', 'histogram'), ('median', 'median')],
-        description='peak max:',
+        description='Peak max:',
         layout=label_layout,
     )
     model_v = widgets.Dropdown(
         options=[('robust_fit', 'robust_fit'), ('curve_fit', 'curve_fit')],
-        description='fit mode:',
+        description='Fit mode:',
         layout=label_layout,
     )
     maximum_sample_method_v = widgets.Dropdown(
         options=[('histogram', 'histogram'), ('mean', 'mean'), ('median', 'median')],
-        description='sample max:',
+        description='Sample max:',
         layout=label_layout,
     )
-    bin_size_v = widgets.FloatText(value=0.01, description='bin size:', layout=label_layout)
+    bin_size_v = widgets.FloatText(value=0.01, description='Bin size:', layout=label_layout)
     figure_v_size_x = widgets.FloatText(value=5.0, description="Fig. size W:", layout=label_layout); figure_v_size_y = widgets.FloatText(value=5.0, description="Fig. size H:", layout=label_layout)
 
-    sample_size_b = widgets.IntText(value=5, description='sample size:', layout=label_layout)
+    sample_size_b = widgets.IntText(value=5, description='Sample size:', layout=label_layout)
     sample_size_b_help = widgets.HTML(
         value=(
             '<span style="font-size:11px; color:#555;">'
@@ -142,60 +133,60 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     )
     fit_mode_b = widgets.Dropdown(
         options=[('robust_fit', 'robust_fit'), ('curve_fit', 'curve_fit')],
-        description='fit mode:',
+        description='Fit mode:',
         layout=label_layout,
     )
     sampling_mode_b = widgets.Dropdown(
         options=[('polar (default)', 'polar'), ('cartesian (legacy)', 'cartesian')],
         value=getattr(variables, 'bowl_sampling_mode', 'polar'),
-        description='sampling mode:',
+        description='Sampling mode:',
         layout=label_layout,
     )
-    index_fig_b = widgets.IntText(value=1, description='fig index:', layout=label_layout)
-    bin_size_b = widgets.FloatText(value=0.01, description='bin size:', layout=label_layout)
+    index_fig_b = widgets.IntText(value=1, description='Fig index:', layout=label_layout)
+    bin_size_b = widgets.FloatText(value=0.01, description='Bin size:', layout=label_layout)
     maximum_cal_method_b = widgets.Dropdown(
         options=[('mean', 'mean'), ('histogram', 'histogram')],
-        description='peak max:',
+        description='Peak max:',
         layout=label_layout,
     )
     maximum_sample_method_b = widgets.Dropdown(
         options=[('histogram', 'histogram'), ('mean', 'mean')],
-        description='sample max:',
+        description='Sample max:',
         layout=label_layout,
     )
     plot_b = widgets.Dropdown(
         options=[('False', False), ('True', True)],
-        description='plot fig:',
+        description='Plot fig:',
         layout=label_layout,
     )
     save_b = widgets.Dropdown(
         options=[('False', False), ('True', True)],
-        description='save fig:',
+        description='Save fig:',
         layout=label_layout,
     )
     fast_calibration = widgets.Dropdown(
         options=[('False', False), ('True', True)],
-        description='fast calibration:',
+        description='Fast calibration:',
         layout=label_layout,
     )
     automatic_window_update = widgets.Dropdown(
         options=[('False', False), ('True', True)],
         value=False,
-        description='auto window update:',
+        description='Auto window update:',
         layout=label_layout,
     )
     lock_peak_selection = widgets.Dropdown(
         options=[('False', False), ('True', True)],
         value=False,
-        description='lock peak ions:',
+        description='Lock peak ions:',
         layout=label_layout,
     )
-    peak_val = widgets.FloatText(value=0, description='peak value:', layout=label_layout)
+    peak_val = widgets.FloatText(value=0, description='Peak value:', layout=label_layout)
     figure_b_size_x = widgets.FloatText(value=5.0, description="Fig. size W:", layout=label_layout); figure_b_size_y = widgets.FloatText(value=5.0, description="Fig. size H:", layout=label_layout)
 
     pb_bowl = widgets.HTML(value=" ", placeholder='Status:', description='Status:', layout=label_layout)
     pb_vol = widgets.HTML(value=" ", placeholder='Status:', description='Status:', layout=label_layout)
-    bin_fdm = widgets.IntText(value=256, description='bin FDM:', layout=label_layout)
+    bin_fdm = widgets.IntText(value=256, description='Bin FDM:', layout=label_layout)
 
     def _calibration_mode_key():
         return 'tof' if calibration_mode.value == 'tof_calib' else 'mc'
@@ -439,8 +430,14 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             return False
         return candidate >= best - max(0.1, abs(best) * tolerance_ratio)
 
-    def _force_reselect_peak_window():
-        """Re-run peak detection on current data and auto-select a new peak window."""
+    def _force_reselect_peak_window(initial_peak_selection=True):
+        """Re-run peak detection on current data and auto-select a new peak window.
+
+        When ``initial_peak_selection=True`` (default) the histogram draws a
+        wider rectangle around the dominant peak.  This matches the manual
+        workflow where the user re-plots with a coarse bin size (0.1) between
+        calibration steps, producing a wider and more stable peak window.
+        """
         mc_plot.hist_plot(
             variables,
             bin_size.value,
@@ -462,6 +459,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             plot_show=False,
             fast_calibration=False,
             fast_histogram=True,
+            initial_peak_selection=initial_peak_selection,
         )
 
     def _update_peak_window(figure_size):
@@ -1216,15 +1214,15 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         hybrid_button,
         auto_optimize_button,
     ])
-    advanced_panel = widgets.VBox([layout1, layout2, advanced_action_row, auto_optimize_note, widgets.VBox([out, out_status])])
+    advanced_panel = widgets.VBox([layout1, layout2, advanced_action_row, widgets.VBox([out, out_status])])
 
-    simple_bin_size = widgets.FloatText(value=bin_size.value, description='bin size:', layout=label_layout)
-    simple_lim = widgets.IntText(value=lim_tof.value, description='lim tof/mc:', layout=label_layout)
-    simple_percent = widgets.IntText(value=percent.value, description='percent MRP:', layout=label_layout)
-    simple_bin_fdm = widgets.IntText(value=bin_fdm.value, description='bin FDM:', layout=label_layout)
-    simple_plot_peak = widgets.Dropdown(options=plot_peak.options, value=plot_peak.value, description='plot peak', layout=label_layout)
-    simple_index_fig = widgets.IntText(value=index_fig.value, description='fig save index:', layout=label_layout)
-    simple_save = widgets.Dropdown(options=save.options, value=save.value, description='save fig:', layout=label_layout)
+    simple_bin_size = widgets.FloatText(value=bin_size.value, description='Bin size:', layout=label_layout)
+    simple_lim = widgets.IntText(value=lim_tof.value, description='Lim tof/mc:', layout=label_layout)
+    simple_percent = widgets.IntText(value=percent.value, description='Percent MRP:', layout=label_layout)
+    simple_bin_fdm = widgets.IntText(value=bin_fdm.value, description='Bin FDM:', layout=label_layout)
+    simple_plot_peak = widgets.Dropdown(options=plot_peak.options, value=plot_peak.value, description='Plot peak', layout=label_layout)
+    simple_index_fig = widgets.IntText(value=index_fig.value, description='Fig save index:', layout=label_layout)
+    simple_save = widgets.Dropdown(options=save.options, value=save.value, description='Save fig:', layout=label_layout)
     simple_fig_w = widgets.FloatText(value=figure_mc_size_x.value, description='Fig. size W:', layout=label_layout)
     simple_fig_h = widgets.FloatText(value=figure_mc_size_y.value, description='Fig. size H:', layout=label_layout)
 
@@ -1287,7 +1285,6 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     simple_mode_actions = widgets.VBox()
     simple_panel = widgets.VBox([
         widgets.HBox([simple_controls, simple_common_actions, simple_mode_actions]),
-        auto_optimize_note,
         widgets.VBox([out, out_status]),
     ])
     subtab_placeholders = [widgets.VBox(), widgets.VBox()]

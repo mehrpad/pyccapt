@@ -27,8 +27,8 @@ def _build_window_rows(prefix: str) -> list[tuple[widgets.Text, widgets.FloatTex
     ]
     for index, (label, left, right) in enumerate(defaults, start=1):
         label_widget = widgets.Text(value=label, description=f'{prefix}{index}:', layout=field_layout)
-        left_widget = widgets.FloatText(value=left, description='min:', layout=small_field_layout)
-        right_widget = widgets.FloatText(value=right, description='max:', layout=small_field_layout)
+        left_widget = widgets.FloatText(value=left, description='Min:', layout=small_field_layout)
+        right_widget = widgets.FloatText(value=right, description='Max:', layout=small_field_layout)
         rows.append((label_widget, left_widget, right_widget))
     return rows
 
@@ -129,18 +129,18 @@ def call_raw_data_workflow(variables=None):
     roentdek_signal_kind = widgets.Dropdown(
         options=[('TOF values', 'tof'), ('Mass/charge values', 'mc')],
         value='tof',
-        description='signal:',
+        description='Signal:',
         layout=field_layout,
     )
-    roentdek_detx_columns = widgets.Text(value='6,10,14,18', description='x cols:', layout=field_layout)
-    roentdek_dety_columns = widgets.Text(value='7,11,15,19', description='y cols:', layout=field_layout)
-    roentdek_signal_columns = widgets.Text(value='8,12,16,20', description='signal cols:', layout=field_layout)
-    roentdek_drop_zero = widgets.Checkbox(value=True, description='skip zero signal rows')
-    roentdek_bin_size = widgets.FloatText(value=0.1, description='bin size:', layout=small_field_layout)
-    roentdek_max_value = widgets.FloatText(value=1000.0, description='max x:', layout=small_field_layout)
-    roentdek_max_bins = widgets.IntText(value=20, description='stats bins:', layout=small_field_layout)
-    roentdek_drift_segments = widgets.IntText(value=20, description='segments:', layout=small_field_layout)
-    roentdek_save_hits_path = widgets.Text(value='', description='save hits:', layout=field_layout)
+    roentdek_detx_columns = widgets.Text(value='6,10,14,18', description='X cols:', layout=field_layout)
+    roentdek_dety_columns = widgets.Text(value='7,11,15,19', description='Y cols:', layout=field_layout)
+    roentdek_signal_columns = widgets.Text(value='8,12,16,20', description='Signal cols:', layout=field_layout)
+    roentdek_drop_zero = widgets.Checkbox(value=True, description='Skip zero signal rows')
+    roentdek_bin_size = widgets.FloatText(value=0.1, description='Bin size:', layout=small_field_layout)
+    roentdek_max_value = widgets.FloatText(value=1000.0, description='Max x:', layout=small_field_layout)
+    roentdek_max_bins = widgets.IntText(value=20, description='Stats bins:', layout=small_field_layout)
+    roentdek_drift_segments = widgets.IntText(value=20, description='Segments:', layout=small_field_layout)
+    roentdek_save_hits_path = widgets.Text(value='', description='Save hits:', layout=field_layout)
     roentdek_analyze_button = widgets.Button(description='Analyze RoentDek')
     roentdek_save_button = widgets.Button(description='Save hits')
     roentdek_window_rows = _build_window_rows('peak ')
@@ -150,23 +150,23 @@ def call_raw_data_workflow(variables=None):
     surface_signal_kind = widgets.Dropdown(
         options=[('TOF plots', 'tof'), ('Mass/charge plots', 'mc')],
         value='tof',
-        description='signal:',
+        description='Signal:',
         layout=field_layout,
     )
-    surface_t0 = widgets.FloatText(value=0.0, description='t0:', layout=small_field_layout)
-    surface_flight_path = widgets.FloatText(value=110.0, description='flight mm:', layout=small_field_layout)
-    surface_detector_limit = widgets.FloatText(value=4.0, description='det lim:', layout=small_field_layout)
+    surface_t0 = widgets.FloatText(value=0.0, description='T0:', layout=small_field_layout)
+    surface_flight_path = widgets.FloatText(value=110.0, description='Flight mm:', layout=small_field_layout)
+    surface_detector_limit = widgets.FloatText(value=4.0, description='Det lim:', layout=small_field_layout)
     surface_pulse_mode = widgets.Dropdown(
         options=[('voltage', 'voltage'), ('laser', 'laser')],
         value='voltage',
-        description='pulse:',
+        description='Pulse:',
         layout=field_layout,
     )
-    surface_bin_size = widgets.FloatText(value=0.1, description='bin size:', layout=small_field_layout)
-    surface_max_value = widgets.FloatText(value=1000.0, description='max x:', layout=small_field_layout)
-    surface_max_bins = widgets.IntText(value=20, description='stats bins:', layout=small_field_layout)
-    surface_drift_segments = widgets.IntText(value=20, description='segments:', layout=small_field_layout)
-    surface_save_processed_path = widgets.Text(value='', description='save processed:', layout=field_layout)
+    surface_bin_size = widgets.FloatText(value=0.1, description='Bin size:', layout=small_field_layout)
+    surface_max_value = widgets.FloatText(value=1000.0, description='Max x:', layout=small_field_layout)
+    surface_max_bins = widgets.IntText(value=20, description='Stats bins:', layout=small_field_layout)
+    surface_drift_segments = widgets.IntText(value=20, description='Segments:', layout=small_field_layout)
+    surface_save_processed_path = widgets.Text(value='', description='Save processed:', layout=field_layout)
     surface_analyze_button = widgets.Button(description='Analyze Surface Concept')
     surface_save_button = widgets.Button(description='Save processed')
     surface_load_button = widgets.Button(description='Load into workflow')
@@ -175,7 +175,7 @@ def call_raw_data_workflow(variables=None):
     cameca_source = widgets.Dropdown(
         options=[('RHIT', 'rhit'), ('STR / HITS', 'str')],
         value='rhit',
-        description='source:',
+        description='Source:',
         layout=field_layout,
     )
     cameca_path = widgets.Text(value='', description='', layout=field_layout)
@@ -184,11 +184,11 @@ def call_raw_data_workflow(variables=None):
     cameca_browse = widgets.Button(description='Browse')
     cameca_epos_browse = widgets.Button(description='Browse')
     cameca_rhit_browse = widgets.Button(description='Browse')
-    cameca_bin_size = widgets.FloatText(value=0.1, description='bin size:', layout=small_field_layout)
-    cameca_tof_max = widgets.FloatText(value=2000.0, description='tof max:', layout=small_field_layout)
-    cameca_mc_max = widgets.FloatText(value=80.0, description='mc max:', layout=small_field_layout)
-    cameca_drift_segments = widgets.IntText(value=20, description='segments:', layout=small_field_layout)
-    cameca_save_path = widgets.Text(value='', description='save processed:', layout=field_layout)
+    cameca_bin_size = widgets.FloatText(value=0.1, description='Bin size:', layout=small_field_layout)
+    cameca_tof_max = widgets.FloatText(value=2000.0, description='Tof max:', layout=small_field_layout)
+    cameca_mc_max = widgets.FloatText(value=80.0, description='Mc max:', layout=small_field_layout)
+    cameca_drift_segments = widgets.IntText(value=20, description='Segments:', layout=small_field_layout)
+    cameca_save_path = widgets.Text(value='', description='Save processed:', layout=field_layout)
     cameca_analyze_button = widgets.Button(description='Analyze LEAP raw')
     cameca_save_button = widgets.Button(description='Save processed')
     cameca_load_button = widgets.Button(description='Load into workflow')

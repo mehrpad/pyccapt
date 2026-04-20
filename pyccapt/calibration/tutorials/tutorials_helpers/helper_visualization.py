@@ -47,6 +47,15 @@ def call_visualization(variables, colab=False):
                 if element not in element_percentage:
                     element_percentage[element] = 0.01
         element_percentage = str(element_percentage)
+    if variables.range_data.empty or variables.range_data['ion'].iloc[0] == 'unranged':
+        element_alpha = str({'unranged': 0.9})
+    else:
+        element_alpha = {}
+        for element_list in variables.range_data['element']:
+            for element in element_list:
+                if element not in element_alpha:
+                    element_alpha[element] = 0.9
+        element_alpha = str(element_alpha)
 
     #############
     peak_find_plot = widgets.Dropdown(options=[('True', True), ('False', False)])
@@ -315,6 +324,7 @@ def call_visualization(variables, colab=False):
     figname_3d = widgets.Text(value='3d_plot')
     rotary_fig_save_p3 = widgets.Dropdown(options=[('False', False), ('True', True)])
     element_percentage_p3 = widgets.Textarea(value=element_percentage)
+    element_alpha_p3 = widgets.Textarea(value=element_alpha)
     opacity = widgets.FloatText(value=0.5, min=0, max=1, step=0.1)
     save_3d = widgets.Dropdown(options=[('True', True), ('False', False)], value=False)
     ions_individually_plots = widgets.Dropdown(options=[('True', True), ('False', False)], value=False)
@@ -397,6 +407,7 @@ def call_visualization(variables, colab=False):
                         if element in element_percentage_dic:
                             max_value = element_percentage_dic[element]
                     element_percentage_list.append(max_value)
+                element_alpha_list = _build_element_value_list(element_alpha_p3.value, 0.9)
 
                 if cluster_result_override is not None:
                     cluster_result = cluster_result_override
@@ -420,7 +431,8 @@ def call_visualization(variables, colab=False):
                                                    range_mc, range_detx, range_dety, range_x, range_y, range_z, range_vol,
                                                    ions_individually_plots.value, cluster_result=cluster_result,
                                                    cluster_display_mode=cluster_display_mode,
-                                                   cluster_opacity_override=cluster_opacity_override)
+                                                   cluster_opacity_override=cluster_opacity_override,
+                                                   element_alpha=element_alpha_list)
         finally:
             plot_3d_button.disabled = False
 
@@ -995,6 +1007,17 @@ def call_visualization(variables, colab=False):
                     max_value = element_percentage_dic[element]
             element_percentage_list.append(max_value)
         return element_percentage_list
+
+    def _build_element_value_list(value, default_value):
+        element_value_dic = ast.literal_eval(value)
+        element_value_list = []
+        for row_elements in variables.range_data['element']:
+            max_value = default_value
+            for element in row_elements:
+                if element in element_value_dic:
+                    max_value = element_value_dic[element]
+            element_value_list.append(max_value)
+        return element_value_list
 
     def _run_cluster_segmentation(*, enabled, selection_text, method_value, cluster_count_value,
                                   d_max_value, auto_d_max_value, kth_neighbor_value, percentile_value,
@@ -1621,6 +1644,7 @@ def call_visualization(variables, colab=False):
     tab3 = (widgets.HBox([
         widgets.VBox([
             widgets.HBox([widgets.Label(value='Element percentage:', layout=label_layout), element_percentage_p3]),
+            widgets.HBox([widgets.Label(value='Element alphas:', layout=label_layout), element_alpha_p3]),
             widgets.HBox([widgets.Label(value='Opacity:', layout=label_layout), opacity]),
             widgets.HBox(
                 [widgets.Label(value='Ions individually plots:', layout=label_layout), ions_individually_plots]),

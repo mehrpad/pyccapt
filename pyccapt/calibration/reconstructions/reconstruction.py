@@ -247,14 +247,14 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                         make_evaporation_gif=False, range_sequence=[], range_mc=[], range_detx=[], range_dety=[],
                         range_x=[], range_y=[], range_z=[], range_vol=[], ions_individually_plots=False,
                         detailed_isotope_charge=False, colab=False, cluster_result=None,
-                        cluster_display_mode='overlay', cluster_opacity_override=None):
+                        cluster_display_mode='overlay', cluster_opacity_override=None, element_alpha=None):
     """
     Generate a 3D plot for atom probe reconstruction data.
 
     Args:
         variables (object): Variables object.
         element_percentage (str): Percentage of elements to display.
-        opacity (float): Opacity of the markers.
+        opacity (float): Default opacity of the markers.
         rotary_fig_save (bool): Whether to save the rotary figure.
         figname (str): Name of the figure.
         save (bool): Whether to save the figure.
@@ -273,6 +273,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
         colab (bool): Whether to run in Google Colab.
         cluster_result: Optional Min-Max segmentation result for precipitate overlays.
         cluster_display_mode (str): `overlay` or `clusters-only`.
+        element_alpha (list[float] | None): Optional per-ion opacity overrides aligned with the range table order.
     Returns:
         None
     """
@@ -329,6 +330,12 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
     y_range = [min(variables.y), max(variables.y)]
     z_range = [min(variables.z), max(variables.z)]
     range_cube = [x_range, y_range, z_range]
+    if element_alpha is None:
+        element_alpha = [float(opacity)] * len(ion)
+    else:
+        element_alpha = [float(value) for value in element_alpha]
+        if len(element_alpha) < len(ion):
+            element_alpha.extend([float(opacity)] * (len(ion) - len(element_alpha)))
 
     cluster_only = cluster_result is not None and str(cluster_display_mode).strip().lower() == 'clusters-only'
 
@@ -372,7 +379,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                     marker=dict(
                         size=1,
                         color=colors[index],
-                        opacity=opacity,
+                        opacity=element_alpha[index],
                     )
                 )
                 fig = draw_qube(fig, range_cube, col, row)
@@ -409,7 +416,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                         marker=dict(
                             size=1,
                             color=colors[index],
-                            opacity=opacity,
+                            opacity=element_alpha[index],
                         )
                     )
                 )
@@ -497,7 +504,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                         marker=dict(
                             size=1,
                             color=colors[index],
-                            opacity=opacity,
+                            opacity=element_alpha[index],
                         )
                     )
                 )

@@ -183,8 +183,6 @@ def hist_plot(
         peak_widths = None
         prominences = None
 
-    mc_hist.selector(selector=selector)
-
     if save_fig:
         mc_hist.save_fig(label=label, fig_name=figname)
 
@@ -198,6 +196,9 @@ def hist_plot(
             mc_hist.plot_background(mode=background)
         elif background == "user":
             mc_hist.manual_background_fit()
+
+    if plot_show:
+        mc_hist.selector(selector=selector)
 
     if peaks is not None and print_info and compute_mrp:
         x_axis = mc_hist.x_centers if getattr(mc_hist, 'x_centers', None) is not None else x_values[:-1]

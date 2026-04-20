@@ -3,7 +3,11 @@
 import pandas as pd
 
 from pyccapt.calibration.core import mc_plot
-from pyccapt.calibration.core.mc_plot_peak_helpers import gaussian_mrp_report
+from pyccapt.calibration.core import mc_plot_peak_helpers as peak_helpers
+from pyccapt.calibration.core.mc_plot_peak_helpers import (
+    _MRP_INTERNAL_BIN_SIZE,
+    gaussian_mrp_report,
+)
 from pyccapt.calibration.core.share_variables import Variables
 
 
@@ -116,4 +120,64 @@ def test_gaussian_mrp_report_rejects_implausibly_narrow_subpeak():
     mrp_50 = float(report['recommended_mrp'][0])
     assert np.isfinite(mrp_50), "recommended MRP(0.5) must be finite"
     assert mrp_50 < 2000, f"MRP(0.5) = {mrp_50} — should reflect broad peak, not narrow spike"
+
+
+def test_mrp_internal_bin_size_is_fixed_reference_width():
+    assert _MRP_INTERNAL_BIN_SIZE == 0.01
+
+
+def test_mrp_calculation_is_independent_of_display_bin_width():
+    rng = np.random.default_rng(123)
+    data = rng.normal(27.0, 0.018, 25000)
+    variables = Variables()
+    mrp_values = []
+
+    for bin_width in (0.1, 0.01):
+        plotter = mc_plot.AptHistPlotter(data, variables)
+        plotter.plot_histogram(bin_width=bin_width, plot_show=False, fast=True)
+        plotter.find_peaks_and_widths(prominence=10, distance=2, percent=50)
+        mrp, _ = plotter.mrp_calculation()
+        mrp_values.append(mrp[0])
+
+    assert np.isfinite(mrp_values).all()
+    assert abs(mrp_values[0] - mrp_values[1]) < 1.0
+
+
+def test_mrp_calculation_uses_voigt_report_only_for_dominant_peak(monkeypatch):
+    rng = np.random.default_rng(321)
+    data = np.concatenate([
+        rng.normal(27.0, 0.018, 25000),
+        rng.normal(52.0, 0.025, 12000),
+    ])
+    variables = Variables()
+    plotter = mc_plot.AptHistPlotter(data, variables)
+    plotter.plot_histogram(bin_width=0.01, plot_show=False, fast=True)
+    plotter.find_peaks_and_widths(prominence=10, distance=50, percent=50)
+
+    calls = {"report": 0, "fast": 0}
+
+    def fake_report(*args, **kwargs):
+        calls["report"] += 1
+        return {
+            "histogram_mrp": [900.0, 500.0, 350.0],
+            "voigt_mrp": [800.0, 450.0, 320.0],
+            "voigt_ok": True,
+            "profile_type": "test",
+            "recommended_peak_sides": [[26.9, 27.1], [26.8, 27.2], [26.7, 27.3]],
+        }
+
+    def fake_fast(*args, **kwargs):
+        calls["fast"] += 1
+        return [100.0, 80.0, 60.0]
+
+    monkeypatch.setattr(peak_helpers, "gaussian_mrp_report", fake_report)
+    monkeypatch.setattr(peak_helpers, "fast_mrp", fake_fast)
+
+    mrp_peak, mrp_all = plotter.mrp_calculation()
+
+    assert calls["report"] == 1
+    assert calls["fast"] == len(plotter.peaks) - 1
+    assert mrp_peak == [800.0, 450.0, 320.0]
+    assert 800.0 in mrp_all["MRP(0.5)"]
+    assert mrp_all["MRP(0.5)"].count(100.0) == len(plotter.peaks) - 1
 

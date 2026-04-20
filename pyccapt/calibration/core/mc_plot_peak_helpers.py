@@ -8,7 +8,7 @@ from scipy.ndimage import gaussian_filter1d
 from scipy.optimize import curve_fit
 from scipy.signal import find_peaks, peak_prominences, peak_widths
 
-_MRP_INTERNAL_BIN_SIZE = 0.001
+_MRP_INTERNAL_BIN_SIZE = 0.01
 _BOX_SELECTION_BIN_SIZE = 0.1
 _MRP_REFERENCE_BIN_SIZE = 0.01
 _MRP_MIN_BINS = 60
@@ -616,7 +616,7 @@ def apply_hist_info_legend(plotter, label='mc', mrp_all=False, background=None, 
 
 
 def calculate_mrp(plotter):
-    """Calculate MRP values using a shared high-resolution peak-profile report."""
+    """Calculate MRP values with a robust profile fit for the dominant peak."""
     mrp_range = [0.5, 0.1, 0.01]
     mrp_peak = []
     mrp = {}
@@ -624,17 +624,46 @@ def calculate_mrp(plotter):
     if plotter.peaks is None or plotter.peak_widths is None or plotter.prominences is None or len(plotter.peaks) == 0:
         return mrp_peak, mrp
     idx_max = int(np.argmax(plotter.prominences[0]))
+    dominant_seed = _internal_peak_seed(
+        plotter.mc_tof,
+        percent=getattr(plotter, 'percent', 50),
+        bin_size=_BOX_SELECTION_BIN_SIZE,
+    )
+    if dominant_seed is not None:
+        x_axis = plotter.x_centers if getattr(plotter, 'x_centers', None) is not None else plotter.x[:-1]
+        peak_centers = x_axis[plotter.peaks]
+        idx_max = int(np.argmin(np.abs(peak_centers - float(dominant_seed['center']))))
     peak_reports = []
     for i in range(len(plotter.peaks)):
+        if i == idx_max:
+            if dominant_seed is None:
+                peak_left, peak_right, peak_center = _plotter_peak_window(plotter, i)
+            else:
+                peak_left = float(dominant_seed['left'])
+                peak_right = float(dominant_seed['right'])
+                peak_center = float(dominant_seed['center'])
+            report = gaussian_mrp_report(
+                plotter.mc_tof,
+                peak_left,
+                peak_right,
+                bin_size=_MRP_INTERNAL_BIN_SIZE,
+                peak_center=peak_center,
+            )
+            if report is not None:
+                peak_reports.append(report)
+                continue
+
         peak_left, peak_right, peak_center = _plotter_peak_window(plotter, i)
-        report = gaussian_mrp_report(
+        mrp_values = fast_mrp(
             plotter.mc_tof,
             peak_left,
             peak_right,
             bin_size=_MRP_INTERNAL_BIN_SIZE,
-            peak_center=peak_center,
         )
-        peak_reports.append(report)
+        peak_reports.append({
+            'histogram_mrp': mrp_values,
+            'histogram_peak_sides': _mrp_sides_from_values(peak_center, mrp_values),
+        })
 
     max_report = peak_reports[idx_max]
     if max_report is not None:
@@ -652,7 +681,8 @@ def calculate_mrp(plotter):
                 continue
             recommended_mrp, _ = _recommended_mrp_payload(report)
             mrp_values.append(recommended_mrp[frac_idx])
-            peak_width_tmp.append(report['recommended_peak_sides'][frac_idx])
+            peak_sides = report.get('recommended_peak_sides', report.get('histogram_peak_sides'))
+            peak_width_tmp.append(peak_sides[frac_idx])
         mrp['MRP(%s)' % mrp_s] = mrp_values
         mrp['peak_sides(%s)' % mrp_s] = peak_width_tmp
 

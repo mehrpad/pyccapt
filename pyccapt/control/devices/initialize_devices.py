@@ -321,12 +321,17 @@ def state_update(conf, variables, emitter):
                     print("cannot read the cryo temperature")
                     output = '0'
                 try:
-                    # output order: [sensor3=stage, sensor2=cryo_head_inside,
-                    #                sensor1=cryo_head_outside, sensor4=load_lock]
-                    temperature_stage = float(output.split()[0].replace(',', ''))
-                    temperature_cryo_head_inside = float(output.split()[1].replace(',', ''))
-                    temperature_cryo_head = float(output.split()[2].replace(',', ''))
-                    temperature_ll = float(output.split()[3].replace(',', ''))
+                    # Output indices are driven by config.toml cryo_sensor_X_index keys.
+                    # Change those values to remap which device output feeds each sensor slot.
+                    words = output.split()
+                    idx1 = conf.get('cryo_sensor_1_index', 2)  # cryo_head_outside
+                    idx2 = conf.get('cryo_sensor_2_index', 1)  # cryo_head_inside
+                    idx3 = conf.get('cryo_sensor_3_index', 0)  # stage
+                    idx4 = conf.get('cryo_sensor_4_index', 3)  # load_lock
+                    temperature_cryo_head = float(words[idx1].replace(',', ''))
+                    temperature_cryo_head_inside = float(words[idx2].replace(',', ''))
+                    temperature_stage = float(words[idx3].replace(',', ''))
+                    temperature_ll = float(words[idx4].replace(',', ''))
                 except Exception as e:
                     com_port_cryovac = None
                     temperature_cryo_head = -1

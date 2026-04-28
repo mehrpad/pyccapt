@@ -64,6 +64,12 @@ baking = "enabled"
 COM_PORT_laser = "COM9"
 COM_PORT_gates = "Dev2/port0/"
 COM_PORT_cryo = "COM7"
+
+# Cryo sensor mapping (controller sensor index -> physical location)
+cryo_sensor_1 = "cryo_head_outside"   # output index 2
+cryo_sensor_2 = "cryo_head_inside"    # output index 1
+cryo_sensor_3 = "stage"               # output index 0
+cryo_sensor_4 = "load_lock"           # output index 3
 COM_PORT_V_dc = "COM6"
 COM_PORT_V_p = "COM4"
 COM_PORT_gauge_mc = "COM5"

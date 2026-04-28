@@ -321,20 +321,25 @@ def state_update(conf, variables, emitter):
                     print("cannot read the cryo temperature")
                     output = '0'
                 try:
+                    # output order: [sensor3=stage, sensor2=cryo_head_inside,
+                    #                sensor1=cryo_head_outside, sensor4=load_lock]
                     temperature_stage = float(output.split()[0].replace(',', ''))
+                    temperature_cryo_head_inside = float(output.split()[1].replace(',', ''))
                     temperature_cryo_head = float(output.split()[2].replace(',', ''))
                     temperature_ll = float(output.split()[3].replace(',', ''))
                 except Exception as e:
                     com_port_cryovac = None
                     temperature_cryo_head = -1
+                    temperature_cryo_head_inside = -1
                     temperature_stage = -1
                     print(e)
                     # Handle the case where response is not a valid float
                     temperature = -1
                 variables.temperature = temperature_stage
                 emitter.temp_stage.emit(temperature_stage)
+                emitter.temp_cryo_head_inside.emit(temperature_cryo_head_inside)
                 emitter.temp_cryo_head.emit(temperature_cryo_head)
-                emitter.temp_ll.emit(temperature_ll - 273.15)  # convert from kelvin to celcius
+                emitter.temp_ll.emit(temperature_ll - 273.15)  # convert from kelvin to celsius
 
                 if variables.set_temperature_flag_cryo:
                     if variables.set_temperature_cryo != set_temperature_tmp_cryo:

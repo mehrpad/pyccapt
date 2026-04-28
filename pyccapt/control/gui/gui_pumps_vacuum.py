@@ -1,6 +1,4 @@
-﻿import multiprocessing
-import os
-import sys
+﻿import sys
 import threading
 import time
 
@@ -402,12 +400,33 @@ class Ui_Pumps_Vacuum(object):
                                           "                                        ")
         self.temp_cryo_head.setObjectName("temp_cryo_head")
         self.gridLayout_7.addWidget(self.temp_cryo_head, 0, 1, 1, 1)
+        self.label_221 = QtWidgets.QLabel(parent=Pumps_Vacuum)
+        font = QtGui.QFont()
+        font.setBold(True)
+        self.label_221.setFont(font)
+        self.label_221.setObjectName("label_221")
+        self.gridLayout_7.addWidget(self.label_221, 1, 0, 1, 1)
+        self.temp_cryo_head_inside = QtWidgets.QLCDNumber(parent=Pumps_Vacuum)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred,
+                                           QtWidgets.QSizePolicy.Policy.Preferred)
+        sizePolicy.setHorizontalStretch(0)
+        sizePolicy.setVerticalStretch(0)
+        sizePolicy.setHeightForWidth(self.temp_cryo_head_inside.sizePolicy().hasHeightForWidth())
+        self.temp_cryo_head_inside.setSizePolicy(sizePolicy)
+        self.temp_cryo_head_inside.setMinimumSize(QtCore.QSize(150, 50))
+        self.temp_cryo_head_inside.setStyleSheet("QLCDNumber{\n"
+                                                 "    border: 2px solid orange;\n"
+                                                 "    border-radius: 10px;\n"
+                                                 "    padding: 0 8px;\n"
+                                                 "    }\n")
+        self.temp_cryo_head_inside.setObjectName("temp_cryo_head_inside")
+        self.gridLayout_7.addWidget(self.temp_cryo_head_inside, 1, 1, 1, 1)
         self.label_220 = QtWidgets.QLabel(parent=Pumps_Vacuum)
         font = QtGui.QFont()
         font.setBold(True)
         self.label_220.setFont(font)
         self.label_220.setObjectName("label_220")
-        self.gridLayout_7.addWidget(self.label_220, 1, 0, 1, 1)
+        self.gridLayout_7.addWidget(self.label_220, 2, 0, 1, 1)
         self.ll_baking_time = QtWidgets.QLineEdit(parent=Pumps_Vacuum)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Minimum)
         sizePolicy.setHorizontalStretch(0)
@@ -420,7 +439,7 @@ class Ui_Pumps_Vacuum(object):
                                           "                                    }\n"
                                           "                                ")
         self.ll_baking_time.setObjectName("ll_baking_time")
-        self.gridLayout_7.addWidget(self.ll_baking_time, 1, 1, 1, 1)
+        self.gridLayout_7.addWidget(self.ll_baking_time, 2, 1, 1, 1)
         self.gridLayout_8.addLayout(self.gridLayout_7, 0, 2, 1, 1)
         self.Error = QtWidgets.QLabel(parent=Pumps_Vacuum)
         self.Error.setMinimumSize(QtCore.QSize(600, 30))
@@ -464,12 +483,14 @@ class Ui_Pumps_Vacuum(object):
         self.vacuum_cryo_load_lock_back.setDigitCount(8)
         self.temp_stage.setDigitCount(8)
         self.temp_cryo_head.setDigitCount(8)
+        self.temp_cryo_head_inside.setDigitCount(8)
         self.target_tempreature_cryo.setValue(40)
         self.target_tempreature_ll.setValue(40)
 
         ###
         self.emitter.temp_stage.connect(self.update_temperature_stage)
         self.emitter.temp_cryo_head.connect(self.update_temperature_cryo)
+        self.emitter.temp_cryo_head_inside.connect(self.update_temperature_cryo_inside)
         self.emitter.temp_ll.connect(self.update_temperature_ll)
         self.emitter.vacuum_main.connect(self.update_vacuum_main)
         self.set_temperature_cryo.clicked.connect(self.update_target_temperature_cryo)
@@ -540,11 +561,17 @@ class Ui_Pumps_Vacuum(object):
         self.led_pump_cryo_load_lock.setText(_translate("Pumps_Vacuum", "pump"))
         self.pump_load_lock_switch.setText(_translate("Pumps_Vacuum", "Vent LL"))
         self.led_pump_load_lock.setText(_translate("Pumps_Vacuum", "pump"))
-        self.label_215.setText(_translate("Pumps_Vacuum", "Temp. Stage (K)"))
+        # Cryo sensor labels driven by config.toml cryo_sensor_X keys
+        _s1 = self.conf.get('cryo_sensor_1', 'cryo_head_outside').replace('_', ' ').title()
+        _s2 = self.conf.get('cryo_sensor_2', 'cryo_head_inside').replace('_', ' ').title()
+        _s3 = self.conf.get('cryo_sensor_3', 'stage').replace('_', ' ').title()
+        _s4 = self.conf.get('cryo_sensor_4', 'load_lock').replace('_', ' ').title()
+        self.label_215.setText(_translate("Pumps_Vacuum", f"Temp. {_s3} (K)"))
         self.set_temperature_cryo.setText(_translate("Pumps_Vacuum", "Set T Cryo (K)"))
-        self.label_219.setText(_translate("Pumps_Vacuum", "LL Temp (Â°C)"))
-        self.set_temperature_ll.setText(_translate("Pumps_Vacuum", "Set T LL (Â°C)"))
-        self.label_218.setText(_translate("Pumps_Vacuum", "Temp. Cryo Head (K)"))
+        self.label_219.setText(_translate("Pumps_Vacuum", f"{_s4} Temp (°C)"))
+        self.set_temperature_ll.setText(_translate("Pumps_Vacuum", "Set T LL (°C)"))
+        self.label_218.setText(_translate("Pumps_Vacuum", f"Temp. {_s1} (K)"))
+        self.label_221.setText(_translate("Pumps_Vacuum", f"Temp. {_s2} (K)"))
         self.label_220.setText(_translate("Pumps_Vacuum", "LL Backing Time (min)"))
         self.ll_baking_time.setText(_translate("Pumps_Vacuum", "60"))
         self.Error.setText(_translate("Pumps_Vacuum", "<html><head/><body><p><br/></p></body></html>"))
@@ -579,6 +606,20 @@ class Ui_Pumps_Vacuum(object):
         else:
             # only up to 2 decimal points
             self.temp_cryo_head.display(round(value, 2))
+
+    def update_temperature_cryo_inside(self, value):
+        """
+        Update the temperature value of cryo head inside sensor in the GUI.
+        Args:
+                value: the temperature value of cryo head inside
+
+        Return:
+                None
+        """
+        if value == -1:
+            self.temp_cryo_head_inside.display('Error')
+        else:
+            self.temp_cryo_head_inside.display(round(value, 2))
 
     def update_temperature_ll(self, value):
         """
@@ -940,6 +981,7 @@ class SignalEmitter(QObject):
 
     temp_stage = pyqtSignal(float)
     temp_cryo_head = pyqtSignal(float)
+    temp_cryo_head_inside = pyqtSignal(float)
     temp_ll = pyqtSignal(float)
     vacuum_main = pyqtSignal(float)
     vacuum_buffer = pyqtSignal(float)

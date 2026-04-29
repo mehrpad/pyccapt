@@ -392,7 +392,7 @@ def run_analysis(variables, species: list[dict]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# UI: tabbed widget
+# UI: single panel with peak-source dropdown
 # ---------------------------------------------------------------------------
 
 
@@ -406,67 +406,100 @@ def _build_manual_rows() -> list[tuple[widgets.Text, widgets.FloatText, widgets.
     return rows
 
 
+def _set_rows_disabled(rows, disabled: bool) -> None:
+    for label, low, high in rows:
+        label.disabled = disabled
+        low.disabled = disabled
+        high.disabled = disabled
+
+
 def call_auto_raw_data_analysis(variables) -> None:
-    """Display the two-tab UI and wire Run buttons to :func:`run_analysis`.
+    """Display a single-panel analysis UI driven by a peak-source dropdown.
 
-    Tabs:
+    The dropdown selects either:
 
-    - **From range file** — uses ``variables.range_data`` to derive the species
-      list. Click *Run* to render the analysis.
-    - **Manual ranges** — type peak windows directly. Empty rows are ignored.
+    - **Manual peak windows** — the user types up to six ``(label, mc_low,
+      mc_up)`` triples below; rows left at 0/0 are skipped.
+    - **From range file** — the species list is derived from
+      ``variables.range_data``; the manual rows are disabled.
+
+    Either way, clicking *Run analysis* renders the same set of plots
+    (DLTS-per-pulse, TOF, M/C, FDM, multi-hit) plus an inline Markdown
+    summary beneath each section.
     """
     range_df = getattr(variables, "range_data", None)
     range_species = species_from_range(range_df)
+    has_range = bool(range_species)
 
-    range_out = Output()
-    manual_out = Output()
+    out = Output()
+    summary = widgets.HTML()
 
-    range_summary = widgets.HTML(
-        value=(
-            f"Range table loaded with <b>{len(range_species)}</b> usable rows."
-            if range_species
-            else "<i>No range table loaded — switch to the Manual tab or load a range file first.</i>"
-        )
+    def _refresh_summary(*_):
+        if peak_source.value == "range":
+            if has_range:
+                summary.value = (
+                    f"Range table loaded with <b>{len(range_species)}</b> usable rows. "
+                    "Click <i>Run analysis</i> to plot."
+                )
+            else:
+                summary.value = (
+                    "<span style='color:#b91c1c;'>No range table is loaded. "
+                    "Switch to <b>Manual peak windows</b> or load a range table first.</span>"
+                )
+        else:
+            summary.value = (
+                "<i>Type peak windows below. Rows with both fields = 0 are skipped.</i>"
+            )
+
+    peak_source = widgets.Dropdown(
+        options=[("Manual peak windows", "manual"), ("From range file", "range")],
+        value="range" if has_range else "manual",
+        description="Peak source:",
+        layout=widgets.Layout(width="320px"),
     )
-    range_run = widgets.Button(description="Run analysis", button_style="primary")
-
-    def _on_range_run(_):
-        range_out.clear_output()
-        with range_out:
-            if not range_species:
-                _md("_Range table is empty; nothing to analyze in this tab._")
-                return
-            run_analysis(variables, range_species)
-
-    range_run.on_click(_on_range_run)
-    range_tab = widgets.VBox([range_summary, range_run, range_out])
 
     manual_rows = _build_manual_rows()
-    manual_run = widgets.Button(description="Run analysis", button_style="primary")
-    manual_help = widgets.HTML(
-        value="<i>Type any number of peak windows (rows with both fields = 0 are skipped).</i>"
-    )
-
-    def _on_manual_run(_):
-        manual_out.clear_output()
-        with manual_out:
-            try:
-                manual_species = species_from_manual(manual_rows)
-            except ValueError as exc:
-                _md(f"**Input error:** {exc}")
-                return
-            if not manual_species:
-                _md("_All peak windows are empty — nothing to analyze._")
-                return
-            run_analysis(variables, manual_species)
-
-    manual_run.on_click(_on_manual_run)
     manual_grid = widgets.VBox([
         widgets.HBox([label, low, high]) for label, low, high in manual_rows
     ])
-    manual_tab = widgets.VBox([manual_help, manual_grid, manual_run, manual_out])
 
-    tabs = widgets.Tab(children=[range_tab, manual_tab])
-    tabs.set_title(0, "From range file")
-    tabs.set_title(1, "Manual ranges")
-    display(tabs)
+    run_button = widgets.Button(description="Run analysis", button_style="primary")
+
+    def _on_source_change(_change):
+        _set_rows_disabled(manual_rows, peak_source.value == "range")
+        _refresh_summary()
+
+    def _on_run(_):
+        out.clear_output()
+        with out:
+            if peak_source.value == "range":
+                if not range_species:
+                    _md("**Range table is empty** — switch to *Manual peak windows*.")
+                    return
+                species = range_species
+            else:
+                try:
+                    species = species_from_manual(manual_rows)
+                except ValueError as exc:
+                    _md(f"**Input error:** {exc}")
+                    return
+                if not species:
+                    _md("_All peak windows are empty — nothing to analyze._")
+                    return
+            run_analysis(variables, species)
+
+    peak_source.observe(_on_source_change, names="value")
+    run_button.on_click(_on_run)
+
+    # Initialize disabled state to match the dropdown's starting value.
+    _set_rows_disabled(manual_rows, peak_source.value == "range")
+    _refresh_summary()
+
+    panel = widgets.VBox([
+        peak_source,
+        summary,
+        manual_grid,
+        run_button,
+        out,
+    ])
+    display(panel)

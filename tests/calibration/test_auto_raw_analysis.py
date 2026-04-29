@@ -231,6 +231,114 @@ def test_load_calibrated_h5_works_without_tdc_and_range(tmp_path: Path):
     assert variables.data_tdc is None
 
 
+def test_load_calibrated_h5_falls_back_to_pure_raw_acquisition_layout(tmp_path: Path):
+    """When the file has /dld + /tdc but no /df, the loader should switch to
+    the raw acquisition path (parsing /dld with fetch_dataset_with_tdc and
+    converting to the processed schema)."""
+    import h5py
+
+    dld_sc = np.array([1, 2, 3])
+    tdc_sc = np.array([1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3])
+    h5_path = tmp_path / "raw_only.h5"
+    n_dld = len(dld_sc)
+    n_tdc = len(tdc_sc)
+    with h5py.File(h5_path, "w") as hdf:
+        dld_grp = hdf.create_group("dld")
+        dld_grp.create_dataset("high_voltage", data=np.full((n_dld, 1), 1500.0))
+        dld_grp.create_dataset("voltage_pulse", data=np.full((n_dld, 1), 200.0))
+        dld_grp.create_dataset("laser_intensity", data=np.zeros((n_dld, 1)))
+        dld_grp.create_dataset("start_counter", data=dld_sc.reshape(-1, 1).astype(np.int64))
+        dld_grp.create_dataset("t", data=np.full((n_dld, 1), 400.0))
+        dld_grp.create_dataset("x", data=np.full((n_dld, 1), 0.5))
+        dld_grp.create_dataset("y", data=np.full((n_dld, 1), -0.5))
+
+        tdc_grp = hdf.create_group("tdc")
+        tdc_grp.create_dataset("channel", data=(np.arange(n_tdc) % 4).reshape(-1, 1).astype(np.int64))
+        tdc_grp.create_dataset("start_counter", data=tdc_sc.reshape(-1, 1).astype(np.int64))
+        tdc_grp.create_dataset("high_voltage", data=np.full((n_tdc, 1), 1500.0))
+        tdc_grp.create_dataset("voltage_pulse", data=np.full((n_tdc, 1), 200.0))
+        tdc_grp.create_dataset("laser_pulse", data=np.zeros((n_tdc, 1)))
+        tdc_grp.create_dataset("time_data", data=np.linspace(40.0, 80.0, n_tdc).reshape(-1, 1))
+
+    variables = Variables()
+    loaded_dld, loaded_tdc, _ = helper_data_loader.load_calibrated_h5(
+        str(h5_path), variables
+    )
+
+    # The /df-style processed schema must exist on the loaded dld.
+    assert "mc (Da)" in loaded_dld.columns
+    assert "t (ns)" in loaded_dld.columns
+    assert "event_group_id" in loaded_dld.columns
+    assert loaded_tdc is not None
+    assert "event_group_id" in loaded_tdc.columns
+
+
+def test_call_auto_raw_data_analysis_renders_single_panel_with_dropdown():
+    """The redesigned UI is one VBox panel (not a Tab) with a peak-source
+    dropdown. Toggling to 'range' must disable the manual rows; toggling
+    back to 'manual' must re-enable them."""
+    import ipywidgets as widgets
+
+    class _CapturingVariables(Variables):
+        def __init__(self):
+            super().__init__()
+
+    variables = _CapturingVariables()
+    variables.data = pd.DataFrame({
+        "mc (Da)": [27.0, 27.05, 27.1],
+        "t (ns)": [400.0, 410.0, 420.0],
+        "x_det (cm)": [0.0, 0.1, -0.1],
+        "y_det (cm)": [0.0, 0.1, -0.1],
+        "delta_p": [0, 1, 2],
+        "multi": [1, 1, 1],
+        "start_counter": [1, 2, 3],
+    })
+
+    captured = {}
+    real_display = helper_auto_raw_analysis.display
+
+    def capture_display(obj):
+        captured["panel"] = obj
+
+    helper_auto_raw_analysis.display = capture_display
+    try:
+        helper_auto_raw_analysis.call_auto_raw_data_analysis(variables)
+    finally:
+        helper_auto_raw_analysis.display = real_display
+
+    panel = captured["panel"]
+    assert isinstance(panel, widgets.VBox)
+    # First child is the peak-source dropdown.
+    dropdown = panel.children[0]
+    assert isinstance(dropdown, widgets.Dropdown)
+    assert {value for _label, value in dropdown.options} == {"manual", "range"}
+
+    # Manual rows are nested in the third child (HTML summary, then VBox of HBoxes).
+    manual_grid = panel.children[2]
+    assert isinstance(manual_grid, widgets.VBox)
+    assert len(manual_grid.children) == 6   # exactly six peak rows
+
+    def _all_disabled():
+        return all(
+            child.children[0].disabled
+            and child.children[1].disabled
+            and child.children[2].disabled
+            for child in manual_grid.children
+        )
+
+    # No range data was loaded, so the dropdown defaults to "manual" and rows are enabled.
+    assert dropdown.value == "manual"
+    assert not _all_disabled()
+
+    # Toggling to "range" must disable the rows.
+    dropdown.value = "range"
+    assert _all_disabled()
+
+    # Toggling back to "manual" re-enables them.
+    dropdown.value = "manual"
+    assert not _all_disabled()
+
+
 # ---------------------------------------------------------------------------
 # event_group_id ride-through with the new flag combo
 # ---------------------------------------------------------------------------

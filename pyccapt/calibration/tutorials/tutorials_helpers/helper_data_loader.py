@@ -175,21 +175,29 @@ def add_columns(variables, max_mc):
 
 
 def load_calibrated_h5(dataset_path, variables, *, range_path=None):
-	"""Load a calibrated PyCCAPT ``.h5`` file with optional ``/tdc`` and ``/range`` groups.
+	"""Load a PyCCAPT ``.h5`` file for raw-data analysis.
 
-	The file is expected to follow the new bundled layout produced by
-	``data_tools.save_data(..., save_tdc=True, save_range=True)`` — a single
-	``.h5`` containing ``/df`` (calibrated dld), and optionally ``/tdc`` (raw
-	delay-line timestamps linked via ``event_group_id``) and ``/range`` (the
-	identified ion windows). Older datasets that store the range table in a
-	separate ``<dataset>_range.h5`` file are also supported via ``range_path``.
+	Two file layouts are supported:
+
+	1. **Calibrated bundle** (preferred) — produced by
+	   ``data_tools.save_data(..., save_tdc=True, save_range=True)``. Contains
+	   ``/df`` (calibrated dld), and optionally ``/tdc`` (raw delay-line
+	   timestamps linked via ``event_group_id``) and ``/range`` (identified
+	   ion windows).
+	2. **Pure raw acquisition** — the file as written by the control software:
+	   ``/dld`` and ``/tdc`` groups (no ``/df``, no ``/range``). The dld
+	   records are converted to the processed dataframe schema in memory, and
+	   the linked raw tdc rows are kept on ``variables.data_tdc``.
+
+	Older datasets that store the range table in a separate
+	``<dataset>_range.h5`` file are also supported via ``range_path``.
 
 	Populates ``variables.data``, ``variables.data_tdc``, ``variables.range_data``,
 	and the standard backup fields.
 	"""
 	import pandas as pd  # local import to keep optional Jupyter loaders fast
 
-	from pyccapt.calibration.data_tools import data_tools
+	from pyccapt.calibration.data_tools import data_loadcrop, data_tools
 
 	dataset_path_obj = Path(dataset_path)
 	if not dataset_path_obj.is_file():
@@ -201,11 +209,35 @@ def load_calibrated_h5(dataset_path, variables, *, range_path=None):
 	variables.set_result_directory(output_dir)
 	variables.result_data_name = variables.dataset_name
 
-	loaded = data_tools.load_data(str(dataset_path_obj), 'pyccapt', mode='processed', load_tdc=True)
-	if isinstance(loaded, tuple):
-		dld_df, tdc_df = loaded
-	else:
-		dld_df, tdc_df = loaded, None
+	# First try the calibrated bundle layout (/df). If that fails because the
+	# file only has the raw acquisition groups, fall back to raw mode.
+	dld_df = None
+	tdc_df = None
+	source = "calibrated"
+	try:
+		loaded = data_tools.load_data(
+			str(dataset_path_obj), 'pyccapt', mode='processed', load_tdc=True
+		)
+		if isinstance(loaded, tuple):
+			dld_df, tdc_df = loaded
+		else:
+			dld_df, tdc_df = loaded, None
+	except (KeyError, ValueError) as calibrated_error:
+		# `pd.read_hdf(..., key='df')` raises ValueError when /df is missing.
+		# Fall back to raw acquisition layout: /dld + /tdc.
+		try:
+			dld_df, tdc_df = data_loadcrop.fetch_dataset_with_tdc(str(dataset_path_obj))
+		except Exception as raw_error:
+			raise ValueError(
+				f"Could not load {dataset_path!r}: not a calibrated bundle "
+				f"({calibrated_error}) and not a recognizable raw acquisition file "
+				f"({raw_error})."
+			) from raw_error
+		# Apply the standard raw -> processed pipeline so downstream analyses
+		# see the same dataframe schema as a calibrated load.
+		dld_df = data_tools.remove_invalid_data(dld_df, max_tof=100000)
+		dld_df = data_tools.pyccapt_raw_to_processed(dld_df)
+		source = "raw"
 
 	variables.data = dld_df
 	variables.data_backup = dld_df.copy()
@@ -231,7 +263,7 @@ def load_calibrated_h5(dataset_path, variables, *, range_path=None):
 		variables.range_data = range_df
 		variables.range_data_backup = range_df.copy()
 
-	print(f"Loaded calibrated dld rows: {len(dld_df)}")
+	print(f"Loaded {source} dld rows: {len(dld_df)}")
 	if tdc_df is not None:
 		print(f"Loaded raw tdc rows:        {len(tdc_df)}")
 	if range_df is not None:

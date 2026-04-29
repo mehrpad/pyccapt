@@ -31,6 +31,139 @@ def _normalize_extract_mode(extract_mode: str) -> str:
     return mode
 
 
+EVENT_GROUP_ID_COLUMN = "event_group_id"
+TDC_HAS_DLD_MATCH_COLUMN = "has_dld_match"
+
+
+def _run_starts(values: np.ndarray) -> np.ndarray:
+    """Index boundaries of consecutive equal-value runs.
+
+    Returns an array of length n_runs+1 where slice [run_starts[i]:run_starts[i+1]]
+    selects the i-th run.
+    """
+    if values.size == 0:
+        return np.array([0], dtype=np.int64)
+    return np.r_[0, np.where(np.diff(values) != 0)[0] + 1, values.size].astype(np.int64)
+
+
+def build_event_group_mapping(
+    dld_start_counter: np.ndarray,
+    tdc_start_counter: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Assign shared event-group ids linking dld rows to their tdc rows.
+
+    The start_counter wraps; values are not unique by themselves. But within each
+    pulse trigger, all related tdc rows are consecutive in time order, and so are
+    any dld rows for that pulse. A two-pointer sweep over the consecutive runs is
+    enough to pair them: each tdc run either matches the next unmatched dld run
+    (same counter value), or it is an "orphan" pulse that did not produce a
+    reconstructible dld event.
+
+    Returns
+    -------
+    dld_gid : int64 array, parallel to ``dld_start_counter``
+        Group id assigned to each dld row.
+    tdc_gid : int64 array, parallel to ``tdc_start_counter``
+        Group id for matched tdc rows; ``-1`` for orphan tdc rows.
+    tdc_has_match : bool array, parallel to ``tdc_start_counter``
+        True iff the tdc row's pulse trigger has at least one dld row.
+    """
+    dld_sc = np.asarray(dld_start_counter).reshape(-1)
+    tdc_sc = np.asarray(tdc_start_counter).reshape(-1)
+
+    dld_gid = np.full(dld_sc.size, -1, dtype=np.int64)
+    tdc_gid = np.full(tdc_sc.size, -1, dtype=np.int64)
+    tdc_has_match = np.zeros(tdc_sc.size, dtype=bool)
+
+    if dld_sc.size == 0 or tdc_sc.size == 0:
+        return dld_gid, tdc_gid, tdc_has_match
+
+    dld_runs = _run_starts(dld_sc)
+    tdc_runs = _run_starts(tdc_sc)
+    n_dld_runs = dld_runs.size - 1
+    n_tdc_runs = tdc_runs.size - 1
+
+    next_gid = 0
+    j = 0
+    for i in range(n_tdc_runs):
+        t_start, t_end = tdc_runs[i], tdc_runs[i + 1]
+        if j < n_dld_runs:
+            d_start, d_end = dld_runs[j], dld_runs[j + 1]
+            if tdc_sc[t_start] == dld_sc[d_start]:
+                dld_gid[d_start:d_end] = next_gid
+                tdc_gid[t_start:t_end] = next_gid
+                tdc_has_match[t_start:t_end] = True
+                next_gid += 1
+                j += 1
+                continue
+        # Orphan tdc run: keep gid = -1, has_match = False.
+    if j < n_dld_runs:
+        # dld rows with no matching tdc run indicate inconsistent inputs.
+        # Assign them unique negative ids so they remain distinguishable.
+        unmatched = dld_runs[j + 1] - dld_runs[j]
+        raise ValueError(
+            "Found dld rows without a matching tdc start_counter run "
+            f"(at least {unmatched} rows starting at dld index {dld_runs[j]}). "
+            "Are the dld and tdc datasets from the same acquisition?"
+        )
+    return dld_gid, tdc_gid, tdc_has_match
+
+
+def fetch_dataset_with_tdc(
+    filename: str,
+    tdc_extract_mode: str = "tdc_sc",
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Load both the dld and tdc dataframes and add shared ``event_group_id``.
+
+    The dld dataframe gets a single new integer column ``event_group_id`` that
+    survives ``drop``/``iloc``/``reset_index``. The tdc dataframe gets the same
+    column plus ``has_dld_match`` (bool) so orphan tdc rows can be preserved at
+    save time even after dld filtering.
+    """
+    dld_df = fetch_dataset_from_dld_grp(filename, extract_mode="dld")
+    if dld_df is None:
+        raise FileNotFoundError(f"Failed to load dld group from {filename!r}")
+
+    tdc_df = fetch_dataset_from_dld_grp(filename, extract_mode=tdc_extract_mode)
+    if tdc_df is None:
+        raise FileNotFoundError(
+            f"Failed to load tdc group from {filename!r} with mode {tdc_extract_mode!r}"
+        )
+
+    dld_gid, tdc_gid, tdc_has_match = build_event_group_mapping(
+        dld_df["start_counter"].to_numpy(),
+        tdc_df["start_counter"].to_numpy(),
+    )
+    dld_df[EVENT_GROUP_ID_COLUMN] = dld_gid
+    tdc_df[EVENT_GROUP_ID_COLUMN] = tdc_gid
+    tdc_df[TDC_HAS_DLD_MATCH_COLUMN] = tdc_has_match
+    return dld_df, tdc_df
+
+
+def filter_tdc_by_dld(dld_df: pd.DataFrame, tdc_df: pd.DataFrame) -> pd.DataFrame:
+    """Return tdc rows whose dld counterpart still exists, plus all orphan rows.
+
+    Rule: drop a tdc row only when its linked dld row was deleted. Orphan tdc
+    rows (pulses that never produced a dld event) are always preserved.
+    """
+    if EVENT_GROUP_ID_COLUMN not in tdc_df.columns or TDC_HAS_DLD_MATCH_COLUMN not in tdc_df.columns:
+        raise ValueError(
+            "tdc_df is missing the event_group_id/has_dld_match columns; "
+            "load it via fetch_dataset_with_tdc()."
+        )
+    if EVENT_GROUP_ID_COLUMN not in dld_df.columns:
+        raise ValueError(
+            "dld_df is missing the event_group_id column; load it via "
+            "fetch_dataset_with_tdc()."
+        )
+
+    surviving_groups = pd.unique(dld_df[EVENT_GROUP_ID_COLUMN].to_numpy())
+    keep = (~tdc_df[TDC_HAS_DLD_MATCH_COLUMN].to_numpy()) | (
+        tdc_df[EVENT_GROUP_ID_COLUMN].isin(surviving_groups).to_numpy()
+    )
+    return tdc_df.loc[keep].reset_index(drop=True).copy()
+
+
 def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld') -> pd.DataFrame:
     """
     Fetches dataset from HDF5 file.
@@ -107,10 +240,15 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld') -> pd.DataFram
             if 'tdc/laser_pulse' in hdf5_data:
                 laser_pulse = hdf5_data['tdc/laser_pulse'].to_numpy()
             else:
-                laser_pulse = np.zeros(len(channel))
+                laser_pulse = np.zeros((len(channel), 1))
+            if laser_pulse.ndim == 1:
+                laser_pulse = laser_pulse.reshape(-1, 1)
             time_data = hdf5_data['tdc/time_data'].to_numpy()
 
-            dld_group_array = np.concatenate((channel, start_counter, high_voltage, voltage_pulse, time_data), axis=1)
+            dld_group_array = np.concatenate(
+                (channel, start_counter, high_voltage, voltage_pulse, laser_pulse, time_data),
+                axis=1,
+            )
             dld_group_storage = create_pandas_dataframe(dld_group_array, mode='tdc_sc')
             return dld_group_storage
         except KeyError as error:

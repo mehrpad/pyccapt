@@ -353,6 +353,8 @@ class Variables(SharedVariablesBase):
         self.plotly_3d_reconstruction = None
         self.data = None
         self.data_backup = None
+        self.data_tdc = None
+        self.data_tdc_backup = None
         self.max_mc = 400
         self.flight_path_length = None
         self.mask = None

@@ -21,6 +21,23 @@ label_layout = widgets.Layout(width='200px')
 
 
 def call_visualization(variables, colab=False):
+    if getattr(variables, 'range_data', None) is not None and 'name' not in variables.range_data.columns:
+        def _to_neutral_label(raw_value):
+            text = str(raw_value).strip().replace('$', '')
+            text = re.sub(r'_\{([^}]*)\}', r'\1', text)
+            text = re.sub(r'\^\{[^}]*\}', '', text)
+            text = text.replace('{', '').replace('}', '')
+            text = re.sub(r'\s*\d*[+-]+\s*$', '', text)
+            return text.strip()
+
+        if 'ion' in variables.range_data.columns:
+            variables.range_data['name'] = variables.range_data['ion'].apply(_to_neutral_label)
+        elif 'ion_name' in variables.range_data.columns:
+            variables.range_data['name'] = variables.range_data['ion_name'].apply(_to_neutral_label)
+        else:
+            variables.range_data['name'] = [f'range_{idx}' for idx in range(len(variables.range_data))]
+        print("Range table did not include 'name'; generated it from legacy ion labels.")
+
     plot_mc_button = widgets.Button(description='Plot mc')
     plot_3d_button = widgets.Button(description='Plot 3D')
     plot_3d_button_iso = widgets.Button(description='Plot 3D iso surface')

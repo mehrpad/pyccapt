@@ -83,6 +83,19 @@ def test_range_display_labels_prefer_plain_name_over_math_ion():
     assert labels == ['Mo2', 'CrMo']
 
 
+def test_range_peak_labels_prefer_raw_ion_text():
+    range_data = pd.DataFrame(
+        {
+            'name': ['Fe', 'Co'],
+            'ion': ['$Fe^{2+}$', '$Co^{+}$'],
+        }
+    )
+
+    labels = mc_plot._resolve_range_peak_labels(range_data)
+
+    assert labels == ['$Fe^{2+}$', '$Co^{+}$']
+
+
 def test_plain_range_label_strips_mathtext_markup():
     assert mc_plot._plain_range_label('$Mo_{2}^{2+}$') == 'Mo2 2+'
 

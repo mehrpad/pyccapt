@@ -12,31 +12,19 @@ from pyccapt.calibration.core.mc_plot_peak_helpers import fast_mrp, gaussian_mrp
 from pyccapt.calibration.tutorials.tutorials_helpers.helper_adaptive_residual_calibration import build_adaptive_residual_calibration_panel
 from pyccapt.calibration.tutorials.tutorials_helpers.helper_combined_mc_tof_calibration import build_combined_mc_tof_calibration_panel
 
-label_layout = widgets.Layout(width='300px')
-
-def reset_on_click(variables, calibration_mode):
-    if calibration_mode.value == 'tof_calib': variables.dld_t_calib = variables.data['t (ns)'].to_numpy()
-    elif calibration_mode.value == 'mc_calib': variables.mc_calib = variables.data['mc_uc (Da)'].to_numpy()
-    variables.clear_calibration_selection_mask()
-    variables.clear_calibration_peak_range()
-
-
-def reset_back_on_click(variables, calibration_mode):
-    if calibration_mode.value == 'tof_calib': variables.dld_t_calib = np.copy(variables.dld_t_calib_backup)
-    elif calibration_mode.value == 'mc_calib': variables.mc_calib = np.copy(variables.mc_calib_backup)
-    variables.clear_calibration_selection_mask()
-    variables.clear_calibration_peak_range()
-
-
-def save_on_click(variables, calibration_mode):
-    if calibration_mode.value == 'tof_calib': variables.dld_t_calib_backup = np.copy(variables.dld_t_calib)
-    elif calibration_mode.value == 'mc_calib': variables.mc_calib_backup = np.copy(variables.mc_calib)
-
-
-def clear_plot_on_click(out, out_status):
-    with out: out.clear_output()
-    with out_status: out_status.clear_output()
-    clear_output(wait=True)
+# Public utilities and pure helpers are kept in a sibling module so the host
+# file stays under the calibration module-length policy. They are re-exported
+# below to preserve every existing import path.
+from pyccapt.calibration.tutorials.tutorials_helpers._helper_calibration_pure import (
+    clear_plot_on_click,
+    label_layout,
+    peaks_overlap as _peaks_overlap,
+    reset_back_on_click,
+    reset_on_click,
+    save_on_click,
+    score_improved as _score_improved,
+    score_not_worse as _score_not_worse,
+)
 
 
 def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse_mode, t0=0.0):
@@ -290,9 +278,6 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             'weight': max(1.0, float(np.sqrt(n_ions))),
         }
 
-    def _peaks_overlap(first_peak, second_peak):
-        return not (first_peak['x2'] <= second_peak['x1'] or second_peak['x2'] <= first_peak['x1'])
-
     def _collect_reference_peaks(max_peaks=6, holdout_count=2):
         current_data = _get_calibration_array()
         selected_peak = _selected_peak_entry()
@@ -415,20 +400,6 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             f'selected={quality["selected_score"]:.2f})'
         )
         return quality
-
-    def _score_improved(candidate, best):
-        if not np.isfinite(candidate):
-            return False
-        if not np.isfinite(best):
-            return True
-        return candidate > best + max(0.1, abs(best) * 0.002)
-
-    def _score_not_worse(candidate, best, tolerance_ratio=0.01):
-        if not np.isfinite(best):
-            return True
-        if not np.isfinite(candidate):
-            return False
-        return candidate >= best - max(0.1, abs(best) * tolerance_ratio)
 
     def _force_reselect_peak_window(initial_peak_selection=True):
         """Re-run peak detection on current data and auto-select a new peak window.

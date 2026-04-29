@@ -1,5 +1,10 @@
 # PyCCAPT
 
+[![tests](https://github.com/mmonajem/pyccapt/actions/workflows/tests.yml/badge.svg)](https://github.com/mmonajem/pyccapt/actions/workflows/tests.yml)
+[![lint](https://github.com/mmonajem/pyccapt/actions/workflows/lint.yml/badge.svg)](https://github.com/mmonajem/pyccapt/actions/workflows/lint.yml)
+[![docs](https://github.com/mmonajem/pyccapt/actions/workflows/docs.yml/badge.svg)](https://github.com/mmonajem/pyccapt/actions/workflows/docs.yml)
+[![PyPI](https://img.shields.io/pypi/v/pyccapt.svg)](https://pypi.org/project/pyccapt/)
+[![Docker](https://img.shields.io/badge/ghcr.io-pyccapt-blue?logo=docker)](https://github.com/mmonajem/pyccapt/pkgs/container/pyccapt)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.10210507.svg)](https://doi.org/10.5281/zenodo.10210507)
 [![Documentation Status](https://readthedocs.org/projects/pyccapt/badge/?version=latest)](https://pyccapt.readthedocs.io/en/latest/?badge=latest)
 
@@ -156,6 +161,16 @@ PyCCAPT calibration workflows cover detector hit maps, FDM views, mass-spectrum 
 Processed calibration datasets can be exported as `HDF5`, `EPOS`, `POS`, and `ATO`.
 Saved range tables can be reloaded from PyCCAPT `HDF5` files as well as IVAS/LEAP
 range files in `.rrng` and `.rng` format.
+
+The data-processing and visualization tutorials also expose a **Load raw tdc**
+toggle and a matching **Save raw tdc** toggle. When both are enabled, the
+raw `/tdc` group from the acquisition file is loaded alongside `/dld` and
+linked event-by-event via a shared `event_group_id` column. Every cropping
+step the user performs on `/dld` is then automatically reflected on the linked
+raw rows when the calibrated dataset is saved, while raw rows that never had a
+matching dld event are preserved untouched. See
+[docs/Calibration_DATA_STRUCTURE.md](docs/Calibration_DATA_STRUCTURE.md) for
+the on-disk schema.
 
 The visualization helpers also include optional precipitate clustering with both
 Min-Max and Maximum-Separation algorithms, plus iso-surface and proxigram

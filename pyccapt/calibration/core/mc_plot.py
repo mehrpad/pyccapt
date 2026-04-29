@@ -59,6 +59,20 @@ def _resolve_range_display_labels(range_data):
     return [_plain_range_label(value) for value in range(len(range_data))]
 
 
+def _resolve_range_peak_labels(range_data):
+    """Return peak annotation labels, preferring the raw ion column when available."""
+    if "ion" in range_data.columns:
+        labels = [str(value).strip() for value in range_data["ion"].tolist()]
+        if any(label for label in labels):
+            return labels
+    for column in ("ion_name", "name"):
+        if column in range_data.columns:
+            labels = [str(value).strip() for value in range_data[column].tolist()]
+            if any(label for label in labels):
+                return labels
+    return [str(value) for value in range(len(range_data))]
+
+
 class AptHistPlotter:
     """
     This class plots the histogram of the mass-to-charge ratio (mc) or time of flight (tof) data.
@@ -204,6 +218,7 @@ class AptHistPlotter:
             mc_up = range_data['mc_up'].tolist()
             mc = range_data['mc'].tolist()
             labels = _resolve_range_display_labels(range_data)
+            peak_labels = _resolve_range_peak_labels(range_data)
             color_mask = np.full((len(self.x)), '#708090')  # default color is slategray
             for i in range(len(labels)):
                 mask = np.logical_and(self.x >= mc_low[i], self.x <= mc_up[i])
@@ -213,8 +228,11 @@ class AptHistPlotter:
                 if color_mask[i] != '#708090':
                     self.patches[i].set_facecolor(color_mask[i])
 
+            seen_legend_labels = set()
             for i in range(len(labels)):
-                self.legend_colors.append((labels[i], plt.Rectangle((0, 0), 1, 1, fc=colors[i])))
+                if labels[i] not in seen_legend_labels:
+                    self.legend_colors.append((labels[i], plt.Rectangle((0, 0), 1, 1, fc=colors[i])))
+                    seen_legend_labels.add(labels[i])
                 x_offset = 0.0  # Adjust this value as needed
 
                 # Find the bin that contains the mc[i]
@@ -238,7 +256,7 @@ class AptHistPlotter:
                     self.peak_annotates.append(plt.text(
                         peak_position + x_offset,
                         peak_height + y_offset,
-                        labels[i],
+                        peak_labels[i],
                         color='black',
                         size=10,
                         alpha=1,
@@ -296,7 +314,7 @@ class AptHistPlotter:
         """
         x_offset = 0.0  # Adjust this value as needed
         if range_data is not None:
-            labels = _resolve_range_display_labels(range_data)
+            labels = _resolve_range_peak_labels(range_data)
             mc = range_data['mc'].tolist()
             for i in range(len(labels)):
                 if self.y is None or len(self.y) == 0 or self.x is None or len(self.x) == 0:

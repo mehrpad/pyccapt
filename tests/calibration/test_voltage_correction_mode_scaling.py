@@ -18,6 +18,9 @@ class _DummyVariables:
             return self.dld_t_calib
         return self.mc_calib
 
+    def get_calibration_peak_range(self, calibration_mode):
+        return float(self.selected_x1), float(self.selected_x2)
+
 
 def test_voltage_corr_main_uses_sqrt_factor_for_tof_and_linear_for_mc(monkeypatch):
     dld_high_voltage = np.array([1000.0, 1100.0, 1200.0, 1300.0], dtype=float)

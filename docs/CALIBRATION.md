@@ -69,6 +69,24 @@ The tutorial save steps can export processed datasets as `HDF5`, `EPOS`, `POS`, 
 The visualization helpers also include Min-Max and Maximum-Separation clustering,
 iso-surface generation, and proxigram analysis for selected precipitate populations.
 
+### Linking and saving raw `/tdc` data alongside `/dld`
+
+PyCCAPT acquisition files contain both a `/dld` group with reconstructed events
+and a `/tdc` group with the raw delay-line timestamps (DLTS) from which those
+events were derived. From the calibration tutorials you can opt in to loading
+both groups together via the **Load raw tdc** dropdown, and at save time choose
+**Save raw tdc** to write the still-relevant raw rows into a `/tdc` key inside
+the calibrated `.h5` output.
+
+Internally this is handled by a shared `event_group_id` column added to both
+dataframes when the file is loaded with `load_tdc_raw=True`. The column rides
+through every cropping step in the calibration workflow (TOF clip, ROI, FDM,
+sequence range, manual mask drops); at save time the linked tdc rows for
+deleted dld rows are dropped, while orphan tdc rows (pulses that never produced
+a reconstructible dld event) are always preserved. See
+[Calibration_DATA_STRUCTURE.md](Calibration_DATA_STRUCTURE.md) for the on-disk
+schema of the optional `/tdc` group and the linking semantics.
+
 The user-facing tutorial pages are grouped in the Tutorials section of this documentation set.
 
 ## Workflow Snapshots

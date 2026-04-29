@@ -232,9 +232,29 @@ def _fit_voigt_mrp(x, y, peak_idx):
     result = []
     widths = []
     fit_span = float(xw[-1] - xw[0])
-    edge_tol = max((xw[1] - xw[0]) * 2.0 if len(xw) > 1 else 0.0, fit_span / 400.0)
+    # MRP(0.5) (i.e. FWHM) is always within the fit window, so we keep the
+    # original numerical sampling for it to preserve historical numerics that
+    # downstream consumers (peak-window inference, residual calibration)
+    # depend on. For the lower fractions (10% / 1% of max) the analytic Voigt
+    # tail can extend well outside the fit window — for a Lorentzian the FWHM
+    # at 1%-of-max is ~10x FWHM(0.5) — so we resample over a wider analytic
+    # range driven by the fitted FWHM. This keeps MRP(0.5) numerically stable
+    # while letting MRP(0.1) and MRP(0.01) report finite values when the
+    # analytic curve genuinely drops below threshold within the wider range.
+    base_edge_tol = max((xw[1] - xw[0]) * 2.0 if len(xw) > 1 else 0.0, fit_span / 400.0)
+    wide_half_span = max(fit_span / 2.0, 15.0 * float(fwhm))
     for frac in [0.5, 0.1, 0.01]:
-        x_fine = np.linspace(xw[0], xw[-1], 2000)
+        if frac >= 0.5:
+            x_fine = np.linspace(xw[0], xw[-1], 2000)
+            edge_tol = base_edge_tol
+        else:
+            x_fine = np.linspace(
+                float(mu_fit) - wide_half_span,
+                float(mu_fit) + wide_half_span,
+                4000,
+            )
+            sample_step = float(x_fine[1] - x_fine[0]) if len(x_fine) > 1 else 0.0
+            edge_tol = sample_step
         y_fine = _voigt(x_fine, *popt) - popt[4]
         y_max = float(np.max(y_fine))
         if y_max <= 0:
@@ -247,7 +267,7 @@ def _fit_voigt_mrp(x, y, peak_idx):
             result.append(float('nan'))
             widths.append(float('nan'))
             continue
-        if above[0] <= xw[0] + edge_tol or above[-1] >= xw[-1] - edge_tol:
+        if above[0] <= x_fine[0] + edge_tol or above[-1] >= x_fine[-1] - edge_tol:
             result.append(float('nan'))
             widths.append(float('nan'))
             continue
@@ -255,7 +275,16 @@ def _fit_voigt_mrp(x, y, peak_idx):
         widths.append(fw)
         result.append(round(float(mu_fit / fw), 2) if fw > 0 else float('nan'))
 
-    widths, result = _sanitize_tail_widths(widths, result, fit_span, max(edge_tol, fit_span / 200.0))
+    # The sanitizer rejects widths that meet or exceed `full_span`. For
+    # MRP(0.5) the width is always within the fit window, but MRP(0.1) and
+    # MRP(0.01) widths can comfortably exceed `fit_span` for Lorentzian-
+    # dominated profiles — that's the whole point of the wider analytic
+    # sampling above. Use the wider analytic span so legitimate tail widths
+    # are not falsely marked NaN.
+    sanitize_full_span = max(fit_span, 2.0 * wide_half_span)
+    widths, result = _sanitize_tail_widths(
+        widths, result, sanitize_full_span, max(base_edge_tol, fit_span / 200.0)
+    )
 
     return result, True, float(fwhm), profile_type
 
@@ -284,18 +313,30 @@ def _recommended_mrp_payload(report):
     histogram_values = report.get('histogram_mrp', [float('nan')] * 3)
     histogram_valid = np.isfinite(histogram_values[0])
     voigt_values = report.get('voigt_mrp', [float('nan')] * 3)
+    gaussian_values = report.get('gaussian_mrp', [float('nan')] * 3)
+    gaussian_finite = bool(report.get('gaussian_ok')) and np.isfinite(gaussian_values[0])
+
+    # Cross-check the Voigt fit against the most reliable independent
+    # estimator we have: histogram-based MRP when the bin size makes it
+    # meaningful, otherwise the Gaussian fit. This catches over-narrow Voigt
+    # convergences that would otherwise produce unrealistically large MRPs.
+    if histogram_valid:
+        voigt_cross_check_ok = voigt_values[0] <= histogram_values[0] * _MRP_REFERENCE_GUARD_FACTOR
+    elif gaussian_finite:
+        voigt_cross_check_ok = voigt_values[0] <= gaussian_values[0] * _MRP_REFERENCE_GUARD_FACTOR
+    else:
+        voigt_cross_check_ok = True
+
     voigt_valid = (
         report.get('voigt_ok')
         and np.isfinite(voigt_values[0])
-        and (not histogram_valid or voigt_values[0] <= histogram_values[0] * _MRP_REFERENCE_GUARD_FACTOR)
+        and voigt_cross_check_ok
         and voigt_values[0] <= _MRP_PHYSICAL_CEILING
     )
     if voigt_valid:
         return report['voigt_mrp'], f'Voigt ({report["profile_type"]})'
-    gaussian_values = report.get('gaussian_mrp', [float('nan')] * 3)
     gaussian_valid = (
-        report.get('gaussian_ok')
-        and np.isfinite(gaussian_values[0])
+        gaussian_finite
         and (not histogram_valid or gaussian_values[0] <= histogram_values[0] * _MRP_REFERENCE_GUARD_FACTOR)
         and gaussian_values[0] <= _MRP_PHYSICAL_CEILING
     )
@@ -812,22 +853,54 @@ def _gaussian_mrp_report_core(calibration_array, x1, x2, bin_size=_MRP_INTERNAL_
     gauss_mrp, gauss_ok = _fit_gaussian_mrp(x, y, peaks[peak_idx])
     voigt_mrp, voigt_ok, voigt_fwhm, profile_type = _fit_voigt_mrp(x, y, peaks[peak_idx])
 
+    # scipy.signal.peak_widths walks outward from the apex bin and interpolates
+    # the first downward crossing. When the histogram bin is much finer than
+    # the peak width (e.g. 0.001 Da bin against a tall, narrow peak), the
+    # apex bin towers over its neighbors and the half-prominence crossing
+    # lands inside the apex bin, returning a width of one bin or less. That
+    # produces an absurdly large histogram-based MRP (e.g. 30,000+) and breaks
+    # the cross-check that protects against over-narrow Voigt fits. We
+    # therefore re-bin to a coarser comparison histogram whenever the input
+    # bin is finer than the threshold below.
+    HIST_COMPARISON_MIN_BIN = 0.05
+    if bin_size < HIST_COMPARISON_MIN_BIN:
+        coarse_bin = HIST_COMPARISON_MIN_BIN
+        coarse_n_bins = max(_MRP_MIN_BINS, int(np.ceil((used_x2 - used_x1) / coarse_bin)))
+        coarse_edges = np.linspace(used_x1, used_x2, coarse_n_bins + 1)
+        coarse_y, coarse_edges = np.histogram(data, bins=coarse_edges)
+        coarse_x = (coarse_edges[:-1] + coarse_edges[1:]) * 0.5
+        try:
+            coarse_peaks, _ = find_peaks(coarse_y, height=0)
+        except ValueError:
+            coarse_peaks = np.array([], dtype=int)
+        coarse_peak_idx = _select_peak_index(coarse_x, coarse_peaks, requested_center) if len(coarse_peaks) else None
+        if coarse_peak_idx is not None:
+            hist_x = coarse_x
+            hist_y = coarse_y
+            hist_peaks = coarse_peaks
+            hist_peak_idx = coarse_peak_idx
+            hist_bin_size = coarse_bin
+        else:
+            hist_x, hist_y, hist_peaks, hist_peak_idx, hist_bin_size = x, y, peaks, peak_idx, bin_size
+    else:
+        hist_x, hist_y, hist_peaks, hist_peak_idx, hist_bin_size = x, y, peaks, peak_idx, bin_size
+
     hist_mrp = []
     histogram_peak_sides = []
     histogram_widths = []
     for rel in [0.5, 0.9, 0.99]:
         try:
-            pw = peak_widths(y, peaks, rel_height=rel)
-            left = np.interp(pw[2][peak_idx], np.arange(len(x)), x)
-            right = np.interp(pw[3][peak_idx], np.arange(len(x)), x)
+            pw = peak_widths(hist_y, hist_peaks, rel_height=rel)
+            left = np.interp(pw[2][hist_peak_idx], np.arange(len(hist_x)), hist_x)
+            right = np.interp(pw[3][hist_peak_idx], np.arange(len(hist_x)), hist_x)
             width = right - left
-            edge_tol = max(bin_size * 2.0, (used_x2 - used_x1) / 400.0)
+            edge_tol = max(hist_bin_size * 2.0, (used_x2 - used_x1) / 400.0)
             if left <= used_x1 + edge_tol or right >= used_x2 - edge_tol:
                 hist_mrp.append(float('nan'))
                 histogram_peak_sides.append([float('nan'), float('nan')])
                 histogram_widths.append(float('nan'))
             else:
-                hist_mrp.append(round(float(x[peaks[peak_idx]] / width), 2) if width > 0 else float('nan'))
+                hist_mrp.append(round(float(hist_x[hist_peaks[hist_peak_idx]] / width), 2) if width > 0 else float('nan'))
                 histogram_peak_sides.append([float(left), float(right)])
                 histogram_widths.append(float(width))
         except (ValueError, IndexError):
@@ -839,7 +912,7 @@ def _gaussian_mrp_report_core(calibration_array, x1, x2, bin_size=_MRP_INTERNAL_
         histogram_widths,
         hist_mrp,
         used_x2 - used_x1,
-        max(bin_size * 2.0, (used_x2 - used_x1) / 200.0),
+        max(hist_bin_size * 2.0, (used_x2 - used_x1) / 200.0),
     )
     histogram_peak_sides = [[float('nan'), float('nan')] if not np.isfinite(width) else sides for width, sides in zip(histogram_widths, histogram_peak_sides)]
 

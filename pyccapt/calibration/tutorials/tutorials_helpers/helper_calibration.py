@@ -999,8 +999,12 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             simple_hybrid_button.disabled = False
 
     def on_gaussian_mrp(_):
+        # The user explicitly clicked the Gaussian MRP button to see the
+        # report. The verbose dropdown only controls passive logging from
+        # automatic calibration steps; an explicit button click should always
+        # render its output regardless of that dropdown's value.
         gaussian_mrp_button.disabled = True
-        with out_status, _verbosity_context():
+        with out_status:
             out_status.clear_output()
             if not _selected_peak_ready():
                 print('Please first select a peak')

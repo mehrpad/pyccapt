@@ -1,0 +1,53 @@
+name: lint
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ruff:
+    name: ruff (lint + format check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - run: python -m pip install --upgrade pip ruff
+      - name: ruff check
+        run: ruff check .
+      # The codebase has not yet been reformatted under ruff format; this step
+      # is informational until that one-time reformat lands. Flip
+      # continue-on-error to false to make formatting drift block CI.
+      - name: ruff format --check (advisory)
+        continue-on-error: true
+        run: ruff format --check --diff .
+
+  imports:
+    name: smoke import check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: setup.py
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[calibration]"
+      - name: Verify package imports cleanly
+        run: |
+          python -c "import pyccapt; print('pyccapt', pyccapt.__version__)"
+          python -c "import pyccapt.calibration"
+          python -c "from pyccapt.calibration.data_tools import data_tools, data_loadcrop"
+          python -c "from pyccapt.calibration.tutorials.tutorials_helpers import helper_data_loader, helper_auto_raw_analysis"
+      - name: Check for dependency conflicts
+        run: python -m pip check

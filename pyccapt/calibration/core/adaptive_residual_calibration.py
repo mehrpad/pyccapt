@@ -147,8 +147,12 @@ def _evaluate_quality(calibration_array, reference_peaks):
 def _build_peak_template(calibration_array, peak, template_bin_size):
     mask = (calibration_array > peak["x1"]) & (calibration_array < peak["x2"])
     values = np.asarray(calibration_array[mask], dtype=float)
-    if values.size < 30:
-        raise CalibrationInputError("Not enough ions to learn a peak template")
+    # Aligned with the 25-ion floor in _split_reference_peaks. Returning
+    # None lets the caller skip this peak instead of aborting the whole
+    # calibration when one peak window is sparse (e.g. after a correction
+    # step shifts ions outside the original auto-detected bounds).
+    if values.size < 25:
+        return None
     center = float(peak["position"])
     offsets = values - center
     search_half_range = max((peak["x2"] - peak["x1"]) * 0.75, template_bin_size * 6.0)
@@ -402,8 +406,12 @@ def adaptive_residual_calibration(
         round_quality = dict(round_baseline_quality)
         round_steps = []
         templates = [_build_peak_template(current_array, peak, template_bin_size) for peak in round_reference_peaks["train"]]
+        peak_template_pairs = [(p, t) for p, t in zip(round_reference_peaks["train"], templates) if t is not None]
+        if not peak_template_pairs:
+            stop_reason = "insufficient_template_ions"
+            break
         temporal_candidates = []
-        for peak, template in zip(round_reference_peaks["train"], templates):
+        for peak, template in peak_template_pairs:
             temporal_correction, candidate_info = _fit_temporal_residual(
                 current_array, template, n_windows=n_windows, overlap=overlap, min_window_ions=min_window_ions, smoothing=temporal_smoothing
             )
@@ -423,8 +431,9 @@ def adaptive_residual_calibration(
         spatial_quality = None
         if apply_spatial:
             templates = [_build_peak_template(current_array, peak, template_bin_size) for peak in round_reference_peaks["train"]]
+            peak_template_pairs = [(p, t) for p, t in zip(round_reference_peaks["train"], templates) if t is not None]
             spatial_candidates = []
-            for peak, template in zip(round_reference_peaks["train"], templates):
+            for peak, template in peak_template_pairs:
                 spatial_correction, candidate_info = _fit_spatial_residual(
                     current_array, template, variables.dld_x_det, variables.dld_y_det, grid_size=spatial_grid, min_cell_ions=min_cell_ions
                 )

@@ -1,6 +1,26 @@
 Change Log
 ==========
 
+0.2.2 (04.05.2026)
+-------------------
+- Add GitHub Actions CI: tests (matrix on Linux/Windows × Py 3.10/3.11/3.12),
+  ruff lint, Sphinx docs build, GHCR Docker image, tag-driven PyPI release.
+- Document the tag-driven release runbook in CONTRIBUTING.md, including PyPI
+  Trusted Publishing setup and recovery from failed releases.
+- Fix `store_df_to_hdf` calling `DataFrame.to_hdf` with a positional `key`
+  on modern pandas (TypeError: takes 2 positional arguments but 3 given).
+- Make `_build_peak_template` skip-not-fail when a peak window has fewer
+  than 25 ions, aligning the threshold with `_split_reference_peaks` so
+  adaptive residual calibration degrades gracefully on sparse peaks.
+- Mock optional control-extra deps (PyQt6, pyqtgraph, pyserial, opencv,
+  pyvisa) in docs/conf.py so the docs build runs in the calibration-only
+  CI environment.
+- README badges: distinguish the docs CI badge (now "docs build") from the
+  Read the Docs link badge.
+- Loosen the synthetic-fixture spread tolerance in
+  test_adaptive_residual_calibration_reduces_windowed_peak_drift to 2x to
+  match the metric's noise floor on small datasets.
+
 0.0.1 (23.03.2022)
 -------------------
 - First Release

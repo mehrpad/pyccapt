@@ -31,8 +31,11 @@ project = 'PyCCAPT'
 copyright = '2022, Mehrpad Monajem'
 author = 'Mehrpad Monajem'
 
-# The full version, including alpha/beta/rc tags
-release = '0.0.34'
+# The full version, including alpha/beta/rc tags. Read dynamically from the
+# package so it never drifts away from pyccapt/__init__.py.
+import pyccapt  # noqa: E402
+
+release = pyccapt.__version__
 
 env_flag = os.getenv("status_flag")
 

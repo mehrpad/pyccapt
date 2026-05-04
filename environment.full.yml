@@ -7,3 +7,6 @@ dependencies:
   - pip
   - pip:
       - pyccapt[full]
+      # SmarAct MCS2 stage SDK – NOT on PyPI, install manually:
+      #   pip install "C:\SmarAct\MCS2\SDK\Python\packages\smaract.ctl-<version>.zip"
+      # e.g.: pip install "C:\SmarAct\MCS2\SDK\Python\packages\smaract.ctl-1.5.2.zip"

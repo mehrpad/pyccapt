@@ -128,68 +128,127 @@ def _format_pct(numerator: int, denominator: int) -> str:
     return f"{numerator:,} ({100.0 * numerator / denominator:.2f}%)"
 
 
+def _classify_pulse_groups(df: pd.DataFrame, group_col: str):
+    """Classify each pulse group by which TDC channels are present.
+
+    Surface Concept has 4 channels (0,1 = x delay line; 2,3 = y delay line).
+
+    Returns three numpy arrays — one entry per pulse group:
+      counts     : total number of TDC signals in the group
+      complete   : True when all 4 channels (0,1,2,3) are present
+                   → both delay-line directions resolved → "4 DLTS"
+      partial    : True when only x-pair (0+1) OR only y-pair (2+3) present
+                   → one direction missing → "2 DLTS"
+
+    A group can be both complete=False and partial=False (e.g. noise burst
+    with only channel 0).  A group can never be both True simultaneously.
+    """
+    if len(df) == 0:
+        empty = np.array([], dtype=int)
+        return empty, empty.astype(bool), empty.astype(bool)
+
+    grp = df.groupby(group_col)["channel"]
+    counts = grp.count().to_numpy()
+
+    # Boolean: does channel N appear at least once in this group?
+    ch = df["channel"]
+    idx = df[group_col]
+    has = {c: (ch == c).groupby(idx).any().to_numpy() for c in range(4)}
+
+    complete = has[0] & has[1] & has[2] & has[3]
+    has_x    = has[0] & has[1]
+    has_y    = has[2] & has[3]
+    partial  = (has_x & ~has_y) | (has_y & ~has_x)
+
+    return counts, complete, partial
+
+
 def plot_dlts_per_pulse(tdc_df: pd.DataFrame, detector_kind: str) -> None:
-    """Stacked histogram of DLTS-per-pulse, broken down by linked vs orphan."""
+    """DLTS-per-pulse histogram with channel-based 4-DLTS / 2-DLTS classification.
+
+    Each x-position (number of TDC signals per pulse) shows up to three bars:
+
+    • **Gray**   – total frequency (all pulses at that DLTS count)
+    • **Orange** – "2 DLTS" partial pulses: only one delay-line direction fired
+                   (channels 0+1 for x  OR  channels 2+3 for y, not both)
+    • **Blue**   – "4 DLTS" complete pulses: all four channels present
+                   (channels 0+1+2+3 → both x and y resolved)
+
+    This reproduces the style and physics of the legacy reference notebook.
+    """
     if tdc_df is None or len(tdc_df) == 0 or "event_group_id" not in tdc_df.columns:
         _md("_No raw tdc loaded with linking — skipping DLTS breakdown._")
+        return
+    if "channel" not in tdc_df.columns:
+        _md("_No `channel` column in tdc data — cannot classify DLTS groups._")
         return
 
     matched = tdc_df[tdc_df["has_dld_match"]]
     orphans = tdc_df[~tdc_df["has_dld_match"]]
 
-    matched_counts = (
-        matched.groupby("event_group_id").size().to_numpy()
-        if len(matched) else np.array([], dtype=int)
-    )
-    # Orphan groups: each orphan run shares no group id (-1), so count consecutive
-    # equal start_counter values in the orphan slice instead.
-    if len(orphans) > 0:
-        sc = orphans["start_counter"].to_numpy()
-        run_starts = np.r_[0, np.where(np.diff(sc) != 0)[0] + 1, sc.size]
-        orphan_counts = np.diff(run_starts)
-    else:
-        orphan_counts = np.array([], dtype=int)
+    m_counts, m_complete, m_partial = _classify_pulse_groups(matched, "event_group_id")
 
-    if matched_counts.size == 0 and orphan_counts.size == 0:
+    # Orphan rows share event_group_id = -1; group them by start_counter instead.
+    o_counts, o_complete, o_partial = _classify_pulse_groups(orphans, "start_counter")
+
+    if m_counts.size == 0 and o_counts.size == 0:
         return
 
-    max_n = int(max(
-        matched_counts.max() if matched_counts.size else 0,
-        orphan_counts.max() if orphan_counts.size else 0,
-    ))
-    bins = np.arange(0.5, max_n + 1.5)
+    all_counts   = np.concatenate([m_counts,   o_counts])   if o_counts.size   else m_counts
+    all_complete = np.concatenate([m_complete,  o_complete]) if o_complete.size else m_complete
+    all_partial  = np.concatenate([m_partial,   o_partial])  if o_partial.size  else m_partial
 
-    fig, ax = plt.subplots(figsize=(7, 3.5))
-    matched_hist, _ = np.histogram(matched_counts, bins=bins)
-    orphan_hist, _ = np.histogram(orphan_counts, bins=bins)
+    max_n = int(all_counts.max())
+    bins    = np.arange(0.5, max_n + 1.5)
     centers = np.arange(1, max_n + 1)
-    ax.bar(centers, matched_hist, label="linked to dld", color="#2ca02c")
-    ax.bar(centers, orphan_hist, bottom=matched_hist, label="orphan (no dld)", color="#d62728")
+
+    freq_hist,     _ = np.histogram(all_counts,                   bins=bins)
+    complete_hist, _ = np.histogram(all_counts[all_complete],     bins=bins)
+    partial_hist,  _ = np.histogram(all_counts[all_partial],      bins=bins)
+
+    fig, ax = plt.subplots(figsize=(9, 4))
+    # Exact same layout as the reference notebook (raw_data_analysis_surface_concept):
+    #
+    #   gray  (Frequency) — WIDE bar (width=0.4) centred AT x, semi-transparent
+    #                        (alpha=0.5) so orange/blue bars drawn on top show through
+    #   orange (2 DLTS)   — NARROW bar (width=0.2) shifted 0.1 LEFT of centre
+    #                        → covers the left half of the gray bar
+    #   blue   (4 DLTS)   — NARROW bar (width=0.2) shifted 0.1 RIGHT of centre
+    #                        → covers the right half of the gray bar
+    #
+    # Result: at each x tick you see all three colours simultaneously.
+    w = 0.2
+    ax.bar(centers,           freq_hist,     width=w * 2, label="Frequency", alpha=0.5, color="gray")
+    ax.bar(centers - 0.5 * w, partial_hist,  width=w,     label="2 DLTS",              color="orange")
+    ax.bar(centers + 0.5 * w, complete_hist, width=w,     label="4 DLTS",              color="blue")
     ax.set_yscale("log")
-    ax.set_xlabel("DLTS per pulse trigger")
+    ax.set_xlabel("Number of Delayline Time Stamps per Pulse")
     ax.set_ylabel("Count")
     ax.set_title(f"DLTS-per-pulse distribution ({detector_kind})")
-    ax.set_xticks(centers)
+    readable_limit = min(max_n, 20)
+    ax.set_xticks(np.arange(1, readable_limit + 1))
+    ax.set_xlim(0.5, readable_limit + 0.5)
     ax.legend()
     fig.tight_layout()
     plt.show()
     _close_after(fig)
 
-    n_full = expected_dlts_full(detector_kind)
-    total_pulses = matched_counts.size + orphan_counts.size
-    full_hits = int((matched_counts == n_full).sum() + (orphan_counts == n_full).sum())
-    matched_total = int(matched_counts.size)
+    n_full         = expected_dlts_full(detector_kind)
+    total_pulses   = int(all_counts.size)
+    matched_total  = int(m_counts.size)
+    n_complete_tot = int(all_complete.sum())
+    n_partial_tot  = int(all_partial.sum())
 
     lines = [
         "**DLTS-per-pulse breakdown**",
         "",
         f"- Detector kind: `{detector_kind}` (full event = {n_full} DLTS)" if n_full else f"- Detector kind: `{detector_kind}`",
         f"- Total pulse triggers seen in tdc: {total_pulses:,}",
-        f"- Linked to a dld row:               {_format_pct(matched_total, total_pulses)}",
-        f"- Orphan (no dld counterpart):       {_format_pct(orphan_counts.size, total_pulses)}",
+        f"- Linked to a dld row (has position): {_format_pct(matched_total, total_pulses)}",
+        f"- Orphan (no dld counterpart):        {_format_pct(total_pulses - matched_total, total_pulses)}",
+        f"- **4 DLTS** — complete (all 4 channels present): {_format_pct(n_complete_tot, total_pulses)}",
+        f"- **2 DLTS** — partial  (one delay-line only):    {_format_pct(n_partial_tot,  total_pulses)}",
     ]
-    if n_full:
-        lines.append(f"- Pulses with the full {n_full} DLTS: {_format_pct(full_hits, total_pulses)}")
     _md("\n".join(lines))
 
 
@@ -211,11 +270,32 @@ def plot_tof_with_peaks(dld_df: pd.DataFrame, species: list[dict]) -> None:
     _close_after(fig)
 
 
+def _pick_mc_col(dld_df: pd.DataFrame) -> str | None:
+    """Return the best available mass/charge column name.
+
+    Prefers ``mc (Da)`` when it contains non-zero values (i.e. the file was
+    calibrated).  Falls back to ``mc_uc (Da)`` (uncalibrated, computed from
+    the raw TOF) when ``mc (Da)`` is all-zero or absent — which is the common
+    case for pure-raw acquisition files where calibration has not yet been
+    applied.
+    """
+    for col in ("mc (Da)", "mc_uc (Da)"):
+        if col in dld_df.columns and (dld_df[col] != 0).any():
+            return col
+    return None
+
+
 def plot_mc_with_peaks(dld_df: pd.DataFrame, species: list[dict]) -> None:
     """Histogram of calibrated mc with shaded species windows + per-peak MRP table."""
-    if "mc (Da)" not in dld_df.columns:
+    mc_col = _pick_mc_col(dld_df)
+    if mc_col is None:
+        _md(
+            "_**Mass/charge skipped** — both `mc (Da)` and `mc_uc (Da)` are either absent "
+            "or all-zero in this file. The file may not have been through calibration yet, "
+            "or the column names differ._"
+        )
         return
-    mc = dld_df["mc (Da)"].to_numpy()
+    mc = dld_df[mc_col].to_numpy()
     if mc.size == 0:
         return
     upper = float(np.percentile(mc, 99.5)) if mc.size else 0.0
@@ -225,9 +305,9 @@ def plot_mc_with_peaks(dld_df: pd.DataFrame, species: list[dict]) -> None:
         ax.axvspan(sp["mc_low"], sp["mc_up"], color=sp.get("color", "#1f77b4"), alpha=0.25, label=sp["label"])
     if species:
         ax.legend(loc="upper right", fontsize=8)
-    ax.set_xlabel("mc (Da)")
+    ax.set_xlabel(mc_col)
     ax.set_ylabel("Count (log)")
-    ax.set_title("Mass/charge histogram")
+    ax.set_title(f"Mass/charge histogram ({mc_col})")
     fig.tight_layout()
     plt.show()
     _close_after(fig)
@@ -291,10 +371,11 @@ def plot_fdm(dld_df: pd.DataFrame, species: list[dict]) -> None:
     plt.show()
     _close_after(fig)
 
-    if not species or "mc (Da)" not in dld_df.columns:
+    mc_col = _pick_mc_col(dld_df)
+    if not species or mc_col is None:
         return
 
-    mc = dld_df["mc (Da)"].to_numpy()
+    mc = dld_df[mc_col].to_numpy()
     n = len(species)
     cols = min(3, n)
     rows = (n + cols - 1) // cols
@@ -316,24 +397,68 @@ def plot_fdm(dld_df: pd.DataFrame, species: list[dict]) -> None:
 
 
 def plot_multihit_and_deadzone(dld_df: pd.DataFrame) -> None:
-    """Multi-hit fraction + delta_p (pulses since previous event) histogram."""
+    """Multi-hit fraction + delta_p (pulses since previous event) histogram.
+
+    Two ``multi`` encoding conventions are handled automatically:
+
+    - **Convention A** (processed files): single hit = 1, two ions = 2, ...
+      Multi-hit events satisfy ``multi > 1``.
+    - **Convention B** (some raw files): single hit = 0, two ions = 1, ...
+      Multi-hit events satisfy ``multi > 0``.
+
+    The convention is auto-detected from ``multi.min()``.
+    """
     if "multi" not in dld_df.columns or "delta_p" not in dld_df.columns:
         _md("_`multi` / `delta_p` columns not present — skipping multi-hit diagnostics._")
         return
-    multi = dld_df["multi"].to_numpy()
+    multi   = dld_df["multi"].to_numpy()
     delta_p = dld_df["delta_p"].to_numpy()
 
+    # ── Validate multi column ──────────────────────────────────────────────
+    # Some files store multi as a float placeholder (all 0.0) or as a column
+    # that was never computed.  Detect this by checking:
+    #   • all values equal (no variation) AND value is 0
+    multi_is_valid = not (multi.max() == multi.min() == 0)
+
+    # ── Detect encoding convention (only when column is valid) ─────────────
+    # • Convention A (processed files): single hit = 1, two ions = 2, …
+    # • Convention B (some raw files) : single hit = 0, two ions = 1, …
+    if multi_is_valid:
+        multi_min    = int(multi.min())
+        single_val   = multi_min       # 0 (conv B) or 1 (conv A)
+        multi_for_plot = multi[multi >= single_val]
+        multi_max    = int(multi_for_plot.max()) if multi_for_plot.size else single_val
+    else:
+        single_val   = 0
+        multi_for_plot = np.array([], dtype=int)
+        multi_max    = 0
+
     fig, axes = plt.subplots(1, 2, figsize=(10, 3.5))
-    axes[0].hist(multi[multi > 0], bins=np.arange(0.5, max(int(multi.max()) + 1, 2) + 0.5))
+
+    # Multi-hit distribution
+    if multi_is_valid and multi_for_plot.size > 0:
+        bins = np.arange(single_val - 0.5, multi_max + 1.5)
+        axes[0].hist(multi_for_plot, bins=bins)
+    else:
+        axes[0].text(0.5, 0.5,
+                     "multi column is all-zero\n(not populated in this file)",
+                     ha="center", va="center", transform=axes[0].transAxes, color="gray")
     axes[0].set_yscale("log")
     axes[0].set_xlabel("multi (ions per pulse)")
     axes[0].set_ylabel("Count (log)")
     axes[0].set_title("Multi-hit distribution")
 
+    # Pulse-to-pulse interval (delta_p)
     delta_p_pos = delta_p[delta_p > 0]
     if delta_p_pos.size:
-        upper = int(np.percentile(delta_p_pos, 99))
+        # Use 95th percentile as the upper limit so that rare counter-reset
+        # outliers (e.g. wrap-around at 2^32) do not compress the main
+        # distribution into a single invisible bar on the left.
+        upper = int(np.percentile(delta_p_pos, 95))
         axes[1].hist(delta_p_pos, bins=80, range=(0, max(upper, 10)))
+    else:
+        axes[1].text(0.5, 0.5, "delta_p is all-zero\nin this file",
+                     ha="center", va="center", transform=axes[1].transAxes, color="gray")
     axes[1].set_yscale("log")
     axes[1].set_xlabel("delta_p (pulses since previous event)")
     axes[1].set_ylabel("Count (log)")
@@ -343,12 +468,18 @@ def plot_multihit_and_deadzone(dld_df: pd.DataFrame) -> None:
     _close_after(fig)
 
     n_total = int(multi.size)
-    n_multi = int((multi > 1).sum())
+    if multi_is_valid:
+        n_multi   = int((multi > single_val).sum())
+        conv_note = f"(encoding: single-hit = {single_val})"
+        multi_line = f"- Events with multi > {single_val}: {_format_pct(n_multi, n_total)} {conv_note}"
+    else:
+        multi_line = "- Multi-hit: _column not populated in this file (all-zero)_"
+
     _md(
         "**Multi-hit summary**\n\n"
         f"- Total events: {n_total:,}\n"
-        f"- Events with multi > 1: {_format_pct(n_multi, n_total)}\n"
-        f"- delta_p median: {int(np.median(delta_p_pos)) if delta_p_pos.size else 'n/a'}\n"
+        f"{multi_line}\n"
+        f"- delta_p median: {int(np.median(delta_p_pos)) if delta_p_pos.size else 'n/a (all-zero in this file)'}\n"
     )
 
 

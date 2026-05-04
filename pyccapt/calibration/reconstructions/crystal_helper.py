@@ -226,10 +226,11 @@ def apply_noise_to_structure(structure, noise_levels=(5, 5, 2), noise_type='corr
 
     # Generate noise based on the type
     if noise_type == 'correlative':
-        # Correlated noise: Same displacement scaled by noise levels
-        correlated_noise = np.random.normal(0, 1, size=(3,))
-        correlated_noise = correlated_noise / np.linalg.norm(correlated_noise)  # Normalize direction
+        # Correlated-axis noise: each atom receives a normalized random direction
+        # scaled by the requested per-axis amplitudes.
         for site in noisy_structure.sites:
+            correlated_noise = np.random.normal(0, 1, size=(3,))
+            correlated_noise = correlated_noise / np.linalg.norm(correlated_noise)
             displacement = correlated_noise * np.array(noise_levels)
             site.coords += displacement
             all_noise.append(displacement)

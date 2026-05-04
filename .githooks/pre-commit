@@ -1,0 +1,12 @@
+#!/bin/sh
+
+if command -v python >/dev/null 2>&1; then
+  PYTHON_BIN=python
+elif command -v py >/dev/null 2>&1; then
+  PYTHON_BIN="py -3"
+else
+  echo "Python is required to clean notebooks before commit."
+  exit 1
+fi
+
+$PYTHON_BIN tools/clean_notebooks.py --staged

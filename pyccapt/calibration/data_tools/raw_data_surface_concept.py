@@ -1,6 +1,65 @@
 from tqdm import tqdm
 
 
+def _sort_sequence_by_channel(start_counter_values, channel_values, time_values):
+    indexed_channels = sorted(enumerate(channel_values), key=lambda item: item[1])
+    sorted_indices = [index for index, _ in indexed_channels]
+    sorted_channels = [channel_values[index] for index in sorted_indices]
+    sorted_time = [time_values[index] for index in sorted_indices]
+    sorted_start_counter = [start_counter_values[index] for index in sorted_indices]
+    return sorted_channels, sorted_time, sorted_start_counter
+
+
+def _build_valid_event_flags(sorted_channels):
+    length = len(sorted_channels)
+    if length < 4:
+        return [False]
+    if length == 4:
+        return [sorted_channels == [0, 1, 2, 3]]
+
+    valid_event = []
+    for index_valid_event in range((length + 3) // 4):
+        chunk = sorted_channels[index_valid_event * 4:(index_valid_event + 1) * 4]
+        valid_event.append(chunk == [0, 1, 2, 3])
+    return valid_event
+
+
+def _normalize_sequence(current_sequence, ch, time):
+    sc = current_sequence.copy()
+    length = len(current_sequence)
+    if length <= 4:
+        sorted_channels, sorted_time, sorted_start_counter = _sort_sequence_by_channel(sc, ch, time)
+        valid_event = _build_valid_event_flags(sorted_channels)
+        return sorted_channels, sorted_time, sorted_start_counter, valid_event
+
+    ch_sorted = []
+    index = []
+    k = 0
+    j = 0
+    while len(ch) != len(ch_sorted):
+        if j == len(ch):
+            j = 0
+            k = k + 1
+            if k == 4:
+                k = 0
+
+        if ch[j] == k:
+            if j not in index:
+                index.append(j)
+                ch_sorted.append(ch[index[-1]])
+                k = k + 1
+                if k == 4:
+                    k = 0
+                j = 0
+                continue
+        j = j + 1
+
+    sorted_time = [time[idx] for idx in index]
+    sorted_start_counter = [sc[idx] for idx in index]
+    valid_event = _build_valid_event_flags(ch_sorted)
+    return ch_sorted, sorted_time, sorted_start_counter, valid_event
+
+
 def find_consecutive_sequences_seperatly(start_counter, channel, time_data, high_voltage, pulse):
     """"
     find the consecutive sequences of the start counter and the corresponding channels
@@ -47,63 +106,7 @@ def find_consecutive_sequences_seperatly(start_counter, channel, time_data, high
             time.append(time_data[i])
         else:
             length = len(current_sequence)
-            sc = current_sequence.copy()
-            if length <= 4:
-                # Enumerate the original list to preserve the original indices
-                ch_sorted = list(enumerate(ch))
-                # Sort the indexed list based on the values
-                ch_sorted = sorted(ch_sorted, key=lambda x: x[1])
-                # Extract the sorted indices from the sorted indexed list
-                sorted_indices = [index_s for index_s, _ in ch_sorted]
-                # Extract the sorted values from the sorted indexed list
-                ch = [ch[idx] for idx in sorted_indices]
-                time = [time[idx] for idx in sorted_indices]
-                sc = [sc[idx] for idx in sorted_indices]
-                if length == 4:
-                    if ch[-1] == 3 or ch[-2] == 2 or ch[-3] == 1 or ch[-4] == 0:
-                        valid_event = [True]
-                    else:
-                        valid_event = [False]
-                else:
-                    valid_event = [False]
-
-            else:
-                ch_sorted = []
-                index = []
-                valid_event = []
-                k = 0
-                j = 0
-                while len(ch) != len(ch_sorted):
-                    if j == len(ch):
-                        j = 0
-                        k = k + 1
-                        if k == 4:
-                            k = 0
-                            valid_event.append(False)
-
-                    if ch[j] == k:
-                        if j not in index:
-                            index.append(j)
-                            ch_sorted.append(ch[index[-1]])
-
-                            k = k + 1
-                            if k == 4:
-                                k = 0
-                                try:
-                                    if ch[index[-1]] == 3 and ch[index[-2]] == 2 and ch[index[-3]] == 1 and ch[
-                                        index[-4]] == 0:
-                                        valid_event.append(True)
-                                except:
-
-                                    valid_event.append(False)
-                            j = 0
-                            continue
-                    j = j + 1
-                time = [time[idx] for idx in index]
-                ch = ch_sorted
-                sc = [sc[idx] for idx in index]
-                if ch[-1] != 3 or ch[-2] != 2 or ch[-3] != 1 or ch[-4] != 0:
-                    valid_event.append(False)
+            ch, time, sc, valid_event = _normalize_sequence(current_sequence, ch, time)
 
             if length == 4:
                 if valid_event[0]:
@@ -195,6 +198,7 @@ def find_consecutive_sequences_seperatly(start_counter, channel, time_data, high
 
     # Handle the last sequence
     length = len(current_sequence)
+    ch, time, sc, valid_event = _normalize_sequence(current_sequence, ch, time)
     if length == 4:
         if valid_event[0]:
             result_4.append({
@@ -338,71 +342,7 @@ def find_consecutive_sequences(start_counter, channel, time_data, high_voltage, 
             time.append(time_data[i])
         else:
             length = len(current_sequence)
-            sc = current_sequence.copy()
-            if length <= 4:
-                # Enumerate the original list to preserve the original indices
-                ch_sorted = list(enumerate(ch))
-                # Sort the indexed list based on the values
-                ch_sorted = sorted(ch_sorted, key=lambda x: x[1])
-                # Extract the sorted indices from the sorted indexed list
-                sorted_indices = [index_s for index_s, _ in ch_sorted]
-                # Extract the sorted values from the sorted indexed list
-                ch = [ch[idx] for idx in sorted_indices]
-                time = [time[idx] for idx in sorted_indices]
-                sc = [sc[idx] for idx in sorted_indices]
-
-                if length == 4:
-                    if ch[-1] == 3 or ch[-2] == 2 or ch[-3] == 1 or ch[-4] == 0:
-                        valid_event = [True]
-                    else:
-                        valid_event = [False]
-                else:
-                    valid_event = [False]
-
-            else:
-                ch_sorted = []
-                index = []
-                valid_event = []
-                k = 0
-                j = 0
-                while len(ch) != len(ch_sorted):
-                    if j == len(ch):
-                        j = 0
-                        k = k + 1
-                        if k == 4:
-                            k = 0
-                            # valid_event.append(False)
-
-                    if ch[j] == k:
-                        if j not in index:
-                            index.append(j)
-                            ch_sorted.append(ch[index[-1]])
-
-                            k = k + 1
-                            if k == 4:
-                                k = 0
-                                # try:
-                                #     if ch[index[-1]] == 3 and ch[index[-2]] == 2 and ch[index[-3]] == 1 and ch[
-                                #         index[-4]] == 0:
-                                #         valid_event.append(True)
-                                # except:
-                                #     valid_event.append(False)
-                            j = 0
-                            continue
-                    j = j + 1
-                time = [time[idx] for idx in index]
-                ch = ch_sorted
-                sc = [sc[idx] for idx in index]
-
-                for index_valid_event in range((len(ch) + 3) // 4):
-                    if len(ch) - index_valid_event * 4 < 4:
-                        valid_event.append(False)
-                    else:
-                        if ch[index_valid_event * 4] == 0 and ch[index_valid_event * 4 + 1] == 1 and ch[
-                            index_valid_event * 4 + 2] == 2 and ch[index_valid_event * 4 + 3] == 3:
-                            valid_event.append(True)
-                        else:
-                            valid_event.append(False)
+            ch, time, sc, valid_event = _normalize_sequence(current_sequence, ch, time)
 
             result.append({
                 'channels': ch,
@@ -422,6 +362,7 @@ def find_consecutive_sequences(start_counter, channel, time_data, high_voltage, 
 
     # Handle the last sequence
     length = len(current_sequence)
+    ch, time, sc, valid_event = _normalize_sequence(current_sequence, ch, time)
     result.append({
         'channels': ch,
         'time_data': time,

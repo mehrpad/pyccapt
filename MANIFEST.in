@@ -4,7 +4,7 @@ include CHANGELOG.txt
 
 recursive-include pyccapt *.toml *.json *.txt *.md
 recursive-include pyccapt *.ui
-recursive-include pyccapt *.h5 *.mat *.pos *.epos *.rrng
+recursive-include pyccapt *.h5 *.mat *.pos *.epos *.rrng *.rng *.csv *.m *.mlx
 recursive-include pyccapt/control *.dll *.lib *.exp *.ocx *.chm *.cfg *.ini *.bit *.exe *.lmf
 
 recursive-exclude pyccapt/calibration/tutorials *.ipynb *.png *.jpg *.gif *.html *.xlsx

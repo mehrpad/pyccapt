@@ -28,7 +28,7 @@ def call_fine_tune_t_0(variables, flightPathLength, pulse_mode, t0):
     fig_name = widgets.Text(value='t0_tune')
 
     # Create a button widget to trigger the function
-    button_plot = widgets.Button(description="plot")
+    button_plot = widgets.Button(description="Plot")
 
     out = Output()
     def on_button_click(b, variables):
@@ -79,7 +79,7 @@ def call_fine_tune_t_0(variables, flightPathLength, pulse_mode, t0):
     button_plot.on_click(lambda b: on_button_click(b, variables))
 
     widget_container = widgets.VBox([
-        widgets.HBox([widgets.Label(value="t0:", layout=label_layout), t0_d_widget]),
+        widgets.HBox([widgets.Label(value="T0:", layout=label_layout), t0_d_widget]),
         widgets.HBox([widgets.Label(value="Flight Path Length:", layout=label_layout), flightPathLength]),
         widgets.HBox([widgets.Label(value="Bin Size:", layout=label_layout), bin_size_widget]),
         widgets.HBox([widgets.Label(value="Log:", layout=label_layout), log_widget]),

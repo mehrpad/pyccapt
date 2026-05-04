@@ -46,9 +46,15 @@ def onselect(eclick, erelease, variables):
         variables (object): Object containing the variables.
 
     """
-    variables.selected_x_fdm = eclick.xdata + (erelease.xdata - eclick.xdata) / 2
-    variables.selected_y_fdm = eclick.ydata + (erelease.ydata - eclick.ydata) / 2
-    variables.roi_fdm = min(erelease.xdata - eclick.xdata, erelease.ydata - eclick.ydata) / 2
+    if any(value is None for value in (eclick.xdata, eclick.ydata, erelease.xdata, erelease.ydata)):
+        return
+
+    x0, x1 = sorted((float(eclick.xdata), float(erelease.xdata)))
+    y0, y1 = sorted((float(eclick.ydata), float(erelease.ydata)))
+
+    variables.selected_x_fdm = x0 + (x1 - x0) / 2
+    variables.selected_y_fdm = y0 + (y1 - y0) / 2
+    variables.roi_fdm = min(x1 - x0, y1 - y0) / 2
 
 def line_select_callback(eclick, erelease, variables):
     """
@@ -60,9 +66,11 @@ def line_select_callback(eclick, erelease, variables):
         variables (object): Object containing the variables.
 
     """
+    if any(value is None for value in (eclick.xdata, eclick.ydata, erelease.xdata, erelease.ydata)):
+        return
 
-    x1, y1 = eclick.xdata, eclick.ydata
-    x2, y2 = erelease.xdata, erelease.ydata
+    x1, x2 = sorted((float(eclick.xdata), float(erelease.xdata)))
+    y1, y2 = sorted((float(eclick.ydata), float(erelease.ydata)))
 
     variables.selected_x1 = x1
     variables.selected_x2 = x2

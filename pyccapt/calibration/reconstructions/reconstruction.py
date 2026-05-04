@@ -1,4 +1,5 @@
 from copy import copy
+import re
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,7 +10,7 @@ from matplotlib.animation import FuncAnimation
 from plotly.subplots import make_subplots
 
 # Local module and scripts
-from pyccapt.calibration.clustering import build_cluster_scatter_traces
+from pyccapt.calibration.clustering import build_cluster_context_trace, build_cluster_scatter_traces
 from pyccapt.calibration.data_tools import data_loadcrop, selectors_data
 from pyccapt.calibration.reconstructions.io_utils import (
     resolve_result_file,
@@ -24,6 +25,19 @@ from pyccapt.calibration.reconstructions.rotation_tools import (
     rotary_fig,
     rotate_z,
 )
+
+
+def _normalize_plotly_color(value):
+    """Return a Plotly-safe color string from stored range colors."""
+    value = str(value).strip()
+    if value and not value.startswith('#') and re.fullmatch(r'[A-Fa-f0-9]{6}', value):
+        return f'#{value}'
+    return value
+
+
+def _normalize_plotly_colors(values):
+    """Normalize a sequence of stored range colors for Plotly usage."""
+    return [_normalize_plotly_color(value) for value in values]
 
 def cart2pol(x, y):
     """
@@ -232,14 +246,15 @@ def draw_qube(fig, range, col=None, row=None):
 def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save, figname, save, make_gif=False,
                         make_evaporation_gif=False, range_sequence=[], range_mc=[], range_detx=[], range_dety=[],
                         range_x=[], range_y=[], range_z=[], range_vol=[], ions_individually_plots=False,
-                        detailed_isotope_charge=False, colab=False, cluster_result=None):
+                        detailed_isotope_charge=False, colab=False, cluster_result=None,
+                        cluster_display_mode='overlay', cluster_opacity_override=None, element_alpha=None):
     """
     Generate a 3D plot for atom probe reconstruction data.
 
     Args:
         variables (object): Variables object.
         element_percentage (str): Percentage of elements to display.
-        opacity (float): Opacity of the markers.
+        opacity (float): Default opacity of the markers.
         rotary_fig_save (bool): Whether to save the rotary figure.
         figname (str): Name of the figure.
         save (bool): Whether to save the figure.
@@ -257,6 +272,8 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
         detailed_isotope_charge (bool): Whether to plot detailed isotope and charge information.
         colab (bool): Whether to run in Google Colab.
         cluster_result: Optional Min-Max segmentation result for precipitate overlays.
+        cluster_display_mode (str): `overlay` or `clusters-only`.
+        element_alpha (list[float] | None): Optional per-ion opacity overrides aligned with the range table order.
     Returns:
         None
     """
@@ -303,7 +320,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
     else:
         print('element_percentage should be a list')
 
-    colors = variables.range_data['color'].tolist()
+    colors = _normalize_plotly_colors(variables.range_data['color'].tolist())
     mc_low = variables.range_data['mc_low'].tolist()
     mc_up = variables.range_data['mc_up'].tolist()
     ion = variables.range_data['ion'].tolist()
@@ -313,6 +330,14 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
     y_range = [min(variables.y), max(variables.y)]
     z_range = [min(variables.z), max(variables.z)]
     range_cube = [x_range, y_range, z_range]
+    if element_alpha is None:
+        element_alpha = [float(opacity)] * len(ion)
+    else:
+        element_alpha = [float(value) for value in element_alpha]
+        if len(element_alpha) < len(ion):
+            element_alpha.extend([float(opacity)] * (len(ion) - len(element_alpha)))
+
+    cluster_only = cluster_result is not None and str(cluster_display_mode).strip().lower() == 'clusters-only'
 
     # Create a subplots with shared axes
     if ions_individually_plots:
@@ -354,7 +379,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                     marker=dict(
                         size=1,
                         color=colors[index],
-                        opacity=opacity,
+                        opacity=element_alpha[index],
                     )
                 )
                 fig = draw_qube(fig, range_cube, col, row)
@@ -364,39 +389,71 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
             print("Cluster overlay is shown only in the combined 3D plot mode.")
     else:
         fig = go.Figure()
-        for index, elemen in enumerate(ion):
-            mask = (variables.mc > mc_low[index]) & (variables.mc < mc_up[index])
-            mask = mask & mask_f
-            size = int(len(mask[mask == True]) * float(element_percentage[index]))
-            # Find indices where the original mask is True
-            true_indices = np.where(mask)[0]
-            # Randomly choose 100 indices from the true indices
-            random_true_indices = np.random.choice(true_indices, size=size, replace=False)
-            # Create a new mask with the same length as the original, initialized with False
-            new_mask = np.full(len(variables.dld_t), False)
-            # Set the selected indices to True in the new mask
-            new_mask[random_true_indices] = True
-            # Apply the new mask to the original mask
-            mask = mask & new_mask
+        if not cluster_only:
+            for index, elemen in enumerate(ion):
+                mask = (variables.mc > mc_low[index]) & (variables.mc < mc_up[index])
+                mask = mask & mask_f
+                size = int(len(mask[mask == True]) * float(element_percentage[index]))
+                # Find indices where the original mask is True
+                true_indices = np.where(mask)[0]
+                # Randomly choose 100 indices from the true indices
+                random_true_indices = np.random.choice(true_indices, size=size, replace=False)
+                # Create a new mask with the same length as the original, initialized with False
+                new_mask = np.full(len(variables.dld_t), False)
+                # Set the selected indices to True in the new mask
+                new_mask[random_true_indices] = True
+                # Apply the new mask to the original mask
+                mask = mask & new_mask
 
-            fig.add_trace(
-                go.Scatter3d(
-                    x=variables.x[mask],
-                    y=variables.y[mask],
-                    z=variables.z[mask],
-                    mode='markers',
-                    name=ion[index],
-                    showlegend=True,
-                    marker=dict(
-                        size=1,
-                        color=colors[index],
-                        opacity=opacity,
+                fig.add_trace(
+                    go.Scatter3d(
+                        x=variables.x[mask],
+                        y=variables.y[mask],
+                        z=variables.z[mask],
+                        mode='markers',
+                        name=ion[index],
+                        showlegend=True,
+                        marker=dict(
+                            size=1,
+                            color=colors[index],
+                            opacity=element_alpha[index],
+                        )
                     )
                 )
-            )
 
         if cluster_result is not None:
-            for trace in build_cluster_scatter_traces(variables, cluster_result, opacity=min(1.0, opacity + 0.25)):
+            if cluster_only:
+                background_trace = build_cluster_context_trace(
+                    variables,
+                    mask=mask_f & ~cluster_result.selected_mask,
+                    name='Background specimen',
+                    opacity=min(0.18, max(0.04, opacity * 0.3)),
+                    marker_size=0.9,
+                )
+                if background_trace is not None:
+                    fig.add_trace(background_trace)
+
+                unclustered_trace = build_cluster_context_trace(
+                    variables,
+                    mask=mask_f & cluster_result.selected_mask & (cluster_result.labels < 0),
+                    name='Selected ions outside clusters',
+                    color='rgba(120,120,120,0.85)',
+                    opacity=min(0.35, max(0.10, opacity * 0.55)),
+                    marker_size=1.4,
+                )
+                if unclustered_trace is not None:
+                    fig.add_trace(unclustered_trace)
+
+            for trace in build_cluster_scatter_traces(
+                variables,
+                cluster_result,
+                opacity=(
+                    float(cluster_opacity_override)
+                    if cluster_opacity_override is not None
+                    else min(1.0, opacity + 0.25)
+                ),
+                valid_mask=mask_f,
+            ):
                 fig.add_trace(trace)
 
         fig = draw_qube(fig, range_cube)
@@ -447,7 +504,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                         marker=dict(
                             size=1,
                             color=colors[index],
-                            opacity=opacity,
+                            opacity=element_alpha[index],
                         )
                     )
                 )
@@ -572,7 +629,7 @@ def scatter_plot(data, range_data, variables, element_percentage, selected_area,
     ax = fig.add_subplot(111)
 
     phases = range_data['element'].tolist()
-    colors = range_data['color'].tolist()
+    colors = _normalize_plotly_colors(range_data['color'].tolist())
     mc_low = range_data['mc_low'].tolist()
     mc_up = range_data['mc_up'].tolist()
     charge = range_data['charge'].tolist()
@@ -681,7 +738,7 @@ def projection(variables, element_percentage, range_sequence=[], range_mc=[], ra
 
 
     ions = variables.range_data['ion'].tolist()
-    colors = variables.range_data['color'].tolist()
+    colors = _normalize_plotly_colors(variables.range_data['color'].tolist())
     mc_low = variables.range_data['mc_low'].tolist()
     mc_up = variables.range_data['mc_up'].tolist()
 
@@ -798,7 +855,7 @@ def heatmap(variables, element_percentage, range_sequence=[], range_mc=[], range
         mask = np.ones(len(variables.mc), dtype=bool)
 
     ions = variables.range_data['ion'].tolist()
-    colors = variables.range_data['color'].tolist()
+    colors = _normalize_plotly_colors(variables.range_data['color'].tolist())
     mc_low = variables.range_data['mc_low'].tolist()
     mc_up = variables.range_data['mc_up'].tolist()
 
@@ -985,7 +1042,7 @@ def detector_animation(variables, points_per_frame, ranged, selected_area_specia
 
     if ranged == True:
         ions = variables.range_data['ion'].tolist()
-        colors = variables.range_data['color'].tolist()
+        colors = _normalize_plotly_colors(variables.range_data['color'].tolist())
         mc_low = variables.range_data['mc_low'].tolist()
         mc_up = variables.range_data['mc_up'].tolist()
     else:

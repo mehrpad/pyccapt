@@ -25,6 +25,53 @@ from pyccapt.calibration.core.mc_plot_selector_helpers import (
 )
 
 
+def _normalize_range_colors(values):
+    """Normalize stored range colors for matplotlib usage."""
+    normalized = []
+    for value in values:
+        value = str(value).strip()
+        if value and not value.startswith('#') and re.fullmatch(r'[A-Fa-f0-9]{6}', value):
+            value = f'#{value}'
+        normalized.append(value)
+    return normalized
+
+
+def _plain_range_label(value):
+    """Convert stored ion/range labels into plain text safe for matplotlib."""
+    text = str(value).strip()
+    if not text:
+        return text
+    text = text.replace("$", "")
+    text = re.sub(r"_\{([^}]*)\}", r"\1", text)
+    text = re.sub(r"\^\{([^}]*)\}", r" \1", text)
+    text = text.replace("{", "").replace("}", "")
+    text = text.replace("^", "").strip()
+    return text
+
+
+def _resolve_range_display_labels(range_data):
+    """Return plain-text labels for ranged overlays and legends."""
+    for column in ("name", "ion_name", "ion"):
+        if column in range_data.columns:
+            labels = [_plain_range_label(value) for value in range_data[column].tolist()]
+            if any(label for label in labels):
+                return labels
+    return [_plain_range_label(value) for value in range(len(range_data))]
+
+
+def _resolve_range_peak_labels(range_data):
+    """Return peak annotation labels, preferring the raw ion column when available."""
+    if "ion" in range_data.columns:
+        labels = [str(value).strip() for value in range_data["ion"].tolist()]
+        if any(label for label in labels):
+            return labels
+    for column in ("ion_name", "name"):
+        if column in range_data.columns:
+            labels = [str(value).strip() for value in range_data[column].tolist()]
+            if any(label for label in labels):
+                return labels
+    return [str(value) for value in range(len(range_data))]
+
 
 class AptHistPlotter:
     """
@@ -55,6 +102,7 @@ class AptHistPlotter:
         self.mc_tof = mc_tof
         self.variables = variables
         self.x = None
+        self.x_centers = None
         self.y = None
         self.peak_annotates = []
         self.annotates = []
@@ -68,7 +116,7 @@ class AptHistPlotter:
         self.legend_colors = []
 
     def plot_histogram(self, bin_width=0.1, normalize=False, label='mc', log=True, grid=False, steps='stepfilled',
-                       fig_size=(9, 5), plot_show=True):
+                       fig_size=(9, 5), plot_show=True, fast=False):
         """
         Plot the histogram of the mc or tof data.
 
@@ -81,6 +129,7 @@ class AptHistPlotter:
             steps (str): The type of the histogram ('stepfilled' or 'bar').
             fig_size (tuple): The size of the figure.
             plot_show (bool): Whether to show the plot.
+            fast (bool): Use np.histogram + fill_between instead of ax.hist for speed.
 
         Returns:
             tuple: A tuple of the y and x values of the histogram.
@@ -94,20 +143,30 @@ class AptHistPlotter:
         # Plot the histogram directly
         self.fig, self.ax = plt.subplots(figsize=fig_size)
 
-        if steps == 'bar':
-            edgecolor = None
-            alpha = 1
+        # Force fast mode for bar-incompatible rendering or large datasets
+        if fast and steps != 'bar':
+            self.y, self.x = np.histogram(self.mc_tof, bins=self.bins, density=normalize)
+            self.x_centers = (self.x[:-1] + self.x[1:]) * 0.5
+            self.ax.fill_between(self.x_centers, self.y, step='mid', alpha=0.9, color='slategray')
+            self.ax.step(self.x_centers, self.y, where='mid', color='k', linewidth=0.5)
+            self.patches = []
         else:
-            edgecolor = 'k'
-            alpha = 0.9
+            if steps == 'bar':
+                edgecolor = None
+                alpha = 1
+            else:
+                edgecolor = 'k'
+                alpha = 0.9
 
-        if normalize:
-            self.y, self.x, self.patches = self.ax.hist(self.mc_tof, bins=self.bins, alpha=alpha,
-                                                        color='slategray', edgecolor=edgecolor, histtype=steps,
-                                                        density=True)
-        else:
-            self.y, self.x, self.patches = self.ax.hist(self.mc_tof, bins=self.bins, alpha=alpha, color='slategray',
-                                                        edgecolor=edgecolor, histtype=steps)
+            if normalize:
+                self.y, self.x, self.patches = self.ax.hist(self.mc_tof, bins=self.bins, alpha=alpha,
+                                                            color='slategray', edgecolor=edgecolor, histtype=steps,
+                                                            density=True)
+            else:
+                self.y, self.x, self.patches = self.ax.hist(self.mc_tof, bins=self.bins, alpha=alpha, color='slategray',
+                                                            edgecolor=edgecolor, histtype=steps)
+            self.x_centers = (self.x[:-1] + self.x[1:]) * 0.5
+
         self.ax.set_xlabel('Mass/Charge [Da]' if label == 'mc' else 'Time of Flight [ns]')
         self.ax.set_ylabel('Event Counts')
         self.ax.set_yscale('log' if log else 'linear')
@@ -116,9 +175,6 @@ class AptHistPlotter:
         if self.original_x_limits is None:
             self.original_x_limits = self.ax.get_xlim()  # Store the original x-axis limits
         plt.tight_layout()
-        # Set the limits for both x and y axes using plt.ylim
-        # plt.ylim(bottom=plt.yticks()[0][0], top=plt.yticks()[0][-1])
-        # plt.xlim(left=plt.xticks()[0][0], right=plt.xticks()[0][-1])
         if plot_show:
             plt.show()
         else:
@@ -157,13 +213,14 @@ class AptHistPlotter:
             None
         """
         if len(self.patches) == len(self.x) - 1:
-            colors = range_data['color'].tolist()
+            colors = _normalize_range_colors(range_data['color'].tolist())
             mc_low = range_data['mc_low'].tolist()
             mc_up = range_data['mc_up'].tolist()
             mc = range_data['mc'].tolist()
-            ion = range_data['ion'].tolist()
+            labels = _resolve_range_display_labels(range_data)
+            peak_labels = _resolve_range_peak_labels(range_data)
             color_mask = np.full((len(self.x)), '#708090')  # default color is slategray
-            for i in range(len(ion)):
+            for i in range(len(labels)):
                 mask = np.logical_and(self.x >= mc_low[i], self.x <= mc_up[i])
                 color_mask[mask] = colors[i]
 
@@ -171,8 +228,11 @@ class AptHistPlotter:
                 if color_mask[i] != '#708090':
                     self.patches[i].set_facecolor(color_mask[i])
 
-            for i in range(len(ion)):
-                self.legend_colors.append((r'%s' % ion[i], plt.Rectangle((0, 0), 1, 1, fc=colors[i])))
+            seen_legend_labels = set()
+            for i in range(len(labels)):
+                if labels[i] not in seen_legend_labels:
+                    self.legend_colors.append((labels[i], plt.Rectangle((0, 0), 1, 1, fc=colors[i])))
+                    seen_legend_labels.add(labels[i])
                 x_offset = 0.0  # Adjust this value as needed
 
                 # Find the bin that contains the mc[i]
@@ -196,7 +256,7 @@ class AptHistPlotter:
                     self.peak_annotates.append(plt.text(
                         peak_position + x_offset,
                         peak_height + y_offset,
-                        r'%s' % ion[i],
+                        peak_labels[i],
                         color='black',
                         size=10,
                         alpha=1,
@@ -254,11 +314,14 @@ class AptHistPlotter:
         """
         x_offset = 0.0  # Adjust this value as needed
         if range_data is not None:
-            ion = range_data['ion'].tolist()
+            labels = _resolve_range_peak_labels(range_data)
             mc = range_data['mc'].tolist()
-            for i in range(len(ion)):
+            for i in range(len(labels)):
+                if self.y is None or len(self.y) == 0 or self.x is None or len(self.x) == 0:
+                    continue
                 # Find the bin that contains the mc[i]
                 bin_index = np.searchsorted(self.x, mc[i]) - 1
+                clamped_index = min(max(int(bin_index), 0), len(self.y) - 1)
                 if 0 <= bin_index < len(self.y):
                     # Define a small range around the bin to search for the local maximum
                     search_range = slice(max(0, bin_index - 1), min(len(self.y), bin_index + 2))
@@ -275,11 +338,14 @@ class AptHistPlotter:
                     if self.ax.get_yscale() == 'log':
                         y_offset = 10 ** (np.log10(peak_height) + 0.1) - peak_height
                 else:
-                    peak_position = mc[i]
-                    peak_height = self.y[np.searchsorted(self.x, mc[i]) - 1]
+                    peak_position = float(np.clip(mc[i], self.x[0], self.x[-1]))
+                    peak_height = float(self.y[clamped_index])
+                    y_offset = peak_height * 0.05
+                    if self.ax.get_yscale() == 'log' and peak_height > 0:
+                        y_offset = 10 ** (np.log10(peak_height) + 0.1) - peak_height
                 if self.plot_show:
                     self.peak_annotates.append(plt.text(peak_position + x_offset, peak_height + y_offset,
-                                                        r'%s' % ion[i], color='black', size=10, alpha=1,
+                                                        labels[i], color='black', size=10, alpha=1,
                                                         rotation=90))
                     self.annotates.append(str(i + 1))
         else:
@@ -465,9 +531,9 @@ class AptHistPlotter:
         """Find peaks and widths and update shared variables."""
         return _find_peaks_and_widths(self, prominence=prominence, distance=distance, percent=percent)
 
-    def draw_rectangle(self, ):
+    def draw_rectangle(self, initial=False):
         """Draw auto-selected peak rectangle."""
-        return _draw_rectangle(self)
+        return _draw_rectangle(self, initial=initial)
 
     def selector(self, selector='rect'):
         """Attach interaction selector handlers."""
@@ -523,7 +589,8 @@ def hist_plot(variables, bin_size, log, target, normalize, prominence, distance,
               peaks_find=True, peaks_find_plot=False, plot_ranged_peak=False, plot_ranged_colors=False, mrp_all=False,
               background=None, grid=False, ranging_mode=False, range_sequence=[], range_mc=[], range_detx=[],
               range_dety=[], range_x=[], range_y=[], range_z=[], range_vol=[], save_fig=True, print_info=True,
-              legend_mode='long', draw_calib_rect=False, figure_size=(9, 5), plot_show=True, fast_calibration=False):
+              legend_mode='long', draw_calib_rect=False, figure_size=(9, 5), plot_show=True, fast_calibration=False,
+              fast_histogram=True, initial_peak_selection=False, compute_mrp=True):
     """Backward-compatible wrapper delegating to :mod:`mc_plot_api`."""
     from pyccapt.calibration.core.mc_plot_api import hist_plot as _hist_plot
 
@@ -562,6 +629,9 @@ def hist_plot(variables, bin_size, log, target, normalize, prominence, distance,
         figure_size=figure_size,
         plot_show=plot_show,
         fast_calibration=fast_calibration,
+        fast_histogram=fast_histogram,
+        initial_peak_selection=initial_peak_selection,
+        compute_mrp=compute_mrp,
     )
 
 

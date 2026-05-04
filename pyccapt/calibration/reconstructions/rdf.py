@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import rcParams
 from scipy.spatial import cKDTree
+
 from pyccapt.calibration.reconstructions.io_utils import save_matplotlib_figure
 
 def rdf(particles, dr, variables=None, rho=None, rcutoff=0.9, eps=1e-15, normalize=True, reference_point=None,
@@ -55,75 +56,78 @@ def rdf(particles, dr, variables=None, rho=None, rcutoff=0.9, eps=1e-15, normali
 	radii : (n_radii) np.array
 		radii over which g(r) is computed
 	"""
+	coords = np.asarray(particles, dtype=float)
+	if coords.ndim != 2 or coords.shape[1] not in (2, 3):
+		raise ValueError("particles must be a (N,2) or (N,3) array")
+	if coords.shape[0] < 2:
+		raise ValueError("At least two particles are required to compute RDF")
 	if reference_point is not None and box_dimensions is not None:
-		if isinstance(reference_point, list):
-			reference_point = np.array(reference_point)
-		if isinstance(box_dimensions, list):
-			box_dimensions = np.array(box_dimensions)
-		# Ensure box_dimensions has at least 2 components
-		assert len(box_dimensions) >= 2, "box_dimensions must have at least 2 components (x, y)."
-
-		# If box_dimensions has 2 components, assume it's a 2D box (x, y)
-		if len(box_dimensions) == 2:
-			box_dimensions = np.concatenate((box_dimensions, [0]))
-
-		# Calculate the bounds of the box
+		reference_point = np.asarray(reference_point, dtype=float)
+		box_dimensions = np.asarray(box_dimensions, dtype=float)
+		if box_dimensions.size == 2 and coords.shape[1] == 3:
+			box_dimensions = np.concatenate((box_dimensions, [coords[:, 2].ptp() or dr]))
+		if box_dimensions.shape[0] != coords.shape[1]:
+			raise ValueError("box_dimensions must match the particle dimensionality")
 		box_min = reference_point - 0.5 * box_dimensions
 		box_max = reference_point + 0.5 * box_dimensions
+		inside_box = np.all((coords >= box_min) & (coords <= box_max), axis=1)
+		coords = coords[inside_box]
+	if coords.shape[0] < 2:
+		raise ValueError("Not enough particles remain after RDF cropping")
 
-		# Crop particles within the specified box
-		inside_box = np.all((particles >= box_min) & (particles <= box_max), axis=1)
-		particles = particles[inside_box]
+	print('The number of ions is: ', len(coords))
+	mins = np.min(coords, axis=0)
+	maxs = np.max(coords, axis=0)
+	coords = coords - mins
+	dims = np.max(coords, axis=0)
+	if np.any(dims <= 0):
+		raise ValueError("RDF box dimensions must be positive")
 
-	print('The number of ions is: ', len(particles))
-	mins = np.min(particles, axis=0)
-	maxs = np.max(particles, axis=0)
-	# translate particles such that the particle with min coords is at origin
-	particles = particles - mins
+	r_max = (np.min(dims) / 2.0) * float(rcutoff)
+	radii = np.arange(float(dr), r_max, float(dr))
+	if radii.size == 0:
+		raise ValueError("RDF radius grid is empty; increase the box size or reduce dr")
 
-	# dimensions of box
-	dims = maxs - mins
+	n_particles, n_dim = coords.shape
+	if rho is None:
+		rho = n_particles / np.prod(dims)
 
-	r_max = (np.min(dims) / 2) * rcutoff
-	radii = np.arange(dr, r_max, dr)
+	tree = cKDTree(coords)
+	g_r = np.zeros(len(radii), dtype=float)
 
-	N, d = particles.shape
-	if not rho:
-		rho = N / np.prod(dims)  # number density
-
-	# create a KDTree for fast nearest-neighbor lookup of particles
-	tree = cKDTree(particles)
-
-	g_r = np.zeros(shape=(len(radii)))
 	for r_idx, r in enumerate(radii):
-		# find all particles that are at least r + dr away from the edges of the box
-		valid_idxs = np.bitwise_and.reduce(
-			[(particles[:, i] - (r + dr) >= mins[i]) & (particles[:, i] + (r + dr) <= maxs[i]) for i in range(d)])
-		valid_particles = particles[valid_idxs]
+		margin = r + dr
+		valid_mask = np.bitwise_and.reduce(
+			[(coords[:, axis] >= margin) & (coords[:, axis] <= dims[axis] - margin) for axis in range(n_dim)]
+		)
+		valid_particles = coords[valid_mask]
+		if len(valid_particles) == 0:
+			continue
 
-		# compute n_i(r) for valid particles.
+		counts = 0.0
 		for particle in valid_particles:
-			n = (tree.query_ball_point(particle, r + dr - eps, return_length=True) -
-			     tree.query_ball_point(particle, r, return_length=True))
-			g_r[r_idx] += n
+			outer = tree.query_ball_point(particle, r + dr - eps, return_length=True)
+			inner = tree.query_ball_point(particle, r, return_length=True)
+			counts += outer - inner
 
-		# normalize
 		if normalize:
-			n_valid = len(valid_particles)
-			shell_vol = (4 / 3) * np.pi * ((r + dr) ** 3 - r ** 3) if d == 3 else np.pi * ((r + dr) ** 2 - r ** 2)
-			g_r[r_idx] /= n_valid * shell_vol * rho
+			if n_dim == 3:
+				shell_measure = (4.0 / 3.0) * np.pi * ((r + dr) ** 3 - r ** 3)
+			else:
+				shell_measure = np.pi * ((r + dr) ** 2 - r ** 2)
+			g_r[r_idx] = counts / (len(valid_particles) * shell_measure * rho)
+		else:
+			g_r[r_idx] = counts
 
 	if plot or save:
-		# Plot RDF
 		fig, ax = plt.subplots(figsize=figure_size)
-		plt.plot(radii, g_r)
-		plt.xlabel('Distance (nm)')
-		plt.ylabel('Counts')
+		ax.plot(radii, g_r)
+		ax.set_xlabel('Distance (nm)')
+		ax.set_ylabel('g(r)' if normalize else 'Counts')
+		ax.grid(alpha=0.3, linestyle='-.', linewidth=0.4)
 		if save and variables is not None:
-			# Enable rendering for text elements
 			rcParams['svg.fonttype'] = 'none'
-			save_matplotlib_figure(fig, variables, stem=f"projection_{figname}", formats=("png", "svg"), dpi=600)
-
+			save_matplotlib_figure(fig, variables, stem=f"rdf_{figname}", formats=("png", "svg"), dpi=600)
 		if plot:
 			plt.show()
 

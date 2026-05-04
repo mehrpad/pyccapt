@@ -5,6 +5,18 @@ This section provides step-by-step tutorials for common PyCCAPT calibration and
 analysis workflows, including data processing, propagation delay correction,
 visualization, and 3D reconstruction.
 
+Additional widget-based Jupyter workflows are available under
+``pyccapt/calibration/tutorials/jupyter_files`` for:
+
+- raw detector analysis (RoentDek, Surface Concept, and LEAP/Cameca imports)
+- `t0` and flight-path estimation
+- Cameca RHIT/STR/HITS import
+- reflectron detector correction for LEAP EPOS datasets
+- TAPSim node/specimen generation
+
+Google Colab support is currently provided for the
+``data_processing.ipynb`` and ``visualization.ipynb`` notebooks.
+
 Dataset Download
 ----------------
 

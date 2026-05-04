@@ -64,6 +64,20 @@ baking = "enabled"
 COM_PORT_laser = "COM9"
 COM_PORT_gates = "Dev2/port0/"
 COM_PORT_cryo = "COM7"
+
+# Cryo sensor mapping: label and which output word index (0-based) comes from the device
+# Change cryo_sensor_X_index to remap which physical output position feeds that display slot.
+cryo_sensor_1 = "cryo_head_outside"
+cryo_sensor_1_index = 2
+
+cryo_sensor_2 = "cryo_head_inside"
+cryo_sensor_2_index = 0
+
+cryo_sensor_3 = "stage"
+cryo_sensor_3_index = 1
+
+cryo_sensor_4 = "load_lock"
+cryo_sensor_4_index = 3
 COM_PORT_V_dc = "COM6"
 COM_PORT_V_p = "COM4"
 COM_PORT_gauge_mc = "COM5"

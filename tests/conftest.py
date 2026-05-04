@@ -3,7 +3,26 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
+
+# Force matplotlib to a non-interactive backend BEFORE any test (or any module
+# they import) calls `matplotlib.pyplot`. Without this, helpers that internally
+# call `plt.show()` open real windows during pytest and the user has to close
+# them manually. Setting MPLBACKEND in the environment is the most reliable
+# way: it takes effect even for matplotlib imports that happen inside imported
+# project modules before the test body runs.
+os.environ.setdefault("MPLBACKEND", "Agg")
+try:
+    import matplotlib
+
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as _plt  # noqa: F401  (force backend init)
+
+    _plt.ioff()
+except Exception:
+    # If matplotlib isn't available the project tests can't run anyway.
+    pass
 
 import pytest
 

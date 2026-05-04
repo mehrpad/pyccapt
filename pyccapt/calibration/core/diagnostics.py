@@ -76,7 +76,8 @@ def plot_selected_statistic(variables, bin_fdm, index_fig, calibration_mode, sav
     ensure_choice(calibration_mode, field_name="calibration_mode", allowed=["tof", "mc"])
     ensure_positive(bin_fdm, field_name="bin_fdm")
 
-    print("Selected tof are: (%s, %s)" % (variables.selected_x1, variables.selected_x2))
+    left_edge, right_edge = variables.get_calibration_peak_range(calibration_mode)
+    print("Selected tof are: (%s, %s)" % (left_edge, right_edge))
     mask_temporal = variables.build_calibration_mask(calibration_mode)
 
     x = variables.dld_x_det[mask_temporal]

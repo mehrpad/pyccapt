@@ -47,7 +47,7 @@ def call_x_y_z_calculation(variables, flight_path_length, element_selected, cola
 	cluster_labels_widget = widgets.Text(value='', placeholder='Ni3Al, Al')
 
 	# Create a button widget to trigger the function
-	button_calculate_plot = widgets.Button(description="reconstruct & plot")
+	button_calculate_plot = widgets.Button(description="Reconstruct & plot")
 
 	def on_button_click(b, variables, flight_path_length):
 		# Disable the button while the code is running
@@ -110,13 +110,13 @@ def call_x_y_z_calculation(variables, flight_path_length, element_selected, cola
 	button_calculate_plot.on_click(lambda b: on_button_click(b, variables, flight_path_length))
 
 	widget_container = widgets.VBox([
-		widgets.HBox([widgets.Label(value='KF:', layout=label_layout), kf_widget, widgets.Label(value='(eV/nm)')]),
+		widgets.HBox([widgets.Label(value='KF:', layout=label_layout), kf_widget, widgets.Label(value='(EV/nm)')]),
 		widgets.HBox([widgets.Label(value='Det_eff:', layout=label_layout), det_eff_widget]),
 		widgets.HBox([widgets.Label(value='ICF:', layout=label_layout), icf_widget]),
 		widgets.HBox([widgets.Label(value='Field_evap:', layout=label_layout), field_evap_widget,
 		              widgets.Label(value='(V/nm)')]),
 		widgets.HBox([widgets.Label(value='Avg_dens:', layout=label_layout), avg_dens_widget,
-		              widgets.Label(value='(amu/nm^3)')]),
+		              widgets.Label(value='(Amu/nm^3)')]),
 		widgets.HBox([widgets.Label(value='Element_percentage:', layout=label_layout), element_percentage_widget]),
 		widgets.HBox([widgets.Label(value='Fig name:', layout=label_layout), figname_widget]),
 		widgets.HBox([widgets.Label(value='Save fig:', layout=label_layout), save_widget]),

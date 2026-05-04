@@ -259,6 +259,22 @@ def dataset_instrument_specification_selection():
     return tdc, pulse_mode, flightPathLength, t0, max_mc, det_diam
 
 
+def load_tdc_raw_selection():
+    """Create the dropdown for opting into raw ``/tdc`` loading.
+
+    The widget has labels (``True``, ``False``) and resolves to ``bool`` values.
+    Pass the widget's ``.value`` to ``helper_data_loader.load_data`` via the
+    ``load_tdc_raw`` argument. When True, the loader also reads the ``/tdc``
+    group and links it to the ``/dld`` group via shared ``event_group_id`` so
+    raw rows can later be saved alongside calibrated dld output.
+    """
+    return widgets.Dropdown(
+        options=[('False', False), ('True', True)],
+        value=False,
+        description='Load raw tdc:',
+    )
+
+
 def density_field_selection():
     """
     Create and return the element dropdown widget for density field selection.

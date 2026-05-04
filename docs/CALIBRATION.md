@@ -8,12 +8,12 @@ The `pyccapt.calibration` package provides workflows for atom probe tomography d
 
 Typical calibration workflows include:
 
-1. Import and crop datasets (HDF5, EPOS, POS, ATO, CSV).
+1. Import and crop datasets (HDF5, EPOS, POS, ATO, CSV, and raw-detector workflows).
 2. Correct time-of-flight and estimate `t0`/flight-path parameters.
 3. Convert time-of-flight to mass-to-charge (`m/c`).
 4. Apply voltage and bowl corrections.
 5. Perform 3D reconstruction.
-6. Define and apply ranging windows.
+6. Define and apply ranging windows, including saved `.h5`, `.rrng`, and `.rng` range files.
 7. Generate 2D/3D visualizations and analysis plots.
 
 ## Package Structure
@@ -23,7 +23,7 @@ Typical calibration workflows include:
 - `mc`: mass-to-charge and time-of-flight helper functions
 - `reconstructions`: reconstruction and structural analysis tools
 - `clustering`: clustering and isosurface workflows
-- `leap_tools`: LEAP/POS/EPOS/RRNG import and helper tools
+- `leap_tools`: LEAP/POS/EPOS/APT/RRNG/RNG readers, Cameca raw importers, and helper tools
 - `tutorials`: notebooks and notebook helper modules
 
 ## Shared State and Validation
@@ -50,8 +50,42 @@ Interactive examples are available in:
 - `pyccapt/calibration/tutorials/jupyter_files`
 - `pyccapt/calibration/tutorials/colab`
 
+The main Jupyter widget workflows currently include:
+
+- `data_processing.ipynb`
+- `visualization.ipynb`
+- `L_and_t0_determination.ipynb`
+- `raw_data_analysis.ipynb`
+- `cameca_raw_import.ipynb`
+- `reflectron_correction.ipynb`
+- `tapsim_node_builder.ipynb`
+
+Google Colab support is currently provided for:
+
+- `data_processing.ipynb`
+- `visualization.ipynb`
+
 The tutorial save steps can export processed datasets as `HDF5`, `EPOS`, `POS`, and `ATO`.
-The visualization helpers also include optional Min-Max clustering to split a selected precipitate population into two reconstruction segments.
+The visualization helpers also include Min-Max and Maximum-Separation clustering,
+iso-surface generation, and proxigram analysis for selected precipitate populations.
+
+### Linking and saving raw `/tdc` data alongside `/dld`
+
+PyCCAPT acquisition files contain both a `/dld` group with reconstructed events
+and a `/tdc` group with the raw delay-line timestamps (DLTS) from which those
+events were derived. From the calibration tutorials you can opt in to loading
+both groups together via the **Load raw tdc** dropdown, and at save time choose
+**Save raw tdc** to write the still-relevant raw rows into a `/tdc` key inside
+the calibrated `.h5` output.
+
+Internally this is handled by a shared `event_group_id` column added to both
+dataframes when the file is loaded with `load_tdc_raw=True`. The column rides
+through every cropping step in the calibration workflow (TOF clip, ROI, FDM,
+sequence range, manual mask drops); at save time the linked tdc rows for
+deleted dld rows are dropped, while orphan tdc rows (pulses that never produced
+a reconstructible dld event) are always preserved. See
+[Calibration_DATA_STRUCTURE.md](Calibration_DATA_STRUCTURE.md) for the on-disk
+schema of the optional `/tdc` group and the linking semantics.
 
 The user-facing tutorial pages are grouped in the Tutorials section of this documentation set.
 

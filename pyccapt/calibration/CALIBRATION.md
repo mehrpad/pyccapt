@@ -10,7 +10,7 @@ The package is organized into these folders:
 - `core`: core calibration logic, validation, shared state, and plotting APIs
 - `clustering`: clustering and isosurface utilities
 - `data_tools`: loading, conversion, and cropping workflows
-- `leap_tools`: POS/EPOS/RRNG readers and LEAP plotting helpers
+- `leap_tools`: POS/EPOS/RRNG readers, Cameca raw importers (RHIT/STR/HITS), and LEAP plotting helpers
 - `mc`: mass-to-charge and time-of-flight helper functions
 - `reconstructions`: 3D reconstruction and structure-analysis tools
 - `tutorials`: notebooks and notebook helper modules
@@ -64,4 +64,24 @@ Examples are available under:
 
 - `tutorials/jupyter_files`
 - `tutorials/colab`
+
+## Range Files
+
+Saved range tables can be loaded across the workflows from either:
+
+- PyCCAPT HDF5 range files: `.h5`
+- IVAS range files: `.rrng`
+- Legacy LEAP/IVAS range files: `.rng`
+
+Use `pyccapt.calibration.data_tools.data_tools.read_range(...)` for the
+normalized PyCCAPT dataframe, or the low-level parsers
+`pyccapt.calibration.leap_tools.leap_tools.read_rrng(..., return_tables=True)` and
+`pyccapt.calibration.leap_tools.leap_tools.read_rng(..., return_tables=True)`
+when you need the raw IVAS/LEAP `ions` and `ranges` tables.
+
+## LEAP APT Import Notes
+
+The LEAP `.apt` reader now preserves the `Position` section layout used by
+APTSuite/paraprobe-style readers by skipping the leading tip-box bounds before
+reading the ion coordinates.
 

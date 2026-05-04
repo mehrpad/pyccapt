@@ -38,13 +38,18 @@ def _require_phases(phases) -> list[str]:
 
 def pre_data(pos_file: str | Path, rrng_file: str | Path, input_type: str):
     """
-    Read POS/EPOS and RRNG files, label ions, and return deconvolved data.
+    Read POS/EPOS and LEAP range files, label ions, and return deconvolved data.
     """
     normalized_input = _ensure_choice(input_type, field_name="input_type", allowed=_INPUT_TYPES)
     pos_file = str(Path(pos_file).expanduser())
     rrng_file = str(Path(rrng_file).expanduser())
-
-    _, ranges = leap_tools.read_rrng(rrng_file)
+    suffix = Path(rrng_file).suffix.lower()
+    if suffix == ".rrng":
+        _, ranges = leap_tools.read_rrng(rrng_file, return_tables=True)
+    elif suffix == ".rng":
+        _, ranges = leap_tools.read_rng(rrng_file, return_tables=True)
+    else:
+        raise ValueError("range file must use .rrng or .rng")
     if normalized_input == "pos":
         position_data = leap_tools.read_pos(pos_file)
     else:

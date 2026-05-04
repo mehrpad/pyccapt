@@ -1,6 +1,7 @@
 import re
 import struct
 import sys
+import os
 from enum import Enum
 from typing import Union, Tuple, Any
 from warnings import warn
@@ -9,6 +10,405 @@ import matplotlib.colors as cols
 import numpy as np
 import pandas as pd
 from vispy import app, scene
+
+
+_RRNG_PATTERN = re.compile(
+    r"Ion(?P<ion_number>\d+)=(?P<ion_name>.+)"
+    r"|Range(?P<range_number>\d+)="
+    r"(?P<lower>[+-]?\d+(?:[.,]\d+)?)\s+"
+    r"(?P<upper>[+-]?\d+(?:[.,]\d+)?)\s+"
+    r"Vol:(?P<vol>[+-]?\d+(?:[.,]\d+)?)\s+"
+    r"(?P<comp>.+?)\s+Color:(?P<colour>[A-Fa-f0-9]{6})$"
+)
+_RNG_COUNTS_PATTERN = re.compile(r"^\d+\s+\d+$")
+_FORMULA_TOKEN_PATTERN = re.compile(r"([A-Z][a-z]*)(\d*)")
+_SPECIES_TOKEN_PATTERN = re.compile(r"(?:(?P<isotope>\d+))?(?P<element>[A-Z][a-z]*)(?P<count>\d*)")
+
+
+def _parse_rrng_float(value: str) -> float:
+    """Parse `.rrng` numeric fields while accepting comma decimals."""
+    return float(str(value).strip().replace(",", "."))
+
+
+def _parse_rrng_species(species: str):
+    """Parse compact species names like `Al2O3` or isotope-prefixed `27CrMo`."""
+    species = str(species).strip()
+    if not species or species.lower() == "unranged":
+        return ["unranged"], [0], [0]
+
+    matches = list(_SPECIES_TOKEN_PATTERN.finditer(species))
+    if not matches or "".join(match.group(0) for match in matches) != species:
+        return [species], [1], [0]
+
+    elements = []
+    multiplicities = []
+    isotopes = []
+    for match in matches:
+        elements.append(match.group("element"))
+        multiplicities.append(int(match.group("count") or "1"))
+        isotopes.append(int(match.group("isotope") or "0"))
+
+    return elements, multiplicities, isotopes
+
+
+def _parse_rrng_element_token(token: str):
+    """Parse one element token such as `Fe` or `27Cr`."""
+    token = str(token).strip()
+    match = _SPECIES_TOKEN_PATTERN.fullmatch(token)
+    if not match:
+        return token, 0
+    return match.group("element"), int(match.group("isotope") or "0")
+
+
+def _parse_rrng_composition(composition: str, explicit_name: str = ""):
+    """Parse the IVAS composition field into PyCCAPT element metadata."""
+    tokens = [token for token in str(composition).split() if token]
+    if not tokens:
+        return _parse_rrng_species(explicit_name or "unranged")
+
+    elements = []
+    multiplicities = []
+    isotopes = []
+
+    for token in tokens:
+        if ":" in token:
+            element_token, value = token.split(":", 1)
+            element_token = element_token.strip()
+            value = value.strip()
+
+            if element_token.lower() == "name":
+                species_name = explicit_name or ("unranged" if value in {"0", "0.0"} else value)
+                species_elements, species_multiplicities, species_isotopes = _parse_rrng_species(species_name)
+                elements.extend(species_elements)
+                multiplicities.extend(species_multiplicities)
+                isotopes.extend(species_isotopes)
+                continue
+
+            try:
+                multiplicity_value = int(float(value))
+            except ValueError:
+                species_name = explicit_name or value or element_token
+                species_elements, species_multiplicities, species_isotopes = _parse_rrng_species(species_name)
+                elements.extend(species_elements)
+                multiplicities.extend(species_multiplicities)
+                isotopes.extend(species_isotopes)
+                continue
+
+            element_name, isotope_value = _parse_rrng_element_token(element_token)
+            elements.append(element_name)
+            multiplicities.append(multiplicity_value)
+            isotopes.append(isotope_value)
+            continue
+
+        species_elements, species_multiplicities, species_isotopes = _parse_rrng_species(token)
+        elements.extend(species_elements)
+        multiplicities.extend(species_multiplicities)
+        isotopes.extend(species_isotopes)
+
+    if not elements:
+        return _parse_rrng_species(explicit_name or "unranged")
+
+    return elements, multiplicities, isotopes
+
+
+def _build_rrng_formula(elements, multiplicities, charge: int) -> str:
+    """Build the lightweight LaTeX-style ion label used in the workflows."""
+    if not elements or elements == ["unranged"]:
+        return "unranged"
+
+    parts = []
+    for element, multiplicity in zip(elements, multiplicities):
+        multiplicity_value = int(multiplicity)
+        if multiplicity_value > 1:
+            parts.append(f"{element}_{{{multiplicity_value}}}")
+        else:
+            parts.append(str(element))
+
+    charge_value = max(int(charge), 1)
+    charge_text = "+" if charge_value == 1 else f"{charge_value}+"
+    return "$" + "".join(parts) + f"^{{{charge_text}}}$"
+
+
+def _composition_to_name(elements, multiplicities) -> str:
+    """Build a compact plain-text name from a composition list."""
+    if not elements or elements == ["unranged"]:
+        return "unranged"
+    return "".join(
+        f"{element}{'' if int(multiplicity) == 1 else int(multiplicity)}"
+        for element, multiplicity in zip(elements, multiplicities)
+    )
+
+
+def _extract_explicit_rrng_name(composition: str, ion_name: str = "") -> str:
+    """Extract a stable explicit name from RRNG metadata when available."""
+    ion_name = str(ion_name).strip()
+    if ion_name:
+        return ion_name
+
+    tokens = [token for token in str(composition).split() if token]
+    if len(tokens) == 1 and ":" in tokens[0]:
+        key, value = tokens[0].split(":", 1)
+        if key.strip().lower() == "name":
+            value = str(value).strip()
+            if value in {"0", "0.0"}:
+                return "unranged"
+            return value
+    return ""
+
+
+def _range_tables_to_pyccapt_range(ions: pd.DataFrame, range_table: pd.DataFrame) -> pd.DataFrame:
+    """Convert raw `.rrng` or legacy `.rng` tables into the normalized PyCCAPT schema."""
+    if range_table.empty:
+        return pd.DataFrame(
+            columns=[
+                "name",
+                "ion",
+                "mass",
+                "mc",
+                "mc_low",
+                "mc_up",
+                "color",
+                "element",
+                "complex",
+                "isotope",
+                "charge",
+                "vol",
+                "raw_comp",
+                "ion_name",
+            ]
+        )
+
+    names = []
+    ion_labels = []
+    element_lists = []
+    complex_lists = []
+    isotope_lists = []
+    charges = []
+
+    for _, row in range_table.iterrows():
+        explicit_name = _extract_explicit_rrng_name(row["comp"], row.get("ion_name", ""))
+        elements, multiplicities, isotopes = _parse_rrng_composition(row["comp"], explicit_name=explicit_name)
+        charge = 1
+        name = explicit_name or _composition_to_name(elements, multiplicities)
+        names.append(name)
+        ion_labels.append(_build_rrng_formula(elements, multiplicities, charge))
+        element_lists.append(elements)
+        complex_lists.append(multiplicities)
+        isotope_lists.append(isotopes)
+        charges.append(charge)
+
+    mc_low = range_table["lower"].astype(float).to_numpy()
+    mc_up = range_table["upper"].astype(float).to_numpy()
+    pyccapt_range = pd.DataFrame(
+        {
+            "name": names,
+            "ion": ion_labels,
+            "mass": (mc_low + mc_up) / 2.0,
+            "mc": (mc_low + mc_up) / 2.0,
+            "mc_low": mc_low,
+            "mc_up": mc_up,
+            "color": ("#" + range_table["colour"].astype(str).str.upper().str.lstrip("#")).to_numpy(),
+            "element": element_lists,
+            "complex": complex_lists,
+            "isotope": isotope_lists,
+            "charge": np.asarray(charges, dtype=int),
+            "vol": range_table["vol"].astype(float).to_numpy(),
+            "raw_comp": range_table["comp"].astype(str).to_numpy(),
+            "ion_name": np.asarray(names, dtype=object),
+        }
+    )
+    pyccapt_range.attrs["range_ions"] = ions.copy()
+    pyccapt_range.attrs["range_ranges"] = range_table.copy()
+    return pyccapt_range
+
+
+def parse_rrng(file_path):
+    """
+    Load a `.rrng` file produced by IVAS and return the raw ion and range tables.
+
+    Returns:
+        tuple[pd.DataFrame, pd.DataFrame]:
+            `(ions, rrngs)` in the IVAS schema.
+    """
+    ions = []
+    rrngs = []
+
+    with open(file_path, "r", encoding="utf-8") as range_file:
+        for line in range_file:
+            match = _RRNG_PATTERN.search(line.strip())
+            if not match:
+                continue
+
+            groups = match.groupdict()
+            if groups["ion_number"] is not None:
+                ions.append((groups["ion_number"], groups["ion_name"].strip()))
+                continue
+
+            rrngs.append(
+                (
+                    groups["range_number"],
+                    _parse_rrng_float(groups["lower"]),
+                    _parse_rrng_float(groups["upper"]),
+                    _parse_rrng_float(groups["vol"]),
+                    groups["comp"].strip(),
+                    groups["colour"].strip().upper(),
+                )
+            )
+
+    ions_df = pd.DataFrame(ions, columns=["number", "name"])
+    if not ions_df.empty:
+        ions_df["number"] = ions_df["number"].astype(str)
+        ions_df.set_index("number", inplace=True)
+
+    rrngs_df = pd.DataFrame(rrngs, columns=["number", "lower", "upper", "vol", "comp", "colour"])
+    if not rrngs_df.empty:
+        rrngs_df["number"] = rrngs_df["number"].astype(str)
+        rrngs_df.set_index("number", inplace=True)
+        rrngs_df[["lower", "upper", "vol"]] = rrngs_df[["lower", "upper", "vol"]].astype(float)
+        rrngs_df[["comp", "colour"]] = rrngs_df[["comp", "colour"]].astype(str)
+
+    return ions_df, rrngs_df
+
+
+def _rgb_float_to_hex(red: float, green: float, blue: float) -> str:
+    """Convert 0-1 RGB triples from legacy `.rng` files to uppercase hex."""
+    values = [int(round(max(0.0, min(1.0, float(value))) * 255.0)) for value in (red, green, blue)]
+    return "".join(f"{value:02X}" for value in values)
+
+
+def _formula_to_comp_string(formula: str) -> str:
+    """Convert a compact formula like `Cr2O` to `Cr:2 O:1`."""
+    pairs = []
+    for element, count in _FORMULA_TOKEN_PATTERN.findall(str(formula).strip()):
+        multiplicity = int(count) if count else 1
+        pairs.append(f"{element}:{multiplicity}")
+    return " ".join(pairs) if pairs else "Name:0"
+
+
+def _average_hex_colours(colours: list[str]) -> str:
+    """Blend multiple hex colours into one representative colour."""
+    if not colours:
+        return "FFFFFF"
+    rgb = np.array(
+        [[int(colour[i:i + 2], 16) for i in (0, 2, 4)] for colour in colours],
+        dtype=float,
+    )
+    blended = np.round(rgb.mean(axis=0)).astype(int)
+    return "".join(f"{value:02X}" for value in blended)
+
+
+def _parse_rng_block(lines: list[str], start_index: int):
+    """Parse one block of the legacy `.rng` text format."""
+    counts = lines[start_index].split()
+    nions = int(counts[0])
+    nranges = int(counts[1])
+    index = start_index + 1
+
+    ions = []
+    ion_colours: dict[str, str] = {}
+    for ion_number in range(1, nions + 1):
+        ion_name = lines[index].strip()
+        index += 1
+        colour_tokens = lines[index].split()
+        index += 1
+        colour = _rgb_float_to_hex(colour_tokens[1], colour_tokens[2], colour_tokens[3])
+        ions.append((str(ion_number), ion_name, colour))
+        ion_colours[ion_name] = colour
+
+    separator_tokens = lines[index].split()
+    index += 1
+    headers = separator_tokens[1:] if separator_tokens else []
+
+    ranges = []
+    for range_number in range(1, nranges + 1):
+        tokens = lines[index].split()
+        index += 1
+        if len(tokens) < 3 + len(headers):
+            raise ValueError("Malformed legacy .rng range row")
+        lower = float(tokens[1])
+        upper = float(tokens[2])
+        counts = [int(value) for value in tokens[3:3 + len(headers)]]
+        composition = [(header, count) for header, count in zip(headers, counts) if count > 0]
+        comp_string = " ".join(f"{name}:{count}" for name, count in composition) if composition else "Name:0"
+        active_colours = [ion_colours.get(name, "FFFFFF") for name, count in composition if count > 0]
+        ranges.append(
+            {
+                "number": str(range_number),
+                "lower": lower,
+                "upper": upper,
+                "vol": np.nan,
+                "comp": comp_string,
+                "colour": _average_hex_colours(active_colours),
+                "ion_name": _composition_to_name(
+                    [name for name, _ in composition] or ["unranged"],
+                    [count for _, count in composition] or [0],
+                ),
+            }
+        )
+
+    ions_df = pd.DataFrame(ions, columns=["number", "name", "colour"])
+    if not ions_df.empty:
+        ions_df.set_index("number", inplace=True)
+
+    ranges_df = pd.DataFrame(ranges, columns=["number", "lower", "upper", "vol", "comp", "colour", "ion_name"])
+    if not ranges_df.empty:
+        ranges_df.set_index("number", inplace=True)
+
+    return index, ions_df, ranges_df
+
+
+def parse_rng(file_path):
+    """
+    Load a legacy IVAS/LEAP `.rng` file and return raw ion and range tables.
+
+    Returns:
+        tuple[pd.DataFrame, pd.DataFrame]:
+            `(ions, ranges)` in a normalized raw schema.
+    """
+    with open(file_path, "r", encoding="utf-8") as range_file:
+        lines = [line.strip() for line in range_file if line.strip()]
+
+    if not lines:
+        raise ValueError("Empty .rng file")
+
+    index, ions_df, ranges_df = _parse_rng_block(lines, 0)
+    extension_map: dict[tuple[float, float], tuple[str, str]] = {}
+
+    while index < len(lines):
+        if lines[index].startswith("---"):
+            index += 1
+            if index >= len(lines):
+                break
+        if not _RNG_COUNTS_PATTERN.match(lines[index]):
+            index += 1
+            continue
+
+        index, ext_ions_df, ext_ranges_df = _parse_rng_block(lines, index)
+        for _, row in ext_ranges_df.iterrows():
+            formula_name = str(row.get("ion_name", "")).strip()
+            if not formula_name or formula_name == "unranged":
+                continue
+            key = (round(float(row["lower"]), 6), round(float(row["upper"]), 6))
+            colour = str(row["colour"]).upper()
+            matching_formula = None
+            for _, ext_ion in ext_ions_df.iterrows():
+                ext_name = str(ext_ion["name"]).strip()
+                if _formula_to_comp_string(ext_name) == row["comp"]:
+                    matching_formula = ext_name
+                    colour = ext_ion["colour"]
+                    break
+            extension_map[key] = (matching_formula or formula_name, str(colour).upper())
+
+    if not ranges_df.empty:
+        for row_index, row in ranges_df.iterrows():
+            key = (round(float(row["lower"]), 6), round(float(row["upper"]), 6))
+            if key not in extension_map:
+                continue
+            formula_name, colour = extension_map[key]
+            ranges_df.at[row_index, "ion_name"] = formula_name
+            ranges_df.at[row_index, "colour"] = colour
+
+    return ions_df, ranges_df
 
 
 def read_pos(file_path):
@@ -21,15 +421,25 @@ def read_pos(file_path):
         z: Reconstructed z position
         Da: Mass/charge ratio of ion
     """
-    with open(file_path, 'rb') as file:
-        data = file.read()
-        n = len(data) // 4
-        d = struct.unpack('>' + 'f' * n, data)
+    record_size = 16
+    file_size = os.path.getsize(file_path)
+    record_count, remainder = divmod(file_size, record_size)
+    if remainder:
+        warn(
+            f"The .pos file size ({file_size} bytes) is not an exact multiple of {record_size}. "
+            f"Ignoring the final {remainder} trailing bytes.",
+            RuntimeWarning,
+        )
+
+    if record_count == 0:
+        return pd.DataFrame(columns=['x (nm)', 'y (nm)', 'z (nm)', 'm/n (Da)'])
+
+    records = np.memmap(file_path, dtype='>f4', mode='r', shape=(record_count, 4))
     pos = pd.DataFrame({
-        'x (nm)': d[0::4],
-        'y (nm)': d[1::4],
-        'z (nm)': d[2::4],
-        'm/n (Da)': d[3::4]
+        'x (nm)': np.asarray(records[:, 0], dtype=np.float32),
+        'y (nm)': np.asarray(records[:, 1], dtype=np.float32),
+        'z (nm)': np.asarray(records[:, 2], dtype=np.float32),
+        'm/n (Da)': np.asarray(records[:, 3], dtype=np.float32),
     })
     return pos
 
@@ -51,123 +461,91 @@ def read_epos(file_path):
         pslep: Pulses since last event pulse (i.e. ionisation rate)
         ipp: Ions per pulse (multihits)
     """
-    with open(file_path, 'rb') as file:
-        data = file.read()
+    record_dtype = np.dtype([
+        ('x', '>f4'),
+        ('y', '>f4'),
+        ('z', '>f4'),
+        ('mc', '>f4'),
+        ('tof', '>f4'),
+        ('hv', '>f4'),
+        ('pulse', '>f4'),
+        ('det_x', '>f4'),
+        ('det_y', '>f4'),
+        ('pslep', '>u4'),
+        ('ipp', '>u4'),
+    ])
+    record_size = record_dtype.itemsize
+    file_size = os.path.getsize(file_path)
+    record_count, remainder = divmod(file_size, record_size)
+    if remainder:
+        warn(
+            f"The .epos file size ({file_size} bytes) is not an exact multiple of {record_size}. "
+            f"Ignoring the final {remainder} trailing bytes.",
+            RuntimeWarning,
+        )
 
-    n = len(data) // 4
-    rs = n // 11
-    d = struct.unpack('>' + 'fffffffffII' * rs, data)
+    if record_count == 0:
+        return pd.DataFrame(
+            columns=[
+                'x (nm)',
+                'y (nm)',
+                'z (nm)',
+                'm/n (Da)',
+                'TOF (ns)',
+                'HV_DC (V)',
+                'pulse (V)',
+                'det_x (mm)',
+                'det_y (mm)',
+                'pslep',
+                'ipp',
+            ]
+        )
+
+    records = np.memmap(file_path, dtype=record_dtype, mode='r', shape=(record_count,))
     epos = pd.DataFrame({
-        'x (nm)': d[0::11],
-        'y (nm)': d[1::11],
-        'z (nm)': d[2::11],
-        'm/n (Da)': d[3::11],
-        'TOF (ns)': d[4::11],
-        'HV_DC (V)': d[5::11],
-        'pulse (V)': d[6::11],
-        'det_x (mm)': d[7::11],
-        'det_y (mm)': d[8::11],
-        'pslep': d[9::11],
-        'ipp': d[10::11]
+        'x (nm)': np.asarray(records['x'], dtype=np.float32),
+        'y (nm)': np.asarray(records['y'], dtype=np.float32),
+        'z (nm)': np.asarray(records['z'], dtype=np.float32),
+        'm/n (Da)': np.asarray(records['mc'], dtype=np.float32),
+        'TOF (ns)': np.asarray(records['tof'], dtype=np.float32),
+        'HV_DC (V)': np.asarray(records['hv'], dtype=np.float32),
+        'pulse (V)': np.asarray(records['pulse'], dtype=np.float32),
+        'det_x (mm)': np.asarray(records['det_x'], dtype=np.float32),
+        'det_y (mm)': np.asarray(records['det_y'], dtype=np.float32),
+        'pslep': np.asarray(records['pslep'], dtype=np.uint32),
+        'ipp': np.asarray(records['ipp'], dtype=np.uint32),
     })
     return epos
 
 
-def read_rrng(file_path):
+def read_rrng(file_path, return_tables: bool = False):
     """
-    Loads a .rrng file produced by IVAS. Returns two DataFrames of 'ions' and 'ranges'.
+    Load a `.rrng` file produced by IVAS.
 
     Parameters:
-    - file_path (str): The path to the .rrng file.
-
-    Returns:
-    - ions (DataFrame): A DataFrame containing ion data with columns 'number' and 'name'.
-    - rrngs (DataFrame): A DataFrame containing range data with columns 'number', 'lower', 'upper', 'vol', 'comp', and 'colour'.
+    - file_path (str): The path to the `.rrng` file.
+    - return_tables (bool): When `True`, return the raw `(ions, rrngs)`
+      IVAS tables. Otherwise return the normalized PyCCAPT range dataframe.
     """
+    ions, rrngs = parse_rrng(file_path)
+    if return_tables:
+        return ions, rrngs
+    return _range_tables_to_pyccapt_range(ions, rrngs)
 
-    # Read the file and store its contents as a list of lines
-    rf = open(file_path, 'r').readlines()
 
-    # Define the regular expression pattern to extract ion and range data
-    patterns = re.compile(
-        r'Ion([0-9]+)=([A-Za-z0-9]+).*|Range([0-9]+)=(\d+.\d+) +(\d+.\d+) +Vol:(\d+.\d+) +([A-Za-z:0-9 ]+) +Color:([A-Z0-9]{6})')
+def read_rng(file_path, return_tables: bool = False):
+    """
+    Load a legacy `.rng` file produced by older IVAS/LEAP workflows.
 
-    # Initialize empty lists to store ion and range data
-    ions = []
-    rrngs = []
-
-    # Iterate over each line in the file
-    for line in rf:
-        # Search for matches using the regular expression pattern
-        m = patterns.search(line)
-        if m:
-            # If match groups contain ion data, append to ions list
-            if m.groups()[0] is not None:
-                ions.append(m.groups()[:2])
-            # If match groups contain range data, append to rrngs list
-            else:
-                rrngs.append(m.groups()[2:])
-
-    mc_low = [float(i[1].replace(',', '.')) for i in rrngs]
-    mc_up = [float(i[2].replace(',', '.')) for i in rrngs]
-    mc = [(float(i[1].replace(',', '.')) + float(i[2].replace(',', '.'))) / 2 for i in rrngs]
-    elements = [i[4] for i in rrngs]
-    colors = [i[5] for i in rrngs]
-    charge = [1] * len(rrngs)
-    # Output lists
-    complex = []
-    element_list = []
-    ion_list = []
-    # Process each item in the input list
-    for item in elements:
-        # Split by space if there are multiple elements (e.g., 'Mo:1 O:3')
-        parts = item.split()
-
-        # Initialize lists for complexity and elements
-        complexities = []
-        elements_s = []
-        for part in parts:
-            # Split by colon to separate element and complexity
-            element, complexity = part.split(':')
-            if element == 'Name':
-                element = 'unranged'
-                complexity = 0
-            # Append element and complexity
-            elements_s.append(element)
-            complexities.append(int(complexity))
-        # Append the result for each item
-        complex.append(complexities)
-        element_list.append(elements_s)
-
-    # make isotope list of list base on element list
-    isotope = []
-
-    for i in range(len(element_list)):
-        isotope_s = []
-        for j in range(len(element_list[i])):
-            formula = r'$'
-            formula += '{}^'
-            formula += '{%s}' % 1
-            formula += '%s' % element_list[i][0]
-            if complex[i][j] > 1:
-                formula += '_{%s}' % complex[i][j]
-            isotope_s.append(1)
-        if charge[i] > 1:
-            formula += '^{%s+}$' % charge[i]
-        else:
-            formula += '^{+}$'
-        isotope.append(isotope_s)
-        ion_list.append(formula)
-
-    name = []
-    for i in range(len(element_list)):
-        name.append(".".join(f"{element_list[i][j]}{complex[i][j]}" for j in range(len(element_list[i]))))
-
-    # Return the pyccapt_ranges DataFrame
-    range_data = pd.DataFrame({'name': name, 'ion': ion_list, 'mass': mc, 'mc': mc, 'mc_low': mc_low,
-                                    'mc_up': mc_up, 'color': colors, 'element': element_list,
-                                    'complex': complex, 'isotope': isotope, 'charge': charge})
-    return range_data
+    Parameters:
+    - file_path (str): The path to the `.rng` file.
+    - return_tables (bool): When `True`, return the raw `(ions, ranges)`
+      tables. Otherwise return the normalized PyCCAPT range dataframe.
+    """
+    ions, ranges = parse_rng(file_path)
+    if return_tables:
+        return ions, ranges
+    return _range_tables_to_pyccapt_range(ions, ranges)
 
 
 def write_rrng(file_path, ions, rrngs):
@@ -191,8 +569,12 @@ def write_rrng(file_path, ions, rrngs):
 
         # Write range data
         f.write('[Ranges]\n')
+        color_column = 'color' if 'color' in rrngs.columns else 'colour'
         for index, row in rrngs.iterrows():
-            range_line = f'Range{index}={row["lower"]:.2f} {row["upper"]:.2f} Vol:{row["vol"]:.2f} {row["comp"]} Color:{row["color"]}\n'
+            range_line = (
+                f'Range{index}={row["lower"]:.2f} {row["upper"]:.2f} '
+                f'Vol:{row["vol"]:.2f} {row["comp"]} Color:{str(row[color_column]).lstrip("#")}\n'
+            )
             f.write(range_line)
 
 
@@ -209,6 +591,14 @@ def label_ions(pos, rrngs):
     - pos (DataFrame): The modified DataFrame with added 'comp' and 'colour' columns.
     """
 
+    mass_column = None
+    for candidate in ("Da", "m/n (Da)", "mc (Da)"):
+        if candidate in pos.columns:
+            mass_column = candidate
+            break
+    if mass_column is None:
+        raise KeyError("The position dataframe must contain 'Da', 'm/n (Da)', or 'mc (Da)'")
+
     # Initialize 'comp' and 'colour' columns in the DataFrame pos
     pos['comp'] = ''
     pos['colour'] = '#FFFFFF'
@@ -216,7 +606,10 @@ def label_ions(pos, rrngs):
     # Iterate over each row in the DataFrame rrngs
     for n, r in rrngs.iterrows():
         # Assign composition and color values to matching ion positions in pos DataFrame
-        pos.loc[(pos['Da'] >= r.lower) & (pos['Da'] <= r.upper), ['comp', 'colour']] = [r['comp'], '#' + r['colour']]
+        pos.loc[
+            (pos[mass_column] >= r.lower) & (pos[mass_column] <= r.upper),
+            ['comp', 'colour'],
+        ] = [r['comp'], '#' + str(r['colour']).lstrip('#')]
 
     # Return the modified pos DataFrame with labeled ions
     return pos
@@ -459,6 +852,7 @@ def read_apt(file_path: str, debug: bool = False) -> pd.DataFrame:
 
         current_position = header_size
         data_sections = {}
+        tipbox = None
 
         while True:
             section_signature = extract_data(ByteFormat.CHAR, 4, current_position)
@@ -470,7 +864,7 @@ def read_apt(file_path: str, debug: bool = False) -> pd.DataFrame:
 
             section_header_size = extract_data(ByteFormat.INT_32)
             section_header_version = extract_data(ByteFormat.INT_32)
-            section_name = extract_data(ByteFormat.WIDE_CHAR, 32)
+            section_name = extract_data(ByteFormat.WIDE_CHAR, 32).strip()
             section_version = extract_data(ByteFormat.INT_32)
 
             section_relation = RelationKind(extract_data(ByteFormat.INT_32))
@@ -514,11 +908,24 @@ def read_apt(file_path: str, debug: bool = False) -> pd.DataFrame:
                 num_columns = int(section_record_size / (section_bit_size / 8))
                 num_records = int(section_record_count)
                 total_items = num_records * num_columns
+                data_offset = current_position + section_header_size
+
+                if section_name == "Position":
+                    tipbox_values = np.fromfile(
+                        file_path,
+                        map_data_type(section_format, section_bit_size),
+                        6,
+                        offset=data_offset,
+                    )
+                    if tipbox_values.size == 6:
+                        tipbox = tipbox_values.reshape(2, 3)
+                        data_offset += int(tipbox_values.nbytes)
+
                 section_data = np.fromfile(
                     file_path,
                     map_data_type(section_format, section_bit_size),
                     total_items,
-                    offset=current_position + section_header_size,
+                    offset=data_offset,
                 )
                 if num_columns > 1:
                     data_sections[section_name] = section_data.reshape(num_records, num_columns)
@@ -555,5 +962,7 @@ def read_apt(file_path: str, debug: bool = False) -> pd.DataFrame:
         for section in data_sections.keys():
             print(f"Section: {section} - {data_sections[section].shape} - {data_sections[section].dtype} - {data_sections[section]}")
     df = pd.DataFrame(data_sections)
+    if tipbox is not None:
+        df.attrs["tipbox"] = tipbox
 
     return df

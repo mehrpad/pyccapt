@@ -26,8 +26,8 @@ def test_pre_data_rejects_unsupported_input_type():
 def test_pre_data_dispatches_to_pos_reader(monkeypatch):
     calls = {}
 
-    def fake_read_rrng(path):
-        calls["rrng"] = path
+    def fake_read_rrng(path, return_tables=False):
+        calls["rrng"] = (path, return_tables)
         return None, "ranges"
 
     def fake_read_pos(path):
@@ -49,7 +49,8 @@ def test_pre_data_dispatches_to_pos_reader(monkeypatch):
 
     result = cloud_plotter.pre_data("input.pos", "ranges.rrng", input_type="pos")
     assert result == {"result": "ok"}
-    assert Path(calls["rrng"]).name == "ranges.rrng"
+    assert Path(calls["rrng"][0]).name == "ranges.rrng"
+    assert calls["rrng"][1] is True
     assert Path(calls["pos"]).name == "input.pos"
     assert calls["label"] == ("pos_data", "ranges")
     assert calls["deconvolve"] == "labeled"

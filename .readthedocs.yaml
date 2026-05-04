@@ -1,0 +1,28 @@
+# Read the Docs configuration.
+# Docs:  https://docs.readthedocs.io/en/stable/config-file/v2.html
+#
+# The user-facing site already lives at https://pyccapt.readthedocs.io/ — this
+# file makes the build reproducible and pinned to a known Sphinx + Python.
+
+version: 2
+
+build:
+  os: ubuntu-22.04
+  tools:
+    python: "3.11"
+
+sphinx:
+  configuration: docs/conf.py
+  fail_on_warning: false
+
+formats:
+  - htmlzip
+  - pdf
+
+python:
+  install:
+    - method: pip
+      path: .
+      extra_requirements:
+        - calibration
+    - requirements: docs/requirements.txt

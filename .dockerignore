@@ -1,0 +1,37 @@
+# Keep the build context small and reproducible.
+.git
+.github
+.claude
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.tmp_paper
+analysis_outputs
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.so
+**/.ipynb_checkpoints
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Editor / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Locally generated docs
+docs/_build/
+
+# Tutorial datasets are huge and not needed in the image
+*.h5
+*.HDF5
+*.epos
+*.pos
+*.apt
+*.ato

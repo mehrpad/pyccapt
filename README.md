@@ -2,11 +2,11 @@
 
 [![tests](https://github.com/mmonajem/pyccapt/actions/workflows/tests.yml/badge.svg)](https://github.com/mmonajem/pyccapt/actions/workflows/tests.yml)
 [![lint](https://github.com/mmonajem/pyccapt/actions/workflows/lint.yml/badge.svg)](https://github.com/mmonajem/pyccapt/actions/workflows/lint.yml)
-[![docs](https://github.com/mmonajem/pyccapt/actions/workflows/docs.yml/badge.svg)](https://github.com/mmonajem/pyccapt/actions/workflows/docs.yml)
+[![docs build](https://img.shields.io/github/actions/workflow/status/mmonajem/pyccapt/docs.yml?branch=main&label=docs%20build)](https://github.com/mmonajem/pyccapt/actions/workflows/docs.yml)
 [![PyPI](https://img.shields.io/pypi/v/pyccapt.svg)](https://pypi.org/project/pyccapt/)
 [![Docker](https://img.shields.io/badge/ghcr.io-pyccapt-blue?logo=docker)](https://github.com/mmonajem/pyccapt/pkgs/container/pyccapt)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.10210507.svg)](https://doi.org/10.5281/zenodo.10210507)
-[![Documentation Status](https://readthedocs.org/projects/pyccapt/badge/?version=latest)](https://pyccapt.readthedocs.io/en/latest/?badge=latest)
+[![Read the Docs](https://img.shields.io/badge/docs-Read%20the%20Docs-blue?logo=readthedocs&logoColor=white)](https://pyccapt.readthedocs.io/en/latest/)
 
 PyCCAPT is a modular, FAIR-oriented Python package for atom probe tomography (APT) instrument control, data calibration, and reconstruction workflows.
 

@@ -79,6 +79,7 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 myst_heading_anchors = 3  # Allows linking to headings in Markdown files
 
 autodoc_mock_imports = [
+    # Hardware deps (Windows-only or vendor SDKs)
     'mcculw',
     'mcculw.enums',
     'mcculw.ul',
@@ -86,6 +87,17 @@ autodoc_mock_imports = [
     'pypylon',
     'pypylon.genicam',
     'pypylon.pylon',
+    # Optional control-extra deps that the docs CI environment doesn't install
+    'serial',
+    'serial.tools',
+    'serial.tools.list_ports',
+    'cv2',
+    'pyvisa',
+    'PyQt6',
+    'PyQt6.QtCore',
+    'PyQt6.QtGui',
+    'PyQt6.QtWidgets',
+    'pyqtgraph',
 ]
 
 # -- Options for HTML output -------------------------------------------------

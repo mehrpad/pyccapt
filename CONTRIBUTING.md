@@ -142,23 +142,83 @@ Every push and pull request triggers five workflows under `.github/workflows/`:
 
 ## Releasing a new version
 
-1. Bump `__version__` in `pyccapt/__init__.py`.
-2. Update `CHANGELOG.md` (or commit history) with the user-facing changes.
-3. Tag the commit and push:
+Releases are **tag-driven**, not commit-driven. Pushing or merging to `main` runs tests, lint, docs, and a Docker `:edge` build, but it does **not** publish a new PyPI version or create a GitHub Release. A release happens only when a tag matching `v*` is pushed.
+
+### One-time setup (first release only)
+
+PyPI publishing uses [Trusted Publishing](https://docs.pypi.org/trusted-publishers/) (OIDC) — no API tokens are stored in this repo. Before the first release, the project owner must register the publisher once on PyPI:
+
+1. Go to <https://pypi.org/manage/account/publishing/>.
+2. Add a new pending publisher with:
+   - PyPI project name: `pyccapt`
+   - Owner: your GitHub user/org (e.g. `mmonajem`)
+   - Repository: `pyccapt`
+   - Workflow filename: `release.yml`
+   - Environment name: `pypi`
+3. In the GitHub repo settings, create an environment called `pypi` (Settings → Environments → New environment). Add reviewers if you want a manual approval gate.
+
+You also need GitHub Pages enabled (Settings → Pages → Source: GitHub Actions) for the docs deploy, and the repo must allow GHCR package writes (Settings → Actions → General → Workflow permissions → Read and write).
+
+### Release runbook
+
+1. **Make sure `main` is green.** Check the latest [tests](https://github.com/mmonajem/pyccapt/actions/workflows/tests.yml), [lint](https://github.com/mmonajem/pyccapt/actions/workflows/lint.yml), and [docs](https://github.com/mmonajem/pyccapt/actions/workflows/docs.yml) runs. Don't tag a red commit.
+
+2. **Bump the version.** The single source of truth is `__version__` in [`pyccapt/__init__.py`](pyccapt/__init__.py); `setup.py` reads it from there. Use [SemVer](https://semver.org/): bump `MAJOR` for breaking changes, `MINOR` for new features, `PATCH` for bug fixes.
+
+3. **Update `CHANGELOG.txt`** with the user-facing changes for this version.
+
+4. **Commit and push the bump to `main`** through the normal PR flow:
 
    ```bash
-   git tag vX.Y.Z
+   git checkout -b release/vX.Y.Z
+   # edit pyccapt/__init__.py and CHANGELOG.txt
+   git commit -am "Release vX.Y.Z"
+   git push origin release/vX.Y.Z
+   # open and merge the PR, then:
+   git checkout main
+   git pull
+   ```
+
+5. **Tag the merge commit and push the tag.** The tag must start with `v` and match the version exactly:
+
+   ```bash
+   git tag -a vX.Y.Z -m "PyCCAPT vX.Y.Z"
    git push origin vX.Y.Z
    ```
 
-4. The `release.yml` workflow then builds the sdist+wheel, publishes to PyPI
-   via [Trusted Publishing](https://docs.pypi.org/trusted-publishers/), and
-   opens a GitHub Release with auto-generated notes. The `docker.yml`
-   workflow pushes `:vX.Y.Z`, `:X.Y`, `:X`, and `:latest` tags to GHCR.
+6. **Watch the workflows.** The tag push triggers:
 
-   *One-time setup on PyPI:* register the publisher under
-   <https://pypi.org/manage/account/publishing/> with workflow `release.yml`
-   and environment `pypi`. No PyPI token is stored in this repo.
+   - [`release.yml`](.github/workflows/release.yml) — builds sdist + wheel, publishes to PyPI via Trusted Publishing, creates a GitHub Release with auto-generated notes and the dist files attached.
+   - [`docker.yml`](.github/workflows/docker.yml) — pushes `ghcr.io/mmonajem/pyccapt:X.Y.Z`, `:X.Y`, `:X`, and `:latest`.
+   - [`docs.yml`](.github/workflows/docs.yml) — rebuilds and deploys the Sphinx site.
+
+7. **Verify.** Confirm the new version is live:
+
+   ```bash
+   pip install --upgrade pyccapt
+   python -c "import pyccapt; print(pyccapt.__version__)"
+   docker pull ghcr.io/mmonajem/pyccapt:latest
+   ```
+
+   Check the [PyPI project page](https://pypi.org/project/pyccapt/), the [GitHub Releases page](https://github.com/mmonajem/pyccapt/releases), and the [GHCR package page](https://github.com/mmonajem/pyccapt/pkgs/container/pyccapt).
+
+### Recovering from a failed release
+
+PyPI versions are **immutable** — once `X.Y.Z` is uploaded you cannot reupload the same version, even after deleting it. If the release workflow fails:
+
+- **Failed before PyPI upload** (build/test step): fix the issue on `main`, then delete and recreate the tag at the new commit.
+
+  ```bash
+  git tag -d vX.Y.Z
+  git push origin :refs/tags/vX.Y.Z
+  # fix, merge to main, then re-tag:
+  git tag -a vX.Y.Z -m "PyCCAPT vX.Y.Z"
+  git push origin vX.Y.Z
+  ```
+
+- **Failed after PyPI upload** (e.g. GitHub Release step): yank the broken release on PyPI (Manage project → Releases → Options → Yank), bump to `X.Y.Z+1`, and run the runbook again. Don't try to reuse `X.Y.Z`.
+
+- **Manual re-trigger:** `release.yml` also accepts `workflow_dispatch`, so you can re-run it from the Actions tab without retagging — useful if only the GitHub Release or Docker step failed transiently.
 
 ## Running the Docker image locally
 

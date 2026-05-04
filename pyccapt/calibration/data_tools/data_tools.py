@@ -200,7 +200,7 @@ def store_df_to_hdf(dataframe, key, filename):
 
     file_path = _as_path(filename)
     file_path.parent.mkdir(parents=True, exist_ok=True)
-    dataframe.to_hdf(file_path, str(key), mode="w")
+    dataframe.to_hdf(file_path, key=str(key), mode="w")
 
 
 def store_df_to_csv(data: pd.DataFrame, path: str | Path) -> None:

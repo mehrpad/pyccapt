@@ -3,7 +3,6 @@ import time
 
 import cv2
 import numpy as np
-from PyQt6.QtCore import QObject, pyqtSlot, pyqtSignal
 
 try:
     from pypylon import pylon
@@ -14,8 +13,14 @@ else:
     _PYPYLON_IMPORT_ERROR = None
 
 
-def check_camera_availability(required_cameras: int = 2) -> tuple[bool, str]:
-    """Return whether the Basler camera backend has enough connected devices."""
+def check_camera_backend() -> tuple[bool, str]:
+	"""Return whether the Basler camera backend is usable on this host.
+
+	A True result means we can enumerate Basler cameras at runtime. The
+	actual *number* of connected cameras is allowed to fluctuate while the
+	GUI is running, so the worker handles that dynamically; this check is
+	only about whether pypylon itself is available.
+	"""
 
     if pylon is None:
         return False, f"Camera backend is unavailable ({_PYPYLON_IMPORT_ERROR})"
@@ -26,40 +31,46 @@ def check_camera_availability(required_cameras: int = 2) -> tuple[bool, str]:
         return False, f"Unable to enumerate cameras ({exc})"
 
     count = len(devices)
-    if count < required_cameras:
-        plural = "s" if count != 1 else ""
-        return (
-            False,
-            f"Detected {count} Basler camera{plural}; at least {required_cameras} are required.",
-        )
+	if count == 0:
+		return True, "No Basler cameras detected; GUI will retry while running."
+	plural = "s" if count != 1 else ""
+	return True, f"Detected {count} Basler camera{plural}."
 
-    return True, f"Detected {count} Basler cameras."
+
+def check_camera_availability(required_cameras: int = 1) -> tuple[bool, str]:
+	"""Compatibility wrapper.
+
+	Older call sites used this to gate whether the camera GUI could open at
+	all. The GUI now always opens when the backend is loaded and the worker
+	handles missing/disconnected cameras dynamically, so this just forwards
+	to :func:`check_camera_backend`.
+	"""
+
+	del required_cameras  # unused; kept for backward compatibility
+	return check_camera_backend()
 
 
 class CameraWorker(QObject):
-    """
-    This class is used to control the BASLER Cameras.
-    """
-    finished = pyqtSignal()  # Define the finished signal
+	"""Drives Basler camera capture with hot-reconnect support.
+
+	The worker keeps a fixed number of slots (one per logical camera in the
+	GUI) and binds each slot to a physical camera by serial number the first
+	time it sees one. If a camera disappears, its slot is freed and the
+	worker keeps trying to (re)attach it. Other slots keep streaming.
+	"""
+
+	finished = pyqtSignal()
+
+	SLOT_COUNT = 2
+	RECONNECT_INTERVAL = 3.0
+
     def __init__(self, variables, emitter):
-        """
-        Constructor function which initializes and setups all variables
-        and parameters for the class.
-
-        Args:
-            variables: The class object of the Variables class.
-            emitter: The class object of the Emitter class.
-
-        Return:
-            None
-        """
         super().__init__()
         self.flag_default_exposure_time = None
-        self.exposure_auto = None
+        self.exposure_auto = False
+        self.exposure_mode = 'Off'
         self.emitter = emitter
         self.variables = variables
-        self.camera_available = False
-        self.camera_status_message = ""
 
         self.running = False
         self.index_save_image = 0
@@ -69,10 +80,6 @@ class CameraWorker(QObject):
         self.exposure_time_cam_2_light = 20000
         self.exposure_time_cam_3 = 400000
         self.exposure_time_cam_3_light = 10000
-        self.emitter.cam_1_exposure_time = emitter.cam_1_exposure_time
-        self.emitter.cam_2_exposure_time = emitter.cam_2_exposure_time
-        self.emitter.cam_3_exposure_time = emitter.cam_3_exposure_time
-        self.emitter.default_exposure_time = emitter.default_exposure_time
 
         self.emitter.cam_1_exposure_time.connect(self.set_exposure_time_1)
         self.emitter.cam_2_exposure_time.connect(self.set_exposure_time_2)
@@ -80,14 +87,45 @@ class CameraWorker(QObject):
         self.emitter.default_exposure_time.connect(self.set_default_exposure_time)
         self.emitter.auto_exposure_time.connect(self.set_auto_exposure_time)
 
-        self.initialize_cameras()
+        # slot -> open pylon.InstantCamera (or None if not currently attached)
+        self._slots: list = [None] * self.SLOT_COUNT
+        # slot -> serial number we have ever bound to this slot
+        self._slot_serials: list = [None] * self.SLOT_COUNT
+        # cached applied exposure values, used to detect changes per slot
+        self._applied_exposure: list = [None] * self.SLOT_COUNT
+        self._applied_exposure_mode: list = [None] * self.SLOT_COUNT
+        self._last_reconnect_attempt = 0.0
+        self._converter = None
+        self._announced_no_backend = False
+
+        self.camera_available, self.camera_status_message = check_camera_backend()
+        # The legacy attribute is kept around for any old caller checking
+        # whether the worker is "alive". The worker now runs whenever the
+        # backend is loaded — even with zero cameras attached.
+        if self.camera_available:
+	        self._init_backend()
+
+	def _init_backend(self):
+		try:
+			self._tl_factory = pylon.TlFactory.GetInstance()
+			self._converter = pylon.ImageFormatConverter()
+			self._converter.OutputPixelFormat = pylon.PixelType_BGR8packed
+			self._converter.OutputBitAlignment = pylon.OutputBitAlignment_MsbAligned
+		except Exception as e:
+			self.camera_available = False
+			self.camera_status_message = f"Error initializing the camera backend ({e})"
+			print(self.camera_status_message)
+
+	# backwards-compat alias for callers that still call the old method name
+	def initialize_cameras(self):
+		self._reconcile_slots(force=True)
 
     def start_capturing(self):
         if not self.camera_available:
             self.finished.emit()
             return
         self.running = True
-        self.thread = threading.Thread(target=self.update_cameras)
+        self.thread = threading.Thread(target=self.update_cameras, daemon=True)
         self.thread.start()
 
     def stop_capturing(self):
@@ -95,15 +133,6 @@ class CameraWorker(QObject):
 
     @pyqtSlot(bool)
     def set_default_exposure_time(self):
-        """
-        This class method sets
-
-        Args:
-            None
-
-        Return:
-            None
-        """
         if not self.exposure_auto:
             self.exposure_time_cam_1 = 400000
             self.exposure_time_cam_1_light = 10000
@@ -116,233 +145,291 @@ class CameraWorker(QObject):
             if self.variables.light:
                 exposure_times = [self.exposure_time_cam_1_light, self.exposure_time_cam_2_light,
                                   self.exposure_time_cam_3_light]
-                self.emitter.cams_exposure_time_default.emit(exposure_times)
             else:
                 exposure_times = [self.exposure_time_cam_1, self.exposure_time_cam_2,
                                   self.exposure_time_cam_3]
-                self.emitter.cams_exposure_time_default.emit(exposure_times)
+            self.emitter.cams_exposure_time_default.emit(exposure_times)
         else:
             print('Cannot set the default exposure time when auto exposure is on')
 
     @pyqtSlot(bool)
     def set_auto_exposure_time(self):
-        """
-        This class method sets
-
-        Args:
-            None
-
-        Return:
-            None
-        """
         if not self.exposure_auto:
             self.exposure_mode = 'Continuous'
             self.exposure_auto = True
-        elif self.exposure_auto:
+        else:
             self.exposure_mode = 'Off'
             self.exposure_auto = False
 
     @pyqtSlot(int)
     def set_exposure_time_1(self, exposure_time):
-        """
-        This class method sets
-
-        Args:
-            exposure_time: The exposure time for the camera.
-
-        Return:
-            None
-        """
         self.exposure_time_cam_1 = exposure_time
 
     @pyqtSlot(int)
     def set_exposure_time_2(self, exposure_time):
-        """
-        This class method sets
-
-        Args:
-            exposure_time: The exposure time for the camera.
-
-        Return:
-            None
-        """
         self.exposure_time_cam_2 = exposure_time
 
     @pyqtSlot(int)
     def set_exposure_time_3(self, exposure_time):
-        """
-        This class method sets
-
-        Args:
-            exposure_time: The exposure time for the camera.
-
-        Return:
-            None
-        """
         self.exposure_time_cam_3 = exposure_time
 
-    def initialize_cameras(self):
-        """
-        Initializes and sets up the cameras.
+	def _exposure_for_slot(self, slot: int) -> int:
+		if slot == 0:
+			return self.exposure_time_cam_1
+		if slot == 1:
+			return self.exposure_time_cam_2
+		return self.exposure_time_cam_3
 
-        Args:
-            None
+	def _close_slot(self, slot: int) -> None:
+		cam = self._slots[slot]
+		self._slots[slot] = None
+		self._applied_exposure[slot] = None
+		self._applied_exposure_mode[slot] = None
+		if cam is None:
+			return
+		try:
+			if cam.IsGrabbing():
+				cam.StopGrabbing()
+		except Exception:
+			pass
+		try:
+			if cam.IsOpen():
+				cam.Close()
+		except Exception:
+			pass
 
-        Return:
-            None
-        """
-        available, message = check_camera_availability(required_cameras=2)
-        self.camera_available = available
-        self.camera_status_message = message
-        self.cameras = None
-        if not available:
-            print(message)
+	def _reconcile_slots(self, force: bool = False) -> None:
+		"""Fill empty slots from currently-enumerated devices.
+
+		Slots are bound by serial number: a slot remembers the first serial
+		it was assigned to and will only re-attach to that same physical
+		camera. Brand-new serials fill the lowest empty slot that has never
+		been claimed.
+		"""
+
+		if pylon is None:
+			return
+		now = time.time()
+		if not force and now - self._last_reconnect_attempt < self.RECONNECT_INTERVAL:
+			return
+		self._last_reconnect_attempt = now
+
+		try:
+			devices = self._tl_factory.EnumerateDevices()
+		except Exception as e:
+			if not self._announced_no_backend:
+				print(f"Camera enumeration failed: {e}")
+				self._announced_no_backend = True
             return
+		self._announced_no_backend = False
 
-        try:
-            maxCamerasToUse = 2
-            self.tlFactory = pylon.TlFactory.GetInstance()
-            self.devices = self.tlFactory.EnumerateDevices()
-            self.cameras = pylon.InstantCameraArray(min(len(self.devices), maxCamerasToUse))
+		# Map serial -> device info.
+		by_serial: dict[str, object] = {}
+		for dev in devices:
+			try:
+				serial_number = dev.GetSerialNumber()
+			except Exception:
+				serial_number = None
+			if serial_number:
+				by_serial[serial_number] = dev
 
-            for i, cam in enumerate(self.cameras):
-                cam.Attach(self.tlFactory.CreateDevice(self.devices[i]))
-            self.converter = pylon.ImageFormatConverter()
-            self.converter.OutputPixelFormat = pylon.PixelType_BGR8packed
-            self.converter.OutputBitAlignment = pylon.OutputBitAlignment_MsbAligned
+		# First, satisfy slots that have a remembered serial.
+		used_serials: set[str] = set()
+		for slot in range(self.SLOT_COUNT):
+			if self._slots[slot] is not None:
+				try:
+					if self._slots[slot].IsOpen():
+						used_serials.add(self._slot_serials[slot])
+						continue
+				except Exception:
+					pass
+				self._close_slot(slot)
+			sn = self._slot_serials[slot]
+			if sn is not None and sn in by_serial:
+				if self._attach_slot(slot, by_serial[sn]):
+					used_serials.add(sn)
 
-            self.cameras[0].Open()
-            self.cameras[0].ExposureAuto.SetValue('Off')
-            self.cameras[0].ExposureTime.SetValue(self.exposure_time_cam_1)
-            self.cameras[1].Open()
-            self.cameras[1].ExposureAuto.SetValue('Off')
-            self.cameras[1].ExposureTime.SetValue(self.exposure_time_cam_2)
-            self.exposure_auto = False
-        except Exception as e:
-            self.camera_available = False
-            self.camera_status_message = f"Error in initializing the camera class ({e})"
-            self.cameras = None
-            print(self.camera_status_message)
+		# Then, assign any unbound device to the first slot that has no
+		# remembered serial. This handles first-ever startup and adding a
+		# second camera after launching with one.
+		for sn, dev in by_serial.items():
+			if sn in used_serials:
+				continue
+			for slot in range(self.SLOT_COUNT):
+				if self._slots[slot] is not None:
+					continue
+				if self._slot_serials[slot] is not None:
+					continue
+				if self._attach_slot(slot, dev):
+					self._slot_serials[slot] = sn
+					used_serials.add(sn)
+					break
+
+	def _attach_slot(self, slot: int, device_info) -> bool:
+		try:
+			cam = pylon.InstantCamera(self._tl_factory.CreateDevice(device_info))
+			cam.Open()
+			try:
+				cam.ExposureAuto.SetValue('Off')
+			except Exception:
+				pass
+			try:
+				cam.ExposureTime.SetValue(self._exposure_for_slot(slot))
+			except Exception:
+				pass
+			cam.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
+		except Exception as e:
+			print(f"Could not attach camera in slot {slot}: {e}")
+			return False
+		self._slots[slot] = cam
+		self._applied_exposure[slot] = self._exposure_for_slot(slot)
+		self._applied_exposure_mode[slot] = 'Off'
+		try:
+			sn = device_info.GetSerialNumber()
+		except Exception:
+			sn = self._slot_serials[slot]
+		print(f"Camera attached in slot {slot} (serial={sn}).")
+		return True
+
+	def _apply_exposure_changes(self) -> None:
+		for slot in range(self.SLOT_COUNT):
+			cam = self._slots[slot]
+			if cam is None:
+				continue
+			target_mode = self.exposure_mode
+			if self._applied_exposure_mode[slot] != target_mode:
+				try:
+					cam.ExposureAuto.SetValue(target_mode)
+					self._applied_exposure_mode[slot] = target_mode
+				except Exception as e:
+					print(f"Slot {slot} exposure-auto change failed: {e}")
+			target_exposure = self._exposure_for_slot(slot)
+			if self._applied_exposure[slot] != target_exposure:
+				try:
+					cam.ExposureTime.SetValue(target_exposure)
+					self._applied_exposure[slot] = target_exposure
+				except Exception as e:
+					print(f"Slot {slot} exposure change failed: {e}")
 
     def update_cameras(self):
-        """
-        This class method sets up the cameras to capture the required images.
-
-        Args:
-            None
-
-        Return:
-            None
-        """
-        if not self.camera_available or self.cameras is None:
+	    if not self.camera_available:
             self.finished.emit()
             return
 
-        retry_attempts = 5
-        tmp_exposure_time_cam_1 = self.exposure_time_cam_1
-        tmp_exposure_time_cam_2 = self.exposure_time_cam_2
-        # tmp_exposure_time_cam_3 = self.exposure_time_cam_3
-        # set the auto exposure mode off
-        self.exposure_mode = 'Off'
-        tmp_exposure_mode = self.exposure_mode
-        for attempt in range(retry_attempts):
-            try:
-                self.cameras.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
-                start_time = time.time()
-                while self.cameras.IsGrabbing() and self.running:
-                    if tmp_exposure_mode != self.exposure_mode:
-                        tmp_exposure_mode = self.exposure_mode
-                        # self.cameras[0].open()
-                        self.cameras[0].ExposureAuto.SetValue(self.exposure_mode)
-                        # self.cameras[1].open()
-                        self.cameras[1].ExposureAuto.SetValue(self.exposure_mode)
-                        # self.cameras[2].open()
-                        # self.cameras[2].ExposureAuto.SetValue(self.exposure_mode)
-                    if tmp_exposure_time_cam_1 != self.exposure_time_cam_1:
-                        tmp_exposure_time_cam_1 = self.exposure_time_cam_1
-                        # self.cameras[0].open()
-                        self.cameras[0].ExposureTime.SetValue(self.exposure_time_cam_1)
-                    if tmp_exposure_time_cam_2 != self.exposure_time_cam_2:
-                        tmp_exposure_time_cam_2 = self.exposure_time_cam_2
-                        # self.cameras[1].open()
-                        self.cameras[1].ExposureTime.SetValue(self.exposure_time_cam_2)
-                    # if tmp_exposure_time_cam_3 != self.exposure_time_cam_3:
-                    #     tmp_exposure_time_cam_3 = self.exposure_time_cam_3
-                    #     self.cameras[2].open()
-                    #     self.cameras[2].ExposureTime.SetValue(self.exposure_time_cam_3)
-                    current_time = time.time()
+	    last_save_time = time.time()
+	    # On first iteration, force a discovery pass so cameras attached
+	    # at boot are picked up without the 3-second reconnect delay.
+	    self._reconcile_slots(force=True)
+
+	    while self.running:
+		    self._reconcile_slots()
+		    self._apply_exposure_changes()
+
+		    any_open = False
+		    grabbed_images = [None] * self.SLOT_COUNT
+		    for slot in range(self.SLOT_COUNT):
+			    cam = self._slots[slot]
+			    if cam is None:
+				    continue
+			    any_open = True
+			    try:
+				    if not cam.IsGrabbing():
+					    cam.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
+				    grab = cam.RetrieveResult(2000, pylon.TimeoutHandling_ThrowException)
                     try:
-                        grabResult0 = self.cameras[0].RetrieveResult(8000, pylon.TimeoutHandling_ThrowException)
-                        grabResult1 = self.cameras[1].RetrieveResult(8000, pylon.TimeoutHandling_ThrowException)
-                        image0 = self.converter.Convert(grabResult0)
-                        img0 = image0.GetArray()
-                        image1 = self.converter.Convert(grabResult1)
-                        img1 = image1.GetArray()
-                    except Exception as e:
-                        print(f"Error in grabbing the images from the camera: {e}")
-                        break
+	                    if grab.GrabSucceeded():
+		                    image = self._converter.Convert(grab)
+		                    grabbed_images[slot] = image.GetArray()
+                    finally:
+	                    grab.Release()
+			    except Exception as e:
+				    print(f"Slot {slot} grab failed: {e}; will try to reconnect.")
+				    self._close_slot(slot)
 
-                    self.img0_orig = img0
-                    self.img1_orig = img1
-                    self.img2_orig = img0
+		    self._emit_images(grabbed_images)
 
-                    self.emitter.img0_orig.emit(np.swapaxes(self.img0_orig, 0, 1))
-                    self.emitter.img1_orig.emit(np.swapaxes(self.img1_orig, 0, 1))
-                    self.emitter.img2_orig.emit(np.swapaxes(self.img2_orig, 0, 1))
+		    if self.variables.clear_index_save_image:
+			    self.variables.clear_index_save_image = False
+			    self.index_save_image = 0
 
-                    if self.variables.clear_index_save_image:
-                        self.variables.clear_index_save_image = False
-                        self.index_save_image = 0
+		    now = time.time()
+		    if (
+				    now - last_save_time >= self.variables.save_meta_interval_camera
+				    and self.variables.start_flag
+		    ):
+			    last_save_time = now
+			    self._save_screenshots(grabbed_images)
 
-                    if current_time - start_time >= self.variables.save_meta_interval_camera and self.variables.start_flag:
-                        start_time = time.time()
-                        path_meta = self.variables.path_meta
-                        cv2.imwrite(path_meta + "/camera_side_%s.png" % self.index_save_image, self.img0_orig)
-                        cv2.imwrite(path_meta + '/camera_top_%s.png' % self.index_save_image, self.img1_orig)
-                        cv2.imwrite(path_meta + '/camera_45_%s.png' % self.index_save_image, self.img2_orig)
-                        self.index_save_image += 1
-                        time.sleep(0.5)
+		    if self.variables.light_switch or self.flag_default_exposure_time:
+			    self.light_switch()
+			    self.variables.light_switch = False
+			    self.flag_default_exposure_time = False
 
-                    grabResult0.Release()
-                    grabResult1.Release()
+		    if not any_open:
+			    # No cameras attached at the moment — sleep longer to give
+			    # the OS time to enumerate a freshly plugged-in device, and
+			    # avoid pegging the CPU.
+			    time.sleep(0.5)
+		    else:
+			    time.sleep(0.5)
 
-                    if self.variables.light_switch or self.flag_default_exposure_time:
-                        self.light_switch()
-                        self.variables.light_switch = False
-                        self.flag_default_exposure_time = False
+		    if not self.variables.flag_camera_grab:
+			    break
 
-                    time.sleep(0.5)
+	    for slot in range(self.SLOT_COUNT):
+		    self._close_slot(slot)
+	    self.finished.emit()
 
-                    if not self.variables.flag_camera_grab:
-                        break
-                break  # Exit the retry loop if successful
+	def _emit_images(self, images: list) -> None:
+		# Slot 0 -> img0 (side overview), Slot 1 -> img1 (top overview).
+		# img2 mirrors slot 0 so the existing 'angle' view doesn't go blank
+		# when only one camera is connected.
+		img0 = images[0] if len(images) > 0 else None
+		img1 = images[1] if len(images) > 1 else None
+		if img0 is not None:
+			self.emitter.img0_orig.emit(np.swapaxes(img0, 0, 1))
+		if img1 is not None:
+			self.emitter.img1_orig.emit(np.swapaxes(img1, 0, 1))
+		angle_src = img0 if img0 is not None else img1
+		if angle_src is not None:
+			self.emitter.img2_orig.emit(np.swapaxes(angle_src, 0, 1))
+
+	def _save_screenshots(self, images: list) -> None:
+		path_meta = self.variables.path_meta
+		labels = ("camera_side", "camera_top", "camera_45")
+		save_sources = list(images)
+		# Mirror slot 0 into the third saved image when no dedicated angle
+		# camera exists, matching the legacy behaviour.
+		if len(save_sources) >= 1 and (len(save_sources) < 3 or save_sources[2] is None):
+			while len(save_sources) < 3:
+				save_sources.append(None)
+			save_sources[2] = save_sources[0]
+		for label, img in zip(labels, save_sources):
+			if img is None:
+				continue
+			try:
+				cv2.imwrite(f"{path_meta}/{label}_{self.index_save_image}.png", img)
             except Exception as e:
-                print(f"Error during update_cameras attempt {attempt + 1}: {e}")
-                self.initialize_cameras()
-                time.sleep(1)
-        self.finished.emit()  # Emit the finished signal when done
+	            print(f"Could not save {label} screenshot: {e}")
+		self.index_save_image += 1
+		time.sleep(0.5)
 
     def light_switch(self):
-        """
-        This class method sets the Exposure time based on a flag.
-
-        Args:
-            None
-
-        Return:
-            None
-        """
-        if not self.exposure_auto:
-            try:
-                if self.variables.light:
-                    # self.cameras[0].Open()
-                    self.cameras[0].ExposureTime.SetValue(self.exposure_time_cam_1_light)
-                    # self.cameras[1].Open()
-                    self.cameras[1].ExposureTime.SetValue(self.exposure_time_cam_2_light)
-                else:
-                    # self.cameras[0].Open()
-                    self.cameras[0].ExposureTime.SetValue(self.exposure_time_cam_1)
-                    # self.cameras[1].Open()
-                    self.cameras[1].ExposureTime.SetValue(self.exposure_time_cam_2)
-            except Exception as e:
-                print(f"Error in switching the light: {e}")
+	    if self.exposure_auto:
+		    return
+	    try:
+		    light_on = bool(self.variables.light)
+		    slot_targets = (
+			    self.exposure_time_cam_1_light if light_on else self.exposure_time_cam_1,
+			    self.exposure_time_cam_2_light if light_on else self.exposure_time_cam_2,
+			    self.exposure_time_cam_3_light if light_on else self.exposure_time_cam_3,
+		    )
+		    for slot in range(self.SLOT_COUNT):
+			    cam = self._slots[slot]
+			    if cam is None:
+				    continue
+			    target = slot_targets[slot]
+			    cam.ExposureTime.SetValue(target)
+			    self._applied_exposure[slot] = target
+	    except Exception as e:
+		    print(f"Error in switching the light: {e}")

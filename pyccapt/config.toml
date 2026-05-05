@@ -20,7 +20,7 @@ save_meta_interval_camera = 300
 
 # Limits and control defaults
 max_vdc = 14000
-min_vp = 1000#328
+min_vp = #328
 max_vp = 3281
 pulse_amp_per_supply_voltage = 21.875
 max_laser_power = 5.2

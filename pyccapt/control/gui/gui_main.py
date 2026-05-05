@@ -1,22 +1,16 @@
 ﻿import multiprocessing
 import sys
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-from importlib.metadata import PackageNotFoundError, version
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import Qt
 
 # Local module and scripts
 from pyccapt.control.core import device_checks, runtime
 from pyccapt.control.devices import camera as camera_device
-from pyccapt.control.gui import main_parameters, process_coordinator
-from pyccapt.control.gui import (
-    gui_baking,
-    gui_gates,
-    gui_laser_control,
-    gui_pumps_vacuum,
-    gui_stage_control,
-)
+from pyccapt.control.gui import main_parameters, process_coordinator, gui_baking, gui_gates, gui_laser_control, \
+    gui_pumps_vacuum, gui_stage_control
 
 
 class Ui_PyCCAPT(object):
@@ -1622,18 +1616,23 @@ class Ui_PyCCAPT(object):
             self.error_message(message)
 
         if str(self.conf.get("camera", "off")).strip().lower() == "on":
-            self.camera_available, self.camera_status_message = camera_device.check_camera_availability()
+	        self.camera_available, self.camera_status_message = camera_device.check_camera_backend()
         else:
             self.camera_available = False
             self.camera_status_message = "Camera support is disabled in config.toml."
 
         if self.camera_available:
+	        # Always start the camera process when the backend is present —
+	        # the worker handles 0/1/2 cameras dynamically and reconnects
+	        # hot-plugged devices, so the button stays usable either way.
             self.camera_process = self.process_coordinator.start_camera(
                 self.variables,
                 self.conf,
                 self.camera_closed_event,
                 self.camera_win_front,
             )
+	        if self.camera_status_message:
+		        self.camears.setToolTip(self.camera_status_message)
         else:
             self.camears.setEnabled(False)
             self.camears.setToolTip(self.camera_status_message)

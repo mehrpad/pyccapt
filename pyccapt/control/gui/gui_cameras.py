@@ -619,26 +619,29 @@ class Ui_Cameras_Alignment(object):
 		"""
 		if self.conf['camera'] == "off":
 			print('The cameras is off')
-		else:
-			# Create cameras thread
-			# Thread for reading cameras
-			# Create a camera instance and move it to a new thread
-			self.camera_worker = camera.CameraWorker(variables=self.variables, emitter=self.emitter)
-			if not self.camera_worker.camera_available:
-				print(self.camera_worker.camera_status_message)
-				self.variables.flag_camera_grab = False
-				return
+			return
+		# Create a camera worker. The worker keeps running even when zero
+		# cameras are currently connected so that hot-plugging a camera
+		# later automatically populates the views — the GUI window itself
+		# stays open in either case.
+		self.camera_worker = camera.CameraWorker(variables=self.variables, emitter=self.emitter)
+		if self.camera_worker.camera_status_message:
+			print(self.camera_worker.camera_status_message)
+		if not self.camera_worker.camera_available:
+			# pypylon failed to load entirely — no point spinning up a thread.
+			self.variables.flag_camera_grab = False
+			return
 
-			self.camera_thread = QThread()
-			self.camera_worker.moveToThread(self.camera_thread)
+		self.camera_thread = QThread()
+		self.camera_worker.moveToThread(self.camera_thread)
 
-			self.camera_thread.started.connect(self.camera_worker.start_capturing)
-			self.camera_worker.finished.connect(self.camera_thread.quit)
-			self.camera_worker.finished.connect(self.camera_worker.deleteLater)
-			self.camera_thread.finished.connect(self.camera_thread.deleteLater)
+		self.camera_thread.started.connect(self.camera_worker.start_capturing)
+		self.camera_worker.finished.connect(self.camera_thread.quit)
+		self.camera_worker.finished.connect(self.camera_worker.deleteLater)
+		self.camera_thread.finished.connect(self.camera_thread.deleteLater)
 
-			self.camera_thread.start()
-			self.variables.flag_camera_grab = True
+		self.camera_thread.start()
+		self.variables.flag_camera_grab = True
 
 	def stop(self):
 		"""

@@ -1,0 +1,511 @@
+"""Centralised hover-tooltips for the PyCCAPT control GUIs.
+
+How it works
+------------
+Each GUI window has a top-level dict here whose keys are the widget
+attribute names on the ``Ui_*`` object (the same names used in the .py and
+.ui files - for example ``stage_speed_x``, ``laser_home``, ``superuser``).
+The values are the strings shown on hover.
+
+A single helper, :func:`apply_tooltips`, walks the dict and calls
+``setToolTip`` on every widget that exists.  Missing keys are silently
+ignored so this module can be edited independently of the GUI source.
+
+Style guide
+-----------
+* Keep each tooltip to 1-2 short sentences.
+* Always answer two questions: *what does this control do?* and *how do I
+  change it?* (e.g. "drag the slider", "edit X in config.toml", "click",
+  "type a number").
+* Mention the underlying config.toml key when one exists, so the user
+  can find the setting outside the GUI.
+
+Add or edit entries here - no GUI source changes are needed for the new
+text to appear on the next launch.
+"""
+
+from __future__ import annotations
+
+from typing import Mapping
+
+
+# ---------------------------------------------------------------------------
+# Helper
+# ---------------------------------------------------------------------------
+
+def apply_tooltips(ui_object, tooltips: Mapping[str, str]) -> None:
+	"""Set tooltips on every named widget that exists on ``ui_object``.
+
+	``ui_object`` is typically a ``Ui_*`` instance after its ``setupUi``
+	has run.  Widgets that don't exist on the object (e.g. removed in a
+	refactor) are silently skipped, so the tooltip dictionary is
+	forward-compatible with GUI changes.
+	"""
+	for attr_name, text in tooltips.items():
+		widget = getattr(ui_object, attr_name, None)
+		if widget is None:
+			continue
+		try:
+			widget.setToolTip(text)
+		except Exception:
+			pass
+
+
+# ===========================================================================
+# Main control window  (pyccapt.control.gui.gui_main)
+# ===========================================================================
+
+MAIN_TOOLTIPS = {
+	# --- Sub-window launcher buttons --------------------------------------
+	"gates_control": "Open the Gates Control window (open/close cryo, "
+	                 "main and load-lock gate valves).",
+	"pumps_vaccum": "Open the Pumps & Vacuum window (chamber pressures, "
+	                "load-lock pumping, cryo / load-lock temperatures).",
+	"camears": "Open the Cameras & Alignment window (live side / "
+	           "top / angle camera streams, light, exposure).",
+	"laser_control": "Open the Laser Control window (NKT laser settings, "
+	                 "AOM, and the laser focusing stage).",
+	"stage_control": "Open the Stage Control window (sample / specimen "
+	                 "stage, SmarAct MCS2).",
+	"visualization": "Open the live Visualization window (detector "
+	                 "hitmap, mass spectrum, statistics).",
+	"baking": "Open the Baking window (chamber bake-out logging).",
+
+	# --- Experiment metadata ----------------------------------------------
+	"ex_number": "Experiment number, used in the output filename.  Type a "
+	             "new integer to bump the counter.",
+	"ex_user": "User name written into the metadata of every saved file.",
+	"ex_name": "Free-text experiment name; becomes part of the saved "
+	           "filename.",
+	"email": "Notification email address (if email reports are "
+	         "enabled).",
+	"electrode": "Electrode configuration selector - picks an entry from "
+	             "electrode.toml.",
+
+	# --- Stop conditions --------------------------------------------------
+	"max_ions": "Stop the experiment after this many detected ions.  "
+	            "Type an integer.",
+	"ex_time": "Stop the experiment after this many seconds, "
+	           "regardless of ion count.",
+	"criteria_ions": "Enable/disable the 'stop at max ions' criterion.",
+	"criteria_time": "Enable/disable the 'stop at max time' criterion.",
+	"criteria_vdc": "Enable/disable the 'stop at max DC voltage' "
+	                "criterion.",
+
+	# --- Voltage limits ---------------------------------------------------
+	"vdc_max": "DC voltage upper limit (V) - the controller will "
+	           "never command above this.  Hard-capped by max_vdc "
+	           "in config.toml.",
+	"vdc_min": "DC voltage starting / lower limit (V).",
+	"set_min_voltage": "Apply the DC Min. Voltage value to the supply now "
+	                   "(without starting the experiment).",
+	"speciemen_voltage": "Live read-back of the specimen DC voltage (V).",
+
+	# --- Pulse parameters -------------------------------------------------
+	"pulse_mode": "Pulse source: Voltage (HV pulser) or Laser "
+	              "(NKT/origami).",
+	"pulse_fraction": "Voltage-pulse amplitude as a percentage of the DC "
+	                  "voltage.  Capped at pulse_fraction_max in "
+	                  "config.toml.",
+	"pulse_frequency": "Pulse repetition frequency (kHz).  Range comes "
+	                   "from min/max_voltage_pulse_frequency or "
+	                   "min/max_laser_pulse_frequency in config.toml.",
+	"pulse_voltage": "Live read-back of the pulse-supply voltage (V).",
+	"vp_min": "Pulser lower voltage limit (V).",
+	"vp_max": "Pulser upper voltage limit (V).  Hard-capped by "
+	          "max_vp in config.toml.",
+
+	# --- Detection / control ---------------------------------------------
+	"detection_rate": "Live read-back of the detection rate (%).",
+	"detection_rate_init": "Target detection rate the controller tries to "
+	                       "hold (%).",
+	"control_algorithm": "Closed-loop control algorithm used to keep "
+	                     "detection rate at target.  Proportional is "
+	                     "the default.",
+	"ex_freq": "Control-loop refresh rate (Hz) for the "
+	           "feedback algorithm.",
+	"vdc_steps_up": "K_p gain for upward DC steps (controller's "
+	                "proportional gain when raising voltage).",
+	"vdc_steps_down": "K_p gain for downward DC steps (proportional "
+	                  "gain when lowering voltage).",
+	"counter_source": "Where ion counts are read from (TDC, DRS, "
+	                  "Counter, etc.).",
+	"parameters_source": "Where setup parameters are loaded from (file "
+	                     "vs. live GUI values).",
+
+	# --- Live experiment statistics --------------------------------------
+	"elapsed_time": "Live elapsed seconds since the experiment started.",
+	"total_ions": "Live cumulative detected-ion count.",
+
+	# --- Run controls -----------------------------------------------------
+	"start_button": "Start the experiment with the parameters above.  "
+	                "Disabled until device checks pass (or override is "
+	                "active).",
+	"stop_button": "Stop the running experiment cleanly (closes data "
+	               "files, ramps voltages down).",
+	"superuser": "Override Access - bypasses device-availability "
+	             "checks and other safety interlocks.  Click for a "
+	             "warning dialog; the button turns green while active.",
+
+	# --- Status -----------------------------------------------------------
+	"Error": "Status / error messages.  Red text indicates a problem; "
+	         "messages auto-hide after a few seconds.",
+}
+
+# ===========================================================================
+# Stage Control window  (pyccapt.control.gui.gui_stage_control)
+# ===========================================================================
+
+STAGE_TOOLTIPS = {
+	# --- Position display (3 LCDs per axis) -------------------------------
+	"stage_x_mm": "X-axis position, millimetres digit.  Read-only - "
+	              "driven by the SmarAct controller.  Combined with the "
+	              "µm and nm columns: total X = mm.µm.nm.",
+	"stage_x_um": "X-axis position, micrometres digit.",
+	"stage_x_nm": "X-axis position, nanometres digit.  Updated every "
+	              "500 ms.",
+	"stage_y_mm": "Y-axis position, millimetres digit.",
+	"stage_y_um": "Y-axis position, micrometres digit.",
+	"stage_y_nm": "Y-axis position, nanometres digit.",
+	"stage_z_mm": "Z-axis position, millimetres digit.",
+	"stage_z_um": "Z-axis position, micrometres digit.",
+	"stage_z_nm": "Z-axis position, nanometres digit.",
+
+	# --- Speed sliders ----------------------------------------------------
+	"stage_speed_x": "Speed level for the X axis (1=slowest, 11=fastest, "
+	                 "matches the MCS2 hand-control display).  Each level "
+	                 "maps to a velocity defined in stage_speed_table_mm_s "
+	                 "in config.toml.  Drag to change; the per-click jog "
+	                 "distance is also derived from this level.",
+	"stage_speed_y": "Speed level for the Y axis (1=slowest, 11=fastest). "
+	                 "See stage_speed_table_mm_s in config.toml.",
+	"stage_speed_z": "Speed level for the Z axis (1=slowest, 11=fastest). "
+	                 "See stage_speed_table_mm_s in config.toml.",
+	"stage_speed_x_label": "Live readout of the X-axis velocity (mm/s) and "
+	                       "per-click jog distance (µm) at the current "
+	                       "level.",
+	"stage_speed_y_label": "Live readout of the Y-axis velocity (mm/s) and "
+	                       "per-click jog distance (µm).",
+	"stage_speed_z_label": "Live readout of the Z-axis velocity (mm/s) and "
+	                       "per-click jog distance (µm).",
+
+	# --- Direction buttons ------------------------------------------------
+	"stage_up": "Jog Y axis +1 step.  Step distance = velocity × "
+	            "stage_click_duration_s (config.toml), so faster "
+	            "Y slider = larger jump per click.",
+	"stage_down": "Jog Y axis -1 step.",
+	"stage_left": "Jog X axis -1 step.",
+	"stage_right": "Jog X axis +1 step.",
+	"stage_forward": "Jog Z axis +1 step.",
+	"stage_backward": "Jog Z axis -1 step.",
+
+	# --- Home / Reference / Stop / Override -------------------------------
+	"stage_home": "Move all three axes to the home position set in "
+	              "config.toml (stage_home_x_mm, stage_home_y_mm, "
+	              "stage_home_z_mm).  Edit those values to change what "
+	              "'home' means for your experiment.",
+	"stage_reference": "Run the SmarAct reference search - moves every "
+	                   "axis until it finds its physical reference mark "
+	                   "and zeros position to absolute coordinates.  "
+	                   "REQUIRED once after every power-on.  Disabled "
+	                   "until Override Access is granted, because the "
+	                   "stage moves on its own.",
+	"stage_stop": "Immediately stop all axes (calls ctl.Stop on every "
+	              "channel).  Always clickable - your panic button.",
+	"superuser": "Enable potentially dangerous controls (currently the "
+	             "Reference button).  Click to grant access (a "
+	             "confirmation dialog appears); the button turns green "
+	             "while active.  Click again to deactivate.",
+
+	"Error": "Status / error messages from the stage controller.  Red "
+	         "text indicates a problem (no SDK, controller unreachable, "
+	         "etc.); the cause stays visible until the next button "
+	         "click resolves it.",
+}
+
+# ===========================================================================
+# Laser Control window  (pyccapt.control.gui.gui_laser_control)
+# ===========================================================================
+
+LASER_TOOLTIPS = {
+	# --- Top-row controls -------------------------------------------------
+	"laser_wavelegnth": "Output wavelength.  IR is the fundamental, Green "
+	                    "is frequency-doubled, DUV is frequency-quadrupled.  "
+	                    "Cannot be changed while the laser is emitting.",
+	"laser_power": "Average output power, milliwatts.  Capped by "
+	               "max_laser_power in config.toml.  Type a number "
+	               "or use the spin arrows; sent to the laser "
+	               "immediately.",
+	"laser_rate": "Base pulse-repetition frequency (Hz).  Above "
+	              "100 kHz the per-pulse energy decreases linearly "
+	              "with rate.  Effective rate at the sample = "
+	              "rate / Division Factor.",
+	"laser_divition_factor": "Pulse division factor (integer).  Effective "
+	                         "rate = base rate / this value.  Use to "
+	                         "drop from MHz down to a few kHz without "
+	                         "changing the base oscillator.",
+
+	# --- Mode buttons + LEDs ---------------------------------------------
+	"laser_listen": "Put the laser into Listen mode (lowest "
+	                "activity, safe).  No emission, ready to "
+	                "receive commands.",
+	"laser_standby": "Bring the laser to Standby - powered, "
+	                 "warmed up, but not emitting.  Required "
+	                 "before Laser On.",
+	"laser_on": "Start laser emission.  Only works from "
+	            "Standby.  Wavelength becomes locked "
+	            "while On.",
+	"laser_enable": "Enable / disable the AOM output gate.  "
+	                "Toggles the actual output at the sample "
+	                "without changing the laser's emission "
+	                "state.",
+	"led_laser_listen": "Listen-mode indicator.  Green = active.",
+	"led_laser_laser_standby": "Standby-mode indicator.  Green = active, "
+	                           "orange = transitioning.",
+	"led_laser_on": "Emission indicator.  Green = laser is "
+	                "emitting, orange = transitioning.",
+	"led_laser_enable": "Output-enable indicator.  Green = AOM "
+	                    "open.",
+
+	# --- Live readouts ---------------------------------------------------
+	"laser_power_disp": "Live measured average power (mW) read "
+	                    "back from the laser.",
+	"laser_pulse_energy_disp": "Live per-pulse energy (nJ) read back "
+	                           "from the laser.",
+	"laser_repetion_rate_disp": "Effective pulse rate at the sample "
+	                            "(kHz), accounting for the division "
+	                            "factor.",
+
+	# --- Scan / Focus mode -----------------------------------------------
+	"laser_scan_mode5": "Scanning pattern selector.  Currently only "
+	                    "'Standard' is implemented.",
+	"laser_focus_mode": "Focus-mode selector.  Currently only "
+	                    "'Standard' is implemented.",
+	"scanning_disp": "Visualisation of the active scanning pattern.",
+	"start_scanning": "Start / stop the scanning routine using the "
+	                  "selected scan and focus modes.",
+	"nktpbus_mode_switch": "Switch the laser from CLI to NKTPBus mode - "
+	                       "hands control over to NKT's own software.  "
+	                       "Once switched, you must use the NKT control "
+	                       "tool to bring it back to CLI mode.  Disabled "
+	                       "until Override Access is granted.",
+
+	# --- SmarAct laser focusing stage: position display ------------------
+	"laser_x_mm": "Laser-stage X position, millimetres digit.  Read-only.  "
+	              "Combined with µm and nm columns: total X = mm.µm.nm.",
+	"laser_x_um": "Laser-stage X position, micrometres digit.",
+	"laser_x_nm": "Laser-stage X position, nanometres digit.  Updated "
+	              "every 500 ms.",
+	"laser_y_mm": "Laser-stage Y position, millimetres digit.",
+	"laser_y_um": "Laser-stage Y position, micrometres digit.",
+	"laser_y_nm": "Laser-stage Y position, nanometres digit.",
+	"laser_z_mm": "Laser-stage Z position, millimetres digit.",
+	"laser_z_um": "Laser-stage Z position, micrometres digit.",
+	"laser_z_nm": "Laser-stage Z position, nanometres digit.",
+
+	# --- Laser-stage speed sliders ---------------------------------------
+	"laser_speed_x": "Speed level for the laser stage X axis (1=slowest, "
+	                 "11=fastest).  Velocity per level set by "
+	                 "stage_speed_table_mm_s in config.toml; per-click "
+	                 "step is derived from velocity × "
+	                 "stage_click_duration_s.",
+	"laser_speed_y": "Speed level for the laser stage Y axis (1=slowest, "
+	                 "11=fastest).",
+	"laser_speed_z": "Speed level for the laser stage Z axis (1=slowest, "
+	                 "11=fastest).",
+	"laser_speed_x_label": "Live readout of the laser-stage X velocity "
+	                       "(mm/s) and per-click jog distance (µm).",
+	"laser_speed_y_label": "Live readout of the laser-stage Y velocity "
+	                       "(mm/s) and per-click jog distance (µm).",
+	"laser_speed_z_label": "Live readout of the laser-stage Z velocity "
+	                       "(mm/s) and per-click jog distance (µm).",
+
+	# --- Laser-stage direction buttons -----------------------------------
+	"laser_up": "Jog laser stage Y axis +1 step.",
+	"laser_down": "Jog laser stage Y axis -1 step.",
+	"laser_left": "Jog laser stage X axis -1 step.",
+	"leser_right": "Jog laser stage X axis +1 step.  (Original typo "
+	               "preserved as the widget name.)",
+	"laser_forward": "Jog laser stage Z axis +1 step.",
+	"laser_backward": "Jog laser stage Z axis -1 step.",
+
+	# --- Home / Reference / Stop / Override ------------------------------
+	"laser_home": "Move the laser stage to the home position set in "
+	              "config.toml (laser_stage_home_x_mm, _y_mm, _z_mm).",
+	"laser_stage_reference": "Run the SmarAct reference search on the "
+	                         "laser stage.  REQUIRED once after every "
+	                         "power-on.  Disabled until Override Access "
+	                         "is granted.",
+	"laser_stage_stop": "Immediately stop all laser-stage axes.  Always "
+	                    "clickable.",
+	"laser_stage_superuser": "Enable potentially disruptive controls: "
+	                         "the stage Reference button and the Nktpbus "
+	                         "mode switch.  Click to grant access (a "
+	                         "confirmation dialog appears); the button "
+	                         "turns green while active.",
+
+	"Error": "Status / error messages from both the laser and the laser "
+	         "stage.  Red text indicates a problem; messages auto-hide "
+	         "after 8 seconds.",
+}
+
+# ===========================================================================
+# Gates window  (pyccapt.control.gui.gui_gates)
+# ===========================================================================
+
+GATES_TOOLTIPS = {
+	"main_chamber_switch": "Open / close the main-chamber gate valve.  "
+	                       "Interlocked: cannot open if vacuum levels "
+	                       "are wrong.  Bypass via Override Access.",
+	"load_lock_switch": "Open / close the load-lock gate valve.",
+	"cryo_switch": "Open / close the cryo gate valve.",
+	"led_main_chamber": "Main-chamber gate state indicator.  Green = "
+	                    "open, red = closed.",
+	"led_load_lock": "Load-lock gate state indicator.",
+	"led_cryo": "Cryo gate state indicator.",
+	"superuser": "Override Access - bypass the gate-vacuum "
+	             "interlocks.  Click for a warning dialog; "
+	             "button turns green while active.  USE WITH "
+	             "CARE: opening a gate against the wrong "
+	             "vacuum can damage hardware.",
+	"Error": "Status / error messages from the gate controller.",
+}
+
+# ===========================================================================
+# Pumps & Vacuum window  (pyccapt.control.gui.gui_pumps_vacuum)
+# ===========================================================================
+
+PUMPS_TOOLTIPS = {
+	# --- Live vacuum readings (mBar) -------------------------------------
+	"vacuum_main": "Main chamber pressure (mBar).  Live read "
+	               "from the gauge; updated continuously.",
+	"vacuum_buffer": "Buffer chamber pressure (mBar).",
+	"vacuum_buffer_back": "Buffer chamber backing-line pressure "
+	                      "(mBar).",
+	"vacuum_load_lock": "Load-lock chamber pressure (mBar).",
+	"vacuum_load_lock_back": "Load-lock backing-line pressure (mBar).",
+	"vacuum_cryo_load_lock": "Cryo load-lock chamber pressure (mBar).",
+	"vacuum_cryo_load_lock_back": "Cryo load-lock backing-line pressure "
+	                              "(mBar).",
+
+	# --- Pump switches ---------------------------------------------------
+	"pump_load_lock_switch": "Vent / pump the load lock.  Click to "
+	                         "toggle.  Interlocked behind Override "
+	                         "Access.",
+	"pump_cryo_load_lock_switch": "Vent / pump the cryo load lock.",
+	"led_pump_load_lock": "Load-lock pump state.  Green = "
+	                      "pumping, red = vented.",
+	"led_pump_cryo_load_lock": "Cryo load-lock pump state.",
+
+	# --- Temperatures ---------------------------------------------------
+	"temp_cryo_head": "Cryo head temperature (K) - live reading.",
+	"temp_cryo_head_inside": "Cryo head inside temperature (K).",
+	"temp_stage": "Stage temperature (K).",
+	"temp_ll": "Load-lock temperature (°C).",
+	"set_temperature_cryo": "Set the cryo target temperature (K).  "
+	                        "Range: min/max_temperature_cryo in "
+	                        "config.toml.",
+	"set_temperature_ll": "Set the load-lock target temperature "
+	                      "(°C).  Range: min/max_temperature_ll in "
+	                      "config.toml.",
+	"target_tempreature_cryo": "Cryo target temperature (K).  Type a "
+	                           "number then click Set.",
+	"target_tempreature_ll": "Load-lock target temperature (°C).",
+
+	# --- Baking ---------------------------------------------------------
+	"ll_baking_time": "Load-lock bake-out duration (minutes).  Type an "
+	                  "integer, then start the bake from the Baking "
+	                  "window.",
+
+	# --- Override / status ----------------------------------------------
+	"superuser": "Override Access - bypass pump / vacuum safety "
+	             "interlocks.  Click for a warning dialog; button turns "
+	             "green while active.",
+	"Error": "Status / error messages from the pump and gauge "
+	         "controllers.",
+}
+
+# ===========================================================================
+# Cameras & Alignment window  (pyccapt.control.gui.gui_cameras)
+# ===========================================================================
+
+CAMERAS_TOOLTIPS = {
+	# --- Live image views ------------------------------------------------
+	"cam_s_o": "Camera Side - overview view (wide field).",
+	"cam_s_d": "Camera Side - detail view (zoomed in).",
+	"cam_b_o": "Camera Top - overview view (wide field).",
+	"cam_b_d": "Camera Top - detail view (zoomed in).",
+	"cam_angle_o": "Camera Angle - overview view.",
+	"cam_angle_d": "Camera Angle - detail view.",
+
+	# --- Exposure controls ----------------------------------------------
+	"exposure_time_cam_1": "Exposure time for the side camera, "
+	                       "microseconds.  Increase if the image is too "
+	                       "dark.",
+	"exposure_time_cam_2": "Exposure time for the top camera (µs).",
+	"exposure_time_cam_3": "Exposure time for the angle camera (µs).",
+	"auto_exposure_time": "Toggle automatic exposure adjustment for all "
+	                      "cameras.",
+	"default_exposure_time": "Reset exposure time to the default values "
+	                         "for all cameras.",
+
+	# --- Light + status -------------------------------------------------
+	"light": "Toggle the alignment light (USB switch).",
+	"led_light": "Light state indicator.  Green = on.",
+	"Error": "Status / error messages from the camera controller.",
+}
+
+# ===========================================================================
+# Visualization window  (pyccapt.control.gui.gui_visualization)
+# ===========================================================================
+
+VISUALIZATION_TOOLTIPS = {
+	# --- Live readouts --------------------------------------------------
+	"voltage": "Live DC voltage on the specimen (V).",
+	"detection_rate": "Live detection rate (%).  Set the target in the "
+	                  "main window.",
+	"hitmap_count": "Number of hits currently displayed in the detector "
+	                "view.",
+
+	# --- Detector view --------------------------------------------------
+	"diagram": "Live detector hitmap or FDM (field-desorption "
+	           "map) - toggled by the switch below.",
+	"heatmap_fdm_switch": "Toggle between detector Hitmap and FDM "
+	                      "(field-desorption map) views.",
+	"hit_displayed": "Maximum number of hits to keep on screen at "
+	                 "once.  Lower = lighter rendering.",
+	"hitmap_plot_size": "Detector view plot size in pixels.",
+	"reset_heatmap_v": "Clear the detector view and start fresh.",
+
+	# --- Spectrum view --------------------------------------------------
+	"spectrum_switch": "Toggle the spectrum X axis between "
+	                   "mass-to-charge (mc, Da) and "
+	                   "time-of-flight (tof, ns).",
+	"spectrum_last_events_switch": "Show only the last N events in the "
+	                               "spectrum (rolling window).",
+	"num_last_events": "Number of most-recent events used by "
+	                   "the 'Last Events' spectrum mode.",
+	"max_mc": "Upper limit of the mass spectrum "
+	          "X axis (Da).",
+	"max_tof": "Upper limit of the time-of-flight "
+	           "spectrum X axis (ns).",
+
+	# --- Hold + range ---------------------------------------------------
+	"dc_hold": "Hold the DC voltage at its current "
+	           "value (pause feedback control).",
+	"detection_rate_range_switch": "Toggle the detection-rate display "
+	                               "between Short and Long Range.",
+
+	"Error": "Status messages from the visualization process.",
+}
+
+# ===========================================================================
+# Baking window  (pyccapt.control.gui.gui_baking)
+# ===========================================================================
+
+BAKING_TOOLTIPS = {
+	"save_data": "Save the current bake-out log to CSV.  The file is "
+	             "written next to the experiment data with a timestamp "
+	             "in the name.",
+	"Error": "Status / error messages from the baking logger.",
+}

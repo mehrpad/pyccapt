@@ -34,44 +34,44 @@ def _format_port_error(device_label, port, exc) -> str:
     )
 
 
-def _serial_port_present(port: str) -> bool:
-	if not port:
-		return False
-	try:
-		ports = {getattr(p, "device", "") for p in serial.tools.list_ports.comports()}
-	except Exception:
-		return True
-	return port in ports
+def _serial_port_present(port):
+    if not port:
+        return False
+    try:
+        ports = {getattr(p, "device", "") for p in serial.tools.list_ports.comports()}
+    except Exception:
+        return True
+    return port in ports
 
 
-def _open_cryovac_serial(port: str):
-	"""Open the Cryovac serial port with a few retries for transient enumeration glitches.
+def _open_cryovac_serial(port):
+    """Open the Cryovac serial port with a few retries for transient enumeration glitches.
 
-	On Windows the USB-to-serial bridge for the TIC 500 sometimes briefly
-	drops out of the COM port table during boot — opening it with no retry
-	fails with OSError 22 ("A device which does not exist was specified")
-	even though the device itself is fine and shows up a moment later.
-	"""
+    On Windows the USB-to-serial bridge for the TIC 500 sometimes briefly
+    drops out of the COM port table during boot — opening it with no retry
+    fails with OSError 22 ("A device which does not exist was specified")
+    even though the device itself is fine and shows up a moment later.
+    """
 
-	last_exc: Exception | None = None
-	for attempt in range(3):
-		if _serial_port_present(port) or attempt > 0:
-			try:
-				return serial.Serial(
-					port=port,
-					baudrate=9600,
-					bytesize=serial.EIGHTBITS,
-					parity=serial.PARITY_NONE,
-					stopbits=serial.STOPBITS_ONE,
-					timeout=0.5,
-					write_timeout=1.0,
-				)
-			except Exception as e:
-				last_exc = e
-		time.sleep(0.6)
-	if last_exc is None:
-		last_exc = OSError(f"port '{port}' not in serial enumeration")
-	raise last_exc
+    last_exc = None
+    for attempt in range(3):
+        if _serial_port_present(port) or attempt > 0:
+            try:
+                return serial.Serial(
+                    port=port,
+                    baudrate=9600,
+                    bytesize=serial.EIGHTBITS,
+                    parity=serial.PARITY_NONE,
+                    stopbits=serial.STOPBITS_ONE,
+                    timeout=0.5,
+                    write_timeout=1.0,
+                )
+            except Exception as e:
+                last_exc = e
+        time.sleep(0.6)
+    if last_exc is None:
+        last_exc = OSError(f"port '{port}' not in serial enumeration")
+    raise last_exc
 
 
 def command_cryovac(cmd, com_port_cryovac):
@@ -354,7 +354,7 @@ def state_update(conf, variables, emitter):
         print('The cryo temperature monitoring is off')
     else:
         try:
-	        com_port_cryovac = _open_cryovac_serial(variables.COM_PORT_cryo)
+            com_port_cryovac = _open_cryovac_serial(variables.COM_PORT_cryo)
             initialize_cryovac(com_port_cryovac, variables)
         except Exception as e:
             com_port_cryovac = None
@@ -375,19 +375,22 @@ def state_update(conf, variables, emitter):
         set_temperature_tmp_cryo = 0
         set_temperature_tmp_ll = 0
         while emitter.bool_flag_while_loop:
-	        if conf['cryo'] == "on" and com_port_cryovac is None:
-		        now = time.time()
-		        if now - last_cryovac_reconnect_attempt >= cryovac_reconnect_interval:
-			        last_cryovac_reconnect_attempt = now
-			        if _serial_port_present(variables.COM_PORT_cryo):
-				        try:
-					        com_port_cryovac = _open_cryovac_serial(variables.COM_PORT_cryo)
-					        initialize_cryovac(com_port_cryovac, variables)
-					        clear_issue("cryovac_reconnect")
-					        print(f"Cryovac reconnected on {variables.COM_PORT_cryo}")
-				        except Exception as e:
-					        com_port_cryovac = None
-					        report_once("cryovac_reconnect", _format_port_error('Cryovac', variables.COM_PORT_cryo, e))
+            if conf['cryo'] == "on" and com_port_cryovac is None:
+                now = time.time()
+                if now - last_cryovac_reconnect_attempt >= cryovac_reconnect_interval:
+                    last_cryovac_reconnect_attempt = now
+                    if _serial_port_present(variables.COM_PORT_cryo):
+                        try:
+                            com_port_cryovac = _open_cryovac_serial(variables.COM_PORT_cryo)
+                            initialize_cryovac(com_port_cryovac, variables)
+                            clear_issue("cryovac_reconnect")
+                            print(f"Cryovac reconnected on {variables.COM_PORT_cryo}")
+                        except Exception as e:
+                            com_port_cryovac = None
+                            report_once(
+                                "cryovac_reconnect",
+                                _format_port_error('Cryovac', variables.COM_PORT_cryo, e),
+                            )
             if conf['cryo'] == "on" and com_port_cryovac is not None:
                 try:
                     output = command_cryovac('getOutput', com_port_cryovac)
@@ -498,6 +501,8 @@ def state_update(conf, variables, emitter):
                     E_AGC_ll = None
                     # Handle the case where response is not a valid float
                     vacuum_load_lock_backing = -1
+                variables.vacuum_load_lock = vacuum_load_lock
+                variables.vacuum_load_lock_backing = vacuum_load_lock_backing
                 emitter.vacuum_load_lock.emit(vacuum_load_lock)
                 emitter.vacuum_load_lock_back.emit(vacuum_load_lock_backing)
 
@@ -525,6 +530,8 @@ def state_update(conf, variables, emitter):
                     report_once("vacuum_cryo_load_lock_backing", f"Error reading CLL backing:{e}")
                     # Handle the case where response is not a valid float
                     vacuum_cryo_load_lock_backing = -1
+                variables.vacuum_cryo_load_lock = vacuum_cryo_load_lock
+                variables.vacuum_cryo_load_lock_backing = vacuum_cryo_load_lock_backing
                 emitter.vacuum_cryo_load_lock.emit(vacuum_cryo_load_lock)
                 emitter.vacuum_cryo_load_lock_back.emit(vacuum_cryo_load_lock_backing)
 

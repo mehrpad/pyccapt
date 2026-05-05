@@ -20,11 +20,24 @@ save_meta_interval_camera = 300
 
 # Limits and control defaults
 max_vdc = 14000
-min_vp = #328
+min_vp = 1000
 max_vp = 3281
 pulse_amp_per_supply_voltage = 21.875
 max_laser_power = 5.2
 pulse_fraction_max = 20
+
+# Vacuum-pressure alert thresholds (mbar). Each gauge in the Pumps & Vacuum
+# window turns red and the main GUI shows a warning when its reading is
+# above the matching value here. Lower the number to make the warning more
+# sensitive. Set to a very large number (e.g. 1.0) to effectively disable
+# a warning for a given gauge.
+vacuum_threshold_main = 1e-9
+vacuum_threshold_buffer = 1e-9
+vacuum_threshold_buffer_back = 1e-2
+vacuum_threshold_load_lock = 1e-5
+vacuum_threshold_load_lock_back = 1e-1
+vacuum_threshold_cryo_load_lock = 1e-5
+vacuum_threshold_cryo_load_lock_back = 1e-1
 
 # Pulse frequency ranges (Hz)
 max_voltage_pulse_frequency = 200000

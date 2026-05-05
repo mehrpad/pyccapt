@@ -3,6 +3,7 @@ import sys
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from pyccapt.control.core import runtime
+from pyccapt.control.gui import tooltips
 from pyccapt.control.smaract_mcs2 import mcs2_stage
 
 
@@ -244,6 +245,7 @@ class Ui_Stage_Control(object):
 
 		self.retranslateUi(Stage_Control)
 		QtCore.QMetaObject.connectSlotsByName(Stage_Control)
+		tooltips.apply_tooltips(self, tooltips.STAGE_TOOLTIPS)
 
 		self._connect_signals()
 		for sl in (self.stage_speed_x, self.stage_speed_y, self.stage_speed_z):
@@ -446,6 +448,9 @@ class StageControlWindow(QtWidgets.QWidget):
 		self.gui_stage_control = gui_stage_control
 
 	def closeEvent(self, event):
+		if getattr(self, "force_close", False):
+			event.accept()
+			return
 		event.ignore()
 		self.hide()
 		self.closed.emit()

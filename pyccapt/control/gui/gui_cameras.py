@@ -10,6 +10,7 @@ from PyQt6.QtGui import QPixmap
 # Local module and scripts
 from pyccapt.control.core import runtime
 from pyccapt.control.devices import camera
+from pyccapt.control.gui import tooltips
 from pyccapt.control.usb_switch import usb_switch
 
 
@@ -372,6 +373,7 @@ class Ui_Cameras_Alignment(object):
 
 		self.retranslateUi(Cameras_Alignment)
 		QtCore.QMetaObject.connectSlotsByName(Cameras_Alignment)
+		tooltips.apply_tooltips(self, tooltips.CAMERAS_TOOLTIPS)
 		Cameras_Alignment.setTabOrder(self.auto_exposure_time, self.light)
 		Cameras_Alignment.setTabOrder(self.light, self.default_exposure_time)
 		Cameras_Alignment.setTabOrder(self.default_exposure_time, self.exposure_time_cam_1)

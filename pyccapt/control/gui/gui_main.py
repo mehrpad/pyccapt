@@ -10,7 +10,7 @@ from PyQt6.QtCore import Qt
 from pyccapt.control.core import device_checks, runtime
 from pyccapt.control.devices import camera as camera_device
 from pyccapt.control.gui import main_parameters, process_coordinator, gui_baking, gui_gates, gui_laser_control, \
-    gui_pumps_vacuum, gui_stage_control
+    gui_pumps_vacuum, gui_stage_control, tooltips
 
 
 class Ui_PyCCAPT(object):
@@ -885,9 +885,70 @@ class Ui_PyCCAPT(object):
         self.actiontake_sceernshot.setObjectName("actiontake_sceernshot")
         self.actionAbout = QtGui.QAction(parent=PyCCAPT)
         self.actionAbout.setObjectName("actionAbout")
+
+        # File menu
+        self.actionOpenDataFolder = QtGui.QAction("Open Data Folder", parent=PyCCAPT)
+        self.actionOpenDataFolder.setShortcut("Ctrl+D")
+        self.actionOpenProjectFolder = QtGui.QAction("Open Project Folder", parent=PyCCAPT)
+        self.actiontake_sceernshot.setShortcut("Ctrl+Shift+S")
+        self.actionExit.setShortcut("Ctrl+Q")
+        self.menuFile.addAction(self.actionOpenDataFolder)
+        self.menuFile.addAction(self.actionOpenProjectFolder)
+        self.menuFile.addAction(self.actiontake_sceernshot)
+        self.menuFile.addSeparator()
         self.menuFile.addAction(self.actionExit)
-        self.menuEdit.addAction(self.actiontake_sceernshot)
+
+        # Edit menu
+        self.actionEditConfig = QtGui.QAction("Edit config.toml…", parent=PyCCAPT)
+        self.actionEditConfig.setShortcut("Ctrl+,")
+        self.actionShowConfigPath = QtGui.QAction("Show Config Location", parent=PyCCAPT)
+        self.menuEdit.addAction(self.actionEditConfig)
+        self.menuEdit.addAction(self.actionShowConfigPath)
+
+        # View menu (shortcuts to the sub-windows already in the toolbar)
+        self.actionShowCameras = QtGui.QAction("Cameras Window", parent=PyCCAPT)
+        self.actionShowCameras.setShortcut("Ctrl+1")
+        self.actionShowPumps = QtGui.QAction("Pumps && Vacuum Window", parent=PyCCAPT)
+        self.actionShowPumps.setShortcut("Ctrl+2")
+        self.actionShowGates = QtGui.QAction("Gates Window", parent=PyCCAPT)
+        self.actionShowGates.setShortcut("Ctrl+3")
+        self.actionShowLaser = QtGui.QAction("Laser Control Window", parent=PyCCAPT)
+        self.actionShowLaser.setShortcut("Ctrl+4")
+        self.actionShowStage = QtGui.QAction("Stage Control Window", parent=PyCCAPT)
+        self.actionShowStage.setShortcut("Ctrl+5")
+        self.actionShowVisualization = QtGui.QAction("Visualization Window", parent=PyCCAPT)
+        self.actionShowVisualization.setShortcut("Ctrl+6")
+        self.actionShowBaking = QtGui.QAction("Baking Window", parent=PyCCAPT)
+        self.actionShowBaking.setShortcut("Ctrl+7")
+        self.menuView.addAction(self.actionShowCameras)
+        self.menuView.addAction(self.actionShowPumps)
+        self.menuView.addAction(self.actionShowGates)
+        self.menuView.addAction(self.actionShowLaser)
+        self.menuView.addAction(self.actionShowStage)
+        self.menuView.addAction(self.actionShowVisualization)
+        self.menuView.addAction(self.actionShowBaking)
+
+        # Settings menu
+        self.actionOpenConfigSettings = QtGui.QAction("Open config.toml…", parent=PyCCAPT)
+        self.actionShowDeviceStatus = QtGui.QAction("Show Device Status", parent=PyCCAPT)
+        self.actionShowSerialPorts = QtGui.QAction("Show Available Serial Ports", parent=PyCCAPT)
+        self.menuSettings.addAction(self.actionOpenConfigSettings)
+        self.menuSettings.addAction(self.actionShowDeviceStatus)
+        self.menuSettings.addAction(self.actionShowSerialPorts)
+
+        # Help menu
+        self.actionDocumentation = QtGui.QAction("Online Documentation", parent=PyCCAPT)
+        self.actionDocumentation.setShortcut("F1")
+        self.actionGitHub = QtGui.QAction("GitHub Repository", parent=PyCCAPT)
+        self.actionReportIssue = QtGui.QAction("Report an Issue…", parent=PyCCAPT)
+        self.actionShortcuts = QtGui.QAction("Keyboard Shortcuts", parent=PyCCAPT)
+        self.menuHelp.addAction(self.actionDocumentation)
+        self.menuHelp.addAction(self.actionGitHub)
+        self.menuHelp.addAction(self.actionReportIssue)
+        self.menuHelp.addSeparator()
+        self.menuHelp.addAction(self.actionShortcuts)
         self.menuHelp.addAction(self.actionAbout)
+
         self.menubar.addAction(self.menuFile.menuAction())
         self.menubar.addAction(self.menuEdit.menuAction())
         self.menubar.addAction(self.menuView.menuAction())
@@ -896,6 +957,7 @@ class Ui_PyCCAPT(object):
 
         self.retranslateUi(PyCCAPT)
         QtCore.QMetaObject.connectSlotsByName(PyCCAPT)
+        tooltips.apply_tooltips(self, tooltips.MAIN_TOOLTIPS)
         PyCCAPT.setTabOrder(self.gates_control, self.pumps_vaccum)
         PyCCAPT.setTabOrder(self.pumps_vaccum, self.camears)
         PyCCAPT.setTabOrder(self.camears, self.laser_control)
@@ -941,6 +1003,30 @@ class Ui_PyCCAPT(object):
         self.actionAbout.triggered.connect(self.about)
         self.actionExit.triggered.connect(PyCCAPT.close)
         self.actiontake_sceernshot.triggered.connect(self.take_screenshot)
+        self.actionOpenDataFolder.triggered.connect(self.open_data_folder)
+        self.actionOpenProjectFolder.triggered.connect(self.open_project_folder)
+        self.actionEditConfig.triggered.connect(self.open_config_in_editor)
+        self.actionShowConfigPath.triggered.connect(self.show_config_path)
+        self.actionOpenConfigSettings.triggered.connect(self.open_config_in_editor)
+        self.actionShowDeviceStatus.triggered.connect(self.show_device_status)
+        self.actionShowSerialPorts.triggered.connect(self.show_serial_ports)
+        self.actionShowCameras.triggered.connect(self.open_cameras_win)
+        self.actionShowPumps.triggered.connect(self.open_pumps_vacuum_win)
+        self.actionShowGates.triggered.connect(self.open_gates_win)
+        self.actionShowLaser.triggered.connect(self.open_laser_control_win)
+        self.actionShowStage.triggered.connect(self.open_stage_control_win)
+        self.actionShowVisualization.triggered.connect(self.open_visualization_win)
+        self.actionShowBaking.triggered.connect(self.open_baking_win)
+        self.actionDocumentation.triggered.connect(
+            lambda: self._open_external_url("https://pyccapt.readthedocs.io/en/latest/")
+        )
+        self.actionGitHub.triggered.connect(
+            lambda: self._open_external_url("https://github.com/mmonajem/pyccapt")
+        )
+        self.actionReportIssue.triggered.connect(
+            lambda: self._open_external_url("https://github.com/mmonajem/pyccapt/issues/new")
+        )
+        self.actionShortcuts.triggered.connect(self.show_keyboard_shortcuts)
         self.camears.clicked.connect(self.open_cameras_win)
         self.gates_control.clicked.connect(self.open_gates_win)
         self.laser_control.clicked.connect(self.open_laser_control_win)
@@ -1129,7 +1215,7 @@ class Ui_PyCCAPT(object):
         self.menuSettings.setTitle(_translate("PyCCAPT", "Settings"))
         self.menuView.setTitle(_translate("PyCCAPT", "View"))
         self.actionExit.setText(_translate("PyCCAPT", "Exit"))
-        self.actiontake_sceernshot.setText(_translate("PyCCAPT", "take sceernshot"))
+        self.actiontake_sceernshot.setText(_translate("PyCCAPT", "Take Screenshot"))
         self.actionAbout.setText(_translate("PyCCAPT", "About PyCCAPT"))
 
     def super_user_access(self):
@@ -1340,12 +1426,55 @@ class Ui_PyCCAPT(object):
         self.emitter.pulse_voltage.emit(self.variables.pulse_voltage)
         self.emitter.detection_rate.emit(self.variables.detection_rate_current)
 
+        self._update_vacuum_warning()
+
         if not self.variables.start_flag and self.variables.stop_flag:
             self.stop_experiment_clicked()
 
         if self.variables.vdc_hold != self.vdc_hold_old:
             self.dc_hold_clicked()
             self.vdc_hold_old = self.variables.vdc_hold
+
+    def _update_vacuum_warning(self):
+        """Show a status-bar warning when any vacuum reading is above its
+        configured threshold.
+
+        Thresholds live in config.toml under the ``vacuum_threshold_*``
+        keys. ``-1`` (gauge read error) and missing values are ignored so
+        we don't spam warnings for disabled / disconnected gauges.
+        """
+        gauges = (
+            ("Main", "vacuum_main", "vacuum_threshold_main"),
+            ("Buffer", "vacuum_buffer", "vacuum_threshold_buffer"),
+            ("Buffer pre", "vacuum_buffer_backing", "vacuum_threshold_buffer_back"),
+            ("Load lock", "vacuum_load_lock", "vacuum_threshold_load_lock"),
+            ("Load lock pre", "vacuum_load_lock_backing", "vacuum_threshold_load_lock_back"),
+            ("Cryo load lock", "vacuum_cryo_load_lock", "vacuum_threshold_cryo_load_lock"),
+            ("Cryo load lock pre", "vacuum_cryo_load_lock_backing", "vacuum_threshold_cryo_load_lock_back"),
+        )
+        warnings = []
+        for label, var_name, conf_key in gauges:
+            value = getattr(self.variables, var_name, None)
+            if value is None or value == -1 or value == 0:
+                continue
+            threshold = self.conf.get(conf_key)
+            if threshold is None:
+                continue
+            try:
+                threshold = float(threshold)
+            except (TypeError, ValueError):
+                continue
+            if value > threshold:
+                warnings.append(f"{label} {value:.2e} > {threshold:.2e} mbar")
+        statusbar = getattr(self, "statusbar", None)
+        if statusbar is None:
+            return
+        if warnings:
+            statusbar.setStyleSheet("color: red; font-weight: bold;")
+            statusbar.showMessage("Vacuum warning: " + "; ".join(warnings))
+        elif statusbar.currentMessage().startswith("Vacuum warning"):
+            statusbar.clearMessage()
+            statusbar.setStyleSheet("")
 
     def stop_experiment_clicked(self):
         """
@@ -1508,6 +1637,136 @@ class Ui_PyCCAPT(object):
         except Exception:
             pass
 
+    # ------------------------------------------------------------------ menus
+
+    def _open_local_path(self, path):
+        """Reveal *path* (file or folder) in the OS file manager / default app."""
+        url = QtCore.QUrl.fromLocalFile(str(path))
+        if not QtGui.QDesktopServices.openUrl(url):
+            self.error_message(f"Could not open: {path}")
+
+    def _open_external_url(self, url):
+        if not QtGui.QDesktopServices.openUrl(QtCore.QUrl(url)):
+            self.error_message(f"Could not open URL: {url}")
+
+    def open_data_folder(self):
+        """Open the experiment data folder (where HDF5 / metadata is written)."""
+        target = getattr(self.variables, "path", None)
+        if not target:
+            self.error_message("No data path is set yet — start an experiment first.")
+            return
+        path = Path(target)
+        if not path.exists():
+            try:
+                path.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                self.error_message(f"Cannot create {path}: {e}")
+                return
+        self._open_local_path(path)
+
+    def open_project_folder(self):
+        """Open the pyccapt project root folder."""
+        try:
+            self._open_local_path(runtime.find_project_root())
+        except Exception as e:
+            self.error_message(f"Cannot locate project root: {e}")
+
+    def open_config_in_editor(self):
+        """Open config.toml in the system default editor."""
+        try:
+            cfg = runtime.project_path("config.toml")
+        except Exception as e:
+            self.error_message(f"Cannot locate config.toml: {e}")
+            return
+        if not cfg.exists():
+            self.error_message(f"config.toml not found at {cfg}")
+            return
+        self._open_local_path(cfg)
+
+    def show_config_path(self):
+        try:
+            cfg = runtime.project_path("config.toml")
+        except Exception as e:
+            self.error_message(f"Cannot locate config.toml: {e}")
+            return
+        QtWidgets.QMessageBox.information(
+            self.centralwidget,
+            "PyCCAPT — config location",
+            f"config.toml is at:\n{cfg}\n\nEdit it in any text editor and restart "
+            "PyCCAPT for changes to take effect.",
+        )
+
+    def show_device_status(self):
+        """Pop up a quick view of which configured devices are reachable now."""
+        try:
+            issues = device_checks.collect_startup_device_issues(
+                self.conf,
+                self.variables,
+                pulse_mode=getattr(self.variables, "pulse_mode", None),
+            )
+            available = device_checks.list_available_serial_ports()
+            serial_issues = device_checks.collect_configured_serial_port_issues(
+                self.conf, available_ports=available
+            )
+        except Exception as e:
+            self.error_message(f"Could not run device check: {e}")
+            return
+
+        lines = []
+        if issues:
+            lines.append("Startup issues:")
+            lines.extend(f"  - {i.device}: {i.reason}" for i in issues)
+        else:
+            lines.append("Startup checks: all enabled experiment devices reachable.")
+        if serial_issues:
+            lines.append("")
+            lines.append("Configured serial ports unavailable:")
+            lines.extend(f"  - {i.device}: {i.reason}" for i in serial_issues)
+        lines.append("")
+        lines.append(f"Detected serial ports: {', '.join(available) if available else 'none'}")
+        try:
+            backend_ok, backend_msg = camera_device.check_camera_backend()
+        except Exception as e:
+            backend_ok, backend_msg = False, f"camera check failed: {e}"
+        lines.append(f"Camera backend: {'OK' if backend_ok else 'unavailable'} — {backend_msg}")
+
+        QtWidgets.QMessageBox.information(
+            self.centralwidget, "PyCCAPT — device status", "\n".join(lines)
+        )
+
+    def show_serial_ports(self):
+        try:
+            ports = device_checks.list_available_serial_ports()
+        except Exception as e:
+            self.error_message(f"Could not enumerate serial ports: {e}")
+            return
+        text = "\n".join(ports) if ports else "(none detected)"
+        QtWidgets.QMessageBox.information(
+            self.centralwidget, "Available serial ports", text
+        )
+
+    def show_keyboard_shortcuts(self):
+        QtWidgets.QMessageBox.information(
+            self.centralwidget,
+            "PyCCAPT — keyboard shortcuts",
+            "File\n"
+            "  Ctrl+D       Open data folder\n"
+            "  Ctrl+Shift+S Take screenshot\n"
+            "  Ctrl+Q       Exit\n\n"
+            "Edit\n"
+            "  Ctrl+,       Edit config.toml\n\n"
+            "View\n"
+            "  Ctrl+1       Cameras\n"
+            "  Ctrl+2       Pumps & Vacuum\n"
+            "  Ctrl+3       Gates\n"
+            "  Ctrl+4       Laser control\n"
+            "  Ctrl+5       Stage control\n"
+            "  Ctrl+6       Visualization\n"
+            "  Ctrl+7       Baking\n\n"
+            "Help\n"
+            "  F1           Online documentation",
+        )
+
     def on_stop_experiment_worker(self):
         """
                                             Enable the start and stop buttons after experiment is finished
@@ -1622,17 +1881,17 @@ class Ui_PyCCAPT(object):
             self.camera_status_message = "Camera support is disabled in config.toml."
 
         if self.camera_available:
-	        # Always start the camera process when the backend is present —
-	        # the worker handles 0/1/2 cameras dynamically and reconnects
-	        # hot-plugged devices, so the button stays usable either way.
+            # Always start the camera process when the backend is present —
+            # the worker handles 0/1/2 cameras dynamically and reconnects
+            # hot-plugged devices, so the button stays usable either way.
             self.camera_process = self.process_coordinator.start_camera(
                 self.variables,
                 self.conf,
                 self.camera_closed_event,
                 self.camera_win_front,
             )
-	        if self.camera_status_message:
-		        self.camears.setToolTip(self.camera_status_message)
+            if self.camera_status_message:
+                self.camears.setToolTip(self.camera_status_message)
         else:
             self.camears.setEnabled(False)
             self.camears.setToolTip(self.camera_status_message)
@@ -1903,6 +2162,26 @@ class Ui_PyCCAPT(object):
             self.visualization_process.terminate()
         if hasattr(self, 'gui_pumps_vacuum') and hasattr(self.gui_pumps_vacuum, 'gauges_thread'):
             self.gui_pumps_vacuum.gauges_thread.join(2)
+
+        # Sub-windows are top-level Qt Tool windows in the same process and
+        # their default closeEvent only hides them. Force them to actually
+        # close so the QApplication event loop can exit when the main GUI
+        # closes — otherwise stage / laser / pumps windows linger.
+        for attr in ("Gates", "Pumps_vacuum", "Laser_control", "Stage_control", "Baking"):
+            window = getattr(self, attr, None)
+            if window is None:
+                continue
+            try:
+                window.force_close = True
+                window.close()
+                window.deleteLater()
+            except Exception:
+                pass
+
+        # Final safety net: ask Qt to quit the event loop. Hidden windows
+        # would otherwise keep the process alive even after the main window
+        # has closed.
+        QtWidgets.QApplication.quit()
 
     def closeEvent(self, event):
         reply = QtWidgets.QMessageBox.question(self, 'Close Confirmation',

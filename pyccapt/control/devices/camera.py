@@ -87,21 +87,15 @@ class CameraWorker(QObject):
         self.emitter.default_exposure_time.connect(self.set_default_exposure_time)
         self.emitter.auto_exposure_time.connect(self.set_auto_exposure_time)
 
-        # slot -> open pylon.InstantCamera (or None if not currently attached)
-        self._slots: list = [None] * self.SLOT_COUNT
-        # slot -> serial number we have ever bound to this slot
-        self._slot_serials: list = [None] * self.SLOT_COUNT
-        # cached applied exposure values, used to detect changes per slot
-        self._applied_exposure: list = [None] * self.SLOT_COUNT
-        self._applied_exposure_mode: list = [None] * self.SLOT_COUNT
+        self._slots = [None] * self.SLOT_COUNT
+        self._slot_serials = [None] * self.SLOT_COUNT
+        self._applied_exposure = [None] * self.SLOT_COUNT
+        self._applied_exposure_mode = [None] * self.SLOT_COUNT
         self._last_reconnect_attempt = 0.0
         self._converter = None
         self._announced_no_backend = False
 
         self.camera_available, self.camera_status_message = check_camera_backend()
-        # The legacy attribute is kept around for any old caller checking
-        # whether the worker is "alive". The worker now runs whenever the
-        # backend is loaded — even with zero cameras attached.
         if self.camera_available:
 	        self._init_backend()
 
@@ -116,8 +110,8 @@ class CameraWorker(QObject):
 			self.camera_status_message = f"Error initializing the camera backend ({e})"
 			print(self.camera_status_message)
 
-	# backwards-compat alias for callers that still call the old method name
 	def initialize_cameras(self):
+		# backwards-compat alias for any caller still using the old name
 		self._reconcile_slots(force=True)
 
     def start_capturing(self):
@@ -173,14 +167,14 @@ class CameraWorker(QObject):
     def set_exposure_time_3(self, exposure_time):
         self.exposure_time_cam_3 = exposure_time
 
-	def _exposure_for_slot(self, slot: int) -> int:
+	def _exposure_for_slot(self, slot):
 		if slot == 0:
 			return self.exposure_time_cam_1
 		if slot == 1:
 			return self.exposure_time_cam_2
 		return self.exposure_time_cam_3
 
-	def _close_slot(self, slot: int) -> None:
+	def _close_slot(self, slot):
 		cam = self._slots[slot]
 		self._slots[slot] = None
 		self._applied_exposure[slot] = None
@@ -198,7 +192,7 @@ class CameraWorker(QObject):
 		except Exception:
 			pass
 
-	def _reconcile_slots(self, force: bool = False) -> None:
+	def _reconcile_slots(self, force=False):
 		"""Fill empty slots from currently-enumerated devices.
 
 		Slots are bound by serial number: a slot remembers the first serial
@@ -223,8 +217,7 @@ class CameraWorker(QObject):
             return
 		self._announced_no_backend = False
 
-		# Map serial -> device info.
-		by_serial: dict[str, object] = {}
+		by_serial = {}
 		for dev in devices:
 			try:
 				serial_number = dev.GetSerialNumber()
@@ -233,8 +226,7 @@ class CameraWorker(QObject):
 			if serial_number:
 				by_serial[serial_number] = dev
 
-		# First, satisfy slots that have a remembered serial.
-		used_serials: set[str] = set()
+		used_serials = set()
 		for slot in range(self.SLOT_COUNT):
 			if self._slots[slot] is not None:
 				try:
@@ -249,9 +241,6 @@ class CameraWorker(QObject):
 				if self._attach_slot(slot, by_serial[sn]):
 					used_serials.add(sn)
 
-		# Then, assign any unbound device to the first slot that has no
-		# remembered serial. This handles first-ever startup and adding a
-		# second camera after launching with one.
 		for sn, dev in by_serial.items():
 			if sn in used_serials:
 				continue
@@ -265,7 +254,7 @@ class CameraWorker(QObject):
 					used_serials.add(sn)
 					break
 
-	def _attach_slot(self, slot: int, device_info) -> bool:
+	def _attach_slot(self, slot, device_info):
 		try:
 			cam = pylon.InstantCamera(self._tl_factory.CreateDevice(device_info))
 			cam.Open()
@@ -291,7 +280,7 @@ class CameraWorker(QObject):
 		print(f"Camera attached in slot {slot} (serial={sn}).")
 		return True
 
-	def _apply_exposure_changes(self) -> None:
+	def _apply_exposure_changes(self):
 		for slot in range(self.SLOT_COUNT):
 			cam = self._slots[slot]
 			if cam is None:
@@ -317,8 +306,6 @@ class CameraWorker(QObject):
             return
 
 	    last_save_time = time.time()
-	    # On first iteration, force a discovery pass so cameras attached
-	    # at boot are picked up without the 3-second reconnect delay.
 	    self._reconcile_slots(force=True)
 
 	    while self.running:
@@ -365,13 +352,7 @@ class CameraWorker(QObject):
 			    self.variables.light_switch = False
 			    self.flag_default_exposure_time = False
 
-		    if not any_open:
-			    # No cameras attached at the moment — sleep longer to give
-			    # the OS time to enumerate a freshly plugged-in device, and
-			    # avoid pegging the CPU.
-			    time.sleep(0.5)
-		    else:
-			    time.sleep(0.5)
+		    time.sleep(0.5)
 
 		    if not self.variables.flag_camera_grab:
 			    break
@@ -380,7 +361,7 @@ class CameraWorker(QObject):
 		    self._close_slot(slot)
 	    self.finished.emit()
 
-	def _emit_images(self, images: list) -> None:
+	def _emit_images(self, images):
 		# Slot 0 -> img0 (side overview), Slot 1 -> img1 (top overview).
 		# img2 mirrors slot 0 so the existing 'angle' view doesn't go blank
 		# when only one camera is connected.
@@ -394,12 +375,10 @@ class CameraWorker(QObject):
 		if angle_src is not None:
 			self.emitter.img2_orig.emit(np.swapaxes(angle_src, 0, 1))
 
-	def _save_screenshots(self, images: list) -> None:
+	def _save_screenshots(self, images):
 		path_meta = self.variables.path_meta
 		labels = ("camera_side", "camera_top", "camera_45")
 		save_sources = list(images)
-		# Mirror slot 0 into the third saved image when no dedicated angle
-		# camera exists, matching the legacy behaviour.
 		if len(save_sources) >= 1 and (len(save_sources) < 3 or save_sources[2] is None):
 			while len(save_sources) < 3:
 				save_sources.append(None)

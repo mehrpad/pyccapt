@@ -9,6 +9,7 @@ from PyQt6.QtGui import QFont, QPixmap
 # Local module and scripts
 from pyccapt.control.core import runtime
 from pyccapt.control.devices import initialize_devices
+from pyccapt.control.gui import tooltips
 
 
 class Ui_Pumps_Vacuum(object):
@@ -458,6 +459,7 @@ class Ui_Pumps_Vacuum(object):
 
         self.retranslateUi(Pumps_Vacuum)
         QtCore.QMetaObject.connectSlotsByName(Pumps_Vacuum)
+        tooltips.apply_tooltips(self, tooltips.PUMPS_TOOLTIPS)
         Pumps_Vacuum.setTabOrder(self.set_temperature_cryo, self.target_tempreature_cryo)
         Pumps_Vacuum.setTabOrder(self.target_tempreature_cryo, self.set_temperature_ll)
         Pumps_Vacuum.setTabOrder(self.set_temperature_ll, self.target_tempreature_ll)
@@ -695,132 +697,39 @@ class Ui_Pumps_Vacuum(object):
                 self.variables.set_temperature_flag_ll = False
                 self.set_temperature_ll.setStyleSheet(self.original_button_style)
 
-    def update_vacuum_main(self, value):
-        """
-        Update the vacuum value in the GUI
-        Args:
-                value: the temperature value
-
-        Return:
-                None
-        """
+    def _update_gauge(self, display_widget, label_widget, value, threshold_key):
+	    """Show *value* on a gauge LCD and colour its label by threshold."""
         if value == -1:
-            self.vacuum_main.display('Error')
+	        display_widget.display('Error')
         else:
-            self.vacuum_main.display('{:.2e}'.format(value))
-        if value > 0.000000001:
-            self.label_212.setStyleSheet("color: red")
+	        display_widget.display('{:.2e}'.format(value))
+	    threshold = float(self.conf.get(threshold_key, float('inf')))
+	    if value != -1 and value > threshold:
+		    label_widget.setStyleSheet("color: red")
         else:
-            self.label_212.setStyleSheet("color: black")
+	        label_widget.setStyleSheet("color: black")
+
+    def update_vacuum_main(self, value):
+	    self._update_gauge(self.vacuum_main, self.label_212, value, 'vacuum_threshold_main')
 
     def update_vacuum_buffer(self, value):
-        """
-        Update the vacuum value in the GUI
-        Args:
-                value: the temperature value
-
-        Return:
-                None
-        """
-        if value == -1:
-            self.vacuum_buffer.display('Error')
-        else:
-            self.vacuum_buffer.display('{:.2e}'.format(value))
-        if value > 0.000000001:
-            self.label_211.setStyleSheet("color: red")
-        else:
-            self.label_211.setStyleSheet("color: black")
+	    self._update_gauge(self.vacuum_buffer, self.label_211, value, 'vacuum_threshold_buffer')
 
     def update_vacuum_buffer_back(self, value):
-        """
-        Update the vacuum value in the GUI
-        Args:
-                value: the temperature value
-
-        Return:
-                None
-        """
-        if value == -1:
-            self.vacuum_buffer_back.display('Error')
-        else:
-            self.vacuum_buffer_back.display('{:.2e}'.format(value))
-        if value > 0.01:
-            self.label_214.setStyleSheet("color: red")
-        else:
-            self.label_214.setStyleSheet("color: black")
+	    self._update_gauge(self.vacuum_buffer_back, self.label_214, value, 'vacuum_threshold_buffer_back')
 
     def update_vacuum_load_back(self, value):
-        """
-        Update the vacuum value in the GUI
-        Args:
-                value: the temperature value
-
-        Return:
-                None
-        """
-        if value == -1:
-            self.vacuum_load_lock_back.display('Error')
-        else:
-            self.vacuum_load_lock_back.display('{:.2e}'.format(value))
-        if value > 0.1:
-            self.label_213.setStyleSheet("color: red")
-        else:
-            self.label_213.setStyleSheet("color: black")
+	    self._update_gauge(self.vacuum_load_lock_back, self.label_213, value, 'vacuum_threshold_load_lock_back')
 
     def update_vacuum_load(self, value):
-        """
-        Update the vacuum value in the GUI
-        Args:
-                value: the temperature value
-
-        Return:
-                None
-        """
-        if value == -1:
-            self.vacuum_load_lock.display('Error')
-        else:
-            self.vacuum_load_lock.display('{:.2e}'.format(value))
-        if value > 0.00001:
-            self.label_210.setStyleSheet("color: red")
-        else:
-            self.label_210.setStyleSheet("color: black")
+	    self._update_gauge(self.vacuum_load_lock, self.label_210, value, 'vacuum_threshold_load_lock')
 
     def update_vacuum_cryo_load_lock(self, value):
-        """
-        Update the vacuum value in the GUI
-        Args:
-                value: the temperature value
-
-        Return:
-                None
-        """
-        if value == -1:
-            self.vacuum_cryo_load_lock.display('Error')  # Or any other message you prefer
-        else:
-            self.vacuum_cryo_load_lock.display('{:.2e}'.format(value))
-
-        if value > 0.00001:
-            self.label_216.setStyleSheet("color: red")
-        else:
-            self.label_216.setStyleSheet("color: black")
+	    self._update_gauge(self.vacuum_cryo_load_lock, self.label_216, value, 'vacuum_threshold_cryo_load_lock')
 
     def update_vacuum_cryo_load_lock_back(self, value):
-        """
-        Update the vacuum value in the GUI
-        Args:
-                value: the temperature value
-
-        Return:
-                None
-        """
-        if value == -1:
-            self.vacuum_cryo_load_lock_back.display('Error')
-        else:
-            self.vacuum_cryo_load_lock_back.display('{:.2e}'.format(value))
-        if value > 0.1:
-            self.label_217.setStyleSheet("color: red")
-        else:
-            self.label_217.setStyleSheet("color: black")
+	    self._update_gauge(self.vacuum_cryo_load_lock_back, self.label_217, value,
+	                       'vacuum_threshold_cryo_load_lock_back')
 
     def super_user_access(self):
         """
@@ -1020,6 +929,9 @@ class PumpsVacuumWindow(QtWidgets.QWidget):
             Args:
                 event: Close event.
         """
+        if getattr(self, "force_close", False):
+	        event.accept()
+	        return
         event.ignore()
         self.hide()
         self.closed.emit()

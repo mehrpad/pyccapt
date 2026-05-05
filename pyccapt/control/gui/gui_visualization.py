@@ -11,6 +11,7 @@ from PyQt6.QtCore import QTimer
 # Local module and scripts
 from pyccapt.control.core import runtime, tof2mc_simple
 from pyccapt.control.devices import initialize_devices
+from pyccapt.control.gui import tooltips
 
 
 class Ui_Visualization(object):
@@ -383,6 +384,7 @@ class Ui_Visualization(object):
 
 		self.retranslateUi(Visualization)
 		QtCore.QMetaObject.connectSlotsByName(Visualization)
+		tooltips.apply_tooltips(self, tooltips.VISUALIZATION_TOOLTIPS)
 		Visualization.setTabOrder(self.voltage, self.detection_rate)
 		Visualization.setTabOrder(self.detection_rate, self.hitmap_count)
 		Visualization.setTabOrder(self.hitmap_count, self.dc_hold)

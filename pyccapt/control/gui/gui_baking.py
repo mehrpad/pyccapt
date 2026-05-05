@@ -1,5 +1,4 @@
-﻿import multiprocessing
-import os
+﻿import os
 import sys
 import threading
 import time
@@ -23,7 +22,7 @@ except Exception as e:
 
 # Local module and scripts
 from pyccapt.control.core import runtime
-from pyccapt.control.gui import gui_pumps_vacuum
+from pyccapt.control.gui import gui_pumps_vacuum, tooltips
 from pyccapt.control.devices import initialize_devices
 
 
@@ -97,6 +96,7 @@ class Ui_Baking(object):
 
 		self.retranslateUi(Baking)
 		QtCore.QMetaObject.connectSlotsByName(Baking)
+		tooltips.apply_tooltips(self, tooltips.BAKING_TOOLTIPS)
 		###
 		read_thread = threading.Thread(target=self.read)
 		read_thread.setDaemon(True)
@@ -438,6 +438,9 @@ class BakingWindow(QtWidgets.QWidget):
 		Args:
 			event: The close event.
 		"""
+		if getattr(self, "force_close", False):
+			event.accept()
+			return
 		event.ignore()
 		self.hide()
 		self.closed.emit()

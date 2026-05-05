@@ -9,6 +9,7 @@ from PyQt6.QtGui import QPixmap
 
 # Local module and scripts
 from pyccapt.control.core import runtime
+from pyccapt.control.gui import tooltips
 from pyccapt.control.nkt_photonics import origamiClassCLI
 from pyccapt.control.smaract_mcs2 import mcs2_stage
 
@@ -530,6 +531,7 @@ class Ui_Laser_Control(object):
 
         self.retranslateUi(Laser_Control)
         QtCore.QMetaObject.connectSlotsByName(Laser_Control)
+        tooltips.apply_tooltips(self, tooltips.LASER_TOOLTIPS)
         Laser_Control.setTabOrder(self.laser_wavelegnth, self.laser_rate)
         Laser_Control.setTabOrder(self.laser_rate, self.laser_enable)
         Laser_Control.setTabOrder(self.laser_enable, self.laser_on)
@@ -1273,6 +1275,9 @@ class LaserControlWindow(QtWidgets.QWidget):
         Args:
             event: Close event.
         """
+        if getattr(self, "force_close", False):
+	        event.accept()
+	        return
         event.ignore()
         self.hide()
         self.closed.emit()

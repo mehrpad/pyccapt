@@ -424,6 +424,46 @@ def test_run_analysis_saves_plots_beside_dataset(tmp_path: Path):
         assert (save_dir / f"{stem}.svg").is_file()
 
 
+def test_run_analysis_handles_roentdek_tdc_bundle():
+    variables = Variables()
+    variables.dataset_name = "roentdek"
+    variables.data = pd.DataFrame(
+        {
+            "event_group_id": [0, 1],
+            "start_counter": [10, 11],
+            "mc (Da)": [27.0, 54.0],
+            "mc_uc (Da)": [27.0, 54.0],
+            "t (ns)": [400.0, 500.0],
+            "x_det (cm)": [0.1, 0.2],
+            "y_det (cm)": [0.3, 0.4],
+            "high_voltage (V)": [1000.0, 1100.0],
+            "pulse_v (V)": [10.0, 12.0],
+            "delta_p": [0, 1],
+            "multi": [1, 1],
+        }
+    )
+    variables.data_tdc = pd.DataFrame(
+        {
+            "channel": np.array([0, 1, 2, 3, 4, 5, 0, 1, 2, 3], dtype=np.uint32),
+            "start_counter": np.array([10, 10, 10, 10, 10, 10, 11, 11, 11, 11], dtype=np.uint32),
+            "event_group_id": np.array([0, 0, 0, 0, 0, 0, 1, 1, 1, 1], dtype=np.int64),
+            "high_voltage (V)": np.array([1000.0] * 6 + [1100.0] * 4, dtype=float),
+            "pulse_v (V)": np.array([10.0] * 6 + [12.0] * 4, dtype=float),
+        }
+    )
+
+    real_display = helper_auto_raw_analysis.display
+    helper_auto_raw_analysis.display = lambda _obj: None
+    try:
+        helper_auto_raw_analysis.run_analysis(
+            variables,
+            [{"label": "Peak 1", "mc_low": 26.5, "mc_up": 27.5, "color": "#1f77b4"}],
+            save_plots=False,
+        )
+    finally:
+        helper_auto_raw_analysis.display = real_display
+
+
 # ---------------------------------------------------------------------------
 # event_group_id ride-through with the new flag combo
 # ---------------------------------------------------------------------------

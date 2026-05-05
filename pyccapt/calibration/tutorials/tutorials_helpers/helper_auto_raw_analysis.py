@@ -474,6 +474,26 @@ def _surface_concept_peak_ratio_markdown(ratio_table: pd.DataFrame) -> str:
     return "\n".join(rows)
 
 
+def _roentdek_raw_summary_markdown(raw_summary: dict[str, object]) -> str:
+    channel_totals = raw_summary.get('channel_timestamp_totals', {})
+    channel_text = ", ".join(
+        f"ch{channel}={int(channel_totals.get(channel, 0)):,}" for channel in range(1, 7)
+    )
+    return "\n".join(
+        [
+            "**RoentDek raw summary**",
+            "",
+            f"- Total grouped pulses: {int(raw_summary.get('total_events', 0)):,}",
+            f"- Total delay-line timestamps: {int(raw_summary.get('total_timestamps', 0)):,}",
+            f"- Events with recovered patterns: {int(raw_summary.get('matched_pattern_events', 0)):,}",
+            f"- Invalid pattern events: {int(raw_summary.get('invalid_pattern_events', 0)):,}",
+            f"- Events with leftover unmatched timestamps: {int(raw_summary.get('unmatched_pattern_events', 0)):,}",
+            f"- Multi-hit events: {int(raw_summary.get('multi_hit_events', 0)):,}",
+            f"- Channel timestamp totals: {channel_text}",
+        ]
+    )
+
+
 def _same_pulse_pair_summary_markdown(summary: dict[str, float | int], *, title: str) -> str:
     if not summary or int(summary.get("pair_count", 0)) == 0:
         return f"_No same-pulse detector pairs were available for {title}._"
@@ -824,7 +844,123 @@ def run_analysis(variables, species: list[dict], *, save_plots: bool = False) ->
                 stem="surface_concept_same_pulse_separations",
             )
 
-    if detector_kind != "surface_concept" or tdc_df is None or len(tdc_df) == 0:
+    elif detector_kind == "roentdek" and tdc_df is not None and len(tdc_df) > 0:
+        from pyccapt.calibration.data_tools.raw_data_workflow import (
+            analyze_roentdek_tdc_frame,
+            compute_same_pulse_detector_separations,
+            plot_detector_dead_zone_and_neighbors,
+            plot_detector_overview,
+            plot_roentdek_statistics,
+            plot_same_pulse_detector_separations,
+            plot_signal_overlay_by_dlts,
+            plot_signal_window_breakdown,
+            plot_tof_segment_drift,
+            roentdek_processed_to_hit_table,
+        )
+
+        windows = _species_to_windows(species)
+        analysis = analyze_roentdek_tdc_frame(tdc_df, show_progress=True)
+        roentdek_hit_table = roentdek_processed_to_hit_table(dld_df, analysis)
+
+        _md("## DLTS-per-pulse")
+        _show_figure(
+            plot_roentdek_statistics(analysis["counters"]),
+            save_dir=save_dir,
+            stem="roentdek_dlts_per_pulse",
+        )
+        _md(_roentdek_raw_summary_markdown(analysis["raw_summary"]))
+
+        if not roentdek_hit_table.empty:
+            _md("## Time-of-flight overlay by recovered DLTS class")
+            _show_figure(
+                plot_signal_overlay_by_dlts(
+                    roentdek_hit_table,
+                    signal_kind="tof",
+                    max_value=1000.0,
+                    bin_size=0.1,
+                    only_in_detector=False,
+                    title="Recovered RoentDek TOF overlay",
+                ),
+                save_dir=save_dir,
+                stem="roentdek_tof_overlay",
+            )
+
+            _md("## Mass/charge overlay by recovered DLTS class")
+            _show_figure(
+                plot_signal_overlay_by_dlts(
+                    roentdek_hit_table,
+                    signal_kind="mc",
+                    max_value=40.0,
+                    bin_size=0.1,
+                    only_in_detector=False,
+                    title="Recovered RoentDek mass/charge overlay",
+                ),
+                save_dir=save_dir,
+                stem="roentdek_mc_overlay",
+            )
+
+            _md("## Recovered detector maps")
+            _show_figure(
+                plot_detector_overview(
+                    roentdek_hit_table,
+                    only_in_detector=False,
+                    title_prefix="Recovered RoentDek",
+                ),
+                save_dir=save_dir,
+                stem="roentdek_detector_overview",
+            )
+
+            _md("## Peak-window recovery breakdown")
+            _show_figure(
+                plot_signal_window_breakdown(
+                    roentdek_hit_table,
+                    windows,
+                    signal_kind="mc",
+                    only_in_detector=False,
+                    title="RoentDek peak-window counts",
+                ),
+                save_dir=save_dir,
+                stem="roentdek_peak_window_breakdown",
+            )
+
+            _md("## TOF drift by segment")
+            _show_figure(
+                plot_tof_segment_drift(
+                    roentdek_hit_table,
+                    windows=None,
+                    num_segments=20,
+                    max_value=1000.0,
+                ),
+                save_dir=save_dir,
+                stem="roentdek_tof_drift",
+            )
+
+            _md("## Dead-zone / nearest-neighbor diagnostics")
+            _show_figure(
+                plot_detector_dead_zone_and_neighbors(roentdek_hit_table),
+                save_dir=save_dir,
+                stem="roentdek_dead_zone_neighbors",
+            )
+
+            pair_table, pair_summary = compute_same_pulse_detector_separations(
+                roentdek_hit_table,
+                group_column="event_group_id",
+                only_in_detector=False,
+                dlts_values=[6, 4, 2],
+                show_progress=True,
+            )
+            _md(_same_pulse_pair_summary_markdown(pair_summary, title="Same-pulse pairwise separations (RoentDek)"))
+            _show_figure(
+                plot_same_pulse_detector_separations(
+                    pair_table,
+                    bin_size=0.1,
+                    title_prefix="RoentDek same-pulse separations",
+                ),
+                save_dir=save_dir,
+                stem="roentdek_same_pulse_separations",
+            )
+
+    if detector_kind not in {"surface_concept", "roentdek"} or tdc_df is None or len(tdc_df) == 0:
         _md("## DLTS-per-pulse")
         plot_dlts_per_pulse(tdc_df, detector_kind, save_dir=save_dir, save_stem="dlts_per_pulse")
 

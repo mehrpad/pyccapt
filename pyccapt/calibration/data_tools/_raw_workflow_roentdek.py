@@ -14,6 +14,7 @@ from collections.abc import Sequence
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from tqdm.auto import tqdm
 
 from pyccapt.calibration.data_tools._raw_workflow_common import (
     DEFAULT_ROENTDEK_DETX_COLUMNS,
@@ -315,6 +316,109 @@ def roentdek_hits_to_dataframe(events: list[dict], *, signal_kind: str = 'tof') 
             if 'start_counter' in event:
                 row['start_counter'] = int(event['start_counter'])
             rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def analyze_roentdek_tdc_frame(
+    df_tdc: pd.DataFrame,
+    *,
+    show_progress: bool = False,
+) -> dict:
+    """Analyze an already-loaded RoentDek-style raw tdc frame."""
+    required = {'start_counter', 'channel'}
+    missing = required.difference(df_tdc.columns)
+    if missing:
+        raise ValueError(f"RoentDek tdc frame is missing required columns: {sorted(missing)}")
+
+    start_counter = df_tdc['start_counter'].to_numpy()
+    channels = df_tdc['channel'].to_numpy()
+    min_channel = int(np.min(channels)) if len(channels) else 0
+    max_channel = int(np.max(channels)) if len(channels) else 0
+    zero_based_channels = min_channel >= 0 and max_channel <= 5
+    run_starts = np.r_[0, np.where(np.diff(start_counter) != 0)[0] + 1, len(df_tdc)].astype(np.int64)
+
+    event_rows = []
+    run_indices = range(len(run_starts) - 1)
+    if show_progress:
+        run_indices = tqdm(run_indices, desc='Analyzing RoentDek groups', unit='group')
+
+    for event_number, run_index in enumerate(run_indices, start=1):
+        start = int(run_starts[run_index])
+        stop = int(run_starts[run_index + 1])
+        run_frame = df_tdc.iloc[start:stop]
+        counts = run_frame['channel'].value_counts().to_dict()
+        normalized_counts = {
+            (int(channel) + 1 if zero_based_channels else int(channel)): int(count)
+            for channel, count in counts.items()
+        }
+        event = {
+            'event_number': event_number,
+            'start_counter': int(run_frame['start_counter'].iloc[0]),
+            'channels': [
+                {
+                    'channel': int(channel),
+                    'num_values': int(normalized_counts.get(channel, 0)),
+                    'values': [0.0] * int(normalized_counts.get(channel, 0)),
+                }
+                for channel in sorted(int(value) for value in normalized_counts)
+            ],
+        }
+        if 'event_group_id' in run_frame.columns:
+            event['event_group_id'] = int(run_frame['event_group_id'].iloc[0])
+        if 'high_voltage (V)' in run_frame.columns:
+            event['high_voltage (V)'] = float(run_frame['high_voltage (V)'].iloc[0])
+        if 'pulse_v (V)' in run_frame.columns:
+            event['pulse'] = float(run_frame['pulse_v (V)'].iloc[0])
+        elif 'pulse' in run_frame.columns:
+            event['pulse'] = float(run_frame['pulse'].iloc[0])
+        event_rows.append(event)
+
+    events, counters = classify_roentdek_events(event_rows)
+    raw_summary = summarize_roentdek_raw_events(events)
+    return {
+        'events': events,
+        'counters': counters,
+        'raw_summary': raw_summary,
+        'tdc_frame': df_tdc,
+    }
+
+
+def roentdek_processed_to_hit_table(
+    dld_df: pd.DataFrame,
+    roentdek_analysis: dict,
+) -> pd.DataFrame:
+    """Attach RoentDek DLTS classes from raw tdc groups onto processed dld rows."""
+    if 'event_group_id' not in dld_df.columns:
+        return pd.DataFrame()
+
+    event_map = {
+        int(event['event_group_id']): list(event.get('dlts', []))
+        for event in roentdek_analysis.get('events', [])
+        if 'event_group_id' in event
+    }
+    rows = []
+    grouped = dld_df.groupby('event_group_id', sort=False)
+    for event_group_id, group in grouped:
+        dlts_values = event_map.get(int(event_group_id), [])
+        group = group.reset_index(drop=True)
+        for row_index, (_, row) in enumerate(group.iterrows()):
+            dlts = int(dlts_values[row_index]) if row_index < len(dlts_values) else np.nan
+            x_det = float(row['x_det (cm)']) if 'x_det (cm)' in row else np.nan
+            y_det = float(row['y_det (cm)']) if 'y_det (cm)' in row else np.nan
+            hit = {
+                'event_group_id': int(event_group_id),
+                'hit_index': row_index,
+                'dlts': dlts,
+                'x_det (cm)': x_det,
+                'y_det (cm)': y_det,
+                'tof (ns)': float(row['t (ns)']) if 't (ns)' in row else np.nan,
+                'mc (Da)': float(row['mc (Da)']) if 'mc (Da)' in row else np.nan,
+                'high_voltage (V)': float(row['high_voltage (V)']) if 'high_voltage (V)' in row else np.nan,
+                'pulse': float(row['pulse_v (V)']) if 'pulse_v (V)' in row else 0.0,
+                'start_counter': int(row['start_counter']) if 'start_counter' in row else 0,
+                'in_detector': bool(np.isfinite(x_det) and np.isfinite(y_det)),
+            }
+            rows.append(hit)
     return pd.DataFrame(rows)
 
 

@@ -52,11 +52,13 @@ from pyccapt.calibration.data_tools._raw_workflow_roentdek import (
     _extract_max_dld_patterns,
     _extract_roentdek_pattern_details,
     _initialize_roentdek_counters,
+    analyze_roentdek_tdc_frame,
     analyze_roentdek_dataset,
     attach_roentdek_measurements,
     classify_roentdek_events,
     parse_roentdek_events,
     plot_roentdek_statistics,
+    roentdek_processed_to_hit_table,
     roentdek_hits_to_dataframe,
     summarize_roentdek_raw_events,
 )
@@ -110,10 +112,12 @@ __all__ = [
     "summarize_signal_windows",
     # roentdek
     "analyze_roentdek_dataset",
+    "analyze_roentdek_tdc_frame",
     "attach_roentdek_measurements",
     "classify_roentdek_events",
     "parse_roentdek_events",
     "plot_roentdek_statistics",
+    "roentdek_processed_to_hit_table",
     "roentdek_hits_to_dataframe",
     "summarize_roentdek_raw_events",
     # surface concept

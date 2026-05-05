@@ -13,6 +13,7 @@ from collections.abc import Sequence
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.patches import Rectangle
 from tqdm.auto import tqdm
 
 from pyccapt.calibration.data_tools import data_loadcrop, raw_data_surface_concept
@@ -676,14 +677,17 @@ def plot_surface_concept_peak_breakdown(
         return None
 
     fig, ax = plt.subplots(figsize=(max(7.5, len(bars) * 0.7), 4.0))
-    ax.bar(bars['label'], bars['count'], color=bars['color'])
+    ax.bar(bars['label'], bars['count'], color=bars['color'], edgecolor='#4b5563', linewidth=0.6)
     ax.set_ylabel('Counts')
-    ax.set_title(title)
+    ax.set_title(title, fontsize=11, fontweight='semibold')
     if np.nanmax(bars['count'].to_numpy(dtype=float)) > 20:
         ax.set_yscale('log')
     ax.tick_params(axis='x', rotation=45)
     for label in ax.get_xticklabels():
         label.set_horizontalalignment('right')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.grid(axis='y', color='#e5e7eb', linewidth=0.8, alpha=0.7)
     fig.tight_layout()
     return fig
 
@@ -704,19 +708,57 @@ def plot_surface_concept_peak_ratio_table(
         lambda value: 'n/a' if not np.isfinite(value) else f'{value:.3f}'
     )
 
-    fig, ax = plt.subplots(figsize=(max(5.8, len(formatted) * 1.5), 1.3 + 0.5 * len(formatted)))
+    figure_width = max(6.8, 0.9 + 1.25 * len(formatted.columns))
+    figure_height = max(2.6, 1.55 + 0.62 * len(formatted))
+    fig, ax = plt.subplots(figsize=(figure_width, figure_height))
     ax.axis('off')
-    ax.set_title(title, loc='left', fontsize=11, pad=8)
+    title_band_height = 0.17
+    ax.add_patch(
+        Rectangle(
+            (0.0, 1.0 - title_band_height),
+            1.0,
+            title_band_height,
+            transform=ax.transAxes,
+            facecolor='#f3f4f6',
+            edgecolor='#b6b8bb',
+            linewidth=0.8,
+        )
+    )
+    ax.text(
+        0.03,
+        1.0 - title_band_height / 2.0,
+        title,
+        transform=ax.transAxes,
+        ha='left',
+        va='center',
+        fontsize=11,
+        fontweight='semibold',
+        color='black',
+    )
     table = ax.table(
         cellText=formatted[['Peak', 'Two DLTS %', 'Four DLTS %', 'Two/Four DLTS']].to_numpy(),
         colLabels=['Ion', 'Two DLTS', 'Four DLTS', 'Two/four DLTS'],
         cellLoc='center',
         loc='center',
-        bbox=[0.0, 0.0, 1.0, 0.9],
+        colWidths=[0.17, 0.23, 0.23, 0.27],
+        bbox=[0.0, 0.0, 1.0, 0.82],
     )
     table.auto_set_font_size(False)
-    table.set_fontsize(10)
-    table.scale(1.0, 1.2)
+    table.set_fontsize(10.5)
+    table.scale(1.0, 1.35)
+
+    for (row, col), cell in table.get_celld().items():
+        cell.set_edgecolor('#b6b8bb')
+        cell.set_linewidth(0.75)
+        if row == 0:
+            cell.set_facecolor('#f7f7f7')
+            cell.set_text_props(weight='semibold', color='black')
+            cell.set_height(cell.get_height() * 1.08)
+        else:
+            cell.set_facecolor('white')
+            if col == 0:
+                cell.set_text_props(ha='left')
+
     fig.tight_layout()
     return fig
 

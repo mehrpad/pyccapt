@@ -19,6 +19,7 @@ The analyses follow the two ``raw_data_analysis_*-Copy1`` reference notebooks:
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Iterable
 
 import ipywidgets as widgets
@@ -27,6 +28,8 @@ import numpy as np
 import pandas as pd
 from IPython.display import Markdown, display
 from ipywidgets import Output
+
+from pyccapt.calibration.path_utils import ensure_directory, save_figure
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +121,40 @@ def _close_after(fig):
     plt.close(fig)
 
 
+def _resolve_dataset_path(variables) -> Path | None:
+    raw_path = str(getattr(variables, "path", "") or "").strip()
+    if raw_path:
+        dataset_path = Path(raw_path).expanduser()
+        if dataset_path.is_file():
+            return dataset_path
+    return None
+
+
+def _analysis_save_directory(variables, enabled: bool) -> Path | None:
+    if not enabled:
+        return None
+    dataset_path = _resolve_dataset_path(variables)
+    if dataset_path is None:
+        return None
+    return ensure_directory(dataset_path.parent / f"{dataset_path.stem}_raw_analysis_plots")
+
+
+def _show_figure(fig, *, save_dir: str | Path | None = None, stem: str | None = None) -> None:
+    if fig is None:
+        return
+    if save_dir is not None and stem:
+        save_figure(
+            fig,
+            directory=save_dir,
+            stem=stem,
+            formats=("svg", "png"),
+            dpi=300,
+            bbox_inches="tight",
+        )
+    display(fig)
+    _close_after(fig)
+
+
 def _md(text: str) -> None:
     display(Markdown(text))
 
@@ -163,7 +200,13 @@ def _classify_pulse_groups(df: pd.DataFrame, group_col: str):
     return counts, complete, partial
 
 
-def plot_dlts_per_pulse(tdc_df: pd.DataFrame, detector_kind: str) -> None:
+def plot_dlts_per_pulse(
+    tdc_df: pd.DataFrame,
+    detector_kind: str,
+    *,
+    save_dir: str | Path | None = None,
+    save_stem: str | None = None,
+) -> None:
     """DLTS-per-pulse histogram with channel-based 4-DLTS / 2-DLTS classification.
 
     Each x-position (number of TDC signals per pulse) shows up to three bars:
@@ -230,8 +273,7 @@ def plot_dlts_per_pulse(tdc_df: pd.DataFrame, detector_kind: str) -> None:
     ax.set_xlim(0.5, readable_limit + 0.5)
     ax.legend()
     fig.tight_layout()
-    plt.show()
-    _close_after(fig)
+    _show_figure(fig, save_dir=save_dir, stem=save_stem)
 
     n_full         = expected_dlts_full(detector_kind)
     total_pulses   = int(all_counts.size)
@@ -252,7 +294,13 @@ def plot_dlts_per_pulse(tdc_df: pd.DataFrame, detector_kind: str) -> None:
     _md("\n".join(lines))
 
 
-def plot_tof_with_peaks(dld_df: pd.DataFrame, species: list[dict]) -> None:
+def plot_tof_with_peaks(
+    dld_df: pd.DataFrame,
+    species: list[dict],
+    *,
+    save_dir: str | Path | None = None,
+    save_stem: str | None = None,
+) -> None:
     """Histogram of calibrated TOF with peak windows shaded."""
     tof_col = "t_c (ns)" if "t_c (ns)" in dld_df.columns and (dld_df["t_c (ns)"] != 0).any() else "t (ns)"
     if tof_col not in dld_df.columns:
@@ -266,8 +314,7 @@ def plot_tof_with_peaks(dld_df: pd.DataFrame, species: list[dict]) -> None:
     ax.set_ylabel("Count (log)")
     ax.set_title("Time-of-flight histogram")
     fig.tight_layout()
-    plt.show()
-    _close_after(fig)
+    _show_figure(fig, save_dir=save_dir, stem=save_stem)
 
 
 def _pick_mc_col(dld_df: pd.DataFrame) -> str | None:
@@ -285,7 +332,13 @@ def _pick_mc_col(dld_df: pd.DataFrame) -> str | None:
     return None
 
 
-def plot_mc_with_peaks(dld_df: pd.DataFrame, species: list[dict]) -> None:
+def plot_mc_with_peaks(
+    dld_df: pd.DataFrame,
+    species: list[dict],
+    *,
+    save_dir: str | Path | None = None,
+    save_stem: str | None = None,
+) -> None:
     """Histogram of calibrated mc with shaded species windows + per-peak MRP table."""
     mc_col = _pick_mc_col(dld_df)
     if mc_col is None:
@@ -309,8 +362,7 @@ def plot_mc_with_peaks(dld_df: pd.DataFrame, species: list[dict]) -> None:
     ax.set_ylabel("Count (log)")
     ax.set_title(f"Mass/charge histogram ({mc_col})")
     fig.tight_layout()
-    plt.show()
-    _close_after(fig)
+    _show_figure(fig, save_dir=save_dir, stem=save_stem)
 
     if not species:
         _md("_No species defined — skipping per-peak MRP table._")
@@ -351,7 +403,114 @@ def compute_mrp_half(mc_window: np.ndarray) -> float:
     return float(peak_value / fwhm)
 
 
-def plot_fdm(dld_df: pd.DataFrame, species: list[dict]) -> None:
+def _surface_concept_length_breakdown_markdown(sequence_stats: dict[str, dict[int, int]], *, max_bins: int = 20) -> str:
+    total = sequence_stats.get('total', {})
+    dld2 = sequence_stats.get('dld2', {})
+    dld4 = sequence_stats.get('dld4', {})
+    invalid = sequence_stats.get('invalid', {})
+    lines = ["**Per-length recovery counts**", ""]
+    for n in range(1, max_bins + 1):
+        total_count = int(total.get(n, 0))
+        if total_count == 0:
+            continue
+        possible_events = total_count * (((n - 1) // 4) + 1)
+        recovered_4 = int(dld4.get(n, 0))
+        recovered_2 = int(dld2.get(n, 0))
+        unrecoverable = int(invalid.get(n, 0))
+        lines.append(
+            f"- For number {n}: frequency = {total_count:,}; possible events = {possible_events:,}; "
+            f"4 DLTS + 2 DLTS + unrecoverable = {recovered_4 + recovered_2 + unrecoverable:,}"
+        )
+    return "\n".join(lines)
+
+
+def _surface_concept_raw_summary_markdown(raw_summary: dict[str, object], recovery_stats: dict[str, int]) -> str:
+    return "\n".join(
+        [
+            "**Surface Concept raw summary**",
+            "",
+            f"- Total grouped pulses: {int(raw_summary.get('total_sequences', 0)):,}",
+            f"- Total delay-line timestamps: {int(raw_summary.get('total_timestamps', 0)):,}",
+            f"- Valid 4-channel groups: {int(raw_summary.get('valid_four_channel_groups', 0)):,}",
+            f"- Invalid 4-channel groups: {int(raw_summary.get('invalid_four_channel_groups', 0)):,}",
+            f"- 3-channel groups: {int(raw_summary.get('length_three_groups', 0)):,}",
+            f"- 2-channel groups: {int(raw_summary.get('length_two_groups', 0)):,}",
+            f"- 1-channel groups: {int(raw_summary.get('length_one_groups', 0)):,}",
+            f"- Multi-hit groups with length multiple of 4: {int(raw_summary.get('multi_hit_groups_of_four', 0)):,}",
+            f"- Multi-hit irregular groups: {int(raw_summary.get('multi_hit_irregular', 0)):,}",
+            f"- Recovered 4 DLTS hits in detector: {int(recovery_stats.get('two_d_in_detector', 0)):,}",
+            f"- Recovered 2 DLTS hits in detector: {int(recovery_stats.get('one_d_in_detector', 0)):,}",
+            f"- Recovered hits outside detector: {int(recovery_stats.get('outside_detector_hits', 0)):,}",
+            f"- Unrecoverable chunks: {int(recovery_stats.get('unrecoverable_chunks', 0)):,}",
+        ]
+    )
+
+
+def _species_to_windows(species: list[dict]) -> list[dict]:
+    windows = []
+    for index, sp in enumerate(species, start=1):
+        windows.append(
+            {
+                "label": str(sp.get("label", f"Peak {index}")),
+                "min": float(sp["mc_low"]),
+                "max": float(sp["mc_up"]),
+            }
+        )
+    return windows
+
+
+def _surface_concept_peak_ratio_markdown(ratio_table: pd.DataFrame) -> str:
+    if ratio_table.empty:
+        return "_No peak-window ratio table could be built._"
+    rows = ["**Peak-window 2 DLTS / 4 DLTS summary**", ""]
+    for _, row in ratio_table.iterrows():
+        ratio_value = row["Two/Four DLTS"]
+        ratio_text = "n/a" if not np.isfinite(ratio_value) else f"{ratio_value:.3f}"
+        rows.append(
+            f"- {row['Peak']}: 2 DLTS = {int(row['Two DLTS count']):,} ({row['Two DLTS %']:.2f}%), "
+            f"4 DLTS = {int(row['Four DLTS count']):,} ({row['Four DLTS %']:.2f}%), "
+            f"2/4 ratio = {ratio_text}"
+        )
+    return "\n".join(rows)
+
+
+def _same_pulse_pair_summary_markdown(summary: dict[str, float | int], *, title: str) -> str:
+    if not summary or int(summary.get("pair_count", 0)) == 0:
+        return f"_No same-pulse detector pairs were available for {title}._"
+
+    def _fmt(value: float | int | None) -> str:
+        if value is None:
+            return "n/a"
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return "n/a"
+        if not np.isfinite(numeric):
+            return "n/a"
+        return f"{numeric:.4f}"
+
+    return "\n".join(
+        [
+            f"**{title}**",
+            "",
+            f"- Pulse groups with pairs: {int(summary.get('groups_with_pairs', 0)):,}",
+            f"- Pair count: {int(summary.get('pair_count', 0)):,}",
+            f"- Min dx: {_fmt(summary.get('min_dx'))} cm",
+            f"- Min dy: {_fmt(summary.get('min_dy'))} cm",
+            f"- Min dr: {_fmt(summary.get('min_dr'))} cm",
+            f"- Median dr: {_fmt(summary.get('median_dr'))} cm",
+        ]
+    )
+
+
+def plot_fdm(
+    dld_df: pd.DataFrame,
+    species: list[dict],
+    *,
+    save_dir: str | Path | None = None,
+    all_stem: str | None = None,
+    species_stem: str | None = None,
+) -> None:
     """Field desorption map: overall plus one panel per species."""
     if not {"x_det (cm)", "y_det (cm)"}.issubset(dld_df.columns):
         return
@@ -368,8 +527,7 @@ def plot_fdm(dld_df: pd.DataFrame, species: list[dict]) -> None:
     ax.set_title("FDM (all events)")
     fig.colorbar(h[3], ax=ax, label="Count")
     fig.tight_layout()
-    plt.show()
-    _close_after(fig)
+    _show_figure(fig, save_dir=save_dir, stem=all_stem)
 
     mc_col = _pick_mc_col(dld_df)
     if not species or mc_col is None:
@@ -392,11 +550,15 @@ def plot_fdm(dld_df: pd.DataFrame, species: list[dict]) -> None:
     for idx in range(n, rows * cols):
         axes[idx // cols][idx % cols].axis("off")
     fig.tight_layout()
-    plt.show()
-    _close_after(fig)
+    _show_figure(fig, save_dir=save_dir, stem=species_stem)
 
 
-def plot_multihit_and_deadzone(dld_df: pd.DataFrame) -> None:
+def plot_multihit_and_deadzone(
+    dld_df: pd.DataFrame,
+    *,
+    save_dir: str | Path | None = None,
+    save_stem: str | None = None,
+) -> None:
     """Multi-hit fraction + delta_p (pulses since previous event) histogram.
 
     Two ``multi`` encoding conventions are handled automatically:
@@ -464,8 +626,7 @@ def plot_multihit_and_deadzone(dld_df: pd.DataFrame) -> None:
     axes[1].set_ylabel("Count (log)")
     axes[1].set_title("Pulse-to-pulse interval")
     fig.tight_layout()
-    plt.show()
-    _close_after(fig)
+    _show_figure(fig, save_dir=save_dir, stem=save_stem)
 
     n_total = int(multi.size)
     if multi_is_valid:
@@ -488,7 +649,7 @@ def plot_multihit_and_deadzone(dld_df: pd.DataFrame) -> None:
 # ---------------------------------------------------------------------------
 
 
-def run_analysis(variables, species: list[dict]) -> None:
+def run_analysis(variables, species: list[dict], *, save_plots: bool = False) -> None:
     """Render every analysis section against ``variables.data`` and ``variables.data_tdc``."""
     dld_df = getattr(variables, "data", None)
     tdc_df = getattr(variables, "data_tdc", None)
@@ -506,20 +667,178 @@ def run_analysis(variables, species: list[dict]) -> None:
         f"- Species supplied: {len(species)}\n"
     )
 
-    _md("## DLTS-per-pulse")
-    plot_dlts_per_pulse(tdc_df, detector_kind)
+    save_dir = _analysis_save_directory(variables, save_plots)
+    if save_plots:
+        if save_dir is not None:
+            _md(f"_Saving plots to:_ `{save_dir}`")
+        else:
+            _md("_Save plots was enabled, but the dataset path could not be resolved. Skipping plot export._")
+
+    plot_df = dld_df
+    if detector_kind == "surface_concept" and tdc_df is not None and len(tdc_df) > 0:
+        from pyccapt.calibration.data_tools.raw_data_workflow import (
+            analyze_surface_concept_tdc_frame,
+            compute_same_pulse_detector_separations,
+            plot_detector_dead_zone_and_neighbors,
+            plot_detector_overview,
+            plot_partial_hit_efficiency_maps,
+            plot_same_pulse_detector_separations,
+            plot_signal_overlay_by_dlts,
+            plot_surface_concept_peak_breakdown,
+            plot_surface_concept_peak_ratio_table,
+            plot_surface_concept_recovery_summary,
+            plot_surface_concept_recovery_yield,
+            plot_surface_concept_sequence_statistics,
+            summarize_surface_concept_peak_windows,
+            surface_concept_hits_to_processed_dataframe,
+        )
+
+        flight_path_length = float(getattr(variables, "flight_path_length", 110.0) or 110.0)
+        pulse_mode = str(getattr(variables, "pulse_mode", "voltage") or "voltage")
+        analysis = analyze_surface_concept_tdc_frame(
+            tdc_df,
+            flight_path_length_mm=flight_path_length,
+            pulse_mode=pulse_mode,
+            t0=0.0,
+            show_progress=True,
+        )
+
+        if not analysis["hit_table"].empty:
+            plot_df = surface_concept_hits_to_processed_dataframe(
+                analysis["hit_table"],
+                pulse_mode=pulse_mode,
+            )
+
+        _md("## DLTS-per-pulse")
+        _show_figure(
+            plot_surface_concept_sequence_statistics(analysis["sequence_stats"]),
+            save_dir=save_dir,
+            stem="dlts_per_pulse",
+        )
+        _md(_surface_concept_raw_summary_markdown(analysis["raw_summary"], analysis["recovery_stats"]))
+        _md(_surface_concept_length_breakdown_markdown(analysis["sequence_stats"]))
+
+        _md("## Recovery summary")
+        _show_figure(
+            plot_surface_concept_recovery_summary(analysis["recovery_stats"]),
+            save_dir=save_dir,
+            stem="surface_concept_recovery_summary",
+        )
+        _show_figure(
+            plot_surface_concept_recovery_yield(analysis["recovery_diagnostics"]),
+            save_dir=save_dir,
+            stem="surface_concept_recovery_yield",
+        )
+        _show_figure(
+            plot_partial_hit_efficiency_maps(analysis["recovery_diagnostics"]),
+            save_dir=save_dir,
+            stem="surface_concept_partial_hit_efficiency",
+        )
+
+        if not analysis["hit_table"].empty:
+            windows = _species_to_windows(species)
+            _md("## Time-of-flight overlay by recovered DLTS class")
+            _show_figure(
+                plot_signal_overlay_by_dlts(
+                    analysis["hit_table"],
+                    signal_kind="tof",
+                    max_value=1000.0,
+                    bin_size=0.1,
+                    only_in_detector=True,
+                    title="Recovered Surface Concept TOF overlay",
+                ),
+                save_dir=save_dir,
+                stem="surface_concept_tof_overlay",
+            )
+
+            _md("## Mass/charge overlay by recovered DLTS class")
+            _show_figure(
+                plot_signal_overlay_by_dlts(
+                    analysis["hit_table"],
+                    signal_kind="mc",
+                    max_value=40.0,
+                    bin_size=0.1,
+                    only_in_detector=True,
+                    title="Recovered Surface Concept mass/charge overlay",
+                ),
+                save_dir=save_dir,
+                stem="surface_concept_mc_overlay",
+            )
+
+            _md("## Recovered detector maps")
+            _show_figure(
+                plot_detector_overview(
+                    analysis["hit_table"],
+                    detector_limit_cm=4.0,
+                    only_in_detector=True,
+                    title_prefix="Recovered Surface Concept",
+                ),
+                save_dir=save_dir,
+                stem="surface_concept_detector_overview",
+            )
+
+            _md("## Peak-window recovery breakdown")
+            peak_summary = summarize_surface_concept_peak_windows(
+                analysis["hit_table"],
+                analysis["recovery_diagnostics"],
+                windows,
+                signal_kind="mc",
+                only_in_detector=True,
+            )
+            _show_figure(
+                plot_surface_concept_peak_breakdown(peak_summary),
+                save_dir=save_dir,
+                stem="surface_concept_peak_breakdown",
+            )
+            ratio_table = peak_summary["ratios"]
+            if isinstance(ratio_table, pd.DataFrame) and not ratio_table.empty:
+                _show_figure(
+                    plot_surface_concept_peak_ratio_table(ratio_table),
+                    save_dir=save_dir,
+                    stem="surface_concept_peak_ratio_table",
+                )
+                _md(_surface_concept_peak_ratio_markdown(ratio_table))
+                display(ratio_table)
+
+            _md("## Dead-zone / nearest-neighbor diagnostics")
+            _show_figure(
+                plot_detector_dead_zone_and_neighbors(analysis["hit_table"]),
+                save_dir=save_dir,
+                stem="surface_concept_dead_zone_neighbors",
+            )
+
+            pair_table, pair_summary = compute_same_pulse_detector_separations(
+                analysis["hit_table"],
+                only_in_detector=True,
+                dlts_values=[4],
+                show_progress=True,
+            )
+            _md(_same_pulse_pair_summary_markdown(pair_summary, title="Same-pulse pairwise separations (4 DLTS only)"))
+            _show_figure(
+                plot_same_pulse_detector_separations(
+                    pair_table,
+                    bin_size=0.1,
+                    title_prefix="Same-pulse separations",
+                ),
+                save_dir=save_dir,
+                stem="surface_concept_same_pulse_separations",
+            )
+
+    if detector_kind != "surface_concept" or tdc_df is None or len(tdc_df) == 0:
+        _md("## DLTS-per-pulse")
+        plot_dlts_per_pulse(tdc_df, detector_kind, save_dir=save_dir, save_stem="dlts_per_pulse")
 
     _md("## Time-of-flight")
-    plot_tof_with_peaks(dld_df, species)
+    plot_tof_with_peaks(plot_df, species, save_dir=save_dir, save_stem="tof_histogram")
 
     _md("## Mass/charge")
-    plot_mc_with_peaks(dld_df, species)
+    plot_mc_with_peaks(plot_df, species, save_dir=save_dir, save_stem="mc_histogram")
 
     _md("## Field desorption map")
-    plot_fdm(dld_df, species)
+    plot_fdm(plot_df, species, save_dir=save_dir, all_stem="fdm_all", species_stem="fdm_species")
 
     _md("## Multi-hit / dead-zone")
-    plot_multihit_and_deadzone(dld_df)
+    plot_multihit_and_deadzone(plot_df, save_dir=save_dir, save_stem="multihit_deadzone")
 
 
 # ---------------------------------------------------------------------------
@@ -531,8 +850,8 @@ def _build_manual_rows() -> list[tuple[widgets.Text, widgets.FloatText, widgets.
     rows = []
     for index in range(1, 7):
         label = widgets.Text(value=f"Peak {index}", description=f"Peak {index}:", layout=widgets.Layout(width="220px"))
-        low = widgets.FloatText(value=0.0, description="mc_low:", layout=widgets.Layout(width="160px"))
-        high = widgets.FloatText(value=0.0, description="mc_up:", layout=widgets.Layout(width="160px"))
+        low = widgets.FloatText(value=0.0, description="tof/mc_low:", layout=widgets.Layout(width="190px"))
+        high = widgets.FloatText(value=0.0, description="tof/mc_up:", layout=widgets.Layout(width="190px"))
         rows.append((label, low, high))
     return rows
 
@@ -549,8 +868,8 @@ def call_auto_raw_data_analysis(variables) -> None:
 
     The dropdown selects either:
 
-    - **Manual peak windows** — the user types up to six ``(label, mc_low,
-      mc_up)`` triples below; rows left at 0/0 are skipped.
+    - **Manual peak windows** — the user types up to six ``(label, tof/mc_low,
+      tof/mc_up)`` triples below; rows left at 0/0 are skipped.
     - **From range file** — the species list is derived from
       ``variables.range_data``; the manual rows are disabled.
 
@@ -579,7 +898,7 @@ def call_auto_raw_data_analysis(variables) -> None:
                 )
         else:
             summary.value = (
-                "<i>Type peak windows below. Rows with both fields = 0 are skipped.</i>"
+                "<i>Type peak windows below. Rows with both tof/mc fields = 0 are skipped.</i>"
             )
 
     peak_source = widgets.Dropdown(
@@ -594,6 +913,12 @@ def call_auto_raw_data_analysis(variables) -> None:
         widgets.HBox([label, low, high]) for label, low, high in manual_rows
     ])
 
+    save_plots = widgets.Checkbox(
+        value=False,
+        description="Save plots",
+        indent=False,
+        tooltip="When enabled, save every figure beside the dataset as SVG and PNG (300 dpi).",
+    )
     run_button = widgets.Button(description="Run analysis", button_style="primary")
 
     def _on_source_change(_change):
@@ -617,7 +942,7 @@ def call_auto_raw_data_analysis(variables) -> None:
                 if not species:
                     _md("_All peak windows are empty — nothing to analyze._")
                     return
-            run_analysis(variables, species)
+            run_analysis(variables, species, save_plots=bool(save_plots.value))
 
     peak_source.observe(_on_source_change, names="value")
     run_button.on_click(_on_run)
@@ -629,6 +954,7 @@ def call_auto_raw_data_analysis(variables) -> None:
     panel = widgets.VBox([
         peak_source,
         summary,
+        save_plots,
         manual_grid,
         run_button,
         out,

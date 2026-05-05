@@ -13,6 +13,7 @@ from collections.abc import Sequence
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from tqdm.auto import tqdm
 
 from pyccapt.calibration.data_tools import data_loadcrop, raw_data_surface_concept
 from pyccapt.calibration.data_tools._raw_workflow_common import (
@@ -23,6 +24,9 @@ from pyccapt.calibration.data_tools._raw_workflow_common import (
     XY_FACTOR,
     _binned_status_fraction,
     _calculate_delta_p_and_multi,
+    _normalize_signal_kind,
+    normalize_signal_windows,
+    summarize_signal_windows,
 )
 from pyccapt.calibration.mc import mc_tools
 
@@ -79,6 +83,21 @@ def _recover_surface_concept_partial_hits(chunk_channels: np.ndarray, chunk_time
                     }
                 )
     return recovered_hits
+
+
+def _surface_concept_pulse_column(tdc_frame: pd.DataFrame, pulse_mode: str) -> str:
+    mode = str(pulse_mode).strip().lower()
+    if mode == 'laser':
+        candidates = ('pulse_l (pJ)', 'pulse')
+    else:
+        candidates = ('pulse_v (V)', 'pulse')
+    for column in candidates:
+        if column in tdc_frame.columns:
+            return column
+    raise ValueError(
+        f"Surface Concept tdc frame is missing the pulse column required for pulse_mode={pulse_mode!r}. "
+        f"Tried: {candidates}."
+    )
 
 
 def summarize_surface_concept_sequences(sequence_records: list[dict]) -> dict[str, dict[int, int]]:
@@ -201,9 +220,14 @@ def extract_surface_concept_hits(
     sequence_records: list[dict],
     *,
     detector_limit_cm: float = 4.0,
+    show_progress: bool = False,
 ) -> tuple[pd.DataFrame, dict[str, int]]:
     """Recover valid 4-DLTS hits and partial 2-DLTS hits from Surface Concept sequences."""
-    diagnostics = build_surface_concept_recovery_diagnostics(sequence_records, detector_limit_cm=detector_limit_cm)
+    diagnostics = build_surface_concept_recovery_diagnostics(
+        sequence_records,
+        detector_limit_cm=detector_limit_cm,
+        show_progress=show_progress,
+    )
     recovered = diagnostics[diagnostics['dlts'] > 0].copy()
     hit_table = recovered.rename(columns={'accepted': 'in_detector'})
     hit_table['recovery'] = hit_table['dlts'].astype(int).astype(str) + ' DLTS'
@@ -253,10 +277,16 @@ def build_surface_concept_recovery_diagnostics(
     sequence_records: list[dict],
     *,
     detector_limit_cm: float = 4.0,
+    show_progress: bool = False,
 ) -> pd.DataFrame:
     """Build a per-candidate recovery table for advanced Surface Concept diagnostics."""
     rows = []
-    for sequence_index, record in enumerate(sequence_records):
+    records_iter = enumerate(sequence_records)
+    if show_progress:
+        records_iter = enumerate(
+            tqdm(sequence_records, desc='Recovering Surface Concept hits', unit='sequence')
+        )
+    for sequence_index, record in records_iter:
         channel_array = np.asarray(record.get('channels', []), dtype=np.int64)
         time_array = np.asarray(record.get('time_data', []), dtype=np.int64)
         length = len(channel_array)
@@ -342,22 +372,28 @@ def build_surface_concept_recovery_diagnostics(
     return pd.DataFrame(rows)
 
 
-def analyze_surface_concept_dataset(
-    hdf5_path: str,
+def analyze_surface_concept_tdc_frame(
+    df_tdc: pd.DataFrame,
     *,
     detector_limit_cm: float = 4.0,
     t0: float = 0.0,
     flight_path_length_mm: float = 110.0,
     pulse_mode: str = 'voltage',
+    show_progress: bool = False,
 ) -> dict:
-    """Recover and analyze Surface Concept raw TDC hits."""
-    df_tdc = data_loadcrop.fetch_dataset_from_dld_grp(hdf5_path, extract_mode='tdc_sc')
+    """Recover and analyze Surface Concept hits from an already-loaded raw tdc frame."""
+    required = {'start_counter', 'channel', 'time_data', 'high_voltage (V)'}
+    missing = required.difference(df_tdc.columns)
+    if missing:
+        raise ValueError(f"Surface Concept tdc frame is missing required columns: {sorted(missing)}")
+
+    pulse_column = _surface_concept_pulse_column(df_tdc, pulse_mode)
     sequence_records = raw_data_surface_concept.find_consecutive_sequences(
         df_tdc['start_counter'].to_numpy(),
         df_tdc['channel'].to_numpy(),
         df_tdc['time_data'].to_numpy(),
         df_tdc['high_voltage (V)'].to_numpy(),
-        df_tdc['pulse'].to_numpy(),
+        df_tdc[pulse_column].to_numpy(),
         print_stats=False,
     )
     sequence_stats = summarize_surface_concept_sequences(sequence_records)
@@ -365,8 +401,13 @@ def analyze_surface_concept_dataset(
     recovery_diagnostics = build_surface_concept_recovery_diagnostics(
         sequence_records,
         detector_limit_cm=detector_limit_cm,
+        show_progress=show_progress,
     )
-    hit_table, recovery_stats = extract_surface_concept_hits(sequence_records, detector_limit_cm=detector_limit_cm)
+    hit_table, recovery_stats = extract_surface_concept_hits(
+        sequence_records,
+        detector_limit_cm=detector_limit_cm,
+        show_progress=False,
+    )
 
     if not hit_table.empty:
         pulse_for_mc = hit_table['pulse'].to_numpy() if pulse_mode == 'voltage' else np.zeros(len(hit_table))
@@ -393,6 +434,25 @@ def analyze_surface_concept_dataset(
         'flight_path_length_mm': flight_path_length_mm,
         't0': t0,
     }
+
+
+def analyze_surface_concept_dataset(
+    hdf5_path: str,
+    *,
+    detector_limit_cm: float = 4.0,
+    t0: float = 0.0,
+    flight_path_length_mm: float = 110.0,
+    pulse_mode: str = 'voltage',
+) -> dict:
+    """Recover and analyze Surface Concept raw TDC hits."""
+    df_tdc = data_loadcrop.fetch_dataset_from_dld_grp(hdf5_path, extract_mode='tdc_sc')
+    return analyze_surface_concept_tdc_frame(
+        df_tdc,
+        detector_limit_cm=detector_limit_cm,
+        t0=t0,
+        flight_path_length_mm=flight_path_length_mm,
+        pulse_mode=pulse_mode,
+    )
 
 
 def plot_surface_concept_recovery_yield(
@@ -498,6 +558,165 @@ def plot_partial_hit_efficiency_maps(recovery_diagnostics: pd.DataFrame) -> plt.
         axis_plot.set_ylabel('Recovered position (cm)')
         axis_plot.set_title(f'{pair_labels[axis_name]} efficiency map')
 
+    fig.tight_layout()
+    return fig
+
+
+def summarize_surface_concept_peak_windows(
+    hit_table: pd.DataFrame,
+    recovery_diagnostics: pd.DataFrame,
+    windows: Sequence[dict] | Sequence[Sequence] | None,
+    *,
+    signal_kind: str = 'mc',
+    only_in_detector: bool = True,
+) -> dict[str, pd.DataFrame | int]:
+    """Summarize user-defined peak windows across 2-DLTS and 4-DLTS recovery classes."""
+    normalized_windows = normalize_signal_windows(windows)
+    if not normalized_windows:
+        empty = pd.DataFrame(columns=['label', 'two_dlts_count', 'four_dlts_count'])
+        empty_ratios = pd.DataFrame(
+            columns=['Peak', 'Two DLTS count', 'Four DLTS count', 'Two DLTS %', 'Four DLTS %', 'Two/Four DLTS']
+        )
+        empty_bars = pd.DataFrame(columns=['label', 'count', 'color'])
+        return {
+            'counts': empty,
+            'ratios': empty_ratios,
+            'bars': empty_bars,
+            'outside_detector_count': 0,
+            'unrecoverable_count': 0,
+            'total_in_detector': 0,
+        }
+
+    signal_value = _normalize_signal_kind(signal_kind)
+    summary = summarize_signal_windows(
+        hit_table,
+        normalized_windows,
+        signal_kind=signal_value,
+        only_in_detector=only_in_detector,
+    )
+
+    labels = [str(window['label']) for window in normalized_windows]
+    noise_label = 'Noise'
+    ordered_labels = [*labels, noise_label]
+    if summary.empty:
+        summary = pd.DataFrame({'label': ordered_labels, 'dlts': np.zeros(len(ordered_labels)), 'count': np.zeros(len(ordered_labels))})
+
+    def _count_for(label: str, dlts: int) -> int:
+        matches = summary[(summary['label'] == label) & (summary['dlts'] == dlts)]
+        if matches.empty:
+            return 0
+        return int(matches['count'].sum())
+
+    total_in_detector = int(
+        np.count_nonzero(
+            (hit_table['dlts'].isin([2, 4]).to_numpy()) &
+            (hit_table['in_detector'].to_numpy() if 'in_detector' in hit_table.columns else np.ones(len(hit_table), dtype=bool))
+        )
+    )
+    outside_detector_count = int(
+        np.count_nonzero(recovery_diagnostics['status'].isin(['2 DLTS outside detector', '4 DLTS outside detector']))
+    )
+    unrecoverable_count = int(np.count_nonzero(recovery_diagnostics['status'] == 'unrecoverable'))
+
+    count_rows = []
+    ratio_rows = []
+    bar_rows = []
+    for label in labels:
+        two_count = _count_for(label, 2)
+        four_count = _count_for(label, 4)
+        count_rows.append(
+            {
+                'label': label,
+                'two_dlts_count': two_count,
+                'four_dlts_count': four_count,
+            }
+        )
+        ratio_rows.append(
+            {
+                'Peak': label,
+                'Two DLTS count': two_count,
+                'Four DLTS count': four_count,
+                'Two DLTS %': (100.0 * two_count / total_in_detector) if total_in_detector else 0.0,
+                'Four DLTS %': (100.0 * four_count / total_in_detector) if total_in_detector else 0.0,
+                'Two/Four DLTS': (two_count / four_count) if four_count else np.nan,
+            }
+        )
+        bar_rows.append({'label': f'{label} 4 DLTS', 'count': four_count, 'color': '#f59e0b'})
+
+    noise_four = _count_for(noise_label, 4)
+    bar_rows.append({'label': f'{noise_label} 4 DLTS', 'count': noise_four, 'color': '#f59e0b'})
+
+    for label in labels:
+        two_count = _count_for(label, 2)
+        bar_rows.append({'label': f'{label} 2 DLTS', 'count': two_count, 'color': '#10b981'})
+
+    noise_two = _count_for(noise_label, 2)
+    bar_rows.append({'label': f'{noise_label} 2 DLTS', 'count': noise_two, 'color': '#10b981'})
+    bar_rows.append({'label': 'Outside detector', 'count': outside_detector_count, 'color': '#ef4444'})
+    bar_rows.append({'label': 'Unrecoverable', 'count': unrecoverable_count, 'color': '#ef4444'})
+
+    return {
+        'counts': pd.DataFrame(count_rows),
+        'ratios': pd.DataFrame(ratio_rows),
+        'bars': pd.DataFrame(bar_rows),
+        'outside_detector_count': outside_detector_count,
+        'unrecoverable_count': unrecoverable_count,
+        'total_in_detector': total_in_detector,
+    }
+
+
+def plot_surface_concept_peak_breakdown(
+    peak_summary: dict[str, pd.DataFrame | int],
+    *,
+    title: str = 'Surface Concept peak-window breakdown',
+) -> plt.Figure | None:
+    """Plot a peak-by-peak 2-DLTS / 4-DLTS bar chart plus rejected-event counts."""
+    bars = peak_summary.get('bars')
+    if not isinstance(bars, pd.DataFrame) or bars.empty:
+        return None
+
+    fig, ax = plt.subplots(figsize=(max(7.5, len(bars) * 0.7), 4.0))
+    ax.bar(bars['label'], bars['count'], color=bars['color'])
+    ax.set_ylabel('Counts')
+    ax.set_title(title)
+    if np.nanmax(bars['count'].to_numpy(dtype=float)) > 20:
+        ax.set_yscale('log')
+    ax.tick_params(axis='x', rotation=45)
+    for label in ax.get_xticklabels():
+        label.set_horizontalalignment('right')
+    fig.tight_layout()
+    return fig
+
+
+def plot_surface_concept_peak_ratio_table(
+    ratio_table: pd.DataFrame,
+    *,
+    title: str = 'Two delay line (Surface Concept)',
+) -> plt.Figure | None:
+    """Render a compact percentage/ratio table for the user-defined peak windows."""
+    if ratio_table.empty:
+        return None
+
+    formatted = ratio_table.copy()
+    formatted['Two DLTS %'] = formatted['Two DLTS %'].map(lambda value: f'{value:.2f}%')
+    formatted['Four DLTS %'] = formatted['Four DLTS %'].map(lambda value: f'{value:.2f}%')
+    formatted['Two/Four DLTS'] = formatted['Two/Four DLTS'].map(
+        lambda value: 'n/a' if not np.isfinite(value) else f'{value:.3f}'
+    )
+
+    fig, ax = plt.subplots(figsize=(max(5.8, len(formatted) * 1.5), 1.3 + 0.5 * len(formatted)))
+    ax.axis('off')
+    ax.set_title(title, loc='left', fontsize=11, pad=8)
+    table = ax.table(
+        cellText=formatted[['Peak', 'Two DLTS %', 'Four DLTS %', 'Two/Four DLTS']].to_numpy(),
+        colLabels=['Ion', 'Two DLTS', 'Four DLTS', 'Two/four DLTS'],
+        cellLoc='center',
+        loc='center',
+        bbox=[0.0, 0.0, 1.0, 0.9],
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(10)
+    table.scale(1.0, 1.2)
     fig.tight_layout()
     return fig
 

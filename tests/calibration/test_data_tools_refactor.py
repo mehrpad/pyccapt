@@ -5,6 +5,7 @@ import pytest
 
 from pyccapt.calibration.core.share_variables import Variables
 from pyccapt.calibration.data_tools import ato_tools, data_tools
+from pyccapt.calibration.leap_tools import ccapt_tools
 
 
 def test_store_df_to_hdf_supports_modern_argument_order(tmp_path: Path):
@@ -71,6 +72,24 @@ def test_load_data_processed_maps_legacy_pulse_column(tmp_path: Path):
     assert "pulse" not in loaded.columns
     assert loaded["pulse_v (V)"].tolist() == pytest.approx([12.0, 13.0])
     assert loaded["pulse_l (pJ)"].tolist() == pytest.approx([0.0, 0.0])
+
+
+def test_load_data_raw_with_tdc_falls_back_to_roentdek_extract_mode(monkeypatch):
+    expected = (pd.DataFrame({"start_counter": [1]}), pd.DataFrame({"start_counter": [1], "channel": [0]}))
+    calls = []
+
+    def fake_fetch_dataset_with_tdc(path, tdc_extract_mode="tdc_sc"):
+        calls.append(tdc_extract_mode)
+        if tdc_extract_mode == "tdc_sc":
+            raise ValueError("surface extractor mismatch")
+        return expected
+
+    monkeypatch.setattr("pyccapt.calibration.data_tools.data_loadcrop.fetch_dataset_with_tdc", fake_fetch_dataset_with_tdc)
+
+    loaded = data_tools.load_data("dummy.h5", data_type="pyccapt", mode="raw", load_tdc=True)
+
+    assert loaded == expected
+    assert calls == ["tdc_sc", "tdc_ro"]
 
 
 def test_read_range_h5_backfills_name_from_ion(tmp_path: Path):
@@ -239,3 +258,26 @@ def test_save_data_can_export_ato(tmp_path: Path):
     roundtrip = ato_tools.ato_to_ccapt(str(ato_path), mode="ato")
     assert len(roundtrip) == len(data)
     assert list(roundtrip["mc (Da)"]) == pytest.approx([27.0, 28.0])
+
+
+def test_pos_to_ccapt_uses_standard_pulse_columns(monkeypatch):
+    monkeypatch.setattr(
+        ccapt_tools.leap_tools,
+        "read_pos",
+        lambda _path: pd.DataFrame(
+            {
+                "x (nm)": [1.0, 2.0],
+                "y (nm)": [3.0, 4.0],
+                "z (nm)": [5.0, 6.0],
+                "m/n (Da)": [10.0, 20.0],
+            }
+        ),
+    )
+
+    converted = ccapt_tools.pos_to_ccapt("dummy.pos")
+
+    assert "pulse_v (V)" in converted.columns
+    assert "pulse_l (pJ)" in converted.columns
+    assert "pulse" not in converted.columns
+    assert converted["pulse_v (V)"].tolist() == [0.0, 0.0]
+    assert converted["pulse_l (pJ)"].tolist() == [0.0, 0.0]

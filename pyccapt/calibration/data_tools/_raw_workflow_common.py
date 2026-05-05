@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 from scipy.signal import find_peaks
 from scipy.spatial import cKDTree
+from tqdm.auto import tqdm
 
 from pyccapt.calibration.data_tools import data_tools
 
@@ -541,6 +542,159 @@ def plot_detector_dead_zone_and_neighbors(
     axes[1, 1].set_title('Median nearest neighbor vs radius')
     axes[1, 1].set_xlabel('Detector radius (cm)')
     axes[1, 1].set_ylabel('Median NN distance (cm)')
+
+    fig.tight_layout()
+    return fig
+
+
+def compute_same_pulse_detector_separations(
+    dataframe: pd.DataFrame,
+    *,
+    group_column: str = 'start_counter',
+    only_in_detector: bool = True,
+    dlts_values: Sequence[int] | None = None,
+    max_group_size: int = 64,
+    show_progress: bool = False,
+) -> tuple[pd.DataFrame, dict[str, float | int]]:
+    """Compute pairwise detector-coordinate separations within the same pulse/group."""
+    required = {group_column, 'x_det (cm)', 'y_det (cm)'}
+    missing = required.difference(dataframe.columns)
+    if missing:
+        raise ValueError(f"Same-pulse separation diagnostics need columns: {sorted(missing)}")
+
+    frame = dataframe.copy()
+    if only_in_detector and 'in_detector' in frame.columns:
+        frame = frame[frame['in_detector']]
+    if dlts_values is not None and 'dlts' in frame.columns:
+        allowed = {int(value) for value in dlts_values}
+        frame = frame[frame['dlts'].isin(sorted(allowed))]
+    frame = frame[np.isfinite(frame['x_det (cm)']) & np.isfinite(frame['y_det (cm)'])]
+    if frame.empty:
+        empty = pd.DataFrame(columns=[group_column, 'group_size', 'dx', 'dy', 'dr'])
+        return empty, {
+            'num_groups': 0,
+            'groups_with_pairs': 0,
+            'pair_count': 0,
+            'skipped_large_groups': 0,
+        }
+
+    rows: list[pd.DataFrame] = []
+    groups_with_pairs = 0
+    skipped_large_groups = 0
+    grouped_items = list(frame.groupby(group_column, sort=False))
+    grouped_iter = tqdm(grouped_items, desc='Computing same-pulse separations', unit='group') if show_progress else grouped_items
+    for _, group in grouped_iter:
+        group_size = int(len(group))
+        if group_size < 2:
+            continue
+        if group_size > max_group_size:
+            skipped_large_groups += 1
+            continue
+
+        coords = group[['x_det (cm)', 'y_det (cm)']].to_numpy(dtype=float)
+        dx_matrix = np.abs(coords[:, 0][:, None] - coords[:, 0][None, :])
+        dy_matrix = np.abs(coords[:, 1][:, None] - coords[:, 1][None, :])
+        upper = np.triu_indices(group_size, k=1)
+        dx = dx_matrix[upper]
+        dy = dy_matrix[upper]
+        dr = np.hypot(dx, dy)
+        if dx.size == 0:
+            continue
+        groups_with_pairs += 1
+        rows.append(
+            pd.DataFrame(
+                {
+                    group_column: np.repeat(group[group_column].iloc[0], dx.size),
+                    'group_size': np.repeat(group_size, dx.size),
+                    'dx': dx,
+                    'dy': dy,
+                    'dr': dr,
+                }
+            )
+        )
+
+    if not rows:
+        empty = pd.DataFrame(columns=[group_column, 'group_size', 'dx', 'dy', 'dr'])
+        return empty, {
+            'num_groups': int(len(grouped_items)),
+            'groups_with_pairs': 0,
+            'pair_count': 0,
+            'skipped_large_groups': int(skipped_large_groups),
+        }
+
+    pair_table = pd.concat(rows, ignore_index=True)
+    dx_nonzero = pair_table.loc[pair_table['dx'] > 0, 'dx'].to_numpy(dtype=float)
+    dy_nonzero = pair_table.loc[pair_table['dy'] > 0, 'dy'].to_numpy(dtype=float)
+    dr_nonzero = pair_table.loc[pair_table['dr'] > 0, 'dr'].to_numpy(dtype=float)
+    summary: dict[str, float | int] = {
+        'num_groups': int(len(grouped_items)),
+        'groups_with_pairs': int(groups_with_pairs),
+        'pair_count': int(len(pair_table)),
+        'skipped_large_groups': int(skipped_large_groups),
+        'min_dx': float(np.min(dx_nonzero)) if dx_nonzero.size else float('nan'),
+        'min_dy': float(np.min(dy_nonzero)) if dy_nonzero.size else float('nan'),
+        'min_dr': float(np.min(dr_nonzero)) if dr_nonzero.size else float('nan'),
+        'median_dx': float(np.median(dx_nonzero)) if dx_nonzero.size else float('nan'),
+        'median_dy': float(np.median(dy_nonzero)) if dy_nonzero.size else float('nan'),
+        'median_dr': float(np.median(dr_nonzero)) if dr_nonzero.size else float('nan'),
+    }
+    return pair_table, summary
+
+
+def plot_same_pulse_detector_separations(
+    pair_table: pd.DataFrame,
+    *,
+    bin_size: float = 0.1,
+    title_prefix: str = 'Same-pulse detector separations',
+) -> plt.Figure | None:
+    """Plot pairwise dx/dy/dr separations for hits recovered from the same pulse."""
+    if pair_table.empty:
+        return None
+    dx = pair_table['dx'].to_numpy(dtype=float)
+    dy = pair_table['dy'].to_numpy(dtype=float)
+    dr = pair_table['dr'].to_numpy(dtype=float)
+    dx = dx[np.isfinite(dx)]
+    dy = dy[np.isfinite(dy)]
+    dr = dr[np.isfinite(dr)]
+    dx_nonzero = dx[dx > 0]
+    dy_nonzero = dy[dy > 0]
+    dr_nonzero = dr[dr > 0]
+    if dx_nonzero.size == 0 and dy_nonzero.size == 0 and dr_nonzero.size == 0:
+        return None
+
+    fig, axes = plt.subplots(2, 2, figsize=(10.5, 7.0))
+    if dx_nonzero.size:
+        dx_bins = _compute_histogram_bins(dx_nonzero, bin_size)
+        axes[0, 0].hist(dx_nonzero, bins=dx_bins, color='#2563eb', alpha=0.75, histtype='step', log=True)
+    axes[0, 0].set_title(f'{title_prefix}: |dx|')
+    axes[0, 0].set_xlabel('dx (cm)')
+    axes[0, 0].set_ylabel('Count')
+
+    if dy_nonzero.size:
+        dy_bins = _compute_histogram_bins(dy_nonzero, bin_size)
+        axes[0, 1].hist(dy_nonzero, bins=dy_bins, color='#dc2626', alpha=0.75, histtype='step', log=True)
+    axes[0, 1].set_title(f'{title_prefix}: |dy|')
+    axes[0, 1].set_xlabel('dy (cm)')
+    axes[0, 1].set_ylabel('Count')
+
+    positive_components = pair_table[(pair_table['dx'] > 0) & (pair_table['dy'] > 0)]
+    if not positive_components.empty:
+        dx_comp = positive_components['dx'].to_numpy(dtype=float)
+        dy_comp = positive_components['dy'].to_numpy(dtype=float)
+        x_bins = _compute_histogram_bins(dx_comp, bin_size)
+        y_bins = _compute_histogram_bins(dy_comp, bin_size)
+        histogram = axes[1, 0].hist2d(dx_comp, dy_comp, bins=[x_bins, y_bins], cmap='viridis')
+        fig.colorbar(histogram[3], ax=axes[1, 0], label='Count')
+    axes[1, 0].set_title(f'{title_prefix}: dx/dy map')
+    axes[1, 0].set_xlabel('dx (cm)')
+    axes[1, 0].set_ylabel('dy (cm)')
+
+    if dr_nonzero.size:
+        dr_bins = _compute_histogram_bins(dr_nonzero, bin_size)
+        axes[1, 1].hist(dr_nonzero, bins=dr_bins, color='#059669', alpha=0.75, histtype='step', log=True)
+    axes[1, 1].set_title(f'{title_prefix}: radial separation')
+    axes[1, 1].set_xlabel('dr (cm)')
+    axes[1, 1].set_ylabel('Count')
 
     fig.tight_layout()
     return fig

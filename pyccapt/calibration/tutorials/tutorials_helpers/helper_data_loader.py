@@ -1,9 +1,21 @@
 from pathlib import Path
 
 import numpy as np
+from tqdm.auto import tqdm
 
 from pyccapt.calibration.data_tools import data_tools
 from pyccapt.calibration.mc import tof_tools
+
+
+def _loader_progress(*, total: int, enabled: bool, desc: str):
+	return tqdm(
+		total=total,
+		desc=desc,
+		unit="stage",
+		dynamic_ncols=True,
+		disable=not enabled,
+		leave=True,
+	)
 
 
 def load_data(dataset_path, max_mc, flightPathLength, pulse_mode, tdc, variables, processing_mode=True,
@@ -46,6 +58,7 @@ def load_data(dataset_path, max_mc, flightPathLength, pulse_mode, tdc, variables
 		print('=============================')
 		variables.pulse_mode = pulse_mode
 		dataset_path_obj = Path(dataset_path)
+		variables.path = str(dataset_path_obj)
 		variables.dataset_name = dataset_path_obj.stem
 		output_dir = dataset_path_obj.parent / variables.dataset_name / 'data_processing'
 		variables.set_result_data_directory(output_dir)
@@ -98,6 +111,7 @@ def load_data(dataset_path, max_mc, flightPathLength, pulse_mode, tdc, variables
 		max_tof = int(tof_tools.mc2tof(max_mc, 1000, 0, 0, flightPathLength))
 		variables.pulse_mode = pulse_mode
 		dataset_path_obj = Path(dataset_path)
+		variables.path = str(dataset_path_obj)
 		variables.dataset_name = dataset_path_obj.stem
 		output_dir = dataset_path_obj.parent / variables.dataset_name / 'visualization'
 		variables.set_result_data_directory(output_dir)
@@ -174,7 +188,7 @@ def add_columns(variables, max_mc):
 	variables.data_backup = variables.data.copy()
 
 
-def load_calibrated_h5(dataset_path, variables, *, range_path=None):
+def load_calibrated_h5(dataset_path, variables, *, range_path=None, show_progress=True):
 	"""Load a PyCCAPT ``.h5`` file for raw-data analysis.
 
 	Two file layouts are supported:
@@ -199,73 +213,92 @@ def load_calibrated_h5(dataset_path, variables, *, range_path=None):
 
 	from pyccapt.calibration.data_tools import data_loadcrop, data_tools
 
-	dataset_path_obj = Path(dataset_path)
-	if not dataset_path_obj.is_file():
-		raise FileNotFoundError(f"Dataset file not found: {dataset_path}")
-
-	variables.dataset_name = dataset_path_obj.stem
-	output_dir = dataset_path_obj.parent / variables.dataset_name / 'raw_analysis'
-	variables.set_result_data_directory(output_dir)
-	variables.set_result_directory(output_dir)
-	variables.result_data_name = variables.dataset_name
-
-	# First try the calibrated bundle layout (/df). If that fails because the
-	# file only has the raw acquisition groups, fall back to raw mode.
-	dld_df = None
-	tdc_df = None
-	source = "calibrated"
+	progress = _loader_progress(total=5, enabled=show_progress, desc="Loading PyCCAPT HDF5")
 	try:
-		loaded = data_tools.load_data(
-			str(dataset_path_obj), 'pyccapt', mode='processed', load_tdc=True
-		)
-		if isinstance(loaded, tuple):
-			dld_df, tdc_df = loaded
-		else:
-			dld_df, tdc_df = loaded, None
-	except (KeyError, ValueError) as calibrated_error:
-		# `pd.read_hdf(..., key='df')` raises ValueError when /df is missing.
-		# Fall back to raw acquisition layout: /dld + /tdc.
+		progress.set_postfix_str("validating dataset path")
+		dataset_path_obj = Path(dataset_path)
+		if not dataset_path_obj.is_file():
+			raise FileNotFoundError(f"Dataset file not found: {dataset_path}")
+
+		variables.path = str(dataset_path_obj)
+		variables.dataset_name = dataset_path_obj.stem
+		output_dir = dataset_path_obj.parent / variables.dataset_name / 'raw_analysis'
+		variables.set_result_data_directory(output_dir)
+		variables.set_result_directory(output_dir)
+		variables.result_data_name = variables.dataset_name
+		progress.update(1)
+
+		# First try the calibrated bundle layout (/df). If that fails because the
+		# file only has the raw acquisition groups, fall back to raw mode.
+		dld_df = None
+		tdc_df = None
+		source = "calibrated"
+		progress.set_postfix_str("reading bundled /df and optional /tdc")
 		try:
-			dld_df, tdc_df = data_loadcrop.fetch_dataset_with_tdc(str(dataset_path_obj))
-		except Exception as raw_error:
-			raise ValueError(
-				f"Could not load {dataset_path!r}: not a calibrated bundle "
-				f"({calibrated_error}) and not a recognizable raw acquisition file "
-				f"({raw_error})."
-			) from raw_error
-		# Apply the standard raw -> processed pipeline so downstream analyses
-		# see the same dataframe schema as a calibrated load.
-		dld_df = data_tools.remove_invalid_data(dld_df, max_tof=100000)
-		dld_df = data_tools.pyccapt_raw_to_processed(dld_df)
-		source = "raw"
+			loaded = data_tools.load_data(
+				str(dataset_path_obj), 'pyccapt', mode='processed', load_tdc=True
+			)
+			if isinstance(loaded, tuple):
+				dld_df, tdc_df = loaded
+			else:
+				dld_df, tdc_df = loaded, None
+		except (KeyError, ValueError) as calibrated_error:
+			progress.set_postfix_str("falling back to raw /dld + /tdc groups")
+			try:
+				dld_df, tdc_df = data_loadcrop.fetch_dataset_with_tdc(str(dataset_path_obj))
+			except Exception as raw_error:
+				raise ValueError(
+					f"Could not load {dataset_path!r}: not a calibrated bundle "
+					f"({calibrated_error}) and not a recognizable raw acquisition file "
+					f"({raw_error})."
+				) from raw_error
+			source = "raw"
+		progress.update(1)
 
-	variables.data = dld_df
-	variables.data_backup = dld_df.copy()
-	variables.data_tdc = tdc_df
-	variables.data_tdc_backup = tdc_df.copy() if tdc_df is not None else None
+		progress.set_postfix_str("normalizing loaded data")
+		if source == "raw":
+			# Apply the standard raw -> processed pipeline so downstream analyses
+			# see the same dataframe schema as a calibrated load.
+			dld_df = data_tools.remove_invalid_data(dld_df, max_tof=100000)
+			dld_df = data_tools.pyccapt_raw_to_processed(dld_df)
+		progress.update(1)
 
-	# Range table: prefer /range in the same h5, then explicit range_path,
-	# then fall back to <dataset>_range.h5 next to the file.
-	range_df = None
-	try:
-		range_df = pd.read_hdf(str(dataset_path_obj), key='range', mode='r')
-	except (KeyError, ValueError):
+		variables.data = dld_df
+		variables.data_backup = dld_df.copy()
+		variables.data_tdc = tdc_df
+		variables.data_tdc_backup = tdc_df.copy() if tdc_df is not None else None
+
+		# Range table: prefer /range in the same h5, then explicit range_path,
+		# then fall back to <dataset>_range.h5 next to the file.
+		progress.set_postfix_str("loading range table")
 		range_df = None
+		try:
+			range_df = pd.read_hdf(str(dataset_path_obj), key='range', mode='r')
+		except (KeyError, ValueError):
+			range_df = None
 
-	if range_df is None and range_path:
-		range_df = data_tools.read_range(range_path)
-	if range_df is None:
-		sibling = dataset_path_obj.with_name(f"{dataset_path_obj.stem}_range.h5")
-		if sibling.is_file():
-			range_df = data_tools.read_range(str(sibling))
+		if range_df is None and range_path:
+			range_df = data_tools.read_range(range_path)
+		if range_df is None:
+			sibling = dataset_path_obj.with_name(f"{dataset_path_obj.stem}_range.h5")
+			if sibling.is_file():
+				range_df = data_tools.read_range(str(sibling))
 
-	if range_df is not None:
-		variables.range_data = range_df
-		variables.range_data_backup = range_df.copy()
+		if range_df is not None:
+			variables.range_data = range_df
+			variables.range_data_backup = range_df.copy()
+		progress.update(1)
 
-	print(f"Loaded {source} dld rows: {len(dld_df)}")
-	if tdc_df is not None:
-		print(f"Loaded raw tdc rows:        {len(tdc_df)}")
-	if range_df is not None:
-		print(f"Loaded range rows:          {len(range_df)}")
-	return dld_df, tdc_df, range_df
+		progress.set_postfix_str("synchronizing shared variables")
+		variables.sync_from_data(update_backups=True)
+		progress.update(1)
+		progress.set_postfix_str("done")
+
+		print(f"Loaded {source} dld rows: {len(dld_df)}")
+		if tdc_df is not None:
+			print(f"Loaded raw tdc rows:        {len(tdc_df)}")
+		if range_df is not None:
+			print(f"Loaded range rows:          {len(range_df)}")
+		return dld_df, tdc_df, range_df
+	finally:
+		progress.close()

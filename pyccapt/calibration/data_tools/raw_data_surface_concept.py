@@ -1,4 +1,4 @@
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 
 def _sort_sequence_by_channel(start_counter_values, channel_values, time_values):
@@ -90,6 +90,8 @@ def find_consecutive_sequences_seperatly(start_counter, channel, time_data, high
     ch = []
     time = []
     current_start = 0
+    current_high_voltage = None
+    current_pulse = None
 
     # for i, value in enumerate(start_counter):
     for i, value in tqdm(enumerate(start_counter), desc="Processing", total=len(start_counter)):
@@ -99,6 +101,8 @@ def find_consecutive_sequences_seperatly(start_counter, channel, time_data, high
             current_sequence.append(value)
             ch.append(channel[i])
             time.append(time_data[i])
+            current_high_voltage = hv
+            current_pulse = pulse_c
             continue
         if current_sequence[-1] == value:
             current_sequence.append(value)
@@ -115,8 +119,8 @@ def find_consecutive_sequences_seperatly(start_counter, channel, time_data, high
                         'time_data': time,
                         'start_counter': sc,
                         'valid_event': valid_event,
-                        'high_voltage': hv,
-                        'pulse': pulse_c,
+                        'high_voltage': current_high_voltage,
+                        'pulse': current_pulse,
                         'indices': (current_start, i - 1),
                         'length': length
                     })
@@ -126,8 +130,8 @@ def find_consecutive_sequences_seperatly(start_counter, channel, time_data, high
                         'time_data': time,
                         'start_counter': sc,
                         'valid_event': valid_event,
-                        'high_voltage': hv,
-                        'pulse': pulse_c,
+                        'high_voltage': current_high_voltage,
+                        'pulse': current_pulse,
                         'indices': (current_start, i - 1),
                         'length': length
                     })
@@ -137,8 +141,8 @@ def find_consecutive_sequences_seperatly(start_counter, channel, time_data, high
                     'time_data': time,
                     'start_counter': sc,
                     'valid_event': valid_event,
-                    'high_voltage': hv,
-                    'pulse': pulse_c,
+                    'high_voltage': current_high_voltage,
+                    'pulse': current_pulse,
                     'indices': (current_start, i - 1),
                     'length': length
                 })
@@ -148,8 +152,8 @@ def find_consecutive_sequences_seperatly(start_counter, channel, time_data, high
                     'time_data': time,
                     'start_counter': sc,
                     'valid_event': valid_event,
-                    'high_voltage': hv,
-                    'pulse': pulse_c,
+                    'high_voltage': current_high_voltage,
+                    'pulse': current_pulse,
                     'indices': (current_start, i - 1),
                     'length': length
                 })
@@ -159,8 +163,8 @@ def find_consecutive_sequences_seperatly(start_counter, channel, time_data, high
                     'time_data': time,
                     'start_counter': sc,
                     'valid_event': valid_event,
-                    'high_voltage': hv,
-                    'pulse': pulse_c,
+                    'high_voltage': current_high_voltage,
+                    'pulse': current_pulse,
                     'indices': (current_start, i - 1),
                     'length': length
                 })
@@ -171,8 +175,8 @@ def find_consecutive_sequences_seperatly(start_counter, channel, time_data, high
                         'time_data': time,
                         'start_counter': sc,
                         'valid_event': valid_event,
-                        'high_voltage': hv,
-                        'pulse': pulse_c,
+                        'high_voltage': current_high_voltage,
+                        'pulse': current_pulse,
                         'indices': (current_start, i - 1),
                         'length': length
                     })
@@ -183,8 +187,8 @@ def find_consecutive_sequences_seperatly(start_counter, channel, time_data, high
                         'time_data': time,
                         'start_counter': sc,
                         'valid_event': valid_event,
-                        'high_voltage': hv,
-                        'pulse': pulse_c,
+                        'high_voltage': current_high_voltage,
+                        'pulse': current_pulse,
                         'indices': (current_start, i - 1),
                         'length': length
                     })
@@ -193,6 +197,8 @@ def find_consecutive_sequences_seperatly(start_counter, channel, time_data, high
             ch = [channel[i]]
             time = [time_data[i]]
             current_start = i
+            current_high_voltage = hv
+            current_pulse = pulse_c
 
         # print(f"Processing: {i} / {len(start_counter)}")
 
@@ -206,8 +212,8 @@ def find_consecutive_sequences_seperatly(start_counter, channel, time_data, high
                 'time_data': time,
                 'start_counter': sc,
                 'valid_event': valid_event,
-                'high_voltage': hv,
-                'pulse': pulse_c,
+                'high_voltage': current_high_voltage,
+                'pulse': current_pulse,
                 'indices': (current_start, len(start_counter) - 1),
                 'length': length,
             })
@@ -217,8 +223,8 @@ def find_consecutive_sequences_seperatly(start_counter, channel, time_data, high
                 'time_data': time,
                 'start_counter': sc,
                 'valid_event': valid_event,
-                'high_voltage': hv,
-                'pulse': pulse_c,
+                'high_voltage': current_high_voltage,
+                'pulse': current_pulse,
                 'indices': (current_start, len(start_counter) - 1),
                 'length': length,
             })
@@ -228,8 +234,8 @@ def find_consecutive_sequences_seperatly(start_counter, channel, time_data, high
             'time_data': time,
             'start_counter': sc,
             'valid_event': valid_event,
-            'high_voltage': hv,
-            'pulse': pulse_c,
+            'high_voltage': current_high_voltage,
+            'pulse': current_pulse,
             'indices': (current_start, len(start_counter) - 1),
             'length': length,
         })
@@ -239,8 +245,8 @@ def find_consecutive_sequences_seperatly(start_counter, channel, time_data, high
             'time_data': time,
             'start_counter': sc,
             'valid_event': valid_event,
-            'high_voltage': hv,
-            'pulse': pulse_c,
+            'high_voltage': current_high_voltage,
+            'pulse': current_pulse,
             'indices': (current_start, len(start_counter) - 1),
             'length': length,
         })
@@ -250,8 +256,8 @@ def find_consecutive_sequences_seperatly(start_counter, channel, time_data, high
             'time_data': time,
             'start_counter': sc,
             'valid_event': valid_event,
-            'high_voltage': hv,
-            'pulse': pulse_c,
+            'high_voltage': current_high_voltage,
+            'pulse': current_pulse,
             'indices': (current_start, len(start_counter) - 1),
             'length': length,
         })
@@ -262,8 +268,8 @@ def find_consecutive_sequences_seperatly(start_counter, channel, time_data, high
                 'time_data': time,
                 'start_counter': sc,
                 'valid_event': valid_event,
-                'high_voltage': hv,
-                'pulse': pulse_c,
+                'high_voltage': current_high_voltage,
+                'pulse': current_pulse,
                 'indices': (current_start, len(start_counter) - 1),
                 'length': length,
             })
@@ -273,8 +279,8 @@ def find_consecutive_sequences_seperatly(start_counter, channel, time_data, high
                 'time_data': time,
                 'start_counter': sc,
                 'valid_event': valid_event,
-                'high_voltage': hv,
-                'pulse': pulse_c,
+                'high_voltage': current_high_voltage,
+                'pulse': current_pulse,
                 'indices': (current_start, len(start_counter) - 1),
                 'length': length,
             })
@@ -327,6 +333,8 @@ def find_consecutive_sequences(start_counter, channel, time_data, high_voltage, 
     ch = []
     time = []
     current_start = 0
+    current_high_voltage = None
+    current_pulse = None
     # for i, value in enumerate(start_counter):
     for i, value in tqdm(enumerate(start_counter), desc="Processing", total=len(start_counter)):
         hv = high_voltage[i]
@@ -335,6 +343,8 @@ def find_consecutive_sequences(start_counter, channel, time_data, high_voltage, 
             current_sequence.append(value)
             ch.append(channel[i])
             time.append(time_data[i])
+            current_high_voltage = hv
+            current_pulse = pulse_c
             continue
         if current_sequence[-1] == value:
             current_sequence.append(value)
@@ -349,8 +359,8 @@ def find_consecutive_sequences(start_counter, channel, time_data, high_voltage, 
                 'time_data': time,
                 'start_counter': sc,
                 'valid_event': valid_event,
-                'high_voltage': hv,
-                'pulse': pulse_c,
+                'high_voltage': current_high_voltage,
+                'pulse': current_pulse,
                 'indices': (current_start, i - 1),
                 'length': length
             })
@@ -359,6 +369,8 @@ def find_consecutive_sequences(start_counter, channel, time_data, high_voltage, 
             ch = [channel[i]]
             time = [time_data[i]]
             current_start = i
+            current_high_voltage = hv
+            current_pulse = pulse_c
 
     # Handle the last sequence
     length = len(current_sequence)
@@ -368,8 +380,8 @@ def find_consecutive_sequences(start_counter, channel, time_data, high_voltage, 
         'time_data': time,
         'start_counter': sc,
         'valid_event': valid_event,
-        'high_voltage': hv,
-        'pulse': pulse_c,
+        'high_voltage': current_high_voltage,
+        'pulse': current_pulse,
         'indices': (current_start, len(start_counter) - 1),
         'length': length,
     })
@@ -416,15 +428,18 @@ def find_consecutive_sequences(start_counter, channel, time_data, high_voltage, 
 
 def find_nth_max_repeated_indices(nums, n):
     """
-    Find the start and end indices of the longest repeated sequence in the list.
+    Find the start/end indices of the ``n``-th longest repeated run (1-based).
 
     Args:
         nums:
-        n:
+        n: 1 returns the longest run, 2 the second-longest, and so on.
     Returns:
 
     """
-    while True:
+    if n < 1:
+        raise ValueError("n must be >= 1")
+
+    while n > 0:
         max_count = 0
         max_number = None
         start_index = None
@@ -447,7 +462,7 @@ def find_nth_max_repeated_indices(nums, n):
                     start_index = i - current_count + 1
                     end_index = i
         n = n - 1
-        if n < 0:
+        if n == 0 or start_index is None:
             break
         nums[start_index:end_index + 1] = [-1] * max_count
 

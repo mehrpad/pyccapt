@@ -243,6 +243,27 @@ def test_fetch_dataset_with_tdc_assigns_shared_event_group_id(tmp_path: Path):
     assert (~tdc_df["has_dld_match"]).sum() == 2 + 1 + 4
 
 
+def test_fetch_dataset_with_tdc_supports_roentdek_extract_mode(tmp_path: Path):
+    dld_sc = np.array([10, 11])
+    tdc_sc = np.array([10, 10, 10, 10, 10, 10, 11, 11, 11, 11])
+    h5_path = tmp_path / "synthetic_roentdek.h5"
+    _write_minimal_pyccapt_h5(h5_path, dld_sc, tdc_sc)
+
+    dld_df, tdc_df = data_loadcrop.fetch_dataset_with_tdc(str(h5_path), tdc_extract_mode="tdc_ro")
+
+    assert "event_group_id" in dld_df.columns
+    assert "event_group_id" in tdc_df.columns
+    assert "has_dld_match" in tdc_df.columns
+    assert list(tdc_df.columns[:6]) == [
+        "channel",
+        "start_counter",
+        "high_voltage (V)",
+        "pulse_v (V)",
+        "pulse_l (pJ)",
+        "time_data",
+    ]
+
+
 # ---------------------------------------------------------------------------
 # save_data with save_tdc round-trip
 # ---------------------------------------------------------------------------

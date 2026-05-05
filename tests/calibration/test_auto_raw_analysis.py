@@ -231,6 +231,54 @@ def test_load_calibrated_h5_works_without_tdc_and_range(tmp_path: Path):
     assert variables.data_tdc is None
 
 
+def test_load_calibrated_h5_accepts_show_progress_flag(tmp_path: Path):
+    dld_df = _make_simple_dld(num_rows=2)
+    h5_path = tmp_path / "dld_only_no_progress.h5"
+    dld_df.to_hdf(h5_path, key="df", mode="w")
+
+    variables = Variables()
+    loaded_dld, loaded_tdc, loaded_range = helper_data_loader.load_calibrated_h5(
+        str(h5_path), variables, show_progress=False
+    )
+
+    assert len(loaded_dld) == 2
+    assert loaded_tdc is None
+    assert loaded_range is None
+
+
+@pytest.mark.parametrize("data_mode,suffix", [("leap_epos", ".epos"), ("leap_apt", ".apt")])
+def test_helper_load_data_supports_leap_processing_modes(tmp_path: Path, monkeypatch, data_mode: str, suffix: str):
+    dataset_path = tmp_path / f"sample{suffix}"
+    dataset_path.write_bytes(b"placeholder")
+
+    source = _make_simple_dld(num_rows=3)
+
+    def fake_load_data(path, mode_name, *args, **kwargs):
+        assert path == str(dataset_path)
+        assert mode_name == data_mode
+        return source.copy()
+
+    monkeypatch.setattr(helper_data_loader.data_tools, "load_data", fake_load_data)
+
+    variables = Variables()
+    helper_data_loader.load_data(
+        str(dataset_path),
+        max_mc=120.0,
+        flightPathLength=110.0,
+        pulse_mode="voltage",
+        tdc=data_mode,
+        variables=variables,
+        processing_mode=True,
+        load_tdc_raw=False,
+    )
+
+    assert variables.dataset_name == "sample"
+    assert variables.path == str(dataset_path)
+    assert variables.data is not None
+    assert len(variables.data) == 3
+    assert variables.data_tdc is None
+
+
 def test_load_calibrated_h5_falls_back_to_pure_raw_acquisition_layout(tmp_path: Path):
     """When the file has /dld + /tdc but no /df, the loader should switch to
     the raw acquisition path (parsing /dld with fetch_dataset_with_tdc and
@@ -313,8 +361,12 @@ def test_call_auto_raw_data_analysis_renders_single_panel_with_dropdown():
     assert isinstance(dropdown, widgets.Dropdown)
     assert {value for _label, value in dropdown.options} == {"manual", "range"}
 
-    # Manual rows are nested in the third child (HTML summary, then VBox of HBoxes).
-    manual_grid = panel.children[2]
+    save_plots = panel.children[2]
+    assert isinstance(save_plots, widgets.Checkbox)
+    assert save_plots.value is False
+
+    # Manual rows are nested after the summary and save checkbox.
+    manual_grid = panel.children[3]
     assert isinstance(manual_grid, widgets.VBox)
     assert len(manual_grid.children) == 6   # exactly six peak rows
 
@@ -337,6 +389,79 @@ def test_call_auto_raw_data_analysis_renders_single_panel_with_dropdown():
     # Toggling back to "manual" re-enables them.
     dropdown.value = "manual"
     assert not _all_disabled()
+
+
+def test_run_analysis_saves_plots_beside_dataset(tmp_path: Path):
+    variables = Variables()
+    dataset_path = tmp_path / "sample.h5"
+    dataset_path.touch()
+    variables.path = str(dataset_path)
+    variables.dataset_name = dataset_path.stem
+    variables.data = pd.DataFrame({
+        "mc (Da)": [27.0, 27.05, 27.1, 52.0],
+        "mc_uc (Da)": [27.0, 27.05, 27.1, 52.0],
+        "t (ns)": [400.0, 410.0, 420.0, 510.0],
+        "x_det (cm)": [0.0, 0.1, -0.1, 0.05],
+        "y_det (cm)": [0.0, 0.1, -0.1, -0.05],
+        "delta_p": [0, 1, 2, 3],
+        "multi": [1, 1, 2, 1],
+        "start_counter": [1, 2, 3, 4],
+    })
+    variables.data_tdc = None
+
+    species = [{"label": "Al", "mc_low": 26.8, "mc_up": 27.2, "color": "#1f77b4"}]
+    real_display = helper_auto_raw_analysis.display
+    helper_auto_raw_analysis.display = lambda _obj: None
+    try:
+        helper_auto_raw_analysis.run_analysis(variables, species, save_plots=True)
+    finally:
+        helper_auto_raw_analysis.display = real_display
+
+    save_dir = tmp_path / "sample_raw_analysis_plots"
+    assert save_dir.is_dir()
+    for stem in ("tof_histogram", "mc_histogram", "fdm_all", "fdm_species", "multihit_deadzone"):
+        assert (save_dir / f"{stem}.png").is_file()
+        assert (save_dir / f"{stem}.svg").is_file()
+
+
+def test_run_analysis_handles_roentdek_tdc_bundle():
+    variables = Variables()
+    variables.dataset_name = "roentdek"
+    variables.data = pd.DataFrame(
+        {
+            "event_group_id": [0, 1],
+            "start_counter": [10, 11],
+            "mc (Da)": [27.0, 54.0],
+            "mc_uc (Da)": [27.0, 54.0],
+            "t (ns)": [400.0, 500.0],
+            "x_det (cm)": [0.1, 0.2],
+            "y_det (cm)": [0.3, 0.4],
+            "high_voltage (V)": [1000.0, 1100.0],
+            "pulse_v (V)": [10.0, 12.0],
+            "delta_p": [0, 1],
+            "multi": [1, 1],
+        }
+    )
+    variables.data_tdc = pd.DataFrame(
+        {
+            "channel": np.array([0, 1, 2, 3, 4, 5, 0, 1, 2, 3], dtype=np.uint32),
+            "start_counter": np.array([10, 10, 10, 10, 10, 10, 11, 11, 11, 11], dtype=np.uint32),
+            "event_group_id": np.array([0, 0, 0, 0, 0, 0, 1, 1, 1, 1], dtype=np.int64),
+            "high_voltage (V)": np.array([1000.0] * 6 + [1100.0] * 4, dtype=float),
+            "pulse_v (V)": np.array([10.0] * 6 + [12.0] * 4, dtype=float),
+        }
+    )
+
+    real_display = helper_auto_raw_analysis.display
+    helper_auto_raw_analysis.display = lambda _obj: None
+    try:
+        helper_auto_raw_analysis.run_analysis(
+            variables,
+            [{"label": "Peak 1", "mc_low": 26.5, "mc_up": 27.5, "color": "#1f77b4"}],
+            save_plots=False,
+        )
+    finally:
+        helper_auto_raw_analysis.display = real_display
 
 
 # ---------------------------------------------------------------------------

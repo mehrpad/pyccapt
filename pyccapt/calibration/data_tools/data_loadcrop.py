@@ -223,7 +223,7 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld') -> pd.DataFram
         except FileNotFoundError as error:
             print(error)
             print("[*] HDF5 file not found")
-    elif extract_mode == 'tdc_sc':
+    elif extract_mode in {'tdc_sc', 'tdc_ro'}:
         try:
             hdf5_data = data_tools.read_hdf5(filename)
             if hdf5_data is None:
@@ -249,7 +249,7 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld') -> pd.DataFram
                 (channel, start_counter, high_voltage, voltage_pulse, laser_pulse, time_data),
                 axis=1,
             )
-            dld_group_storage = create_pandas_dataframe(dld_group_array, mode='tdc_sc')
+            dld_group_storage = create_pandas_dataframe(dld_group_array, mode=extract_mode)
             return dld_group_storage
         except KeyError as error:
             print(error)
@@ -257,8 +257,6 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld') -> pd.DataFram
         except FileNotFoundError as error:
             print(error)
             print("[*] HDF5 file not found")
-    elif extract_mode == 'tdc_ro':
-        print('Not implemented yet')
     return None
 
 def concatenate_dataframes_of_dld_grp(dataframe_list: list) -> pd.DataFrame:
@@ -786,8 +784,13 @@ def create_pandas_dataframe(data_crop, mode='dld', flag_old_pyccpat_data=False):
         hdf_dataframe['start_counter'] = hdf_dataframe['start_counter'].astype('uint32')
         hdf_dataframe['time_data'] = hdf_dataframe['time_data'].astype('uint32')
     elif mode == 'tdc_ro':
-        print('Not implemented yet')
-        hdf_dataframe = None
+        hdf_dataframe = pd.DataFrame(data=data_crop,
+                                     columns=['channel', 'start_counter', 'high_voltage (V)', 'pulse_v (V)',
+                                              'pulse_l (pJ)', 'time_data'])
+
+        hdf_dataframe['channel'] = hdf_dataframe['channel'].astype('uint32')
+        hdf_dataframe['start_counter'] = hdf_dataframe['start_counter'].astype('uint32')
+        hdf_dataframe['time_data'] = hdf_dataframe['time_data'].astype('uint32')
     else:
         raise ValueError(f"Unsupported mode: {mode!r}")
 

@@ -423,9 +423,17 @@ def load_data(dataset_path, data_type, mode="processed", *, load_tdc=False, tdc_
             from pyccapt.calibration.data_tools import data_loadcrop
 
             if load_tdc:
-                return data_loadcrop.fetch_dataset_with_tdc(
-                    dataset_path, tdc_extract_mode=tdc_extract_mode
-                )
+                primary_mode = tdc_extract_mode
+                fallback_modes = [mode_name for mode_name in ("tdc_sc", "tdc_ro") if mode_name != primary_mode]
+                last_error = None
+                for mode_name in [primary_mode, *fallback_modes]:
+                    try:
+                        return data_loadcrop.fetch_dataset_with_tdc(
+                            dataset_path, tdc_extract_mode=mode_name
+                        )
+                    except Exception as error:
+                        last_error = error
+                raise last_error
             return data_loadcrop.fetch_dataset_from_dld_grp(dataset_path)
         if mode == "processed":
             data = pd.read_hdf(dataset_path, key="df", mode="r")

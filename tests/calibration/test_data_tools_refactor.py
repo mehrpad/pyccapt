@@ -74,6 +74,24 @@ def test_load_data_processed_maps_legacy_pulse_column(tmp_path: Path):
     assert loaded["pulse_l (pJ)"].tolist() == pytest.approx([0.0, 0.0])
 
 
+def test_load_data_raw_with_tdc_falls_back_to_roentdek_extract_mode(monkeypatch):
+    expected = (pd.DataFrame({"start_counter": [1]}), pd.DataFrame({"start_counter": [1], "channel": [0]}))
+    calls = []
+
+    def fake_fetch_dataset_with_tdc(path, tdc_extract_mode="tdc_sc"):
+        calls.append(tdc_extract_mode)
+        if tdc_extract_mode == "tdc_sc":
+            raise ValueError("surface extractor mismatch")
+        return expected
+
+    monkeypatch.setattr("pyccapt.calibration.data_tools.data_loadcrop.fetch_dataset_with_tdc", fake_fetch_dataset_with_tdc)
+
+    loaded = data_tools.load_data("dummy.h5", data_type="pyccapt", mode="raw", load_tdc=True)
+
+    assert loaded == expected
+    assert calls == ["tdc_sc", "tdc_ro"]
+
+
 def test_read_range_h5_backfills_name_from_ion(tmp_path: Path):
     range_path = tmp_path / "legacy_range.h5"
     legacy_range = pd.DataFrame(

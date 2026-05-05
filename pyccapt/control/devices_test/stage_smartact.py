@@ -26,7 +26,26 @@ Common errors
 
 import time
 
-import smaract.ctl as ctl
+try:
+    import smaract.ctl as ctl
+except ImportError:
+    ctl = None
+    print(
+        "[stage_smartact] WARNING: 'smaract' package not found.\n"
+        "  Install it with:  pip install smaract\n"
+        "  Or follow the SmarAct MCS2 SDK installation guide.\n"
+        "  All stage functions will raise RuntimeError until the package is installed."
+    )
+
+
+def _check_smaract():
+    """Raise a clear error if smaract is not installed."""
+    if ctl is None:
+        raise RuntimeError(
+            "The 'smaract' package is not installed.\n"
+            "Install it with:  pip install smaract\n"
+            "Or follow the SmarAct MCS2 SDK installation guide."
+        )
 
 # ---------------------------------------------------------------------------
 # Axis channel mapping
@@ -62,6 +81,7 @@ def list_devices() -> list:
 
     Useful for diagnosing connection problems before calling any other function.
     """
+    _check_smaract()
     buffer = ctl.FindDevices()
     if not buffer:
         return []
@@ -178,6 +198,7 @@ def move_relative(dx_m: float = 0.0,
     wait : bool
         If True, block until all axes have stopped moving.
     """
+    _check_smaract()
     handle = _open_controller(locator)
     try:
         velocity_pm_s = _m_to_pm(velocity_m_s)
@@ -287,48 +308,118 @@ def find_reference(locator: str = None):
 # Quick-test / demo
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
+    if ctl is None:
+        print(
+            "\nERROR: 'smaract' package is not installed.\n"
+            "  Install it with:  pip install smaract\n"
+            "  Or follow the SmarAct MCS2 SDK installation guide."
+        )
+        raise SystemExit(1)
+
     # --- 1. List all devices found on the network/USB ----------------------
     devices = list_devices()
     if not devices:
         print("ERROR: No MCS2 devices found. Check connection and power.")
         raise SystemExit(1)
 
-    print(f"Found {len(devices)} device(s):")
-    for d in devices:
-        print(f"  {d}")
+    print(f"\nFound {len(devices)} device(s):")
+    for i, d in enumerate(devices, start=1):
+        print(f"  [{i}] {d}")
 
-    # --- 2. Pick the first device that actually responds -------------------
+    # --- 2. Let the user pick a device and verify it is reachable ----------
     locator = None
-    for candidate in devices:
+    while True:
+        # Print available devices
+        print(f"\nAvailable devices:")
+        for i, d in enumerate(devices, start=1):
+            print(f"  [{i}] {d}")
+        print(f"  [c] Enter a custom locator string (e.g. with a specific port)")
+
+        raw = input(f"\nSelect device [1-{len(devices)} / c]: ").strip().lower()
+
+        if raw == "c":
+            print("  Locator examples:")
+            print("    network:sn:MCS2-00017939          (default port 55551)")
+            print("    network:sn:MCS2-00017939:55552    (custom port)")
+            print("    network:host:192.168.1.100        (by IP)")
+            candidate = input("  Enter locator: ").strip()
+            if not candidate:
+                print("  Empty input, try again.")
+                continue
+        else:
+            try:
+                choice = int(raw)
+            except ValueError:
+                print("  Invalid input. Enter a number or 'c'.")
+                continue
+            if not (1 <= choice <= len(devices)):
+                print(f"  Please enter a number between 1 and {len(devices)}, or 'c'.")
+                continue
+            candidate = devices[choice - 1]
+
+        print(f"\nTrying: {candidate} ...")
         try:
             h = ctl.Open(candidate)
             ctl.Close(h)
             locator = candidate
-            print(f"\nUsing: {locator}")
+            print(f"  Connected successfully.")
             break
-        except ctl.Error as e:
-            print(f"  {candidate}  -> unreachable (error {e.args[1]:#06x}), skipping")
+        except ctl.Error as exc:
+            code = exc.args[1] if len(exc.args) >= 2 else "?"
+            hints = {
+                0xF01A: (
+                    "SA_CTL_ERROR_NETWORK_TIMEOUT – TCP connection timed out.\n"
+                    "    • Is the MCS2 powered on and reachable? (try ping / SmarActServiceTool)\n"
+                    "    • Another process may hold an open handle – restart the controller.\n"
+                    "    • Firewall may be blocking port 55551.\n"
+                    "    • Try entering a custom locator with a different port (option 'c')."
+                ),
+                0xF003: "SA_CTL_ERROR_NOT_FOUND – device not found.",
+                0xF00C: "SA_CTL_ERROR_DEVICE_LIMIT_REACHED – too many open handles. Close other sessions.",
+            }
+            hint = hints.get(code, "")
+            print(f"  ERROR: Cannot connect to '{candidate}' (error code {code:#06x}).")
+            if hint:
+                print(f"    Hint: {hint}")
+            print("  Please select a different device or try a custom locator.\n")
 
-    if locator is None:
-        print("\nERROR: No reachable MCS2 controller found.")
-        raise SystemExit(1)
+    print(f"\nUsing: {locator}")
 
-    # --- 3. Try to open and read position ----------------------------------
+    # --- 4. Read and display initial position ------------------------------
     try:
         pos = get_position(locator)
-        print(f"Current position: x={pos['x']*1e6:.3f} um  "
-              f"y={pos['y']*1e6:.3f} um  z={pos['z']*1e6:.3f} um")
+        print(f"\nInitial position:      "
+              f"x={pos['x'] * 1e6:+10.3f} um  "
+              f"y={pos['y'] * 1e6:+10.3f} um  "
+              f"z={pos['z'] * 1e6:+10.3f} um")
     except RuntimeError as e:
         print(f"\nERROR reading position:\n{e}")
         raise SystemExit(1)
 
-    # --- 4. Demo: move +10 um on all axes ----------------------------------
-    print("\nMoving +10 um in X, Y, and Z ...")
+    # --- 5. Move +10 um forward on all axes --------------------------------
+    print("\nStep 1: Moving +10 um (forward) on X, Y, Z ...")
     try:
         move_relative(dx_m=10e-6, dy_m=10e-6, dz_m=10e-6, locator=locator)
         pos = get_position(locator)
-        print(f"Position after move: x={pos['x']*1e6:.3f} um  "
-              f"y={pos['y']*1e6:.3f} um  z={pos['z']*1e6:.3f} um")
+        print(f"After  +10 um move:    "
+              f"x={pos['x'] * 1e6:+10.3f} um  "
+              f"y={pos['y'] * 1e6:+10.3f} um  "
+              f"z={pos['z'] * 1e6:+10.3f} um")
     except RuntimeError as e:
-        print(f"\nERROR during move:\n{e}")
+        print(f"\nERROR during forward move:\n{e}")
         raise SystemExit(1)
+
+    # --- 6. Move -10 um backward to return to start ------------------------
+    print("\nStep 2: Moving -10 um (backward) on X, Y, Z ...")
+    try:
+        move_relative(dx_m=-10e-6, dy_m=-10e-6, dz_m=-10e-6, locator=locator)
+        pos = get_position(locator)
+        print(f"After  -10 um move:    "
+              f"x={pos['x'] * 1e6:+10.3f} um  "
+              f"y={pos['y'] * 1e6:+10.3f} um  "
+              f"z={pos['z'] * 1e6:+10.3f} um")
+    except RuntimeError as e:
+        print(f"\nERROR during backward move:\n{e}")
+        raise SystemExit(1)
+
+    print("\nDone. Stage returned to original position.")

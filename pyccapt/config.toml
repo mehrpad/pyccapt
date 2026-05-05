@@ -86,3 +86,49 @@ COM_PORT_gauge_ll = "COM1"
 COM_PORT_gauge_cll = "COM8"
 COM_PORT_signal_generator = "USB0::0xF4EC::0x1101::SDG6XBAD2R0601::INSTR"
 COM_PORT_thorlab_motor = "27261754"
+
+# SmarAct MCS2 stage controllers (locator string passed to ctl.Open).
+# Use "network:sn:<serial>" for an Ethernet controller, or the value returned
+# by ctl.FindDevices() for USB.  These two devices are addressed independently
+# and MUST be different physical controllers:
+#   * stage_smartact_main   -> sample / specimen stage (Stage Control window)
+#   * stage_smartact_laser  -> laser focusing stage (Laser Control window)
+# Set either one to "" (empty string) to disable that GUI's stage section
+# without showing any error - useful when only one MCS2 is plugged in.
+stage_smartact_main = "network:sn:MCS2-00017939"
+stage_smartact_laser = "network:sn:MCS2-00017944"
+
+# Default "home" position for the Home button on the stage / laser GUIs.
+# Values are in millimetres.  The Home button moves all three axes to these
+# coordinates after referencing has run (or immediately if the controller
+# already knows its reference).
+stage_home_x_mm = 0.0
+stage_home_y_mm = 0.0
+stage_home_z_mm = 0.0
+laser_stage_home_x_mm = 0.0
+laser_stage_home_y_mm = 0.0
+laser_stage_home_z_mm = 0.0
+
+# Speed slider range for both GUIs.  Mirrors the "Simple Mode" levels shown on
+# the SmarAct MCS2 hand-control display (1 = slowest, 11 = fastest).  Each
+# level is mapped to an actual MOVE_VELOCITY by stage_smartact_speed_mm_s
+# below (level^2 * factor in mm/s, capped at the max).
+stage_speed_level_min = 1
+stage_speed_level_max = 11
+stage_speed_level_default = 5
+# Velocity (mm/s) corresponding to slider level 11.  Only used when
+# stage_speed_table_mm_s below is empty.  Lower levels are then scaled
+# quadratically so the slider feels exponential-ish.
+stage_speed_max_mm_s = 1.0
+# Per-level velocity table (mm/s), one entry per slider level.  When set,
+# this takes precedence over stage_speed_max_mm_s and lets you make the
+# GUI levels match the MCS2 hand-control display exactly: step the
+# controller through Simple Mode levels 1..11, read off the velocity each
+# one shows, and put the values here in order.  Default below is a clean
+# power-of-2 table from 1 µm/s to ~1 mm/s, safe for atom-probe positioning.
+stage_speed_table_mm_s = [0.001, 0.002, 0.004, 0.008, 0.016, 0.032, 0.064, 0.128, 0.256, 0.512, 1.024]
+# Effective "joystick deflection time" (seconds): the per-click jog distance
+# is computed as velocity * this value, so faster slider settings produce
+# proportionally larger jogs - just like the MCS2 hand-control where only
+# speed is set and the distance follows from how long the knob is deflected.
+stage_click_duration_s = 0.2

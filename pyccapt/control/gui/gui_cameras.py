@@ -692,21 +692,23 @@ class CamerasAlignmentWindow(QtWidgets.QWidget):
 		self.gui_cameras_alignment = gui_cameras_alignment
 		self.camera_win_front = camera_win_front
 		self.close_event = close_event
-		self.show()
-		self.showMinimized()
+		# Start hidden - check_if_should() below brings the window up the
+		# first time the main GUI sets flag_camera_win_show.  Calling show()
+		# + showMinimized() here would leave a leftover minimised stub in
+		# the taskbar before the user has ever asked to see the window.
 		self.timer = QtCore.QTimer(self)
 		self.timer.timeout.connect(self.check_if_should)
 		self.timer.start(500)  # Check every 1000 milliseconds (1 second)
 
 	def closeEvent(self, event):
 		"""
-		Not close only hide the window
-
-		Args:
-				event: The close event.
+		Don't actually close - hide the window so the subprocess stays alive
+		and the next "open" from the main GUI is instant.  Using hide()
+		(not showMinimized) avoids leaving a leftover minimised stub in the
+		taskbar / desktop.
 		"""
 		event.ignore()
-		self.showMinimized()
+		self.hide()
 		self.close_event.set()
 
 	def check_if_should(self):
@@ -730,6 +732,9 @@ def run_camera_window(variables, conf, camera_closed_event, camera_win_front):
 	"""
 	app = QtWidgets.QApplication(sys.argv)  # <-- Create a new QApplication instance
 	app.setStyle('Fusion')
+	# The window starts hidden and only appears when the main GUI signals -
+	# don't let Qt quit the subprocess just because no window is visible.
+	app.setQuitOnLastWindowClosed(False)
 	SignalEmitter_Cameras = SignalEmitter()
 
 	gui_cameras_alignment = Ui_Cameras_Alignment(variables, conf, SignalEmitter_Cameras)

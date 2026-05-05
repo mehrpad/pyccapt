@@ -1,6 +1,4 @@
-﻿import multiprocessing
-import os
-import sys
+﻿import sys
 import time
 
 import numpy as np
@@ -1145,24 +1143,23 @@ class VisualizationWindow(QtWidgets.QWidget):
 		self.variables = variables
 		self.visualization_win_front = visualization_win_front
 		self.visualization_close_event = visualization_close_event
-		self.show()
-		self.showMinimized()
+		# Start hidden - check_if_should() below brings the window up the
+		# first time the main GUI sets flag_visualization_win_show.  Calling
+		# show() + showMinimized() here would leave a leftover minimised
+		# stub in the taskbar before the user has ever asked to see the window.
 		self.timer = QtCore.QTimer(self)
 		self.timer.timeout.connect(self.check_if_should)
 		self.timer.start(500)  # Check every 1000 milliseconds (1 second)
 
 	def closeEvent(self, event):
 		"""
-        Close event for the window.
-
-        Args:
-            event: Close event.
-
-        Return:
-            None
-        """
+		Don't actually close - hide the window so the subprocess stays alive
+		and the next "open" from the main GUI is instant.  Using hide()
+		(not showMinimized) avoids leaving a leftover minimised stub in the
+		taskbar / desktop.
+		"""
 		event.ignore()
-		self.showMinimized()
+		self.hide()
 		self.visualization_close_event.set()
 
 	def check_if_should(self):
@@ -1209,6 +1206,9 @@ def run_visualization_window(variables, conf, visualization_closed_event, visual
     """
 	app = QtWidgets.QApplication(sys.argv)  # <-- Create a new QApplication instance
 	app.setStyle('Fusion')
+	# The window starts hidden and only appears when the main GUI signals -
+	# don't let Qt quit the subprocess just because no window is visible.
+	app.setQuitOnLastWindowClosed(False)
 
 	gui_visualization = Ui_Visualization(variables, conf, x_plot, y_plot, t_plot, main_v_dc_plot)
 	Cameras_alignment = VisualizationWindow(variables, gui_visualization, visualization_closed_event,

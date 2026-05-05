@@ -140,9 +140,34 @@ def initialize_cryovac(com_port_cryovac, variables):
     Returns:
         None
     """
-    output = command_cryovac('getOutput', com_port_cryovac)
-    time.sleep(0.1)
-    variables.temperature = float(output.split()[0].replace(',', ''))
+    # The TIC 500 firmware can fault on screen with "A system crash occurred /
+    # Diagnostic code: bpt0" if the first command we send arrives concatenated
+    # with stale bytes left in its macro parser (e.g. a partial line from a
+    # previous session, or line transitions caused by the host opening the
+    # port). Drain both directions, send a bare line terminator so any
+    # in-flight half-line is flushed as an empty macro, then drain again
+    # before issuing the real query.
+    time.sleep(0.2)
+    try:
+	    com_port_cryovac.reset_input_buffer()
+	    com_port_cryovac.reset_output_buffer()
+	    com_port_cryovac.write(b'\r\n')
+	    time.sleep(0.15)
+	    com_port_cryovac.reset_input_buffer()
+    except Exception:
+	    pass
+
+    output = ''
+    for _ in range(5):
+	    output = command_cryovac('getOutput?', com_port_cryovac)
+	    if output and output.split():
+		    break
+	    time.sleep(0.2)
+
+    try:
+	    variables.temperature = float(output.split()[0].replace(',', ''))
+    except (ValueError, IndexError):
+	    variables.temperature = -1
 
 
 def initialize_edwards_tic_load_lock(conf, variables):
@@ -294,7 +319,9 @@ def state_update(conf, variables, emitter):
                 baudrate=9600,
                 bytesize=serial.EIGHTBITS,
                 parity=serial.PARITY_NONE,
-                stopbits=serial.STOPBITS_ONE
+	            stopbits=serial.STOPBITS_ONE,
+	            timeout=0.5,
+	            write_timeout=1.0,
             )
             initialize_cryovac(com_port_cryovac, variables)
         except Exception as e:

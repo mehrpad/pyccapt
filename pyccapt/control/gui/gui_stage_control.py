@@ -1,10 +1,41 @@
 import sys
+import threading
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from pyccapt.control.core import runtime
 from pyccapt.control.gui import tooltips
 from pyccapt.control.smaract_mcs2 import mcs2_stage
+
+
+class _ReferenceWorker(QtCore.QThread):
+	"""Background worker that runs ``find_reference`` so the GUI stays
+	responsive (and the STOP button still works) during the search."""
+
+	finished_with_error = QtCore.pyqtSignal(str)
+	finished_ok = QtCore.pyqtSignal()
+
+	def __init__(self, stage_device, cancel_event, referencing_options,
+	             timeout_s, velocity_m_s):
+		super().__init__()
+		self.stage_device = stage_device
+		self.cancel_event = cancel_event
+		self.referencing_options = referencing_options
+		self.timeout_s = timeout_s
+		self.velocity_m_s = velocity_m_s
+
+	def run(self):
+		try:
+			self.stage_device.find_reference(
+				timeout_s=self.timeout_s,
+				cancel_event=self.cancel_event,
+				referencing_options=self.referencing_options,
+				velocity_m_s=self.velocity_m_s,
+			)
+		except mcs2_stage.SmarActStageError as exc:
+			self.finished_with_error.emit(str(exc))
+			return
+		self.finished_ok.emit()
 
 
 def _make_lcd(parent):
@@ -44,6 +75,13 @@ class Ui_Stage_Control(object):
 		self._poll_timer = None
 		self._connect_error = ""  # original cause - kept across button clicks
 		self.flag_super_user = False  # Reference is gated behind Override Access
+		self._reference_worker = None
+		self._reference_cancel = None
+		# Polling-error dedup: don't spam the GUI with the same message
+		# every 500 ms - remember the last error string and only re-show
+		# it when it changes.
+		self._last_position_error = ""
+		self._consecutive_position_errors = 0
 
 		self._speed_max_mm_s = float(self.conf.get('stage_speed_max_mm_s', 1.0))
 		self._speed_max_level = int(self.conf.get('stage_speed_level_max', 11))
@@ -57,6 +95,15 @@ class Ui_Stage_Control(object):
 			float(self.conf.get('stage_home_z_mm', 0.0)) * 1e-3,
 		)
 		self._locator = self.conf.get('stage_smartact_main', '')
+		self._referencing_options = int(self.conf.get(
+			'stage_referencing_options',
+			mcs2_stage.SmarActStage.REFERENCING_OPTIONS_DEFAULT))
+		self._reference_timeout_s = float(self.conf.get(
+			'stage_reference_timeout_s', 120))
+		self._reference_velocity_m_s = float(self.conf.get(
+			'stage_reference_velocity_mm_s', 5.0)) * 1e-3
+		self._home_velocity_m_s = float(self.conf.get(
+			'stage_home_velocity_mm_s', 1.0)) * 1e-3
 
 	# ------------------------------------------------------------------- ui
 
@@ -377,11 +424,14 @@ class Ui_Stage_Control(object):
 			self._set_error(self._connect_error or "Stage not connected.")
 			return
 		x_m, y_m, z_m = self._home_target_m
-		# Use the X-axis slider as the global home velocity (tunable).
+		# Home uses a dedicated velocity (stage_home_velocity_mm_s in
+		# config.toml) instead of whatever per-axis slider happens to be
+		# set right now - otherwise a Home click with the X slider at
+		# level 1 (a few um/s) takes minutes to complete.
 		try:
 			self.stage_device.move_absolute(
 				x_m=x_m, y_m=y_m, z_m=z_m,
-				velocity_m_s=self._axis_velocity_m_s(mcs2_stage.AXIS_X),
+				velocity_m_s=self._home_velocity_m_s,
 				wait=False,
 			)
 		except mcs2_stage.SmarActStageError as exc:
@@ -391,12 +441,109 @@ class Ui_Stage_Control(object):
 		if self.stage_device is None:
 			self._set_error(self._connect_error or "Stage not connected.")
 			return
-		try:
-			self.stage_device.find_reference()
-		except mcs2_stage.SmarActStageError as exc:
-			self._set_error(f"Reference search failed: {exc}")
+		# Already running -> ignore the second click rather than start a
+		# parallel reference (which the controller would refuse anyway).
+		if self._reference_worker is not None and self._reference_worker.isRunning():
+			self._set_error("Reference already in progress.")
+			return
+
+		# Hard safety gate. Referencing drives every axis to its physical
+		# end-stop sensor. If a specimen is mounted, the motion will crash the
+		# tip into surrounding hardware and the specimen is destroyed. We
+		# show a Critical (red) confirmation dialog and require an explicit
+		# "Yes". Default button is No so an accidental Enter/Space does NOT
+		# proceed.
+		if not self._confirm_reference_no_sample():
+			self._set_error("Reference canceled - confirm there is no specimen on the stage.")
+			return
+
+		self._reference_cancel = threading.Event()
+		self._reference_worker = _ReferenceWorker(
+			self.stage_device, self._reference_cancel,
+			self._referencing_options, self._reference_timeout_s,
+			self._reference_velocity_m_s,
+		)
+		self._reference_worker.finished_ok.connect(self._on_reference_done)
+		self._reference_worker.finished_with_error.connect(self._on_reference_failed)
+		# Lock the movement controls for the duration of the search - the
+		# controller will refuse jogs while channels are busy and the
+		# resulting error spam isn't useful.  STOP stays enabled so the
+		# user can always abort.
+		self._set_jog_enabled(False)
+		self.stage_reference.setEnabled(False)
+		self._set_error("Referencing - keep the path clear; press STOP to abort.")
+		self._reference_worker.start()
+
+	def _confirm_reference_no_sample(self):
+		"""Show a red Critical-icon dialog confirming the stage is empty.
+
+		Returns True only if the user explicitly clicks Yes. Anything else
+		(No, dialog closed, Esc) returns False.
+		"""
+		warning = QtWidgets.QMessageBox(parent=self.stage_reference)
+		warning.setIcon(QtWidgets.QMessageBox.Icon.Critical)
+		warning.setWindowTitle("Stage Reference - specimen must be removed")
+		warning.setTextFormat(QtCore.Qt.TextFormat.RichText)
+		warning.setText(
+			'<p style="color:#c00000; font-weight:bold; font-size:14px;">'
+			'WARNING: there must be NO SPECIMEN on the stage before referencing.'
+			'</p>'
+		)
+		warning.setInformativeText(
+			'Referencing drives every axis to its physical end-stop sensor. '
+			'If a specimen is mounted it will be crashed into the surrounding '
+			'hardware and destroyed.'
+			'<br/><br/>'
+			'<b>Confirm:</b>'
+			'<ul>'
+			'<li>The specimen / tip has been removed from the stage.</li>'
+			'<li>The path of every axis is clear.</li>'
+			'</ul>'
+			'Press <b>Yes</b> only when both are true.'
+		)
+		# Style the dialog text area red so the warning is unmissable.
+		warning.setStyleSheet(
+			"QLabel{color:#c00000;}"
+			"QMessageBox{background-color:#fff5f5;}"
+		)
+		warning.setStandardButtons(
+			QtWidgets.QMessageBox.StandardButton.Yes
+			| QtWidgets.QMessageBox.StandardButton.No
+		)
+		warning.setDefaultButton(QtWidgets.QMessageBox.StandardButton.No)
+		warning.setEscapeButton(QtWidgets.QMessageBox.StandardButton.No)
+		return warning.exec() == QtWidgets.QMessageBox.StandardButton.Yes
+
+	def _on_reference_done(self):
+		self._reference_worker = None
+		self._reference_cancel = None
+		self._set_jog_enabled(True)
+		self.stage_reference.setEnabled(self.flag_super_user and self.stage_device is not None)
+		# A fresh reference clears any "no sensor" condition, so reset
+		# the dedup state too.
+		self._last_position_error = ""
+		self._consecutive_position_errors = 0
+		self._set_error("Reference complete.")
+
+	def _on_reference_failed(self, message):
+		self._reference_worker = None
+		self._reference_cancel = None
+		self._set_jog_enabled(True)
+		self.stage_reference.setEnabled(self.flag_super_user and self.stage_device is not None)
+		self._set_error(f"Reference failed: {message}")
+
+	def _set_jog_enabled(self, enabled):
+		"""Enable/disable jog + Home for the duration of a reference run."""
+		for btn in (self.stage_up, self.stage_down, self.stage_left,
+		            self.stage_right, self.stage_forward, self.stage_backward,
+		            self.stage_home):
+			btn.setEnabled(enabled and self.stage_device is not None)
 
 	def _stop_stage(self):
+		# Abort an in-flight reference search FIRST, then stop the axes.
+		# This is the only call path that can interrupt referencing.
+		if self._reference_cancel is not None:
+			self._reference_cancel.set()
 		if self.stage_device is None:
 			return
 		self.stage_device.stop()
@@ -407,8 +554,27 @@ class Ui_Stage_Control(object):
 		try:
 			pos = self.stage_device.get_position()
 		except mcs2_stage.SmarActStageError as exc:
-			self._set_error(f"Position read failed: {exc}")
+			# Same error repeating every poll? Show it once then go quiet
+			# until the condition clears, otherwise the user's screen
+			# fills with identical red text.  After 4 repeats we also
+			# slow the timer down so we stop hammering the controller.
+			text = str(exc)
+			if text != self._last_position_error:
+				self._last_position_error = text
+				self._consecutive_position_errors = 1
+				self._set_error(f"Position read failed: {text}")
+			else:
+				self._consecutive_position_errors += 1
+				if self._consecutive_position_errors == 4 and self._poll_timer is not None:
+					self._poll_timer.setInterval(5000)
 			return
+		# Successful read - clear dedup state and restore fast polling.
+		if self._consecutive_position_errors:
+			self._last_position_error = ""
+			self._consecutive_position_errors = 0
+			if self._poll_timer is not None:
+				self._poll_timer.setInterval(500)
+			self._set_error("")
 		self._set_axis_display(pos['x'], self.stage_x_mm, self.stage_x_um, self.stage_x_nm,
 		                       self.stage_x_cord)
 		self._set_axis_display(pos['y'], self.stage_y_mm, self.stage_y_um, self.stage_y_nm,
@@ -433,10 +599,31 @@ class Ui_Stage_Control(object):
 		)
 
 	def stop(self):
+		# Cancel any in-flight Reference search BEFORE we touch
+		# ctl.Close - the SmarAct SDK is not thread-safe and a Close
+		# that lands while the worker is mid-GetProperty can deadlock
+		# the GUI thread indefinitely.
+		if self._reference_cancel is not None:
+			try:
+				self._reference_cancel.set()
+			except Exception:
+				pass
+		if self._reference_worker is not None:
+			try:
+				self._reference_worker.wait(1000)
+			except Exception:
+				pass
 		if self._poll_timer is not None:
 			self._poll_timer.stop()
 		if self.stage_device is not None:
-			self.stage_device.close()
+			try:
+				self.stage_device.stop()  # send Stop on every channel first
+			except Exception:
+				pass
+			try:
+				self.stage_device.close()
+			except Exception:
+				pass
 			self.stage_device = None
 
 

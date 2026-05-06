@@ -180,6 +180,20 @@ def send_info_email(log_apt, variables):
 	additional_info += 'Counter source: {}\n'.format(variables.counter_source)
 	additional_info += 'Pulse Fraction (%): {}\n'.format(variables.pulse_fraction)
 	additional_info += 'Pulse Frequency (kHz): {}\n'.format(variables.pulse_frequency)
+	# variables.laser_freq is the BASE rep-rate in Hz; the OUTPUT rate at
+	# the sample is base / division. Show both in kHz so the recipient does
+	# not need to do the conversion.
+	try:
+		_base_khz = float(variables.laser_freq or 0) / 1000.0
+		_div = max(int(getattr(variables, 'laser_division_factor', 1) or 1), 1)
+		_output_khz = _base_khz / _div
+		additional_info += 'Laser base pulse frequency (kHz): {:.3f}\n'.format(_base_khz)
+		additional_info += 'Laser division factor: {}\n'.format(_div)
+		additional_info += 'Laser output pulse frequency (kHz): {:.3f}\n'.format(_output_khz)
+		_pulse_nJ = float(getattr(variables, 'laser_pulse_energy', 0) or 0)
+		additional_info += 'Laser pulse energy (nJ): {:.3f}\n'.format(_pulse_nJ)
+	except (TypeError, ValueError):
+		pass
 	additional_info += 'Control Algorithm: {}\n'.format(variables.control_algorithm)
 	additional_info += 'pulse_mode: {}\n'.format(variables.pulse_mode)
 	additional_info += 'Experiment Control Refresh freq. (Hz): {}\n'.format(variables.ex_freq)
@@ -214,5 +228,12 @@ def send_info_email(log_apt, variables):
 	additional_info += 'The experiment was conducted using PyCCAPT Python package.'
 
 	message += additional_info
-	email_send.send_email(variables.email, subject, message)
-	log_apt.info('Email is sent')
+	# Pass variables through so the email module can attach apt.log and
+	# parameters.txt from this experiment's folder. Any failure (missing
+	# credentials, SMTP error, attachment IO error) raises and is caught
+	# by the caller's try/except in apt_exp_control.run_experiment.
+	attached = email_send.send_email(variables.email, subject, message, variables=variables)
+	if attached:
+		log_apt.info('Email is sent (attachments: %s)', ', '.join(attached))
+	else:
+		log_apt.info('Email is sent (no attachments)')

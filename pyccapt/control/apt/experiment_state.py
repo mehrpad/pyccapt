@@ -8,7 +8,6 @@ from typing import Any
 
 from pyccapt.control.core import runtime
 
-
 _CLEAR_LIST_FIELDS = (
     "x",
     "y",
@@ -197,15 +196,16 @@ def reset_runtime_variables(
     variables.specimen_voltage_plot = 0
     variables.pulse_voltage = 0
 
-    while not x_plot.empty() or not y_plot.empty() or not t_plot.empty() or not main_v_dc_plot.empty():
-        if not x_plot.empty():
-            x_plot.get()
-        if not y_plot.empty():
-            y_plot.get()
-        if not t_plot.empty():
-            t_plot.get()
-        if not main_v_dc_plot.empty():
-            main_v_dc_plot.get()
+    # Plot pipes are now SharedRingBuffer instances - reset their indices
+    # in one O(1) call instead of draining sample-by-sample.
+    for buf in (x_plot, y_plot, t_plot, main_v_dc_plot):
+	    try:
+		    buf.reset()
+	    except AttributeError:
+		    # Backwards-compat: if a queue-style object is still passed,
+		    # drain it the old way.
+		    while not buf.empty():
+			    buf.get()
 
     for field in _CLEAR_LIST_FIELDS:
         variables.clear_to(field)

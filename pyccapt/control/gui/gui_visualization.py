@@ -263,13 +263,75 @@ class Ui_Visualization(object):
 		                                 "                                        ")
 		self.hit_displayed.setObjectName("hit_displayed")
 		self.horizontalLayout_2.addWidget(self.hit_displayed)
+		# Hitmap and FDM are now SEPARATE panels (see gridLayout_3b
+		# below).  The old heatmap_fdm_switch toggle is no longer
+		# needed; we keep a hidden stub so any external code that
+		# still references the attribute doesn't crash.
 		self.heatmap_fdm_switch = QtWidgets.QPushButton(parent=Visualization)
-		self.heatmap_fdm_switch.setMinimumSize(QtCore.QSize(100, 20))
-		self.heatmap_fdm_switch.setMaximumSize(QtCore.QSize(60, 16777215))
-		self.heatmap_fdm_switch.setObjectName("heatmap_fdm_switch")
-		self.horizontalLayout_2.addWidget(self.heatmap_fdm_switch)
+		self.heatmap_fdm_switch.setVisible(False)
 		self.gridLayout_3.addLayout(self.horizontalLayout_2, 2, 0, 1, 3)
 		self.gridLayout_5.addLayout(self.gridLayout_3, 0, 2, 1, 1)
+
+		# ------------------------------------------------------------------
+		# FDM-only panel - mirrors the hitmap panel above but always shows
+		# the field-desorption map.  Header has the live ion-count used in
+		# the current FDM; bottom field is the max ion count that will be
+		# accumulated before the histogram resets and starts over.
+		# ------------------------------------------------------------------
+		self.gridLayout_3b = QtWidgets.QGridLayout()
+		self.gridLayout_3b.setObjectName("gridLayout_3b")
+		self.label_fdm_header = QtWidgets.QLabel(parent=Visualization)
+		font = QtGui.QFont();
+		font.setBold(True)
+		self.label_fdm_header.setFont(font)
+		self.label_fdm_header.setText("FDM")
+		self.gridLayout_3b.addWidget(self.label_fdm_header, 0, 0, 1, 1)
+		self.fdm_count = QtWidgets.QLineEdit(parent=Visualization)
+		sp = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Minimum)
+		self.fdm_count.setSizePolicy(sp)
+		self.fdm_count.setMinimumSize(QtCore.QSize(100, 20))
+		self.fdm_count.setStyleSheet("QLineEdit{background: rgb(223,223,233)}")
+		self.fdm_count.setReadOnly(True)
+		self.fdm_count.setText("0")
+		self.fdm_count.setObjectName("fdm_count")
+		self.gridLayout_3b.addWidget(self.fdm_count, 0, 1, 1, 1)
+		self.gridLayout_3b.addItem(QtWidgets.QSpacerItem(40, 20,
+		                                                 QtWidgets.QSizePolicy.Policy.Expanding,
+		                                                 QtWidgets.QSizePolicy.Policy.Minimum), 0, 2, 1, 1)
+
+		self.detector_fdm = pg.PlotWidget(parent=Visualization)
+		self.detector_fdm.setBackground('w')
+		sp = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+		                           QtWidgets.QSizePolicy.Policy.Expanding)
+		sp.setHorizontalStretch(1);
+		sp.setVerticalStretch(1)
+		self.detector_fdm.setSizePolicy(sp)
+		self.detector_fdm.setMinimumSize(QtCore.QSize(250, 250))
+		self.detector_fdm.setStyleSheet("QWidget{border: 0.5px solid gray;}")
+		self.detector_fdm.setObjectName("detector_fdm")
+		self.gridLayout_3b.addWidget(self.detector_fdm, 1, 0, 1, 3)
+
+		# Bottom row: [Last Events toggle] [N input]
+		# When the toggle is OFF (default), the FDM accumulates ions
+		# forever and the N field is ignored.  When ON, only the last N
+		# ions are used to build the FDM (sliding window).
+		self.fdm_bottom_row = QtWidgets.QHBoxLayout()
+		self.fdm_last_events_switch = QtWidgets.QPushButton(parent=Visualization)
+		self.fdm_last_events_switch.setMinimumSize(QtCore.QSize(0, 20))
+		self.fdm_last_events_switch.setMaximumSize(QtCore.QSize(120, 16777215))
+		self.fdm_last_events_switch.setText("Last Events")
+		self.fdm_last_events_switch.setCheckable(True)
+		self.fdm_last_events_switch.setObjectName("fdm_last_events_switch")
+		self.fdm_bottom_row.addWidget(self.fdm_last_events_switch)
+		self.fdm_max_ions = QtWidgets.QLineEdit(parent=Visualization)
+		self.fdm_max_ions.setMinimumSize(QtCore.QSize(100, 20))
+		self.fdm_max_ions.setStyleSheet("QLineEdit{background: rgb(223,223,233)}")
+		self.fdm_max_ions.setText("1000000")
+		self.fdm_max_ions.setObjectName("fdm_max_ions")
+		self.fdm_bottom_row.addWidget(self.fdm_max_ions)
+		self.gridLayout_3b.addLayout(self.fdm_bottom_row, 2, 0, 1, 3)
+
+		self.gridLayout_5.addLayout(self.gridLayout_3b, 0, 3, 1, 1)
 		self.gridLayout_2 = QtWidgets.QGridLayout()
 		self.gridLayout_2.setObjectName("gridLayout_2")
 		self.label_207 = QtWidgets.QLabel(parent=Visualization)
@@ -379,7 +441,7 @@ class Ui_Visualization(object):
 		self.Error.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.LinksAccessibleByMouse)
 		self.Error.setObjectName("Error")
 		self.gridLayout_2.addWidget(self.Error, 3, 0, 1, 1)
-		self.gridLayout_5.addLayout(self.gridLayout_2, 1, 0, 1, 3)
+		self.gridLayout_5.addLayout(self.gridLayout_2, 1, 0, 1, 4)
 		self.gridLayout_6.addLayout(self.gridLayout_5, 0, 0, 1, 1)
 
 		self.retranslateUi(Visualization)
@@ -392,8 +454,9 @@ class Ui_Visualization(object):
 		Visualization.setTabOrder(self.detection_rate_range_switch, self.reset_heatmap_v)
 		Visualization.setTabOrder(self.reset_heatmap_v, self.hitmap_plot_size)
 		Visualization.setTabOrder(self.hitmap_plot_size, self.hit_displayed)
-		Visualization.setTabOrder(self.hit_displayed, self.heatmap_fdm_switch)
-		Visualization.setTabOrder(self.heatmap_fdm_switch, self.spectrum_switch)
+		Visualization.setTabOrder(self.hit_displayed, self.fdm_last_events_switch)
+		Visualization.setTabOrder(self.fdm_last_events_switch, self.fdm_max_ions)
+		Visualization.setTabOrder(self.fdm_max_ions, self.spectrum_switch)
 		Visualization.setTabOrder(self.spectrum_switch, self.spectrum_last_events_switch)
 		Visualization.setTabOrder(self.spectrum_last_events_switch, self.num_last_events)
 		Visualization.setTabOrder(self.num_last_events, self.max_mc)
@@ -451,6 +514,26 @@ class Ui_Visualization(object):
 		self.detector_heatmap.setLabel("left", "X_det", units='mm', **self.styles)
 		self.detector_heatmap.setLabel("bottom", "Y_det", units='mm', **self.styles)
 
+		# FDM panel - one detector circle per plot (Qt items can't be
+		# shared between two PlotWidgets) plus matching axis labels.
+		self.detector_circle_fdm = QtWidgets.QGraphicsEllipseItem(-40, -40, 80, 80)
+		self.detector_circle_fdm.setPen(pg.mkPen(color=(255, 0, 0), width=2))
+		self.detector_fdm.addItem(self.detector_circle_fdm)
+		self.detector_fdm.setLabel("left", "X_det", units='mm', **self.styles)
+		self.detector_fdm.setLabel("bottom", "Y_det", units='mm', **self.styles)
+		self.detector_fdm.getViewBox().setAspectLocked(True)
+		# Per-FDM ion counter - resets when fdm_max_ions is exceeded
+		# (only relevant when the Last-Events toggle is OFF).
+		self._fdm_event_count = 0
+		# Last-Events mode state.  When the toggle is on, the FDM is
+		# rebuilt every tick from a sliding window of the most recent
+		# fdm_max_ions (x, y) hits stored in these two arrays.
+		self._fdm_use_last_events = False
+		self._fdm_window_x = np.array([], dtype=np.float32)
+		self._fdm_window_y = np.array([], dtype=np.float32)
+		self._original_fdm_button_style = self.fdm_last_events_switch.styleSheet()
+		self.fdm_last_events_switch.clicked.connect(self._fdm_last_events_toggle)
+
 		# Histogram #########################
 		# Add Axis Labels
 		self.histogram.plotItem.setMouseEnabled(y=False)  # Only allow zoom in X-axis
@@ -476,7 +559,8 @@ class Ui_Visualization(object):
 
 		self.num_event_mc_tof = int(self.num_last_events.text())
 
-		self.heatmap_fdm_switch.clicked.connect(self.heatmap_fdm_switch_change)
+		# heatmap_fdm_switch is now hidden - hitmap and FDM are always
+		# rendered side-by-side in their own panels, no toggle needed.
 
 		self.num_event_mc_tof = int(self.num_last_events.text())
 		self.max_mc_val = int(self.max_mc.text())
@@ -524,6 +608,8 @@ class Ui_Visualization(object):
 		self.hitmap_count.setText(_translate("Visualization", "0"))
 		self.reset_heatmap_v.setText(_translate("Visualization", "Reset"))
 		self.hit_displayed.setText(_translate("Visualization", "2000"))
+		# heatmap_fdm_switch is hidden but we still set its text in case
+		# any external code reads it.
 		self.heatmap_fdm_switch.setText(_translate("Visualization", "Hitmap/FDM"))
 		self.label_207.setText(_translate("Visualization", "Spectrum"))
 		self.spectrum_switch.setText(_translate("Visualization", "mc/tof"))
@@ -556,19 +642,43 @@ class Ui_Visualization(object):
 				self.dc_hold.setStyleSheet(self.original_button_style)
 
 	def heatmap_fdm_switch_change(self):
+		"""No-op kept for backward compatibility.
+
+		Hitmap and FDM are now rendered side-by-side in their own
+		panels (detector_heatmap + detector_fdm) every refresh - there
+		is no longer anything to toggle.  Any external code that still
+		clicks the (now-hidden) heatmap_fdm_switch button just lands
+		here harmlessly.
 		"""
-        Change the heatmap type
-        Args:
-            None
+		return
 
-        Return:
-            None
-        """
-		if self.heatmap_fdm_switch_flag == 'heatmap':
-			self.heatmap_fdm_switch_flag = 'fdm'
+	def _fdm_last_events_toggle(self):
+		"""Switch the FDM between accumulate-all and sliding-window modes.
 
-		elif self.heatmap_fdm_switch_flag == 'fdm':
-			self.heatmap_fdm_switch_flag = 'heatmap'
+		Default (button up) - the FDM histogram accumulates every ion
+		for the lifetime of the experiment.  The fdm_max_ions field
+		below is ignored.
+
+		Toggled on (button green) - the FDM is rebuilt every refresh
+		from a sliding window of the most recent fdm_max_ions hits.
+		Switching modes resets the window so the next render starts
+		from a clean slate.
+		"""
+		self._fdm_use_last_events = self.fdm_last_events_switch.isChecked()
+		if self._fdm_use_last_events:
+			self.fdm_last_events_switch.setStyleSheet(
+				"QPushButton{background: rgb(0, 255, 26)}")
+		else:
+			self.fdm_last_events_switch.setStyleSheet(
+				self._original_fdm_button_style)
+		# Reset everything so the next render starts clean in the new mode.
+		self._fdm_window_x = np.array([], dtype=np.float32)
+		self._fdm_window_y = np.array([], dtype=np.float32)
+		self.hist_fdm[:] = 0.0
+		self._fdm_event_count = 0
+		self.fdm_count.setText("0")
+		self.detector_fdm.clear()
+		self.detector_fdm.addItem(self.detector_circle_fdm)
 
 	def reset_heatmap(self):
 		"""
@@ -683,21 +793,26 @@ class Ui_Visualization(object):
 		if self.counter_source == 'TDC' and self.variables.total_ions > 0 and \
 				self.index_wait_on_plot_start > 16:
 
-			xx = np.array([])
-			yy = np.array([])
-			tt = np.array([])
-			main_v_dc_dld = np.array([])
-
-			while not self.x_plot.empty() and not self.y_plot.empty() and not self.t_plot.empty() and \
-					not self.main_v_dc_plot.empty():
-				data = self.x_plot.get()
-				xx = np.append(xx, data)
-				data = self.y_plot.get()
-				yy = np.append(yy, data)
-				data = self.t_plot.get()
-				tt = np.append(tt, data)
-				data = self.main_v_dc_plot.get()
-				main_v_dc_dld = np.append(main_v_dc_dld, data)
+			# Drain all four ring buffers in one shot (zero-copy NumPy
+			# slices, no IPC).  Each call returns every sample produced
+			# since the last call and trims the four arrays to the
+			# minimum length so they remain aligned per-ion if one buffer
+			# happens to lag the others by a tick.
+			xx = self.x_plot.read_all()
+			yy = self.y_plot.read_all()
+			tt = self.t_plot.read_all()
+			main_v_dc_dld = self.main_v_dc_plot.read_all()
+			n = min(len(xx), len(yy), len(tt), len(main_v_dc_dld))
+			if n == 0:
+				xx = np.array([])
+				yy = np.array([])
+				tt = np.array([])
+				main_v_dc_dld = np.array([])
+			else:
+				xx = xx[:n]
+				yy = yy[:n]
+				tt = tt[:n]
+				main_v_dc_dld = main_v_dc_dld[:n]
 
 			# self.length_events += len(self.tt)
 			self.length_events += len(tt)
@@ -800,66 +915,77 @@ class Ui_Visualization(object):
 				print(
 					f"{initialize_devices.bcolors.FAIL}Error: Cannot plot Histogram correctly{initialize_devices.bcolors.ENDC}")
 				print(e)
-			# Visualization
-			# try:
-			# calculate the fdm for the current data
-			hist, xedges, yedges = np.histogram2d(xx * 10, yy * 10, bins=self.bins_detector, range=self.range)
-			self.hist_fdm += np.log10(hist + 1)  # Avoid log(0) error
-			# self.hist_fdm += hist
-			if self.heatmap_fdm_switch_flag == 'heatmap':
-				if self.variables.reset_heatmap:
-					self.variables.reset_heatmap = False
-					self.last_100_thousand_det_x_heatmap = np.array([])
-					self.last_100_thousand_det_y_heatmap = np.array([])
-				x_last_events = self.last_100_thousand_det_x_heatmap[:]
-				y_last_events = self.last_100_thousand_det_y_heatmap[:]
-				# adding points to the scatter plot
-				self.scatter.setSize(self.hitmap_plot_size.value())
+			# Hitmap and FDM are now rendered every tick into two
+			# separate panels (detector_heatmap + detector_fdm).  The
+			# heatmap_fdm_switch toggle is gone.
+			hist, xedges, yedges = np.histogram2d(
+				xx * 10, yy * 10, bins=self.bins_detector, range=self.range,
+			)
 
-				x = x_last_events * 10
-				y = y_last_events * 10
+			# --- Hitmap (left panel) -------------------------------------
+			if self.variables.reset_heatmap:
+				self.variables.reset_heatmap = False
+				self.last_100_thousand_det_x_heatmap = np.array([])
+				self.last_100_thousand_det_y_heatmap = np.array([])
+			x_last_events = self.last_100_thousand_det_x_heatmap[:]
+			y_last_events = self.last_100_thousand_det_y_heatmap[:]
+			self.scatter.setSize(self.hitmap_plot_size.value())
+			x = (x_last_events * 10)[-self.num_hit_display:]
+			y = (y_last_events * 10)[-self.num_hit_display:]
+			self.hitmap_count.setText(str(len(x)))
+			self.scatter.clear()
+			self.scatter.setData(x=x, y=y)
+			self.detector_heatmap.clear()
+			self.detector_heatmap.addItem(self.scatter)
+			self.detector_heatmap.addItem(self.detector_circle)
 
-				x = x[-self.num_hit_display:]
-				y = y[-self.num_hit_display:]
-				self.hitmap_count.setText(str(len(x)))  # number of points displayed
-				self.scatter.clear()
-				self.scatter.setData(x=x, y=y)
-				# add item to plot window
-				# adding scatter plot item to the plot window
-				self.detector_heatmap.clear()
-				self.detector_heatmap.addItem(self.scatter)
-				self.detector_heatmap.addItem(self.detector_circle)
+			# --- FDM (right panel) ---------------------------------------
+			# Two modes, switched by the Last Events toggle button:
+			#   * OFF (default): accumulate every ion into hist_fdm
+			#                    forever; fdm_count = total ions seen.
+			#   * ON           : keep a sliding window of the most recent
+			#                    fdm_max ions and rebuild hist_fdm from
+			#                    that window every refresh.
+			try:
+				fdm_max = max(1, int(float(self.fdm_max_ions.text())))
+			except (ValueError, AttributeError):
+				fdm_max = 1_000_000
+			new_events = int(np.sum(hist))
 
-			elif self.heatmap_fdm_switch_flag == 'fdm':
-				# plot fdm which is 2d hsogram of det_x and det_y
-				# Create a 2D histogram
-				if self.mc_tof_last_events_flag:
-					x_last_events = self.last_100_thousand_det_x_heatmap[-self.num_event_mc_tof:]
-					y_last_events = self.last_100_thousand_det_y_heatmap[-self.num_event_mc_tof:]
-					hist_fdm_last_events, xedges, yedges = np.histogram2d(x_last_events * 10, y_last_events * 10,
-					                                                      bins=self.bins_detector, range=self.range)
-					hist_fdm_last_events = np.log10(hist_fdm_last_events + 1)
-				if self.mc_tof_last_events_flag:
-					hist_fdm_tmp = np.copy(hist_fdm_last_events)
-				else:
-					hist_fdm_tmp = np.copy(self.hist_fdm)
+			if self._fdm_use_last_events:
+				# Append the new chunk's per-ion (x_mm, y_mm) into the
+				# sliding window, then trim to the last fdm_max entries.
+				self._fdm_window_x = np.concatenate(
+					(self._fdm_window_x, (xx * 10).astype(np.float32))
+				)[-fdm_max:]
+				self._fdm_window_y = np.concatenate(
+					(self._fdm_window_y, (yy * 10).astype(np.float32))
+				)[-fdm_max:]
+				win_hist, _, _ = np.histogram2d(
+					self._fdm_window_x, self._fdm_window_y,
+					bins=self.bins_detector, range=self.range,
+				)
+				self.hist_fdm = np.log10(win_hist + 1)
+				self._fdm_event_count = int(self._fdm_window_x.size)
+			else:
+				# Plain accumulate-forever path.
+				self.hist_fdm += np.log10(hist + 1)
+				self._fdm_event_count += new_events
 
-				img = pg.ImageItem()
-				img.setImage(hist_fdm_tmp)  # Transpose if needed because pg.ImageItem assumes (row, col) format
-				# set the length of histogram
-				self.hitmap_count.setText(str(self.length_events))  # number of points displayed
-				img.setRect(QtCore.QRectF(xedges[0], yedges[0], xedges[-1] - xedges[0], yedges[-1] - yedges[0]))
+			self.fdm_count.setText(str(self._fdm_event_count))
 
-				# Apply a color map to the histogram
-				# Load a preset color map (e.g., 'grey', 'thermal', 'flame', viridis, etc.)
-				lut = pg.colormap.get('viridis').getLookupTable(start=0.0, stop=1.0, nPts=256)
-				img.setLookupTable(lut)
-				# add item to plot window
-				# adding scatter plot item to the plot window
-				self.detector_heatmap.clear()
-				self.detector_heatmap.addItem(img)
-				# Adjust the aspect ratio to match the data aspect ratio
-				self.detector_heatmap.getViewBox().setAspectLocked(True)
+			img_fdm = pg.ImageItem()
+			img_fdm.setImage(np.copy(self.hist_fdm))
+			img_fdm.setRect(QtCore.QRectF(
+				xedges[0], yedges[0],
+				xedges[-1] - xedges[0], yedges[-1] - yedges[0],
+			))
+			lut = pg.colormap.get('viridis').getLookupTable(start=0.0, stop=1.0, nPts=256)
+			img_fdm.setLookupTable(lut)
+			self.detector_fdm.clear()
+			self.detector_fdm.addItem(img_fdm)
+			self.detector_fdm.addItem(self.detector_circle_fdm)
+			self.detector_fdm.getViewBox().setAspectLocked(True)
 
 	def update_graphs(self, ):
 		"""
@@ -892,6 +1018,14 @@ class Ui_Visualization(object):
 
 			self.detector_heatmap.clear()
 			self.detector_heatmap.addItem(self.detector_circle)
+			# Reset the FDM panel too.
+			self.detector_fdm.clear()
+			self.detector_fdm.addItem(self.detector_circle_fdm)
+			self.hist_fdm[:] = 0.0
+			self._fdm_event_count = 0
+			self._fdm_window_x = np.array([], dtype=np.float32)
+			self._fdm_window_y = np.array([], dtype=np.float32)
+			self.fdm_count.setText("0")
 			self.variables.plot_clear_flag = False
 			self.index_plot = 0
 			self.index_plot_start = 0
@@ -907,6 +1041,10 @@ class Ui_Visualization(object):
 			self.last_100_thousand_v = np.array([])
 			self.length_events = 0
 			self.hist_fdm, xedges, yedges = np.histogram2d([], [], bins=self.bins_detector, range=self.range)
+			self._fdm_event_count = 0
+			self._fdm_window_x = np.array([], dtype=np.float32)
+			self._fdm_window_y = np.array([], dtype=np.float32)
+			self.fdm_count.setText("0")
 			self.hist_mc = np.zeros(len(self.bins_mc) - 1)
 			self.hist_tof = np.zeros(len(self.bins_tof) - 1)
 
@@ -935,10 +1073,15 @@ class Ui_Visualization(object):
 				exporter.params['width'] = 1000  # Set the width of the image
 				exporter.params['height'] = 800  # Set the height of the image
 				exporter.export(self.path_meta + '/visualization_detection_rate_%s.png' % self.index_plot_save)
+				# Hitmap and FDM are now separate panels - export both.
 				exporter = pg.exporters.ImageExporter(self.detector_heatmap.plotItem)
-				exporter.params['width'] = 1000  # Set the width of the image
-				exporter.params['height'] = 800  # Set the height of the image
-				exporter.export(self.path_meta + '/visualization_detector_%s.png' % self.index_plot_save)
+				exporter.params['width'] = 1000
+				exporter.params['height'] = 800
+				exporter.export(self.path_meta + '/visualization_detector_hitmap_%s.png' % self.index_plot_save)
+				exporter = pg.exporters.ImageExporter(self.detector_fdm.plotItem)
+				exporter.params['width'] = 1000
+				exporter.params['height'] = 800
+				exporter.export(self.path_meta + '/visualization_detector_fdm_%s.png' % self.index_plot_save)
 				exporter = pg.exporters.ImageExporter(self.histogram.plotItem)
 				exporter.params['width'] = 1000  # Set the width of the image
 				exporter.params['height'] = 800  # Set the height of the image
@@ -954,8 +1097,8 @@ class Ui_Visualization(object):
 			self.path_meta = self.variables.path_meta
 			if self.variables.vdc_hold:
 				self.dc_hold.click()
-			if self.heatmap_fdm_switch_flag == 'heatmap':
-				self.heatmap_fdm_switch.click()
+			# (No more heatmap_fdm_switch click - both views are always
+			# rendered into their own panels.)
 			if self.mc_tof_last_events_flag:
 				self.spectrum_last_events_switch.click()
 			if self.change_detection_rate_range:
@@ -973,10 +1116,16 @@ class Ui_Visualization(object):
 			exporter.params['width'] = 1000  # Set the width of the image
 			exporter.params['height'] = 800  # Set the height of the image
 			exporter.export(self.path_meta + '/visualization_detection_rate_final.png')
+			# Hitmap panel
 			exporter = pg.exporters.ImageExporter(self.detector_heatmap.plotItem)
-			exporter.params['width'] = 1000  # Set the width of the image
-			exporter.params['height'] = 800  # Set the height of the image
-			exporter.export(self.path_meta + '/visualization_detector_final.png')
+			exporter.params['width'] = 1000
+			exporter.params['height'] = 800
+			exporter.export(self.path_meta + '/visualization_detector_hitmap_final.png')
+			# FDM panel
+			exporter = pg.exporters.ImageExporter(self.detector_fdm.plotItem)
+			exporter.params['width'] = 1000
+			exporter.params['height'] = 800
+			exporter.export(self.path_meta + '/visualization_detector_fdm_final.png')
 			exporter = pg.exporters.ImageExporter(self.histogram.plotItem)
 			exporter.params['width'] = 1000  # Set the width of the image
 			exporter.params['height'] = 800  # Set the height of the image
@@ -1125,33 +1274,39 @@ class VisualizationWindow(QtWidgets.QWidget):
 	closed = QtCore.pyqtSignal()  # Define a custom closed signal
 
 	def __init__(self, variables, gui_visualization, visualization_close_event,
-	             visualization_win_front, *args, **kwargs):
+	             command_queue, *args, **kwargs):
 		"""
         Constructor for the VisualizationWindow class.
 
         Args:
             variables: Shared variables.
             gui_visualization: Instance of the Visualization.
-            visualization_close_event: Event for the Visualization window closed.
-            visualization_win_front: Event for the Visualization window front.
-            *args: Additional positional arguments.
-            **kwargs: Additional keyword arguments.
-
-        Return:
-            None
+            visualization_close_event: multiprocessing.Event signalled by
+                this window when closed by the user.
+            command_queue: multiprocessing.Queue of typed string commands
+                from the main GUI ("show", "show_front", "hide").
         """
 		super().__init__(*args, **kwargs)
 		self.gui_visualization = gui_visualization
 		self.variables = variables
-		self.visualization_win_front = visualization_win_front
+		self.command_queue = command_queue
 		self.visualization_close_event = visualization_close_event
+		# Diagnostic: log the first few QTimer ticks + every command we
+		# receive to files/logs/visualization_subprocess.log so we can
+		# tell whether the timer fires and the queue is being drained.
+		self._diag_ticks_logged = 0
+		self._diag_log_path = None
+		try:
+			from pyccapt.control.core import runtime as _runtime
+			self._diag_log_path = _runtime.project_path(
+				"files", "logs", "visualization_subprocess.log")
+		except Exception:
+			pass
 		# Start hidden - check_if_should() below brings the window up the
-		# first time the main GUI sets flag_visualization_win_show.  Calling
-		# show() + showMinimized() here would leave a leftover minimised
-		# stub in the taskbar before the user has ever asked to see the window.
+		# first time a "show" command arrives on the queue.
 		self.timer = QtCore.QTimer(self)
 		self.timer.timeout.connect(self.check_if_should)
-		self.timer.start(500)  # Check every 1000 milliseconds (1 second)
+		self.timer.start(500)
 
 	def closeEvent(self, event):
 		"""
@@ -1165,30 +1320,64 @@ class VisualizationWindow(QtWidgets.QWidget):
 		self.visualization_close_event.set()
 
 	def check_if_should(self):
-		"""
-        Check if the window should be shown.
-
-        Args:
-            None
-
-        Return:
-            None
-        """
-		if self.visualization_win_front.is_set():
-			self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowType.WindowStaysOnTopHint)
-			self.show()
-			self.setWindowFlags(self.windowFlags() & ~QtCore.Qt.WindowType.WindowStaysOnTopHint)
-			self.visualization_win_front.clear()  # Reset the flag
-		if self.variables.flag_visualization_win_show:
-			self.show()
-			self.variables.flag_visualization_win_show = False
+		"""Drain the command queue and dispatch each message in order."""
+		# Diagnostic: confirm the QTimer is actually firing (first 3 ticks
+		# only, to avoid filling the log).
+		if self._diag_ticks_logged < 3 and self._diag_log_path is not None:
+			try:
+				import datetime as _dt
+				with open(self._diag_log_path, "a", encoding="utf-8") as fh:
+					fh.write(f"[{_dt.datetime.now().isoformat()}] timer tick #{self._diag_ticks_logged + 1}\n")
+			except Exception:
+				pass
+			self._diag_ticks_logged += 1
+		raise_to_front = False
+		make_visible = False
+		hide = False
+		drained_msgs = []
+		while True:
+			try:
+				msg = self.command_queue.get_nowait()
+			except Exception:
+				break
+			drained_msgs.append(msg)
+			if msg == "show":
+				make_visible = True
+			elif msg == "show_front":
+				make_visible = True
+				raise_to_front = True
+			elif msg == "hide":
+				hide = True
+		if drained_msgs and self._diag_log_path is not None:
+			try:
+				import datetime as _dt
+				with open(self._diag_log_path, "a", encoding="utf-8") as fh:
+					fh.write(f"[{_dt.datetime.now().isoformat()}] received: {drained_msgs}\n")
+			except Exception:
+				pass
+		if hide and not make_visible:
+			self.hide()
+			return
+		if not make_visible:
+			return
+		# Always call show() + showNormal() unconditionally.  After a
+		# previous closeEvent->hide() Qt may not honour a single show()
+		# call on every platform; the explicit showNormal() also brings
+		# the window out of a minimised state if it's been there.  We
+		# deliberately do NOT toggle setWindowFlags() - that hides the
+		# widget on Windows (Qt docs).
+		self.show()
+		self.showNormal()
+		self.raise_()
+		if raise_to_front:
+			self.activateWindow()
 
 	def setWindowStyleFusion(self):
 		# Set the Fusion style
 		QtWidgets.QApplication.setStyle("Fusion")
 
 
-def run_visualization_window(variables, conf, visualization_closed_event, visualization_win_front,
+def run_visualization_window(variables, conf, visualization_closed_event, visualization_command_queue,
                              x_plot, y_plot, t_plot, main_v_dc_plot):
 	"""
     Run the Cameras window in a separate process.
@@ -1206,17 +1395,48 @@ def run_visualization_window(variables, conf, visualization_closed_event, visual
     Return:
         None
     """
-	app = QtWidgets.QApplication(sys.argv)  # <-- Create a new QApplication instance
-	app.setStyle('Fusion')
-	# The window starts hidden and only appears when the main GUI signals -
-	# don't let Qt quit the subprocess just because no window is visible.
-	app.setQuitOnLastWindowClosed(False)
+	# Every subprocess startup writes a one-line breadcrumb to the log.
+	# If the visualization subprocess never gets that far the file stays
+	# empty and we know the unpickling of the Process args failed before
+	# this body even ran.  Crashes inside this body land in the same
+	# file with a full traceback.
+	import os
+	import traceback
+	import datetime as _dt
+	log_path = None
+	try:
+		log_path = runtime.project_path("files", "logs", "visualization_subprocess.log")
+		log_path.parent.mkdir(parents=True, exist_ok=True)
+		with open(log_path, "a", encoding="utf-8") as fh:
+			fh.write(f"[{_dt.datetime.now().isoformat()}] pid={os.getpid()} startup\n")
+	except Exception:
+		pass
+	try:
+		app = QtWidgets.QApplication(sys.argv)
+		app.setStyle('Fusion')
+		app.setQuitOnLastWindowClosed(False)
 
-	gui_visualization = Ui_Visualization(variables, conf, x_plot, y_plot, t_plot, main_v_dc_plot)
-	Cameras_alignment = VisualizationWindow(variables, gui_visualization, visualization_closed_event,
-	                                        visualization_win_front, flags=QtCore.Qt.WindowType.Tool)
-	gui_visualization.setupUi(Cameras_alignment)
-	sys.exit(app.exec())  # <-- Start the event loop for this QApplication instance
+		gui_visualization = Ui_Visualization(variables, conf, x_plot, y_plot, t_plot, main_v_dc_plot)
+		Cameras_alignment = VisualizationWindow(variables, gui_visualization, visualization_closed_event,
+		                                        visualization_command_queue, flags=QtCore.Qt.WindowType.Tool)
+		gui_visualization.setupUi(Cameras_alignment)
+		try:
+			if log_path is not None:
+				with open(log_path, "a", encoding="utf-8") as fh:
+					fh.write(f"[{_dt.datetime.now().isoformat()}] setupUi finished, entering app.exec()\n")
+		except Exception:
+			pass
+		sys.exit(app.exec())
+	except Exception:
+		try:
+			if log_path is not None:
+				with open(log_path, "a", encoding="utf-8") as fh:
+					fh.write(f"[{_dt.datetime.now().isoformat()}] CRASH:\n")
+					traceback.print_exc(file=fh)
+		except Exception:
+			pass
+		traceback.print_exc()
+		raise
 
 
 if __name__ == "__main__":

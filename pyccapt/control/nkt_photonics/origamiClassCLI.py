@@ -81,6 +81,15 @@ class origClass:
 		return dataBack.decode()
 
 	def Power(self, power):
+		"""Set the IR seed/pump power setpoint of the OXPS.
+
+		Units: ``power`` is in **Watts** (the same convention as the
+		``max_laser_power`` config entry and the test report, e.g.
+		"IR power set to 4.65 W"). Range is 0 .. ``max_laser_power``.
+
+		The corresponding CLI command is ``ly_oxp2_power=<value>``;
+		the firmware echoes back ``ly_oxp2_power <value>`` on success.
+		"""
 		cmd = "ly_oxp2_power=" + str(power) + "\n"
 		self.ser.write(cmd.encode())
 		sleep(0.1)

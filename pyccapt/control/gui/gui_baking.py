@@ -325,11 +325,15 @@ class Ui_Baking(object):
 				if index % 20 == 0:
 					try:
 						self.data.to_csv(self.file_name, sep=';', index=False)
+						# Successful save - reset the dedup so the next
+						# failure (e.g. user re-opens the file) prints again.
+						self._warned_messages.discard('baking_csv_save')
 					except Exception as e:
 						self.data.to_csv(self.file_name_backup, sep=';', index=False)
-						print('csv File cannot be saved')
-						print('close the csv file')
-						print(e)
+						self._warn_once(
+							'baking_csv_save',
+							f'csv File cannot be saved (close the csv file): {e}',
+						)
 
 				end_time = time.perf_counter()
 				elapsed_time = end_time - start_time

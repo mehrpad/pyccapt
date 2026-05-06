@@ -683,27 +683,27 @@ class CamerasAlignmentWindow(QtWidgets.QWidget):
 	closed = QtCore.pyqtSignal()  # Define a custom closed signal
 
 	def __init__(self, variables, gui_cameras_alignment, close_event,
-	             camera_win_front, *args, **kwargs):
+	             command_queue, *args, **kwargs):
 		"""
 		Initialize the CamerasAlignmentWindow class.
 
 		Args:
-				gui_cameras_alignment: An instance of the GUI cameras alignment class.
-				*args: Variable length argument list.
-				**kwargs: Arbitrary keyword arguments.
+				gui_cameras_alignment: GUI cameras alignment instance.
+				close_event: multiprocessing.Event signalled by this window
+					when it is closed by the user.
+				command_queue: multiprocessing.Queue of typed string commands
+					sent from the main GUI ("show", "show_front", "hide").
 		"""
 		super().__init__(*args, **kwargs)
 		self.variables = variables
 		self.gui_cameras_alignment = gui_cameras_alignment
-		self.camera_win_front = camera_win_front
+		self.command_queue = command_queue
 		self.close_event = close_event
 		# Start hidden - check_if_should() below brings the window up the
-		# first time the main GUI sets flag_camera_win_show.  Calling show()
-		# + showMinimized() here would leave a leftover minimised stub in
-		# the taskbar before the user has ever asked to see the window.
+		# first time a "show" command arrives on the queue.
 		self.timer = QtCore.QTimer(self)
 		self.timer.timeout.connect(self.check_if_should)
-		self.timer.start(500)  # Check every 1000 milliseconds (1 second)
+		self.timer.start(500)
 
 	def closeEvent(self, event):
 		"""
@@ -717,38 +717,81 @@ class CamerasAlignmentWindow(QtWidgets.QWidget):
 		self.close_event.set()
 
 	def check_if_should(self):
-		if self.camera_win_front.is_set():
-			self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowType.WindowStaysOnTopHint)
-			self.show()
-			self.setWindowFlags(self.windowFlags() & ~QtCore.Qt.WindowType.WindowStaysOnTopHint)
-			self.camera_win_front.clear()  # Reset the flag
-		if self.variables.flag_camera_win_show:
-			self.show()
-			self.variables.flag_camera_win_show = False
+		"""Drain the command queue and dispatch each message in order."""
+		raise_to_front = False
+		make_visible = False
+		hide = False
+		while True:
+			try:
+				msg = self.command_queue.get_nowait()
+			except Exception:
+				break  # queue empty
+			if msg == "show":
+				make_visible = True
+			elif msg == "show_front":
+				make_visible = True
+				raise_to_front = True
+			elif msg == "hide":
+				hide = True
+		if hide and not make_visible:
+			self.hide()
+			return
+		if not make_visible:
+			return
+		# Always call show() + showNormal() unconditionally - after a
+		# previous closeEvent->hide() a single show() call doesn't
+		# always re-display the window on every platform, and
+		# showNormal() additionally brings it out of a minimised state.
+		# We deliberately do NOT toggle setWindowFlags() - that call
+		# implicitly hides the widget (Qt docs).
+		self.show()
+		self.showNormal()
+		self.raise_()
+		if raise_to_front:
+			self.activateWindow()
 
 	def setWindowStyleFusion(self):
 		# Set the Fusion style
 		QtWidgets.QApplication.setStyle("Fusion")
 
 
-def run_camera_window(variables, conf, camera_closed_event, camera_win_front):
+def run_camera_window(variables, conf, camera_closed_event, camera_command_queue):
 	"""
 	Run the Cameras window in a separate process.
+
+	Args:
+		camera_command_queue: multiprocessing.Queue of typed string commands
+			from the main GUI ("show", "show_front", "hide").
 	"""
-	app = QtWidgets.QApplication(sys.argv)  # <-- Create a new QApplication instance
-	app.setStyle('Fusion')
-	# The window starts hidden and only appears when the main GUI signals -
-	# don't let Qt quit the subprocess just because no window is visible.
-	app.setQuitOnLastWindowClosed(False)
-	SignalEmitter_Cameras = SignalEmitter()
+	# A startup crash in the subprocess otherwise dies silently - the
+	# parent never sees it.  Funnel any exception to a log file under
+	# files/logs/ so the user can pick it up after the fact.
+	import traceback
+	try:
+		app = QtWidgets.QApplication(sys.argv)
+		app.setStyle('Fusion')
+		# The window starts hidden and only appears when the main GUI signals -
+		# don't let Qt quit the subprocess just because no window is visible.
+		app.setQuitOnLastWindowClosed(False)
+		SignalEmitter_Cameras = SignalEmitter()
 
-	gui_cameras_alignment = Ui_Cameras_Alignment(variables, conf, SignalEmitter_Cameras)
-	Cameras_alignment = CamerasAlignmentWindow(variables, gui_cameras_alignment, camera_closed_event, camera_win_front,
-	                                           flags=QtCore.Qt.WindowType.Tool)
-	gui_cameras_alignment.setupUi(Cameras_alignment)
-	# Cameras_alignment.show()
-
-	sys.exit(app.exec())  # <-- Start the event loop for this QApplication instance
+		gui_cameras_alignment = Ui_Cameras_Alignment(variables, conf, SignalEmitter_Cameras)
+		Cameras_alignment = CamerasAlignmentWindow(variables, gui_cameras_alignment, camera_closed_event,
+		                                           camera_command_queue,
+		                                           flags=QtCore.Qt.WindowType.Tool)
+		gui_cameras_alignment.setupUi(Cameras_alignment)
+		sys.exit(app.exec())
+	except Exception:
+		try:
+			log_path = runtime.project_path("files", "logs", "camera_subprocess_crash.log")
+			log_path.parent.mkdir(parents=True, exist_ok=True)
+			with open(log_path, "a", encoding="utf-8") as fh:
+				fh.write("=" * 60 + "\n")
+				traceback.print_exc(file=fh)
+		except Exception:
+			pass
+		traceback.print_exc()
+		raise
 
 
 if __name__ == "__main__":

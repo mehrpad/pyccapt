@@ -39,6 +39,27 @@ Configuration is loaded from `config.toml` (supports comments).
   - the terminal output
 - To continue without a disconnected device, set that device to `"off"` in `config.toml`.
 
+## Email Notifications
+
+When an experiment finishes, PyCCAPT can send the operator a summary email with the experiment's `parameters.txt`
+and `apt.log` attached, and the PyCCAPT logo embedded in the body.
+
+To enable email:
+
+1. Copy the template `pyccapt/files/email_credentials.example.toml` (checked in, no secrets)
+   to `pyccapt/files/email_credentials.toml` (gitignored).
+2. Fill in `sender_email`, `password`, and — if you don't use Gmail — `smtp_server` / `smtp_port`. For Gmail, generate a
+   16-character App Password at <https://myaccount.google.com/apppasswords> and paste it as the `password` value.
+3. Optionally set `cc = ["lab-archive@example.com"]` to copy a permanent address on every notification.
+4. In the main GUI, type the recipient address into the "Email" field of the Run page before starting the experiment.
+
+If the credentials file is missing or malformed, the experiment still runs to completion; the failure is recorded in the
+experiment's `apt.log` (`Email notification failed`) and the GUI session log. The legacy file `email_pass.txt` (one-line
+plaintext password) is still accepted as a fallback for backwards compatibility, but the TOML form is preferred.
+
+`email_credentials.toml` and `email_pass.txt` are explicitly listed in `.gitignore` so they cannot be committed
+accidentally.
+
 ## Logging
 
 The control package writes two layers of logs.

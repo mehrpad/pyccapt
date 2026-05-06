@@ -478,18 +478,34 @@ VISUALIZATION_TOOLTIPS = {
 	"voltage": "Live DC voltage on the specimen (V).",
 	"detection_rate": "Live detection rate (%).  Set the target in the "
 	                  "main window.",
-	"hitmap_count": "Number of hits currently displayed in the detector "
-	                "view.",
+	"hitmap_count": "Number of ion hits currently rendered in the "
+	                "hitmap panel (capped by 'hits displayed').",
 
-	# --- Detector view --------------------------------------------------
-	"diagram": "Live detector hitmap or FDM (field-desorption "
-	           "map) - toggled by the switch below.",
-	"heatmap_fdm_switch": "Toggle between detector Hitmap and FDM "
-	                      "(field-desorption map) views.",
-	"hit_displayed": "Maximum number of hits to keep on screen at "
-	                 "once.  Lower = lighter rendering.",
-	"hitmap_plot_size": "Detector view plot size in pixels.",
-	"reset_heatmap_v": "Clear the detector view and start fresh.",
+	# --- Detector view (hitmap panel, left) -----------------------------
+	"diagram": "Live detector hitmap - red dots are recent ion impacts "
+	           "on the detector face.",
+	"hit_displayed": "Maximum number of hits to keep on the hitmap "
+	                 "at once.  Lower = lighter rendering.",
+	"hitmap_plot_size": "Hitmap dot size (pixels).",
+	"reset_heatmap_v": "Clear both hitmap and FDM panels and start fresh.",
+
+	# --- Detector view (FDM panel, right) -------------------------------
+	"detector_fdm": "Field-desorption map - log-scaled 2D histogram of "
+	                "ion impacts.  Colour intensity shows how many ions "
+	                "hit each detector pixel.",
+	"fdm_count": "Number of ions currently contributing to the FDM.  "
+	             "With Last Events OFF this is the cumulative ion "
+	             "total; with Last Events ON it is the size of the "
+	             "sliding window (capped at the N field).",
+	"fdm_last_events_switch": "Toggle between cumulative FDM (off, "
+	                          "default - every ion since experiment "
+	                          "start) and sliding-window FDM (on - "
+	                          "only the last N ions, where N is the "
+	                          "field to the right).",
+	"fdm_max_ions": "When Last Events is ON, the FDM uses only the "
+	                "most recent N ions (sliding window).  When OFF, "
+	                "this field is ignored and every ion is "
+	                "accumulated forever.  Default 1000000.",
 
 	# --- Spectrum view --------------------------------------------------
 	"spectrum_switch": "Toggle the spectrum X axis between "

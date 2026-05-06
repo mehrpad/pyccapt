@@ -41,8 +41,12 @@ class Ui_PyCCAPT(object):
         self.experimetn_finished_event = multiprocessing.Event()
         self.camera_closed_event = multiprocessing.Event()
         self.visualization_closed_event = multiprocessing.Event()
-        self.camera_win_front = multiprocessing.Event()
-        self.visualization_win_front = multiprocessing.Event()
+        # Typed command channels to the camera/visualization subprocesses.
+        # Replaces the previous (Event + flag_*) pair which was racy:
+        # main puts a string command (e.g. "show", "show_front", "hide");
+        # the subprocess drains the queue every poll tick and dispatches.
+        self.camera_command_queue = multiprocessing.Queue()
+        self.visualization_command_queue = multiprocessing.Queue()
         self.process_coordinator = process_coordinator.ProcessCoordinator()
         self.camera_process = None
         self.camera_available = False
@@ -960,6 +964,12 @@ class Ui_PyCCAPT(object):
         self.retranslateUi(PyCCAPT)
         QtCore.QMetaObject.connectSlotsByName(PyCCAPT)
         tooltips.apply_tooltips(self, tooltips.MAIN_TOOLTIPS)
+        # Override the literal defaults baked into retranslateUi with the
+        # values from config.toml so that editing config.toml is the single
+        # source of truth for "what the GUI looks like when the operator
+        # opens the software". Operators can still freely edit the fields
+        # afterwards; this only changes the *initial* values.
+        self._apply_config_defaults_to_inputs()
         PyCCAPT.setTabOrder(self.gates_control, self.pumps_vaccum)
         PyCCAPT.setTabOrder(self.pumps_vaccum, self.camears)
         PyCCAPT.setTabOrder(self.camears, self.laser_control)
@@ -1221,6 +1231,88 @@ class Ui_PyCCAPT(object):
         self.actiontake_sceernshot.setText(_translate("PyCCAPT", "Take Screenshot"))
         self.actionAbout.setText(_translate("PyCCAPT", "About PyCCAPT"))
 
+    def _apply_config_defaults_to_inputs(self):
+        """Populate the experiment-parameter input fields from config.toml.
+
+        For each editable field on the main GUI, if a corresponding key is
+        set in ``config.toml`` we use that value as the field's initial
+        contents; otherwise the literal default already written by
+        ``retranslateUi`` stays in place (so the GUI is still usable on a
+        minimal config).
+
+        Operators can still freely edit any field after the GUI opens --
+        this method only sets the *initial* values shown when the
+        software starts.
+
+        Recognised config keys:
+
+        * ``min_vp``                  -> Pulse Min. Voltage (V)
+        * ``max_vp``                  -> Pulse Max. Voltage (V)
+        * ``default_vdc_min``         -> DC Min. Voltage (V)
+        * ``default_vdc_max``         -> DC Max. Voltage (V)
+          (separate from ``max_vdc``, which is the *safety* upper bound)
+        * ``default_max_ions``        -> Max. Number of Ions
+        * ``default_ex_time_s``       -> Max. Experiment Time (s)
+        * ``default_ex_freq_hz``      -> Control Refresh Freq. (Hz)
+        * ``default_vdc_step_up``     -> K_p Upwards
+        * ``default_vdc_step_down``   -> K_p Downwards
+        * ``default_detection_rate``  -> Detection Rate (%)
+        * ``default_pulse_fraction``  -> Pulse Fraction (%)
+        * ``default_pulse_frequency_khz`` -> Pulse Frequency (kHz)
+        * ``default_pulse_mode``      -> Pulse Mode dropdown text
+        * ``default_counter_source``  -> Detection Mode dropdown text
+        * ``default_control_algorithm`` -> Control Algorithm dropdown text
+        * ``default_ex_user``         -> Experiment User
+        * ``default_ex_name``         -> Experiment Name
+        """
+        conf = self.conf
+
+        def _set_text(widget, key):
+            value = conf.get(key)
+            if value is None or value == "":
+                return
+            widget.setText(str(value))
+
+        def _set_combo(widget, key):
+            value = conf.get(key)
+            if value is None or value == "":
+                return
+            text = str(value).strip()
+            idx = widget.findText(text)
+            if idx >= 0:
+                widget.setCurrentIndex(idx)
+
+        # Voltage limits. The pulse-voltage system limits (`min_vp` /
+        # `max_vp`) double as the experiment-default values because in
+        # this rig the experiment usually starts and ends at those
+        # extremes. The DC voltage GUI defaults are *not* the same as
+        # `max_vdc` (which is the safety hard cap, e.g. 14000) -- so we
+        # use dedicated `default_vdc_*` keys.
+        _set_text(self.vp_min, 'min_vp')
+        _set_text(self.vp_max, 'max_vp')
+        _set_text(self.vdc_min, 'default_vdc_min')
+        _set_text(self.vdc_max, 'default_vdc_max')
+
+        _set_text(self.max_ions, 'default_max_ions')
+        _set_text(self.ex_time, 'default_ex_time_s')
+        _set_text(self.ex_freq, 'default_ex_freq_hz')
+        _set_text(self.vdc_steps_up, 'default_vdc_step_up')
+        _set_text(self.vdc_steps_down, 'default_vdc_step_down')
+        _set_text(self.detection_rate_init, 'default_detection_rate')
+        _set_text(self.pulse_fraction, 'default_pulse_fraction')
+        _set_text(self.pulse_frequency, 'default_pulse_frequency_khz')
+
+        # Free-text identity fields.
+        _set_text(self.ex_user, 'default_ex_user')
+        _set_text(self.ex_name, 'default_ex_name')
+
+        # Dropdowns. We match by visible text (case-sensitive) so the
+        # operator can write 'Voltage' / 'Laser' / 'VoltageLaser' etc.
+        # in config.toml without having to know the index.
+        _set_combo(self.pulse_mode, 'default_pulse_mode')
+        _set_combo(self.counter_source, 'default_counter_source')
+        _set_combo(self.control_algorithm, 'default_control_algorithm')
+
     def super_user_access(self):
         """
         The function for override access
@@ -1430,6 +1522,7 @@ class Ui_PyCCAPT(object):
         self.emitter.detection_rate.emit(self.variables.detection_rate_current)
 
         self._update_vacuum_warning()
+        self._update_laser_warning()
 
         if not self.variables.start_flag and self.variables.stop_flag:
             self.stop_experiment_clicked()
@@ -1476,6 +1569,44 @@ class Ui_PyCCAPT(object):
             statusbar.setStyleSheet("color: red; font-weight: bold;")
             statusbar.showMessage("Vacuum warning: " + "; ".join(warnings))
         elif statusbar.currentMessage().startswith("Vacuum warning"):
+            statusbar.clearMessage()
+            statusbar.setStyleSheet("")
+
+    def _update_laser_warning(self):
+        """Show a status-bar warning when the laser is enabled in
+        ``config.toml`` but the laser GUI cannot reach it on CLI.
+
+        The flag ``variables.flag_laser_connected`` is set by the laser
+        GUI (True on healthy CLI session, False on disconnect / NKTPBus
+        mode / COM-port error). We only complain if the laser is
+        actually expected to be connected -- if ``laser = "off"`` in
+        config.toml the warning is suppressed.
+
+        Vacuum warnings take priority on the status bar; this only
+        writes when no vacuum warning is currently shown.
+        """
+        statusbar = getattr(self, "statusbar", None)
+        if statusbar is None:
+            return
+        if str(self.conf.get("laser", "off")).strip().lower() != "on":
+            # Laser deliberately disabled -- nothing to warn about.
+            if statusbar.currentMessage().startswith("Laser warning"):
+                statusbar.clearMessage()
+                statusbar.setStyleSheet("")
+            return
+        connected = bool(getattr(self.variables, "flag_laser_connected", False))
+        if not connected:
+            current = statusbar.currentMessage()
+            if current.startswith("Vacuum warning"):
+                # Don't clobber an active vacuum warning.
+                return
+            statusbar.setStyleSheet("color: red; font-weight: bold;")
+            statusbar.showMessage(
+                "Laser warning: not connected on CLI (open Laser Control "
+                "and use Override Access -> Switch to CLI, or check the "
+                "COM port)."
+            )
+        elif statusbar.currentMessage().startswith("Laser warning"):
             statusbar.clearMessage()
             statusbar.setStyleSheet("")
 
@@ -1907,7 +2038,7 @@ class Ui_PyCCAPT(object):
                 self.variables,
                 self.conf,
                 self.camera_closed_event,
-                self.camera_win_front,
+                self.camera_command_queue,
             )
             if self.camera_status_message:
                 self.camears.setToolTip(self.camera_status_message)
@@ -1957,7 +2088,7 @@ class Ui_PyCCAPT(object):
             self.variables,
             self.conf,
             self.visualization_closed_event,
-            self.visualization_win_front,
+            self.visualization_command_queue,
             self.x_plot,
             self.y_plot,
             self.t_plot,
@@ -1974,6 +2105,30 @@ class Ui_PyCCAPT(object):
             window.activateWindow()
         button.setStyleSheet("background-color: green")
 
+    def _grant_foreground_to(self, process):
+        """Allow *process* to bring its own windows to the foreground.
+
+        Windows blocks cross-process ``SetForegroundWindow`` calls by
+        default, which is why the camera and visualization sub-windows
+        (running in their own ``multiprocessing.Process``) ignored
+        ``raise_()`` / ``activateWindow()`` requests. Calling
+        ``AllowSetForegroundWindow(target_pid)`` from this process lifts
+        that block for the next focus-grab the target tries. No-op on
+        non-Windows platforms.
+        """
+        if sys.platform != "win32":
+            return
+        if process is None:
+            return
+        pid = getattr(process, "pid", None)
+        if not pid:
+            return
+        try:
+            import ctypes
+            ctypes.windll.user32.AllowSetForegroundWindow(int(pid))
+        except Exception:
+            pass
+
     def open_cameras_win(self):
         """
                                     Open the Cameras window
@@ -1988,8 +2143,10 @@ class Ui_PyCCAPT(object):
             self.error_message(self.camera_status_message or "No cameras are available on this system.")
             return
 
-        self.variables.flag_camera_win_show = True
-        self.camera_win_front.set()
+        # Send a single typed "show + front" command instead of toggling
+        # two separate handshakes (was: flag_camera_win_show + Event).
+        self._grant_foreground_to(self.camera_process)
+        self.camera_command_queue.put("show_front")
         self.camears.setStyleSheet("background-color: green")
 
     def check_closed_events(self):
@@ -2084,8 +2241,10 @@ class Ui_PyCCAPT(object):
                                     Return:
                                             None
                                     """
-        self.variables.flag_visualization_win_show = True
-        self.visualization_win_front.set()
+        # Send a single typed "show + front" command instead of toggling
+        # two separate handshakes.
+        self._grant_foreground_to(getattr(self, "visualization_process", None))
+        self.visualization_command_queue.put("show_front")
         self.visualization.setStyleSheet("background-color: green")
 
     def open_baking_win(self):
@@ -2158,34 +2317,47 @@ class Ui_PyCCAPT(object):
         self.timer.stop()
 
     def cleanup(self, ):
+        """Tear down every long-lived resource so the Python process can exit.
+
+        The order matters:
+          1. Stop QThreads / QTimers / device handles inside each Ui_*
+             instance.  Without this the laser Worker QThread keeps
+             looping forever (msleep(1000)) and the SmarAct poll timers
+             keep firing on already-closed windows.
+          2. Force-close the sub-windows so their accept-paths run.
+          3. Terminate worker subprocesses and *wait briefly* for them
+             to die - terminate() is async, and unjoined zombie
+             subprocesses keep the multiprocessing Manager alive,
+             which is what makes "close" appear to do nothing.
+          4. Quit the Qt event loop so app.exec() returns and __main__
+             can release the shared context + os._exit.
         """
-                                    Cleanup function to terminate the camera process
+        # --- 1. Stop in-process QThreads / timers / device handles ------
+        for ui_attr in ("gui_baking", "gui_pumps_vacuum", "gui_gates",
+                        "gui_laser_control", "gui_stage_control"):
+            ui = getattr(self, ui_attr, None)
+            if ui is None or not hasattr(ui, "stop"):
+                continue
+            try:
+                ui.stop()
+            except Exception as exc:
+                print(f"cleanup: {ui_attr}.stop() failed (non-fatal): {exc}")
 
-                                    Args:
-                                            None
-
-                                    Return:
-                                            None
-                                    """
-        if hasattr(self, "gui_baking"):
-            self.gui_baking.stop()
-        if hasattr(self, "gui_pumps_vacuum"):
-            self.gui_pumps_vacuum.stop()
         if hasattr(self, "SignalEmitter_Pumps_Vacuum"):
-            self.SignalEmitter_Pumps_Vacuum.bool_flag_while_loop.emit(False)
-        if hasattr(self, "experiment_process") and self.experiment_process.is_alive():
-            self.experiment_process.terminate()
-        if self.camera_process is not None and self.camera_process.is_alive():
-            self.camera_process.terminate()
-        if hasattr(self, 'visualization_process') and self.visualization_process.is_alive():
-            self.visualization_process.terminate()
-        if hasattr(self, 'gui_pumps_vacuum') and hasattr(self.gui_pumps_vacuum, 'gauges_thread'):
-            self.gui_pumps_vacuum.gauges_thread.join(2)
+            try:
+                self.SignalEmitter_Pumps_Vacuum.bool_flag_while_loop.emit(False)
+            except Exception:
+                pass
 
-        # Sub-windows are top-level Qt Tool windows in the same process and
-        # their default closeEvent only hides them. Force them to actually
-        # close so the QApplication event loop can exit when the main GUI
-        # closes — otherwise stage / laser / pumps windows linger.
+        # Daemon thread - join briefly so it gets a chance to honour the
+        # stop signal, but don't hang if it's wedged on a serial read.
+        if hasattr(self, 'gui_pumps_vacuum') and hasattr(self.gui_pumps_vacuum, 'gauges_thread'):
+            try:
+                self.gui_pumps_vacuum.gauges_thread.join(0.5)
+            except Exception:
+                pass
+
+        # --- 2. Force-close the Qt sub-windows --------------------------
         for attr in ("Gates", "Pumps_vacuum", "Laser_control", "Stage_control", "Baking"):
             window = getattr(self, attr, None)
             if window is None:
@@ -2197,9 +2369,31 @@ class Ui_PyCCAPT(object):
             except Exception:
                 pass
 
-        # Final safety net: ask Qt to quit the event loop. Hidden windows
-        # would otherwise keep the process alive even after the main window
-        # has closed.
+        # --- 3. Terminate worker subprocesses, wait briefly -------------
+        subs = []
+        if hasattr(self, "experiment_process") and self.experiment_process is not None:
+            subs.append(("experiment", self.experiment_process))
+        if self.camera_process is not None:
+            subs.append(("camera", self.camera_process))
+        if hasattr(self, 'visualization_process') and self.visualization_process is not None:
+            subs.append(("visualization", self.visualization_process))
+        for name, proc in subs:
+            try:
+                if proc.is_alive():
+                    proc.terminate()
+            except Exception:
+                pass
+        for name, proc in subs:
+            try:
+                proc.join(timeout=2.0)
+                if proc.is_alive():
+                    print(f"cleanup: {name} subprocess did not exit within 2 s; killing")
+                    proc.kill()
+                    proc.join(timeout=1.0)
+            except Exception as exc:
+                print(f"cleanup: {name} join failed (non-fatal): {exc}")
+
+        # --- 4. Quit the Qt event loop ----------------------------------
         QtWidgets.QApplication.quit()
 
     def closeEvent(self, event):
@@ -2245,7 +2439,27 @@ class MyPyCCAPT(QtWidgets.QMainWindow):
         )
 
         if reply == QtWidgets.QMessageBox.StandardButton.Yes:
-            self.ui.cleanup()
+            # Hard watchdog: fire os._exit after 5 s no matter what.
+            # cleanup() can hang indefinitely if a SmarAct ctl.Close
+            # call collides with an in-flight Reference (the SDK is
+            # not thread-safe) or if a serial port refuses to release.
+            # We can't fix every possible blocker individually, so a
+            # daemon thread that calls os._exit is the only guarantee
+            # the user's "X" click actually closes the program.
+            import os as _os
+            import threading as _threading
+            def _force_exit():
+                import time as _time
+                _time.sleep(5.0)
+                print("Close watchdog: forcing os._exit after 5 s")
+                _os._exit(0)
+
+            t = _threading.Thread(target=_force_exit, daemon=True)
+            t.start()
+            try:
+                self.ui.cleanup()
+            except Exception as exc:
+                print(f"Cleanup raised (non-fatal): {exc}")
             event.accept()
         else:
             event.ignore()
@@ -2279,6 +2493,21 @@ if __name__ == "__main__":
         shared.main_v_dc_plot,
     )
     window.show()
-    sys.exit(app.exec())
+    exit_code = app.exec()
+    # Tear down the multiprocessing Manager and unlink the shared-memory
+    # ring buffers - without this the parent Python interpreter waits
+    # forever for the Manager subprocess and the close button appears to
+    # do nothing.
+    try:
+        runtime.release_shared_context(shared)
+    except Exception as exc:
+        print(f"Shared-context teardown failed (non-fatal): {exc}")
+    # Safety net: even after cleanup() and release_shared_context, a
+    # rogue daemon thread or unjoinable subprocess can keep the Python
+    # interpreter alive so the user sees a "frozen" main window long
+    # after they hit close.  os._exit is a hard exit that bypasses all
+    # of that machinery - on Windows the OS reclaims any leftover
+    # shared memory automatically, so this is safe.
+    import os
 
-
+    os._exit(exit_code)

@@ -66,16 +66,31 @@ Last detection rate: {variables.detection_rate_current_plot:.3f}%
 -----------------------------------------------------
 """
     elif variables.pulse_mode in ('Laser', 'VoltageLaser'):
+        # variables.laser_freq is stored in Hz; the GUI's repetition-rate
+        # combo selects 400 000, 500 000, ..., 1 000 000 Hz. Convert to kHz
+        # for the human-readable summary so the label and value agree.
+        # Effective output rate = base / division.
+        try:
+            base_freq_khz = float(variables.laser_freq) / 1000.0
+            div = max(int(variables.laser_division_factor or 1), 1)
+            output_rate_khz = base_freq_khz / div
+        except (TypeError, ValueError, ZeroDivisionError):
+            base_freq_khz = float('nan')
+            output_rate_khz = float('nan')
+        # Pulse energy is now computed and tracked by the laser GUI; if it
+        # was never set (laser disabled / never connected), fall back to 0.
+        pulse_energy_nJ = float(getattr(variables, 'laser_pulse_energy', 0) or 0)
         statistics = f"""
 Experiment Elapsed Time (Sec): {variables.elapsed_time:.3f}
 Experiment Total Ions: {variables.total_ions}
 Specimen Max Achieved Voltage (V): {variables.specimen_voltage:.3f}
 Specimen Max Achieved Pulse Voltage (V): {variables.pulse_voltage:.3f}
-Laser pulse energy (): {0.0:.3f}
+Laser pulse energy (nJ): {pulse_energy_nJ:.3f}
 Laser average power (mW): {variables.laser_average_power:.3f}
-Laser pulse frequency (kHz): {variables.laser_freq}
-Laser power (mW): {variables.laser_power:.3f}
-Laser division factor: {variables.laser_division_factor:.3f}
+Laser base pulse frequency (kHz): {base_freq_khz:.3f}
+Laser division factor: {variables.laser_division_factor}
+Laser output pulse frequency (kHz): {output_rate_khz:.3f}
+Laser IR power setpoint (W): {variables.laser_power:.3f}
 Last detection rate: {variables.detection_rate_current_plot:.3f}%
 -----------------------------------------------------
 """

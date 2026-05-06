@@ -114,9 +114,22 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
 	events_detected_tmp = 0
 	start_time = time.time()
 	pulse_frequency = max(float(variables.pulse_frequency) * 1000.0, 1.0)
+	_last_buf_error = None  # dedup transient SDK read errors
 
 	while not stop_event.is_set() and not variables.flag_stop_tdc:
-		return_value = tdc.get_data_tdc_buf()
+		# A DLL fault here used to take down the subprocess silently.
+		# Catch + dedup so transient hiccups don't spam stdout and
+		# don't bring down the experiment.
+		try:
+			return_value = tdc.get_data_tdc_buf()
+		except Exception as exc:
+			msg = str(exc)
+			if msg != _last_buf_error:
+				_last_buf_error = msg
+				print(f"RoentDek TDC: get_data_tdc_buf failed (non-fatal): {msg}")
+			time.sleep(0.05)
+			continue
+		_last_buf_error = None
 		buffer_length = int(return_value[0])
 		if buffer_length <= 0:
 			time.sleep(0.01)
@@ -136,10 +149,15 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
 		pulse_data = np.tile(variables.pulse_voltage, buffer_length)
 		laser_data = np.tile(variables.laser_pulse_energy, buffer_length)
 
-		x_plot.put(xx)
-		y_plot.put(yy)
-		t_plot.put(tt)
-		main_v_dc_plot.put(main_v_dc_list)
+		# Push into the shared-memory ring buffers (one per signal).
+		# Append is non-blocking and bounded; the visualization
+		# subprocess drains the rings on its own cadence.  (Was
+		# Queue.put before the migration to SharedRingBuffer; this file
+		# was missed in that round.)
+		x_plot.write(xx)
+		y_plot.write(yy)
+		t_plot.write(tt)
+		main_v_dc_plot.write(main_v_dc_list)
 
 		variables.extend_to('x', xx.tolist())
 		variables.extend_to('y', yy.tolist())
@@ -163,6 +181,14 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
 
 		current_time = time.time()
 		if current_time - start_time >= 0.5:
+			# Re-read pulse_frequency every interval - if the user
+			# changes it mid-run the rate calc otherwise stays wrong.
+			try:
+				live_pulse_frequency = max(
+					float(variables.pulse_frequency) * 1000.0, 1.0)
+				pulse_frequency = live_pulse_frequency
+			except Exception:
+				pass
 			detection_rate = events_detected_tmp * 100 / pulse_frequency
 			variables.detection_rate_current = detection_rate * 2
 			variables.detection_rate_current_plot = detection_rate * 2

@@ -1,4 +1,5 @@
 import datetime
+from pathlib import Path
 
 
 def save_statistics_apt(variables, conf):
@@ -64,11 +65,12 @@ Specimen Max Achieved Pulse Voltage (V): {variables.pulse_voltage:.3f}
 Last detection rate: {variables.detection_rate_current_plot:.3f}%
 -----------------------------------------------------
 """
-    elif variables.pulse_mode == 'Laser':
+    elif variables.pulse_mode in ('Laser', 'VoltageLaser'):
         statistics = f"""
 Experiment Elapsed Time (Sec): {variables.elapsed_time:.3f}
 Experiment Total Ions: {variables.total_ions}
 Specimen Max Achieved Voltage (V): {variables.specimen_voltage:.3f}
+Specimen Max Achieved Pulse Voltage (V): {variables.pulse_voltage:.3f}
 Laser pulse energy (): {0.0:.3f}
 Laser average power (mW): {variables.laser_average_power:.3f}
 Laser pulse frequency (kHz): {variables.laser_freq}
@@ -77,9 +79,21 @@ Laser division factor: {variables.laser_division_factor:.3f}
 Last detection rate: {variables.detection_rate_current_plot:.3f}%
 -----------------------------------------------------
 """
+    else:
+	    # Defensive default so the file write never raises
+	    # UnboundLocalError when pulse_mode is something unexpected.
+	    statistics = f"""
+Experiment Elapsed Time (Sec): {variables.elapsed_time:.3f}
+Experiment Total Ions: {variables.total_ions}
+Specimen Max Achieved Voltage (V): {variables.specimen_voltage:.3f}
+Pulse Mode: {variables.pulse_mode!r} (no specialised statistics block)
+Last detection rate: {variables.detection_rate_current_plot:.3f}%
+-----------------------------------------------------
+"""
     software_info = "Created by PyCCAPT software."
 
-    with open(variables.path + '\\parameters.txt', 'w') as f:
+    output_path = Path(variables.path) / 'parameters.txt'
+    with open(output_path, 'w', encoding='utf-8') as f:
         f.write(header)
         f.write(statistics)
         f.write(software_info)

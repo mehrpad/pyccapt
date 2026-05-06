@@ -156,24 +156,81 @@ class APT_Exp_Control:
         self.main_temperature.extend([self.variables.temperature])
         self.main_chamber_vacuum.extend([self.variables.vacuum_main])
 
+        # Re-read the algorithm choice every iteration so the user can
+        # switch between Proportional / Aggressive / Adaptive / PID live
+        # via the main GUI dropdown without restarting the experiment.
+        live_algorithm = self.variables.control_algorithm
+        if live_algorithm != self.control_algorithm:
+	        self._switch_control_algorithm(live_algorithm)
+
+        error = self.detection_rate - self.variables.detection_rate_current
+
         if self.control_algorithm == 'Proportional':
-            error = self.detection_rate - self.variables.detection_rate_current
-            # simple proportional control with averaging
+	        # P with deadband + asymmetric up/down gains + hard cap.
             if error > 0.05:
                 voltage_step = error * self.variables.vdc_step_up * 10
             elif error < -0.05:
                 voltage_step = error * self.variables.vdc_step_down * 10
             else:
                 voltage_step = 0
+	        voltage_step = max(-40, min(40, voltage_step))
 
-            if voltage_step > 40:
-                print('voltage step is too high: %s' % voltage_step)
-                voltage_step = 40
-        elif self.control_algorithm == 'PID' or self.control_algorithm == 'PID aggressive':
-            error = self.detection_rate - self.variables.detection_rate_current
-            print('error: %s' % error)
-            voltage_step = self.pid(error) * 1000
-            print('voltage step: %s' % voltage_step)
+        elif self.control_algorithm == 'Proportional aggressive':
+	        # Same as Proportional but the upward gain is multiplied by
+	        # control_p_aggressive_up_factor (down-gain stays normal so
+	        # the loop still brakes gently when rate is too high).
+	        if error > 0.05:
+		        voltage_step = (error * self.variables.vdc_step_up * 10
+		                        * self._p_aggressive_factor)
+	        elif error < -0.05:
+		        voltage_step = error * self.variables.vdc_step_down * 10
+	        else:
+		        voltage_step = 0
+	        voltage_step = max(-40, min(40, voltage_step))
+
+        elif self.control_algorithm == 'Adaptive P':
+	        # Proportional core, but the up-step gain is auto-scaled by
+	        # _adapt_factor based on observed loop behaviour:
+	        #   * many same-sign errors in a row -> loop is sluggish -> grow
+	        #   * sign-flipping errors -> loop is overshooting -> shrink
+	        sign = 1 if error > 0 else (-1 if error < 0 else 0)
+	        if sign != 0 and sign == self._adapt_last_sign:
+		        self._adapt_same_sign += 1
+		        self._adapt_flip_count = max(0, self._adapt_flip_count - 1)
+	        elif sign != 0 and self._adapt_last_sign != 0:
+		        self._adapt_flip_count += 1
+		        self._adapt_same_sign = 0
+	        self._adapt_last_sign = sign
+
+	        if self._adapt_same_sign >= self._adapt_grow_threshold:
+		        self._adapt_factor = min(self._adapt_factor * 1.1,
+		                                 self._adapt_max_factor)
+		        self._adapt_same_sign = 0
+	        elif self._adapt_flip_count >= self._adapt_shrink_threshold:
+		        self._adapt_factor = max(self._adapt_factor * 0.7,
+		                                 self._adapt_min_factor)
+		        self._adapt_flip_count = 0
+
+	        if error > 0.05:
+		        voltage_step = (error * self.variables.vdc_step_up * 10
+		                        * self._adapt_factor)
+	        elif error < -0.05:
+		        voltage_step = (error * self.variables.vdc_step_down * 10
+		                        * self._adapt_factor)
+	        else:
+		        voltage_step = 0
+	        voltage_step = max(-40, min(40, voltage_step))
+
+        elif self.control_algorithm == 'PID':
+	        # simple_pid expects the *measurement* (it computes error itself).
+	        # output_limits are symmetric volts/iteration so the controller
+	        # can also drive voltage *down* when the rate is too high.
+	        voltage_step = self.pid(self.variables.detection_rate_current)
+	        cap = self._pid_max_step
+	        voltage_step = max(-cap, min(cap, voltage_step))
+
+        else:
+	        voltage_step = 0
 
         # update v_dc
         if not self.variables.vdc_hold and voltage_step != 0:
@@ -206,6 +263,39 @@ class APT_Exp_Control:
         start_time = time.perf_counter()
         while time.perf_counter() - start_time < seconds:
             pass
+
+    def _build_pid(self):
+	    """(Re)create the PID controller from the current config gains."""
+	    self.pid = PID(self._pid_kp, self._pid_ki, self._pid_kd,
+	                   setpoint=self.detection_rate)
+	    self.pid.sample_time = 1.0 / self.variables.ex_freq
+	    self.pid.output_limits = (-self._pid_max_step, self._pid_max_step)
+	    # P-on-measurement avoids derivative kick on setpoint changes.
+	    self.pid.proportional_on_measurement = True
+
+    def _switch_control_algorithm(self, new_algorithm):
+	    """Handle a live algorithm change from the GUI dropdown.
+
+		Called from the per-iteration control branch.  Resets per-mode
+		state so transitions don't leak old gains/integrators.
+		"""
+	    valid = ('Proportional', 'Proportional aggressive', 'Adaptive P', 'PID')
+	    if new_algorithm not in valid:
+		    return  # ignore unknown values
+	    self.control_algorithm = new_algorithm
+	    # Reset Adaptive-P state on every switch so the multiplier and
+	    # sign-tracker start fresh for the new mode.
+	    self._adapt_factor = 1.0
+	    self._adapt_same_sign = 0
+	    self._adapt_flip_count = 0
+	    self._adapt_last_sign = 0
+	    # Build / rebuild the PID object only when entering PID mode.
+	    if new_algorithm == 'PID':
+		    self._build_pid()
+	    else:
+		    # Drop the PID instance so its accumulated I-term doesn't
+		    # carry over if the user switches back later.
+		    self.pid = None
 
     def run_experiment(self):
         """
@@ -248,6 +338,25 @@ class APT_Exp_Control:
             self.variables.flag_finished_tdc = True
 
         self.log_apt = loggi.logger_creator('apt', self.variables, 'apt.log', path=self.variables.log_path)
+        # Record the inputs that produced this experiment so the apt.log file
+        # is self-contained for later debugging / forensics.
+        try:
+	        self.log_apt.info('Experiment name: %s', getattr(self.variables, 'exp_name', '<unset>'))
+	        self.log_apt.info('Output folder  : %s', getattr(self.variables, 'path', '<unset>'))
+	        self.log_apt.info('Pulse mode     : %s', self.pulse_mode)
+	        self.log_apt.info('Counter source : %s', getattr(self.variables, 'counter_source', '<unset>'))
+	        self.log_apt.info('Control alg.   : %s', self.control_algorithm)
+	        self.log_apt.info('Detection rate : %s', getattr(self.variables, 'detection_rate', '<unset>'))
+	        self.log_apt.info('Ex frequency   : %s Hz', getattr(self.variables, 'ex_freq', '<unset>'))
+	        self.log_apt.info('Vdc range      : %s -> %s V',
+	                          getattr(self.variables, 'vdc_min', '<unset>'),
+	                          getattr(self.variables, 'vdc_max', '<unset>'))
+	        if self.access_override_enabled:
+		        self.log_apt.warning('Super-user override active. Disabled devices: %s',
+		                             sorted(self.override_disabled_devices))
+	        loggi.log_configuration_snapshot(self.log_apt, self.conf, self.variables)
+        except Exception:
+	        self.log_apt.debug('Could not log experiment context', exc_info=True)
         if self._is_config_enabled('signal_generator') and not self._is_override_disabled("signal_generator") and \
                 self.pulse_mode in ['Voltage', 'VoltageLaser'] and not self.initialization_error:
             self.initialization_error = apt_exp_control_func.initialization_signal_generator(self.variables,
@@ -332,13 +441,33 @@ class APT_Exp_Control:
         if self.pulse_mode in ['Voltage', 'VoltageLaser']:
             self.pulse_voltage = self.variables.pulse_voltage
 
-        if self.control_algorithm == 'PID' or self.control_algorithm == 'PID aggressive':
-            self.pid = PID(1, 0.1, 0.05, setpoint=self.detection_rate)
-            self.pid.sample_time = 1 / self.variables.ex_freq
-            self.pid.output_limits = (0, 100)
-            self.pid.proportional_on_measurement = True
-            if self.control_algorithm == 'PID aggressive':
-                self.pid.tunings = (5, 0.1, 0.05)
+        # ----- Per-algorithm state ------------------------------------------
+        # Loaded from config.toml and initialised once; the per-iteration
+        # branch above reads them.  `_switch_control_algorithm` rebuilds the
+        # PID object on demand when the user changes mode mid-run.
+        self._p_aggressive_factor = float(self.conf.get(
+	        'control_p_aggressive_up_factor', 3.0))
+        self._adapt_min_factor = float(self.conf.get(
+	        'control_adaptive_min_factor', 0.3))
+        self._adapt_max_factor = float(self.conf.get(
+	        'control_adaptive_max_factor', 3.0))
+        self._adapt_grow_threshold = int(self.conf.get(
+	        'control_adaptive_grow_threshold', 5))
+        self._adapt_shrink_threshold = int(self.conf.get(
+	        'control_adaptive_shrink_threshold', 3))
+        self._adapt_factor = 1.0
+        self._adapt_same_sign = 0
+        self._adapt_flip_count = 0
+        self._adapt_last_sign = 0
+
+        self._pid_kp = float(self.conf.get('control_pid_kp', 1.0))
+        self._pid_ki = float(self.conf.get('control_pid_ki', 0.1))
+        self._pid_kd = float(self.conf.get('control_pid_kd', 0.05))
+        self._pid_max_step = float(self.conf.get(
+	        'control_pid_max_step_v', 40.0))
+        self.pid = None
+        if self.control_algorithm == 'PID':
+	        self._build_pid()
 
         self.ex_freq = self.variables.ex_freq
 
@@ -375,8 +504,7 @@ class APT_Exp_Control:
                 if self.detection_rate != self.variables.detection_rate:
                     self.detection_rate = self.variables.detection_rate
                     self.counts_target = self.pulse_frequency * self.detection_rate / 100
-                    self.detection_rate = self.variables.detection_rate
-                    if self.control_algorithm == 'PID' or self.control_algorithm == 'PID aggressive':
+                    if self.control_algorithm == 'PID' and self.pid is not None:
                         self.pid.setpoint = self.detection_rate
 
                 self.total_ions = self.variables.total_ions
@@ -707,6 +835,17 @@ def run_experiment(variables, conf, experiment_finished_event, x_plot, y_plot, t
         None
 
     """
+    # On Windows ``multiprocessing`` uses spawn semantics, so the experiment
+    # subprocess starts with no logging handlers attached. Re-initialise the
+    # application logger here so that prints and uncaught exceptions in the
+    # experiment process land in the same daily GUI log file as the main
+    # GUI process. The function is idempotent and cheap.
+    try:
+	    gui_log_root = getattr(variables, "log_path", "") or runtime.find_project_root()
+	    loggi.setup_application_logging(gui_log_root)
+    except Exception as _exc:
+	    # Logging setup must never block the experiment from starting.
+	    print(f"[apt] Could not initialise application logging: {_exc}")
 
     apt_exp_control = APT_Exp_Control(variables, conf, experiment_finished_event, x_plot, y_plot, t_plot,
                                       main_v_dc_plot)

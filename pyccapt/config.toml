@@ -145,3 +145,33 @@ stage_speed_table_mm_s = [0.001, 0.002, 0.004, 0.008, 0.016, 0.032, 0.064, 0.128
 # proportionally larger jogs - just like the MCS2 hand-control where only
 # speed is set and the distance follows from how long the knob is deflected.
 stage_click_duration_s = 0.2
+
+# ---------------------------------------------------------------------------
+# Closed-loop control gains for the main GUI's "Control Algorithm" dropdown
+# (Proportional / Proportional aggressive / Adaptive P / PID).
+# ---------------------------------------------------------------------------
+
+# Proportional aggressive: the upward voltage step is multiplied by this
+# factor (downward step uses the normal vdc_step_down so the loop still
+# brakes gently when rate is too high).  > 1 = ramps up faster.
+control_p_aggressive_up_factor = 3.0
+
+# Adaptive P: starts at the normal proportional step but scales itself
+# based on observed response.  If the error keeps the same sign for many
+# iterations (loop is too sluggish) the multiplier grows toward _max_.
+# If the error keeps flipping sign (loop is overshooting) it shrinks
+# toward _min_.  Both bounds are dimensionless multipliers on the
+# proportional step.
+control_adaptive_min_factor = 0.3
+control_adaptive_max_factor = 3.0
+control_adaptive_grow_threshold = 5   # consecutive same-sign errors -> grow
+control_adaptive_shrink_threshold = 3 # sign flips within window -> shrink
+
+# PID gains (Kp, Ki, Kd) - only used when "PID" is selected.  These are
+# starting points; expect to retune empirically on real hardware.
+control_pid_kp = 1.0
+control_pid_ki = 0.1
+control_pid_kd = 0.05
+# Hard cap on the per-iteration PID voltage step (V), applied symmetrically
+# (-cap .. +cap).  Mirrors the 40 V cap on the Proportional branch.
+control_pid_max_step_v = 40.0

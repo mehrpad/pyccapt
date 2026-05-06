@@ -39,6 +39,37 @@ Configuration is loaded from `config.toml` (supports comments).
   - the terminal output
 - To continue without a disconnected device, set that device to `"off"` in `config.toml`.
 
+## Logging
+
+The control package writes two layers of logs.
+
+- **GUI session log** — `pyccapt/files/logs/gui/gui_<YYYY-MM-DD>.log`
+    - Daily rotating file (5 MiB per file, up to 10 backups per day).
+    - Captures everything emitted by the GUI process and the experiment subprocess.
+    - Each record includes timestamp, level, logger name, source `filename:line`, and message.
+    - Captures: `print()` output, Python `warnings`, uncaught exceptions (full traceback), startup banner with version /
+      host / OS / Python / detected COM ports, configuration snapshot at start.
+- **Per-experiment log** — `<experiment folder>/meta_data/apt.log`
+    - Created when an experiment starts.
+    - Self-contained: includes the experiment name, pulse mode, configured COM ports, device toggles, V-dc range,
+      detection rate, super-user override state, and every `INFO` or higher event from the experiment loop (
+      initialization, ramps, stop reasons, HDF5 finalisation, cleanup).
+    - The same records also appear in the daily GUI log so the operator can scroll across multiple experiments
+      chronologically.
+
+Both layers are configured by `pyccapt/control/core/loggi.py`:
+
+- `setup_application_logging(project_root)` is called from `gui_main.__main__` and
+  from `apt_exp_control.run_experiment` (the experiment subprocess). It is idempotent.
+- `logger_creator(script_name, variables, log_name, path)` attaches a per-experiment file handler.
+
+To raise console verbosity, call `setup_application_logging(project_root, console_level=logging.DEBUG)`. The file always
+records at DEBUG.
+
+When debugging "the software was working yesterday but failed today," the GUI session log under `files/logs/gui/` is the
+first place to look — it records what hardware was visible at startup, which devices the operator enabled, and any
+uncaught exceptions with full stack traces.
+
 ## Data Structure
 
 HDF5 groups and dataset semantics are documented in [DATA_STRUCTURE.md](DATA_STRUCTURE.md).

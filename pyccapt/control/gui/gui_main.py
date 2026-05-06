@@ -1,4 +1,5 @@
-﻿import multiprocessing
+﻿import logging
+import multiprocessing
 import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -7,7 +8,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import Qt
 
 # Local module and scripts
-from pyccapt.control.core import device_checks, runtime
+from pyccapt.control.core import device_checks, loggi, runtime
 from pyccapt.control.devices import camera as camera_device
 from pyccapt.control.gui import main_parameters, process_coordinator, gui_baking, gui_gates, gui_laser_control, \
     gui_pumps_vacuum, gui_stage_control, tooltips
@@ -561,9 +562,10 @@ class Ui_PyCCAPT(object):
                                              "                                                }\n"
                                              "                                            ")
         self.control_algorithm.setObjectName("control_algorithm")
-        self.control_algorithm.addItem("")
-        self.control_algorithm.addItem("")
-        self.control_algorithm.addItem("")
+        self.control_algorithm.addItem("")  # Proportional
+        self.control_algorithm.addItem("")  # Proportional aggressive
+        self.control_algorithm.addItem("")  # Adaptive P
+        self.control_algorithm.addItem("")  # PID
         self.gridLayout.addWidget(self.control_algorithm, 1, 1, 1, 1)
         self.label_178 = QtWidgets.QLabel(parent=self.centralwidget)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Minimum)
@@ -1141,12 +1143,12 @@ class Ui_PyCCAPT(object):
         self.label_190.setText(_translate("PyCCAPT", "Email"))
         self.label_200.setText(_translate("PyCCAPT", "Electrode"))
         self.label.setText(_translate("PyCCAPT", "Stop at"))
-        self.max_ions.setText(_translate("PyCCAPT", "40000"))
+        self.max_ions.setText(_translate("PyCCAPT", "2000000"))
         self.label_2.setText(_translate("PyCCAPT", "Stop at"))
         self.label_3.setText(_translate("PyCCAPT", "Stop at"))
         self.label_176.setText(_translate("PyCCAPT", "Max. Experiment Time (s)"))
         self.set_min_voltage.setText(_translate("PyCCAPT", "Set"))
-        self.ex_time.setText(_translate("PyCCAPT", "900"))
+        self.ex_time.setText(_translate("PyCCAPT", "3600"))
         self.label_179.setText(_translate("PyCCAPT", "DC Min. Voltage (V)"))
         self.vdc_max.setText(_translate("PyCCAPT", "4000"))
         self.label_180.setText(_translate("PyCCAPT", "DC Max. Voltage (V)"))
@@ -1167,8 +1169,9 @@ class Ui_PyCCAPT(object):
         self.counter_source.setItemText(1, _translate("PyCCAPT", "Digitizer"))
         self.label_191.setText(_translate("PyCCAPT", "Control Algorithm"))
         self.control_algorithm.setItemText(0, _translate("PyCCAPT", "Proportional"))
-        self.control_algorithm.setItemText(1, _translate("PyCCAPT", "PID"))
-        self.control_algorithm.setItemText(2, _translate("PyCCAPT", "PID aggressive"))
+        self.control_algorithm.setItemText(1, _translate("PyCCAPT", "Proportional aggressive"))
+        self.control_algorithm.setItemText(2, _translate("PyCCAPT", "Adaptive P"))
+        self.control_algorithm.setItemText(3, _translate("PyCCAPT", "PID"))
         self.label_178.setText(_translate("PyCCAPT", "Control Refresh Freq.(Hz)"))
         self.ex_freq.setText(_translate("PyCCAPT", "5"))
         self.label_184.setText(_translate("PyCCAPT", "Pulse Min. Voltage (V)"))
@@ -1508,6 +1511,13 @@ class Ui_PyCCAPT(object):
         self.variables.clear_index_save_image = True
         self.variables.access_override_enabled = self.flag_super_user
 
+        gui_logger = logging.getLogger("pyccapt.gui")
+        gui_logger.info(
+            "Start requested. pulse_mode=%s super_user=%s",
+            self.variables.pulse_mode,
+            self.flag_super_user,
+        )
+
         issues = device_checks.collect_startup_device_issues(
             self.conf,
             self.variables,
@@ -1521,14 +1531,15 @@ class Ui_PyCCAPT(object):
                     "Override active. Experiment is starting with unavailable enabled devices. "
                     "Review the terminal log for the full device list."
                 )
-                print(
+                gui_logger.warning(
                     "Override active. Device check found unavailable enabled devices: "
-                    f"{details}. Experiment will continue and skip unavailable hardware where possible."
+                    "%s. Experiment will continue and skip unavailable hardware where possible.",
+                    details,
                 )
                 self.error_message(warning_message)
             else:
                 message = device_checks.format_startup_device_issue_message(issues)
-                print(message)
+                gui_logger.error("Experiment start blocked: %s", message)
                 self.error_message(message)
                 self.variables.start_flag = False
                 self.variables.stop_flag = False
@@ -1549,11 +1560,16 @@ class Ui_PyCCAPT(object):
                 "Experiment process could not start: "
                 f"{exc.__class__.__name__}: {exc}"
             )
-            print(message)
+            gui_logger.exception("Experiment process could not start")
             self.error_message(message)
             self.variables.start_flag = False
             self.variables.stop_flag = False
             return
+
+        gui_logger.info(
+            "Experiment process started. pid=%s",
+            getattr(self.experiment_process, "pid", "?"),
+        )
 
         self.start_button.setEnabled(False)
         self.counter_source.setEnabled(False)
@@ -1563,7 +1579,9 @@ class Ui_PyCCAPT(object):
         self.ex_freq.setEnabled(False)
         self.ex_name.setEnabled(False)
         self.electrode.setEnabled(False)
-        self.control_algorithm.setEnabled(False)
+        # control_algorithm intentionally stays enabled during the run so
+        # the user can switch between Proportional / Aggressive / Adaptive /
+        # PID on the fly.
 
         self.variables.elapsed_time = 0.0
         self.variables.total_ions = 0
@@ -1788,7 +1806,8 @@ class Ui_PyCCAPT(object):
             self.ex_freq.setEnabled(True)
             self.ex_name.setEnabled(True)
             self.electrode.setEnabled(True)
-            self.control_algorithm.setEnabled(True)
+            # control_algorithm was never disabled during the run; nothing
+            # to re-enable here.
 
             self.ex_number.setText(str(self.variables.counter))
             self.experiment_process.join(1)
@@ -2239,6 +2258,12 @@ if __name__ == "__main__":
         print('Can not load the configuration file')
         print(exc)
         sys.exit()
+
+    # Configure application-wide logging as early as possible so that any
+    # subsequent device probing, configuration parsing, or process startup
+    # is captured to disk under <project_root>/files/logs/gui/.
+    gui_logger = loggi.setup_application_logging(project_root)
+    loggi.log_configuration_snapshot(gui_logger, conf)
 
     shared = runtime.create_shared_context(conf)
     shared.variables.log_path = str(project_root)

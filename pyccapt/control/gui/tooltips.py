@@ -120,8 +120,22 @@ MAIN_TOOLTIPS = {
 	"detection_rate_init": "Target detection rate the controller tries to "
 	                       "hold (%).",
 	"control_algorithm": "Closed-loop control algorithm used to keep "
-	                     "detection rate at target.  Proportional is "
-	                     "the default.",
+	                     "detection rate at target.  Switchable LIVE during "
+	                     "an experiment.\n"
+	                     "  Proportional - P + deadband + asymmetric "
+	                     "up/down gains (vdc_step_up, vdc_step_down).  "
+	                     "Default; safest.\n"
+	                     "  Proportional aggressive - same as above but the "
+	                     "upward step is multiplied by "
+	                     "control_p_aggressive_up_factor in config.toml; "
+	                     "down-step unchanged.\n"
+	                     "  Adaptive P - proportional core whose gain "
+	                     "auto-scales between control_adaptive_min_factor "
+	                     "and _max_factor based on observed loop behaviour "
+	                     "(grows when sluggish, shrinks when overshooting).\n"
+	                     "  PID - simple_pid with control_pid_kp/ki/kd "
+	                     "gains and ±control_pid_max_step_v cap.  Tunings "
+	                     "in config.toml; expect to retune on hardware.",
 	"ex_freq": "Control-loop refresh rate (Hz) for the "
 	           "feedback algorithm.",
 	"vdc_steps_up": "K_p gain for upward DC steps (controller's "

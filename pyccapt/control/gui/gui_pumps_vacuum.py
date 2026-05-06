@@ -698,38 +698,38 @@ class Ui_Pumps_Vacuum(object):
                 self.set_temperature_ll.setStyleSheet(self.original_button_style)
 
     def _update_gauge(self, display_widget, label_widget, value, threshold_key):
-	    """Show *value* on a gauge LCD and colour its label by threshold."""
+        """Show *value* on a gauge LCD and colour its label by threshold."""
         if value == -1:
-	        display_widget.display('Error')
+            display_widget.display('Error')
         else:
-	        display_widget.display('{:.2e}'.format(value))
-	    threshold = float(self.conf.get(threshold_key, float('inf')))
-	    if value != -1 and value > threshold:
-		    label_widget.setStyleSheet("color: red")
+            display_widget.display('{:.2e}'.format(value))
+        threshold = float(self.conf.get(threshold_key, float('inf')))
+        if value != -1 and value > threshold:
+            label_widget.setStyleSheet("color: red")
         else:
-	        label_widget.setStyleSheet("color: black")
+            label_widget.setStyleSheet("color: black")
 
     def update_vacuum_main(self, value):
-	    self._update_gauge(self.vacuum_main, self.label_212, value, 'vacuum_threshold_main')
+        self._update_gauge(self.vacuum_main, self.label_212, value, 'vacuum_threshold_main')
 
     def update_vacuum_buffer(self, value):
-	    self._update_gauge(self.vacuum_buffer, self.label_211, value, 'vacuum_threshold_buffer')
+        self._update_gauge(self.vacuum_buffer, self.label_211, value, 'vacuum_threshold_buffer')
 
     def update_vacuum_buffer_back(self, value):
-	    self._update_gauge(self.vacuum_buffer_back, self.label_214, value, 'vacuum_threshold_buffer_back')
+        self._update_gauge(self.vacuum_buffer_back, self.label_214, value, 'vacuum_threshold_buffer_back')
 
     def update_vacuum_load_back(self, value):
-	    self._update_gauge(self.vacuum_load_lock_back, self.label_213, value, 'vacuum_threshold_load_lock_back')
+        self._update_gauge(self.vacuum_load_lock_back, self.label_213, value, 'vacuum_threshold_load_lock_back')
 
     def update_vacuum_load(self, value):
-	    self._update_gauge(self.vacuum_load_lock, self.label_210, value, 'vacuum_threshold_load_lock')
+        self._update_gauge(self.vacuum_load_lock, self.label_210, value, 'vacuum_threshold_load_lock')
 
     def update_vacuum_cryo_load_lock(self, value):
-	    self._update_gauge(self.vacuum_cryo_load_lock, self.label_216, value, 'vacuum_threshold_cryo_load_lock')
+        self._update_gauge(self.vacuum_cryo_load_lock, self.label_216, value, 'vacuum_threshold_cryo_load_lock')
 
     def update_vacuum_cryo_load_lock_back(self, value):
-	    self._update_gauge(self.vacuum_cryo_load_lock_back, self.label_217, value,
-	                       'vacuum_threshold_cryo_load_lock_back')
+        self._update_gauge(self.vacuum_cryo_load_lock_back, self.label_217, value,
+                           'vacuum_threshold_cryo_load_lock_back')
 
     def super_user_access(self):
         """
@@ -930,8 +930,8 @@ class PumpsVacuumWindow(QtWidgets.QWidget):
                 event: Close event.
         """
         if getattr(self, "force_close", False):
-	        event.accept()
-	        return
+            event.accept()
+            return
         event.ignore()
         self.hide()
         self.closed.emit()

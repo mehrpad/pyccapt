@@ -1,3 +1,26 @@
+"""Origami XPS laser control over the vendor CLI protocol.
+
+Vendor / origin
+---------------
+The CLI command set used in this module (``ly_oxp2_*``, ``e_freq``,
+``e_div``, ``e_mode``, ``e_power``, ``e_mlp``, ``ls_wavelength``, etc.)
+is defined and owned by **NKT Photonics A/S** for their Origami XP /
+XPS series femtosecond lasers. This file is a thin Python wrapper
+around that ASCII serial protocol; the protocol itself is documented
+in NKT's CLI reference and the Origami QSG (see
+``T:/Monajem/Oxcart_laser_manual/`` on the lab network and
+``800-621-0X.pdf`` series).
+
+The original wrapper (`origClass`) was authored by **Ian Baker (NKT
+Photonics), version 1.1** and shipped as an example with the NKT SDK.
+Subsequent edits in this repository are local extensions for pyccapt
+integration; the underlying CLI commands remain NKT's.
+
+Use of the Origami / OXPS hardware and its CLI protocol is subject to
+NKT Photonics' licence terms; consult NKT's documentation before
+distributing this file outside this project.
+"""
+
 from time import sleep
 
 import serial
@@ -5,8 +28,9 @@ import serial
 
 # Control static object for Origami using CLI
 # Version 1.1
-
-# Author Ian Baker
+#
+# Author: Ian Baker (NKT Photonics)
+# Origin: NKT Photonics SDK example, adapted for pyccapt.
 
 
 class origClass:

@@ -1,5 +1,24 @@
 """Bidirectional NKTPBus <-> CLI mode switch for the Origami OXPS laser.
 
+Vendor / origin
+---------------
+This module talks to **NKT Photonics A/S** hardware (Origami XPS laser)
+via NKT's proprietary protocols and SDK:
+
+* The ``NKTPDLL.dll`` shared library (loaded at runtime from
+  ``%NKTP_SDK_PATH%\\NKTPDLL\\x64\\``) and the bundled Python wrapper
+  ``Examples/DLL_Example_Python/NKTP_DLL.py`` are NKT's property and
+  are installed by NKT's SDK installer. PyCCAPT does not redistribute
+  them.
+* The Interbus / NKTPBus binary protocol, the OXPS register map
+  (module type ``0x95``, register ``0x39`` = serial-port communication
+  protocol), the CLI command set, and the device-address conventions
+  are all defined and owned by NKT.
+
+This file is local pyccapt code that *uses* NKT's SDK; it does not
+contain NKT source. Use of the OXPS hardware and these interfaces is
+subject to NKT Photonics' licence terms.
+
 The Origami OXPS exposes the same RS-232 port as either:
 
 * CLI mode (38 400 baud, ASCII commands like ``ly_oxp2_listen``) — what

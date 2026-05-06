@@ -1,3 +1,15 @@
+"""Driver for Edwards TIC / Active Gauge Controller (AGC) vacuum gauges.
+
+Vendor / origin
+---------------
+The serial command set used here (``!C910``, ``!C904``, ``?V911``,
+``?V940``, etc.) is defined and owned by **Edwards Vacuum** for their
+TIC / AGC vacuum-controller family. This file is a thin Python wrapper
+around that ASCII serial protocol; the protocol itself is Edwards'
+property. Refer to Edwards' Active Gauge Controller manual for the
+authoritative command reference.
+"""
+
 import serial
 
 

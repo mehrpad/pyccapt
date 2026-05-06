@@ -1,3 +1,21 @@
+"""Python wrapper around the DRS digitizer board library.
+
+Vendor / origin
+---------------
+The DRS evaluation board, the ``DRS.dll`` / ``libDRS`` shared library,
+and the underlying DRS4 ASIC are products of the
+**Paul Scherrer Institute (PSI)**, Switzerland. The native source code
+under ``pyccapt/control/drs/source/drs5_lib/`` is PSI's; it is
+included here so PyCCAPT can be built on machines without a separate
+DRS SDK install. See ``source/drs5_lib/`` for PSI's licence (the DRS
+software is distributed under the GNU General Public License v3 with
+the additional permission that linking against PSI's drivers does not
+constitute a derivative work).
+
+This Python wrapper is local pyccapt code that calls into PSI's
+library via ctypes.
+"""
+
 import ctypes
 from pathlib import Path
 

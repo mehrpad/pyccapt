@@ -1,10 +1,25 @@
-from . import _APTAPI
-from . import _error_codes
+"""Python wrapper around the Thorlabs APT motion-control C API.
+
+Vendor / origin
+---------------
+This wrapper drives **Thorlabs Inc.** APT-series motor controllers via
+their ``APT.dll`` shared library. The C API surface (``_APTAPI``) and
+the error codes (``_error_codes``) are bound by hand to ctypes from
+Thorlabs' published header. ``APT.dll`` itself is Thorlabs' property
+and must be installed via the Thorlabs APT software distribution; it
+is not redistributed in this repository.
+
+This particular wrapper is adapted from the open-source
+``thorlabs_apt`` Python package (originally by Tobias Tritschler /
+qpit), made available under the same terms.
+"""
 
 import ctypes
 import ctypes.util
 import os
 import sys
+
+from . import _APTAPI, _error_codes
 
 # constants
 # Home direction

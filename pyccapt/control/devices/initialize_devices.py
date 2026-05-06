@@ -78,6 +78,17 @@ def command_cryovac(cmd, com_port_cryovac):
     """
     Execute a command on Cryovac through serial communication.
 
+    Vendor / origin
+    ---------------
+    The CLI command set used here (``getOutput``, ``getOutputNames``,
+    ``Out1Cryo.PID.Setpoint``, ``Out2LL.PID.Setpoint``, ``e_mlp``-style
+    queries, etc.) is defined and owned by **CryoVac GmbH** for their
+    TIC 500 programmable temperature controller. This function and its
+    siblings (``initialize_cryovac`` etc.) are thin wrappers around
+    that ASCII serial protocol; the protocol itself is CryoVac's
+    property. Refer to the CryoVac TIC 500 manual (e.g. document
+    5984591) for the authoritative reference.
+
     Args:
         cmd: Command to be executed.
         com_port_cryovac: Serial communication object.

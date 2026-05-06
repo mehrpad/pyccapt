@@ -65,19 +65,19 @@ class ProcessCoordinator:
         variables: Any,
         conf: dict[str, Any],
         camera_closed_event: Any,
-		    camera_command_queue: Any,
+            camera_command_queue: Any,
     ) -> Any:
-	    """Spawn the camera subprocess.
+        """Spawn the camera subprocess.
 
-		Args:
-			camera_command_queue: ``multiprocessing.Queue`` of typed string
-				commands ("show", "show_front", "hide") sent from the main
-				GUI to the camera window.  Replaces the old (Event +
-				flag_camera_win_show) handshake.
-		"""
+        Args:
+            camera_command_queue: ``multiprocessing.Queue`` of typed string
+                commands ("show", "show_front", "hide") sent from the main
+                GUI to the camera window.  Replaces the old (Event +
+                flag_camera_win_show) handshake.
+        """
         process = self._process_factory(
             target=self._get_camera_target(),
-	        args=(variables, conf, camera_closed_event, camera_command_queue),
+            args=(variables, conf, camera_closed_event, camera_command_queue),
         )
         process.start()
         return process
@@ -87,20 +87,20 @@ class ProcessCoordinator:
         variables: Any,
         conf: dict[str, Any],
         visualization_closed_event: Any,
-		    visualization_command_queue: Any,
+            visualization_command_queue: Any,
         x_plot: Any,
         y_plot: Any,
         t_plot: Any,
         main_v_dc_plot: Any,
     ) -> Any:
-	    """Spawn the visualization subprocess.
+        """Spawn the visualization subprocess.
 
-		Args:
-			visualization_command_queue: ``multiprocessing.Queue`` of typed
-				string commands ("show", "show_front", "hide") sent from
-				the main GUI to the visualization window.  Replaces the
-				old (Event + flag_visualization_win_show) handshake.
-		"""
+        Args:
+            visualization_command_queue: ``multiprocessing.Queue`` of typed
+                string commands ("show", "show_front", "hide") sent from
+                the main GUI to the visualization window.  Replaces the
+                old (Event + flag_visualization_win_show) handshake.
+        """
         process = self._process_factory(
             target=self._get_visualization_target(),
             args=(

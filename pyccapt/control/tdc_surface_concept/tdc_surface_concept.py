@@ -28,15 +28,15 @@ class BufDataCB4(scTDC.buffered_data_callbacks_pipe):
     def __init__(self, lib, dev_desc, data_field_selection, dld_events,
                  max_buffered_data_len=500_000):
         """
-		Initialize the base class: scTDC.buffered_data_callbacks_pipe
+        Initialize the base class: scTDC.buffered_data_callbacks_pipe
 
-		Args:
-			lib (scTDClib): A scTDClib object.
-			dev_desc (int): Device descriptor as returned by sc_tdc_init_inifile(...).
-			data_field_selection (int): A 'bitwise or' combination of SC_DATA_FIELD_xyz constants.
-			dld_events (bool): True to receive DLD events, False to receive TDC events.
-			max_buffered_data_len (int): Number of events buffered before invoking callbacks.
-		"""
+        Args:
+            lib (scTDClib): A scTDClib object.
+            dev_desc (int): Device descriptor as returned by sc_tdc_init_inifile(...).
+            data_field_selection (int): A 'bitwise or' combination of SC_DATA_FIELD_xyz constants.
+            dld_events (bool): True to receive DLD events, False to receive TDC events.
+            max_buffered_data_len (int): Number of events buffered before invoking callbacks.
+        """
         super().__init__(lib, dev_desc, data_field_selection, max_buffered_data_len, dld_events)
 
         self.queue = Queue()

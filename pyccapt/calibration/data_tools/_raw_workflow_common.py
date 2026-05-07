@@ -36,6 +36,93 @@ DLTS_COLORS = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Detector geometry / TDC bin-to-time-position conversion constants.
+# ---------------------------------------------------------------------------
+# These default values mirror the historical hard-coded numbers (Surface
+# Concept 80 mm detector, 4900 TDC bins, binning factor 2). They can also be
+# loaded per-rig from ``pyccapt/config.toml`` via :func:`load_detector_constants`
+# so that the same code can be applied to instruments with different TDC
+# resolution or detector geometry without touching source.
+
+# Match the SC defaults so existing tests / direct imports keep working.
+_SURFACE_CONCEPT_DEFAULT_CONSTANTS = {
+    'tof_ns_per_bin':     TOF_FACTOR_NS,
+    'tof_ns_per_bin_1d':  TOF_FACTOR_NS_1D,
+    'detector_bins':      DETBINS,
+    'binning_factor':     BINNING_FACTOR,
+    'detector_width_mm':  80.0,
+    'detector_limit_cm':  4.0,
+    'xy_factor':          XY_FACTOR,
+    'xy_bin_shift':       XY_BIN_SHIFT,
+}
+
+# RoentDek default — keep the 80 mm geometry so existing fixtures still work.
+# The TOF bin width (25 ps) is a typical CTNM4 / CRTM-class TDC value; tune
+# via config for your specific board.
+_ROENTDEK_DEFAULT_CONSTANTS = {
+    'tof_ns_per_bin':     0.025,
+    'detector_bins':      4900,
+    'binning_factor':     2,
+    'detector_width_mm':  80.0,
+    'detector_limit_cm':  4.0,
+    'xy_factor':          80.0 / 4900.0 * 2.0,
+    'xy_bin_shift':       4900.0 / 2.0 / 2.0,
+}
+
+
+def _config_get(conf, key, default):
+    """Pull a numeric setting out of a config mapping, ignoring missing keys."""
+    if conf is None:
+        return default
+    try:
+        value = conf[key] if hasattr(conf, '__getitem__') else getattr(conf, key, default)
+    except (KeyError, AttributeError, TypeError):
+        return default
+    return value if value is not None else default
+
+
+def load_detector_constants(detector_kind: str, conf=None) -> dict[str, float]:
+    """Return the geometry / time-base constants for one detector family.
+
+    ``detector_kind`` is ``'surface_concept'``, ``'roentdek'``, or
+    ``'single_delay_line'``. ``conf`` is an optional mapping (e.g. the dict
+    returned by :func:`pyccapt.control.core.read_files.load_config_file`); when
+    supplied, per-rig overrides take precedence over the historical defaults.
+
+    The returned dict always carries the derived ``xy_factor`` (mm / bin) and
+    ``xy_bin_shift`` (bins) so callers can convert raw delay-line timestamps
+    to detector-cm coordinates without re-deriving them from primitive
+    constants in three different places.
+    """
+    kind = (detector_kind or '').lower()
+    if kind == 'roentdek':
+        defaults = dict(_ROENTDEK_DEFAULT_CONSTANTS)
+        prefix = 'ro_'
+    elif kind == 'surface_concept' or kind == 'single_delay_line':
+        defaults = dict(_SURFACE_CONCEPT_DEFAULT_CONSTANTS)
+        prefix = 'sc_'
+    else:
+        defaults = dict(_SURFACE_CONCEPT_DEFAULT_CONSTANTS)
+        prefix = 'sc_'
+
+    constants = {
+        'tof_ns_per_bin':    float(_config_get(conf, f'{prefix}tof_ns_per_bin',         defaults['tof_ns_per_bin'])),
+        'detector_bins':     int(_config_get(conf,   f'{prefix}detector_bins',          defaults['detector_bins'])),
+        'binning_factor':    int(_config_get(conf,   f'{prefix}detector_binning_factor', defaults['binning_factor'])),
+        'detector_width_mm': float(_config_get(conf, f'{prefix}detector_width_mm',      defaults['detector_width_mm'])),
+        'detector_limit_cm': float(_config_get(conf, f'{prefix}detector_limit_cm',      defaults['detector_limit_cm'])),
+    }
+    # Re-derive the spatial factors from the primitives so the returned dict
+    # is always self-consistent even when the user only overrode part of the
+    # geometry.
+    constants['xy_factor']    = constants['detector_width_mm'] / constants['detector_bins'] * constants['binning_factor']
+    constants['xy_bin_shift'] = constants['detector_bins'] / constants['binning_factor'] / 2.0
+    if kind == 'surface_concept' or kind == 'single_delay_line':
+        constants['tof_ns_per_bin_1d'] = constants['tof_ns_per_bin'] * 2.0
+    return constants
+
+
 def _normalize_signal_kind(signal_kind: str) -> str:
     value = str(signal_kind).strip().lower()
     if value not in {'tof', 'mc'}:

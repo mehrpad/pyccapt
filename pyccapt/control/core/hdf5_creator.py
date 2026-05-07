@@ -189,21 +189,25 @@ def hdf_creator(variables, conf, time_counter, time_ex):
 				_create_dataset(hdf_file, "tdc/laser_pulse", variables.main_l_p_tdc, np.float64)
 
 			elif conf["tdc"] == "on" and conf["tdc_model"] == "HSD" and variables.counter_source == "HSD":
-				_create_dataset(hdf_file, "hsd/ch0_time", variables.ch0_time, np.uint64)
-				_create_dataset(hdf_file, "hsd/ch0_wave", variables.ch0_wave, np.uint64)
-				_create_dataset(hdf_file, "hsd/ch1_time", variables.ch1_time, np.uint64)
-				_create_dataset(hdf_file, "hsd/ch1_wave", variables.ch1_wave, np.uint64)
-				_create_dataset(hdf_file, "hsd/ch2_time", variables.ch2_time, np.uint64)
-				_create_dataset(hdf_file, "hsd/ch2_wave", variables.ch2_wave, np.uint64)
-				_create_dataset(hdf_file, "hsd/ch3_time", variables.ch3_time, np.uint64)
-				_create_dataset(hdf_file, "hsd/ch3_wave", variables.ch3_wave, np.uint64)
-				_create_dataset(hdf_file, "hsd/ch4_time", variables.ch4_time, np.uint64)
-				_create_dataset(hdf_file, "hsd/ch4_wave", variables.ch4_wave, np.uint64)
-				_create_dataset(hdf_file, "hsd/ch5_time", variables.ch5_time, np.uint64)
-				_create_dataset(hdf_file, "hsd/ch5_wave", variables.ch5_wave, np.uint64)
+				# DRS readout: GetTime returns ns and GetWave returns mV as
+				# C float — both are signed real values, NOT unsigned ints.
+				# Casting to uint64 (the previous behaviour) silently
+				# truncated fractional ns and wrapped negative mV samples
+				# (range ±500 mV at SetInputRange(0)) to ~1.8e19, ruining
+				# every saved HSD file. Persist as float32 to match the
+				# native dtype.
+				_create_dataset(hdf_file, "hsd/ch0_time", variables.ch0_time, np.float32)
+				_create_dataset(hdf_file, "hsd/ch0_wave", variables.ch0_wave, np.float32)
+				_create_dataset(hdf_file, "hsd/ch1_time", variables.ch1_time, np.float32)
+				_create_dataset(hdf_file, "hsd/ch1_wave", variables.ch1_wave, np.float32)
+				_create_dataset(hdf_file, "hsd/ch2_time", variables.ch2_time, np.float32)
+				_create_dataset(hdf_file, "hsd/ch2_wave", variables.ch2_wave, np.float32)
+				_create_dataset(hdf_file, "hsd/ch3_time", variables.ch3_time, np.float32)
+				_create_dataset(hdf_file, "hsd/ch3_wave", variables.ch3_wave, np.float32)
+				# ch4/ch5 and laser_pulse are not produced by drs.experiment_measure,
+				# so we don't write empty datasets for them.
 				_create_dataset(hdf_file, "hsd/high_voltage", variables.main_v_dc_drs, np.float64)
 				_create_dataset(hdf_file, "hsd/voltage_pulse", variables.main_v_p_drs, np.float64)
-				_create_dataset(hdf_file, "hsd/laser_pulse", variables.main_l_p_drs, np.float64)
 		# h5py has flushed and closed the file. Atomically replace any prior
 		# .h5 file in this folder. ``os.replace`` is atomic on POSIX and
 		# atomic-or-best-effort on Windows.

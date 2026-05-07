@@ -17,6 +17,7 @@ library via ctypes.
 """
 
 import ctypes
+import time
 from pathlib import Path
 
 import numpy as np
@@ -84,9 +85,23 @@ def experiment_measure(variables):
     drs_ox = DRS(trigger=0, test=1, delay=0, sample_frequency=2)
 
     while True:
-        returnVale = np.array(drs_ox.reader())
-        data = returnVale.reshape(8, 1024)
-        # with self.variables.lock_data:
+        # Stop check at the top so the user's Stop click does not
+        # always cost one extra acquisition.
+        if variables.flag_stop_tdc:
+            print('DRS loop is break in child process')
+            break
+
+        try:
+            returnVale = np.array(drs_ox.reader())
+            data = returnVale.reshape(8, 1024)
+        except Exception as exc:
+            # Don't kill the worker silently on a single bad read
+            # (USB hiccup, board reset, unexpected shape). Log and
+            # let the next iteration retry.
+            print(f"DRS read failed: {exc}")
+            time.sleep(0.1)
+            continue
+
         ch0_time = data[0, :]
         ch0_wave = data[1, :]
         ch1_time = data[2, :]
@@ -105,21 +120,22 @@ def experiment_measure(variables):
         variables.extend_to('ch3_time', ch3_time.tolist())
         variables.extend_to('ch3_wave', ch3_wave.tolist())
 
-        voltage_data = np.tile(variables.specimen_voltage, len(ch0_time))
-        pulse_data = np.tile(variables.pulse_voltage, len(ch0_time))
-        variables.extend_to('main_v_dc_drs', voltage_data.tolist())
-        variables.extend_to('main_v_p_drs', pulse_data.tolist())
+        # One DC / pulse voltage reading per acquisition (per waveform),
+        # not one per sample. The previous code tiled both to 1024 copies
+        # which bloated the HDF5 by 1024x and only "worked" because every
+        # downstream reader implicitly assumed N=1024 samples per event.
+        variables.extend_to('main_v_dc_drs', [float(variables.specimen_voltage)])
+        variables.extend_to('main_v_p_drs', [float(variables.pulse_voltage)])
 
-        # with self.variables.lock_data_plot:
-        variables.extend_to('main_v_dc_plot', voltage_data.tolist())
+        # Plot stream: one scalar per acquisition, matching the new
+        # per-event voltage shape. (x_plot/y_plot/t_plot still feed the
+        # raw waveform time array as a placeholder — proper hit
+        # reconstruction from the waves is a separate task.)
+        variables.extend_to('main_v_dc_plot', [float(variables.specimen_voltage)])
         # we have to calculate x and y from the wave data here
         variables.extend_to('x_plot', ch0_time.tolist())
         variables.extend_to('y_plot', ch0_time.tolist())
         variables.extend_to('t_plot', ch0_time.tolist())
-
-        if variables.flag_stop_tdc:
-            print('DRS loop is break in child process')
-            break
 
     drs_ox.delete_drs_ox()
 

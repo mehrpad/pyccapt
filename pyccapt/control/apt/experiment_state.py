@@ -157,9 +157,15 @@ def validate_detector_data_lengths(variables: Any, conf: dict[str, Any], log_apt
         )
 
     elif variables.counter_source == "HSD":
+	    # The DRS records 1024 waveform samples per acquisition and one
+	    # DC / pulse voltage reading per acquisition, so the two groups
+	    # have different lengths by design (channel = 1024 * N, voltage
+	    # = N). Validate them as separate groups instead of mixing them.
+	    # main_l_p_drs is not produced by drs.experiment_measure, so it
+	    # is intentionally excluded.
         _warn_on_mismatch(
             log_apt,
-            "hsd",
+	        "hsd-channels",
             [
                 variables.ch0_time,
                 variables.ch0_wave,
@@ -169,9 +175,14 @@ def validate_detector_data_lengths(variables: Any, conf: dict[str, Any], log_apt
                 variables.ch2_wave,
                 variables.ch3_time,
                 variables.ch3_wave,
+            ],
+        )
+	    _warn_on_mismatch(
+		    log_apt,
+		    "hsd-voltages",
+		    [
                 variables.main_v_dc_drs,
                 variables.main_v_p_drs,
-                variables.main_l_p_drs,
             ],
         )
 

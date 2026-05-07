@@ -1747,7 +1747,7 @@ class Ui_Laser_Control(object):
         try:
             databack = device.open_port()
         except Exception as exc:
-            reason = f"could not open {com_port}: {exc}"
+            reason = f"Laser: could not open {com_port}: {exc}"
             print(reason)
             self._set_laser_disconnected_banner(reason)
             self._apply_button_locks_for_status(None)
@@ -1756,7 +1756,7 @@ class Ui_Laser_Control(object):
         if databack != 0:
             error_text = device.last_error or "no response from device"
             reason = (
-                f"could not open {com_port}: {error_text}. "
+                f"Laser: could not open {com_port}: {error_text}. "
                 f"Available ports: {_available_serial_ports_text()}"
             )
             print(reason)
@@ -1770,7 +1770,11 @@ class Ui_Laser_Control(object):
         try:
             status = device.StatusRead()
         except Exception as exc:
-            reason = f"port open but no CLI reply: {exc}"
+            reason = (
+                f"Laser: port {com_port} opened but the laser did not reply to "
+                f"any CLI command ({exc}). Most likely the laser is in "
+                f"NKTPBus mode — use 'Switch to CLI', or check the cable."
+            )
             print(reason)
             try:
                 device.close_port()
@@ -1781,8 +1785,8 @@ class Ui_Laser_Control(object):
             return False
         if not status or 'ly_oxp2' not in status:
             reason = (
-                f"port {com_port} opened but laser did not reply to CLI "
-                f"(probably in NKTPBus mode). Use 'Switch to CLI'."
+                f"Laser: port {com_port} opened but the laser did not reply "
+                f"to CLI (probably in NKTPBus mode). Use 'Switch to CLI'."
             )
             print(reason)
             try:

@@ -109,8 +109,16 @@ class CameraWorker(QObject):
         self._last_exposure_mode_error = [None] * self.SLOT_COUNT
         self._last_exposure_error = [None] * self.SLOT_COUNT
         self._last_grab_error = [None] * self.SLOT_COUNT
+        # Serials the user explicitly disconnected from the camera GUI;
+        # _reconcile_slots skips these so they don't auto-reattach.
+        self._user_disabled_serials = set()
+        # Most recent human-readable status / error message, displayed in
+        # the camera GUI's bottom banner. Updated by _set_status() so the
+        # GUI can poll it on a timer.
+        self.latest_status = ""
 
         self.camera_available, self.camera_status_message = check_camera_backend()
+        self.latest_status = self.camera_status_message
         if self.camera_available:
             self._init_backend()
 
@@ -252,12 +260,14 @@ class CameraWorker(QObject):
                     pass
                 self._close_slot(slot)
             sn = self._slot_serials[slot]
+            if sn in self._user_disabled_serials:
+                continue
             if sn is not None and sn in by_serial:
                 if self._attach_slot(slot, by_serial[sn]):
                     used_serials.add(sn)
 
         for sn, dev in by_serial.items():
-            if sn in used_serials:
+            if sn in used_serials or sn in self._user_disabled_serials:
                 continue
             for slot in range(self.SLOT_COUNT):
                 if self._slots[slot] is not None:
@@ -309,6 +319,7 @@ class CameraWorker(QObject):
             if self._last_attach_error_by_device.get(device_key) != msg:
                 self._last_attach_error_by_device[device_key] = msg
                 print(f"Could not attach camera (slot {slot}): {msg}")
+                self._set_status(f"Camera {device_key}: {msg}")
             return False
         # Successful attach - reset the dedup state for this device so
         # the next failure (if any) prints again.
@@ -321,7 +332,99 @@ class CameraWorker(QObject):
         except Exception:
             sn = self._slot_serials[slot]
         print(f"Camera attached in slot {slot} (serial={sn}).")
+        self._set_status(f"Camera {sn} attached (slot {slot}).")
         return True
+
+    def _set_status(self, message):
+        """Publish a human-readable status / error string for the GUI."""
+        self.latest_status = message or ""
+
+    # ------------------------------------------------------------ public API
+
+    def list_cameras(self):
+        """Return one dict per currently-detected Basler camera.
+
+        Each dict has ``serial``, ``model``, ``slot`` (or None when the
+        device is detected but not bound), ``attached`` (bool), and
+        ``user_disabled`` (bool — user explicitly disconnected it).
+        """
+
+        if pylon is None or not self.camera_available:
+            return []
+        try:
+            devices = self._tl_factory.EnumerateDevices()
+        except Exception as e:
+            self._set_status(f"Camera enumeration failed: {e}")
+            return []
+
+        # serial -> slot, derived from currently-open slots
+        slot_by_serial = {}
+        for slot in range(self.SLOT_COUNT):
+            cam = self._slots[slot]
+            sn = self._slot_serials[slot]
+            if cam is not None and sn is not None:
+                slot_by_serial[sn] = slot
+
+        out = []
+        seen = set()
+        for dev in devices:
+            try:
+                sn = dev.GetSerialNumber()
+            except Exception:
+                sn = None
+            if not sn or sn in seen:
+                continue
+            seen.add(sn)
+            try:
+                model = dev.GetModelName()
+            except Exception:
+                model = ""
+            out.append({
+                "serial": sn,
+                "model": model,
+                "slot": slot_by_serial.get(sn),
+                "attached": sn in slot_by_serial,
+                "user_disabled": sn in self._user_disabled_serials,
+            })
+        return out
+
+    def disconnect_serial(self, serial):
+        """Close any open slot bound to *serial* and prevent auto-reattach.
+
+        Use :meth:`connect_serial` to re-enable it.
+        """
+        if not serial:
+            return
+        self._user_disabled_serials.add(serial)
+        for slot in range(self.SLOT_COUNT):
+            if self._slot_serials[slot] == serial and self._slots[slot] is not None:
+                self._close_slot(slot)
+                self._set_status(
+                    f"Disconnected camera {serial} from slot {slot}."
+                )
+                return
+        self._set_status(f"Camera {serial} marked disconnected.")
+
+    def connect_serial(self, serial):
+        """Permit *serial* to attach again and force a reconcile pass."""
+        if not serial:
+            return
+        self._user_disabled_serials.discard(serial)
+        # Drop the cached attach error so the next failure (if any)
+        # prints fresh.
+        self._last_attach_error_by_device.pop(serial, None)
+        try:
+            self._reconcile_slots(force=True)
+        except Exception as e:
+            self._set_status(f"Could not connect {serial}: {e}")
+            return
+        for slot in range(self.SLOT_COUNT):
+            if self._slot_serials[slot] == serial and self._slots[slot] is not None:
+                self._set_status(f"Connected camera {serial} (slot {slot}).")
+                return
+        self._set_status(
+            f"Camera {serial} could not be attached — see terminal log."
+        )
 
     def _apply_exposure_changes(self):
         for slot in range(self.SLOT_COUNT):
@@ -385,6 +488,7 @@ class CameraWorker(QObject):
                     if self._last_grab_error[slot] != msg:
                         self._last_grab_error[slot] = msg
                         print(f"Slot {slot} grab failed: {msg}; will try to reconnect.")
+                        self._set_status(f"Slot {slot} grab failed: {msg}")
                     self._close_slot(slot)
                 else:
                     # Successful grab - clear the dedup state.

@@ -9,7 +9,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import QTimer
 
 # Local module and scripts
-from pyccapt.control.core import runtime, tof2mc_simple
+from pyccapt.control.core import live_calibration, runtime, tof2mc_simple
 from pyccapt.control.devices import initialize_devices
 from pyccapt.control.gui import tooltips
 
@@ -74,6 +74,30 @@ class Ui_Visualization(object):
 
 		self.update_timer = QTimer()  # Create a QTimer for updating graphs
 		self.update_timer.timeout.connect(self.update_graphs)  # Connect it to the update_graphs slot
+
+		# ----- Live calibration state -------------------------------------
+		# Default: show CALIBRATED data (uncalibrated_mode = False).
+		# The "Uncalibrate" toggle in the GUI flips this flag. Calibration
+		# parameters are refit by a background QThread (see
+		# pyccapt.control.core.live_calibration) and atomically swapped
+		# in here on the GUI thread. Until the first successful fit
+		# self._calib_params stays None and the apply path falls back
+		# to the raw uncalibrated formulas.
+		self.uncalibrated_mode = False
+		self._calib_params = None
+		self._calib_worker = None
+		self._calib_status_text = "calibrating..."
+
+		# Lock that protects every write to / read of the
+		# ``last_100_thousand_*`` ring buffer. The GUI thread mutates
+		# these arrays in update_graphs_helper while the calibration
+		# worker thread reads them via _calibration_snapshot. NumPy
+		# array assignments are NOT atomic at the array level (a
+		# concatenate -> realloc may race with a copy), so an explicit
+		# RLock is the correct fix even though Python's GIL alone
+		# usually papers over the race in practice.
+		import threading as _threading
+		self._buffer_lock = _threading.RLock()
 		self.visualization_window = None  # Inâ™ itialize the attribute
 
 	def setupUi(self, Visualization):
@@ -367,6 +391,24 @@ class Ui_Visualization(object):
 		self.spectrum_switch.setMaximumSize(QtCore.QSize(60, 16777215))
 		self.spectrum_switch.setObjectName("spectrum_switch")
 		self.horizontalLayout.addWidget(self.spectrum_switch)
+		# "Uncalibrate" toggle, sits right next to the mc/tof switch.
+		# Default state = NOT pressed = show calibrated spectrum.
+		# Pressed (green) = bypass corrections, show raw mc/tof.
+		self.uncalibrate_switch = QtWidgets.QPushButton(parent=Visualization)
+		self.uncalibrate_switch.setMinimumSize(QtCore.QSize(0, 20))
+		self.uncalibrate_switch.setMaximumSize(QtCore.QSize(100, 16777215))
+		self.uncalibrate_switch.setObjectName("uncalibrate_switch")
+		self.horizontalLayout.addWidget(self.uncalibrate_switch)
+		# Small status label that surfaces what the live-calibration
+		# worker is doing ("calibrating…", "no clear peak", "R²=0.81…").
+		self.calib_status_label = QtWidgets.QLabel(parent=Visualization)
+		self.calib_status_label.setMinimumSize(QtCore.QSize(120, 20))
+		font_status = QtGui.QFont()
+		font_status.setItalic(True)
+		font_status.setPointSize(8)
+		self.calib_status_label.setFont(font_status)
+		self.calib_status_label.setObjectName("calib_status_label")
+		self.horizontalLayout.addWidget(self.calib_status_label)
 		self.spectrum_last_events_switch = QtWidgets.QPushButton(parent=Visualization)
 		self.spectrum_last_events_switch.setMinimumSize(QtCore.QSize(0, 20))
 		self.spectrum_last_events_switch.setMaximumSize(QtCore.QSize(100, 16777215))
@@ -552,7 +594,14 @@ class Ui_Visualization(object):
 		self.original_button_style = self.detection_rate_range_switch.styleSheet()
 		self.detection_rate_range_switch.clicked.connect(self.detection_rate_range)
 		self.spectrum_switch.clicked.connect(self.spectrum_switch_mc_tof)
+		self.uncalibrate_switch.clicked.connect(self.uncalibrate_clicked)
 		self.spectrum_last_events_switch.clicked.connect(self.spectrum_last_events)
+		# Start the background calibration worker. It snapshots the
+		# 100 000-event ring buffer every refit_interval_s, fits new
+		# parameters off the GUI thread, and emits parameters_updated
+		# when ready. The render path picks up the new params on the
+		# next tick. Disable via config: live_calibration_refit_interval_s = 0
+		self._start_live_calibration_worker()
 		self.num_last_events.editingFinished.connect(self.parameters_changes)
 		self.max_mc.editingFinished.connect(self.parameters_changes)
 		self.max_tof.editingFinished.connect(self.parameters_changes)
@@ -613,6 +662,10 @@ class Ui_Visualization(object):
 		self.heatmap_fdm_switch.setText(_translate("Visualization", "Hitmap/FDM"))
 		self.label_207.setText(_translate("Visualization", "Spectrum"))
 		self.spectrum_switch.setText(_translate("Visualization", "mc/tof"))
+		self.uncalibrate_switch.setText(_translate("Visualization", "Uncalibrate"))
+		self.calib_status_label.setText(
+			_translate("Visualization", "live cal: calibrating…")
+		)
 		self.spectrum_last_events_switch.setText(_translate("Visualization", "Last Events"))
 		self.num_last_events.setText(_translate("Visualization", "10000"))
 		self.label_208.setText(_translate("Visualization", "Max mc (Da)"))
@@ -817,70 +870,89 @@ class Ui_Visualization(object):
 			# self.length_events += len(self.tt)
 			self.length_events += len(tt)
 
-			if len(self.last_100_thousand_v) == 0:
-				self.last_100_thousand_det_x_heatmap = xx
-				self.last_100_thousand_det_y_heatmap = yy
-				mask_t = tt < self.conf["max_tof"]
-				self.last_100_thousand_v = main_v_dc_dld[mask_t]
-				self.last_100_thousand_det_x = xx[mask_t]
-				self.last_100_thousand_det_y = yy[mask_t]
-				self.last_100_thousand_t = tt[mask_t]
-			else:
-				self.last_100_thousand_det_x_heatmap = np.concatenate((self.last_100_thousand_det_x_heatmap, xx))
-				self.last_100_thousand_det_y_heatmap = np.concatenate((self.last_100_thousand_det_y_heatmap, yy))
-				mask_t = tt < self.conf["max_tof"]
-				self.last_100_thousand_v = np.concatenate((self.last_100_thousand_v, main_v_dc_dld[mask_t]))
-				self.last_100_thousand_det_x = np.concatenate((self.last_100_thousand_det_x, xx[mask_t]))
-				self.last_100_thousand_det_y = np.concatenate((self.last_100_thousand_det_y, yy[mask_t]))
-				self.last_100_thousand_t = np.concatenate((self.last_100_thousand_t, tt[mask_t]))
-			if len(self.last_100_thousand_v) > 100000:
-				self.last_100_thousand_v = self.last_100_thousand_v[-100000:]
-				self.last_100_thousand_det_x = self.last_100_thousand_det_x[-100000:]
-				self.last_100_thousand_det_x_heatmap = self.last_100_thousand_det_x_heatmap[-100000:]
-				self.last_100_thousand_det_y = self.last_100_thousand_det_y[-100000:]
-				self.last_100_thousand_det_y_heatmap = self.last_100_thousand_det_y_heatmap[-100000:]
-				self.last_100_thousand_t = self.last_100_thousand_t[-100000:]
+			# All ring-buffer writes go through the lock so the
+			# background calibration worker's snapshot can never see a
+			# half-updated buffer (e.g. concatenated v_dc but pre-trim
+			# t / x / y after the 100 k cap kicks in).
+			with self._buffer_lock:
+				if len(self.last_100_thousand_v) == 0:
+					self.last_100_thousand_det_x_heatmap = xx
+					self.last_100_thousand_det_y_heatmap = yy
+					mask_t = tt < self.conf["max_tof"]
+					self.last_100_thousand_v = main_v_dc_dld[mask_t]
+					self.last_100_thousand_det_x = xx[mask_t]
+					self.last_100_thousand_det_y = yy[mask_t]
+					self.last_100_thousand_t = tt[mask_t]
+				else:
+					self.last_100_thousand_det_x_heatmap = np.concatenate((self.last_100_thousand_det_x_heatmap, xx))
+					self.last_100_thousand_det_y_heatmap = np.concatenate((self.last_100_thousand_det_y_heatmap, yy))
+					mask_t = tt < self.conf["max_tof"]
+					self.last_100_thousand_v = np.concatenate((self.last_100_thousand_v, main_v_dc_dld[mask_t]))
+					self.last_100_thousand_det_x = np.concatenate((self.last_100_thousand_det_x, xx[mask_t]))
+					self.last_100_thousand_det_y = np.concatenate((self.last_100_thousand_det_y, yy[mask_t]))
+					self.last_100_thousand_t = np.concatenate((self.last_100_thousand_t, tt[mask_t]))
+				if len(self.last_100_thousand_v) > 100000:
+					self.last_100_thousand_v = self.last_100_thousand_v[-100000:]
+					self.last_100_thousand_det_x = self.last_100_thousand_det_x[-100000:]
+					self.last_100_thousand_det_x_heatmap = self.last_100_thousand_det_x_heatmap[-100000:]
+					self.last_100_thousand_det_y = self.last_100_thousand_det_y[-100000:]
+					self.last_100_thousand_det_y_heatmap = self.last_100_thousand_det_y_heatmap[-100000:]
+					self.last_100_thousand_t = self.last_100_thousand_t[-100000:]
 
 			try:
 				if self.variables.pulse_mode == 'Voltage':
 					t_0 = self.conf["t_0_voltage"]
 				elif self.variables.pulse_mode == 'Laser' or self.variables.pulse_mode == 'VoltageLaser':
 					t_0 = self.conf["t_0_laser"]
+
+				# Decide whether to apply cached live-calibration parameters.
+				# - "Uncalibrate" toggle pressed         -> always raw
+				# - calibrated mode + params available   -> apply
+				# - calibrated mode + no params yet      -> raw fallback
+				use_calibration = (
+						not self.uncalibrated_mode
+						and self._calib_params is not None
+				)
+
+				def _get_tof_mc(t_arr, v_arr, x_arr, y_arr):
+					"""Return (tof, mc) arrays honouring the current calibration mode."""
+					if use_calibration:
+						corrected = live_calibration.apply_corrections(
+							t_arr, v_arr, x_arr, y_arr, self._calib_params,
+						)
+						if corrected is not None:
+							return corrected  # (t_corr, mc_corr)
+					# Raw fallback: simple geometry-only mc, t unchanged.
+					mc_raw = tof2mc_simple.tof_2_mc(
+						t_arr, t_0, v_arr, x_arr, y_arr,
+						flightPathLength=self.conf["flight_path_length"],
+					)
+					return t_arr, mc_raw
+
 				if self.mc_tof_last_events_flag and self.conf["visualization"] == "tof":
-					tt_last_events = self.last_100_thousand_t[-self.num_event_mc_tof:]
+					t_le = self.last_100_thousand_t[-self.num_event_mc_tof:]
+					v_le = self.last_100_thousand_v[-self.num_event_mc_tof:]
+					x_le = self.last_100_thousand_det_x[-self.num_event_mc_tof:]
+					y_le = self.last_100_thousand_det_y[-self.num_event_mc_tof:]
+					tt_last_events, _ = _get_tof_mc(t_le, v_le, x_le, y_le)
 					hist_tof_last_events, _ = np.histogram(tt_last_events, bins=self.bins_tof)
 
 				elif self.mc_tof_last_events_flag and self.conf["visualization"] == "mc":
-					t_last_events = self.last_100_thousand_t[-self.num_event_mc_tof:]
-					main_v_dc_dld_last_events = self.last_100_thousand_v[-self.num_event_mc_tof:]
-					x_last_events = self.last_100_thousand_det_x[-self.num_event_mc_tof:]
-					y_last_events = self.last_100_thousand_det_y[-self.num_event_mc_tof:]
-
-					mc_last_events = tof2mc_simple.tof_2_mc(t_last_events, t_0,
-					                                        main_v_dc_dld_last_events,
-					                                        x_last_events,
-					                                        y_last_events,
-					                                        flightPathLength=self.conf["flight_path_length"])
+					t_le = self.last_100_thousand_t[-self.num_event_mc_tof:]
+					v_le = self.last_100_thousand_v[-self.num_event_mc_tof:]
+					x_le = self.last_100_thousand_det_x[-self.num_event_mc_tof:]
+					y_le = self.last_100_thousand_det_y[-self.num_event_mc_tof:]
+					_, mc_last_events = _get_tof_mc(t_le, v_le, x_le, y_le)
 					hist_mc_last_events, _ = np.histogram(mc_last_events, bins=self.bins_mc)
 
-				# hist_tof, _ = np.histogram(tt_max_lenght, bins=self.bins_tof)
-				# self.hist_tof = hist_tof
-				hist_tof, _ = np.histogram(tt[mask_t], bins=self.bins_tof)
+				# Cumulative histograms always come from the new tick's events
+				# only -- no need to re-bin the whole ring buffer.
+				tof_evt, mc_evt = _get_tof_mc(
+					tt[mask_t], main_v_dc_dld[mask_t], xx[mask_t], yy[mask_t],
+				)
+				hist_tof, _ = np.histogram(tof_evt, bins=self.bins_tof)
 				self.hist_tof += hist_tof
-
-				# mc = tof2mc_simple.tof_2_mc(self.last_100_thousand_t, self.conf["t_0"],
-				#                             self.last_100_thousand_v,
-				#                             self.last_100_thousand_det_x,
-				#                             self.last_100_thousand_det_y,
-				#                             flightPathLength=self.conf["flight_path_length"])
-				# hist_mc, _ = np.histogram(mc, bins=self.bins_mc)
-				# self.hist_mc = hist_mc
-				mc = tof2mc_simple.tof_2_mc(tt[mask_t], t_0,
-				                            main_v_dc_dld[mask_t],
-				                            xx[mask_t],
-				                            yy[mask_t],
-				                            flightPathLength=self.conf["flight_path_length"])
-				hist_mc, _ = np.histogram(mc, bins=self.bins_mc)
+				hist_mc, _ = np.histogram(mc_evt, bins=self.bins_mc)
 				self.hist_mc += hist_mc
 
 				self.histogram.clear()
@@ -1151,6 +1223,143 @@ class Ui_Visualization(object):
 		elif self.conf["visualization"] == "mc":
 			self.conf["visualization"] = "tof"
 			self.histogram.setLabel("bottom", "Time", units='ns', **self.styles)
+		# The TOF and MC pipelines are different (TOF: prescale + vol +
+		# bowl; MC: bowl_init + vol + bowl_final). Restart the worker
+		# so it refits for the new mode and clear the cached params /
+		# cumulative histograms so the displayed spectrum doesn't mix
+		# bins from one mode's fit with another.
+		self._calib_params = None
+		self._reset_cumulative_histograms()
+		self._stop_live_calibration_worker()
+		self._set_calib_status_text("calibrating…")
+		self._start_live_calibration_worker()
+
+	# ---------------------------------------------------------------- live cal
+
+	def uncalibrate_clicked(self):
+		"""Toggle "Uncalibrate" state on the live spectrum.
+
+		Default = NOT pressed = show CALIBRATED data.
+		Pressed (green) = bypass corrections, show raw mc/tof.
+		"""
+		self.uncalibrated_mode = not self.uncalibrated_mode
+		if self.uncalibrated_mode:
+			self.uncalibrate_switch.setStyleSheet(
+				"QPushButton{background: rgb(0, 255, 26)}"
+			)
+		else:
+			self.uncalibrate_switch.setStyleSheet(self.original_button_style)
+		# The cumulative histograms hold values that were computed
+		# under the *previous* mode; mixing calibrated and uncalibrated
+		# bins would produce garbage. Reset so the display rebuilds in
+		# the new mode from the next tick onwards.
+		self._reset_cumulative_histograms()
+
+	def _reset_cumulative_histograms(self):
+		"""Clear hist_tof / hist_mc so a calibration mode change starts fresh."""
+		try:
+			self.hist_tof.fill(0)
+			self.hist_mc.fill(0)
+		except Exception:
+			pass
+
+	def _calibration_snapshot(self):
+		"""Snapshot callback handed to the LiveCalibrationWorker.
+
+		Returns the 100 000-event ring buffer's contents as plain numpy
+		arrays, or ``None`` when there is not yet enough data. Runs on
+		the worker thread; never touches Qt widgets. Takes the same
+		``_buffer_lock`` as the writer in update_graphs_helper so the
+		snapshot is guaranteed consistent across the four arrays even
+		when the GUI thread is mid-concatenate.
+		"""
+		try:
+			with self._buffer_lock:
+				t = self.last_100_thousand_t
+				v = self.last_100_thousand_v
+				x = self.last_100_thousand_det_x
+				y = self.last_100_thousand_det_y
+				if t is None or t.size == 0:
+					return None
+				# Lengths can desync briefly across the four arrays
+				# while update_graphs_helper concatenates one at a time.
+				# The lock above already prevents that, but trim to the
+				# common length defensively in case any future code
+				# path bypasses the lock.
+				n = min(len(t), len(v), len(x), len(y))
+				if n == 0:
+					return None
+				return t[-n:].copy(), v[-n:].copy(), x[-n:].copy(), y[-n:].copy()
+		except Exception:
+			return None
+
+	def _start_live_calibration_worker(self):
+		"""Spin up the background fitter, unless disabled in config."""
+		try:
+			interval = float(self.conf.get("live_calibration_refit_interval_s", 15.0))
+		except (TypeError, ValueError):
+			interval = 15.0
+		if interval <= 0:
+			# Operator disabled live calibration entirely.
+			self._set_calib_status_text("disabled")
+			return
+		# Tell the worker which t_0 to use by hinting at the active pulse mode.
+		try:
+			pulse_mode = str(getattr(self.variables, "pulse_mode", "")).strip()
+			self.conf["_active_pulse_mode_is_laser"] = pulse_mode in {"Laser", "VoltageLaser"}
+		except Exception:
+			self.conf["_active_pulse_mode_is_laser"] = False
+		# Pick the calibration mode that matches the active visualization
+		# view. The two pipelines are different (see live_calibration
+		# docstring): TOF starts with a sqrt(V/V̄) prescaling, MC starts
+		# with a bowl-only initial step.
+		self.conf["live_calibration_mode"] = (
+			"mc" if self.conf.get("visualization", "tof") == "mc" else "tof"
+		)
+		self._calib_worker = live_calibration.LiveCalibrationWorker(
+			self._calibration_snapshot, self.conf,
+		)
+		self._calib_worker.parameters_updated.connect(self._on_calibration_params_updated)
+		self._calib_worker.status_changed.connect(self._on_calibration_status_changed)
+		self._calib_worker.start()
+
+	def _on_calibration_params_updated(self, params):
+		"""GUI-thread slot that atomically swaps in new calibration params."""
+		self._calib_params = params
+		if params is not None:
+			self._set_calib_status_text(
+				f"calibrated (R²={params.fit_quality:.2f}, "
+				f"n={params.num_events_used})", ok=True,
+			)
+			# Old cumulative bins were computed under the previous
+			# parameters; clear them so the displayed spectrum reflects
+			# only events binned with the new calibration.
+			self._reset_cumulative_histograms()
+
+	def _on_calibration_status_changed(self, text):
+		"""GUI-thread slot for the worker's human-readable status."""
+		self._set_calib_status_text(text)
+
+	def _set_calib_status_text(self, text, *, ok=False):
+		self._calib_status_text = text
+		try:
+			color = "#0a7d20" if ok else "#666666"
+			self.calib_status_label.setText(f"live cal: {text}")
+			self.calib_status_label.setStyleSheet(f"QLabel{{color:{color};}}")
+		except Exception:
+			pass
+
+	def _stop_live_calibration_worker(self):
+		"""Stop the background fitter cleanly; called from .stop()."""
+		worker = self._calib_worker
+		self._calib_worker = None
+		if worker is None:
+			return
+		try:
+			worker.stop()
+			worker.wait(2000)  # ms
+		except Exception:
+			pass
 
 	def spectrum_last_events(self):
 		"""
@@ -1256,8 +1465,11 @@ class Ui_Visualization(object):
         Return:
             None
             """
-		# Add any additional cleanup code here
-		pass
+		# Stop the live-calibration QThread cleanly so the visualization
+		# subprocess can exit. The worker's ``stop()`` sets a flag that
+		# its ``run()`` loop checks every 200 ms; ``wait(2000)`` gives it
+		# up to 2 s to actually exit.
+		self._stop_live_calibration_worker()
 
 
 def efficient_histogram(viz, bin_size):

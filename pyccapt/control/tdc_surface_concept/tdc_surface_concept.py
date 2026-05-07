@@ -161,9 +161,9 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
     # different rigs can be tuned without editing source.  Defaults
     # match the values that were hard-coded here historically.
     try:
-	    _conf, _ = _runtime.load_project_config(change_cwd=False)
+        _conf, _ = _runtime.load_project_config(change_cwd=False)
     except Exception:
-	    _conf = {}
+        _conf = {}
     exposure_time = int(_conf.get("sc_exposure_time", 100))
     TOFFACTOR = float(_conf.get("sc_tof_ns_per_bin", 27.432 / (1000 * 4)))
     DETBINS = int(_conf.get("sc_detector_bins", 4900))
@@ -268,29 +268,29 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
         # block the loop indefinitely and starve stop_event polling.
         # Now: timed gets, no-data sentinels, stop_event re-checked.
         try:
-	        eventtype, data = bufdatacb.queue.get(timeout=QUEUE_GET_TIMEOUT_S)
+            eventtype, data = bufdatacb.queue.get(timeout=QUEUE_GET_TIMEOUT_S)
         except Empty:
-	        eventtype, data = None, None
+            eventtype, data = None, None
         if stop_event.is_set():
-	        break
+            break
         try:
-	        eventtype_raw, data_raw = bufdatacb_raw.queue.get(timeout=QUEUE_GET_TIMEOUT_S)
+            eventtype_raw, data_raw = bufdatacb_raw.queue.get(timeout=QUEUE_GET_TIMEOUT_S)
         except Empty:
-	        eventtype_raw, data_raw = None, None
+            eventtype_raw, data_raw = None, None
         if stop_event.is_set():
-	        break
+            break
 
         try:
-	        specimen_voltage = variables.specimen_voltage
-	        voltage_pulse = variables.pulse_voltage
-	        laser_pulse = variables.laser_pulse_energy
+            specimen_voltage = variables.specimen_voltage
+            voltage_pulse = variables.pulse_voltage
+            laser_pulse = variables.laser_pulse_energy
         except Exception as exc:
-	        # Manager IPC can transiently fail under heavy load; skip
-	        # this iteration but keep the loop alive.
-	        if str(exc) != _last_loop_warn:
-		        _last_loop_warn = str(exc)
-		        print(f"TDC: variable read failed (non-fatal): {exc}")
-	        continue
+            # Manager IPC can transiently fail under heavy load; skip
+            # this iteration but keep the loop alive.
+            if str(exc) != _last_loop_warn:
+                _last_loop_warn = str(exc)
+                print(f"TDC: variable read failed (non-fatal): {exc}")
+            continue
 
         if eventtype == QUEUE_DATA:
             # correct for binning of surface concept
@@ -349,31 +349,31 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
                 laser_pulse_data_tdc.extend((np.tile(laser_pulse, len(channel_data_tmp))).tolist())
 
         if eventtype == QUEUE_ENDOFMEAS:
-	        retcode = bufdatacb.start_measurement(exposure_time, retries=10)
+            retcode = bufdatacb.start_measurement(exposure_time, retries=10)
             if retcode < 0:
-	            print("Error during read (error code: %s - error msg: %s):" % (
-		            retcode, device.lib.sc_get_err_msg(retcode)))
-	            variables.flag_tdc_failure = True
-	            # Clean teardown - the post-loop block at the end runs
-	            # bufdatacb.close() etc.  We just break out here.
+                print("Error during read (error code: %s - error msg: %s):" % (
+                    retcode, device.lib.sc_get_err_msg(retcode)))
+                variables.flag_tdc_failure = True
+                # Clean teardown - the post-loop block at the end runs
+                # bufdatacb.close() etc.  We just break out here.
                 break
 
         # Calculate the detection rate
         current_time = time.time()
         if current_time - start_time >= 0.5:
-	        # Re-read pulse_frequency every interval so the rate calc
-	        # stays correct if the user changes it mid-run.  Guard
-	        # against zero (would divide by zero on first chunk after a
-	        # bad value).
-	        try:
-		        live_pulse_frequency = max(
-			        float(variables.pulse_frequency) * 1000.0, 1.0)
-	        except Exception:
-		        live_pulse_frequency = pulse_frequency
-	        pulse_frequency = live_pulse_frequency
+            # Re-read pulse_frequency every interval so the rate calc
+            # stays correct if the user changes it mid-run.  Guard
+            # against zero (would divide by zero on first chunk after a
+            # bad value).
+            try:
+                live_pulse_frequency = max(
+                    float(variables.pulse_frequency) * 1000.0, 1.0)
+            except Exception:
+                live_pulse_frequency = pulse_frequency
+            pulse_frequency = live_pulse_frequency
             detection_rate = events_detected_tmp * 100 / pulse_frequency
-	        variables.detection_rate_current = detection_rate * 2  # rate per second
-	        variables.detection_rate_current_plot = detection_rate * 2
+            variables.detection_rate_current = detection_rate * 2  # rate per second
+            variables.detection_rate_current_plot = detection_rate * 2
             variables.total_ions = events_detected
             variables.total_raw_signals = raw_signal_detected
             events_detected_tmp = 0
@@ -415,21 +415,21 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
             # any experiment > CHUNK_SIZE silently truncated its
             # in-memory copy.
             try:
-	            variables.extend_to('x', xx[:CHUNK_SIZE])
-	            variables.extend_to('y', yy[:CHUNK_SIZE])
-	            variables.extend_to('t', tt[:CHUNK_SIZE])
-	            variables.extend_to('dld_start_counter', start_counter[:CHUNK_SIZE])
-	            variables.extend_to('main_v_dc_dld', voltage_data[:CHUNK_SIZE])
-	            variables.extend_to('main_v_p_dld', voltage_pulse_data[:CHUNK_SIZE])
-	            variables.extend_to('main_l_p_dld', laser_pulse_data[:CHUNK_SIZE])
-	            variables.extend_to('channel', channel_data[:CHUNK_SIZE])
-	            variables.extend_to('time_data', time_data[:CHUNK_SIZE])
-	            variables.extend_to('tdc_start_counter', tdc_start_counter[:CHUNK_SIZE])
-	            variables.extend_to('main_v_dc_tdc', voltage_data_tdc[:CHUNK_SIZE])
-	            variables.extend_to('main_v_p_tdc', voltage_pulse_data_tdc[:CHUNK_SIZE])
-	            variables.extend_to('main_l_p_tdc', laser_pulse_data_tdc[:CHUNK_SIZE])
+                variables.extend_to('x', xx[:CHUNK_SIZE])
+                variables.extend_to('y', yy[:CHUNK_SIZE])
+                variables.extend_to('t', tt[:CHUNK_SIZE])
+                variables.extend_to('dld_start_counter', start_counter[:CHUNK_SIZE])
+                variables.extend_to('main_v_dc_dld', voltage_data[:CHUNK_SIZE])
+                variables.extend_to('main_v_p_dld', voltage_pulse_data[:CHUNK_SIZE])
+                variables.extend_to('main_l_p_dld', laser_pulse_data[:CHUNK_SIZE])
+                variables.extend_to('channel', channel_data[:CHUNK_SIZE])
+                variables.extend_to('time_data', time_data[:CHUNK_SIZE])
+                variables.extend_to('tdc_start_counter', tdc_start_counter[:CHUNK_SIZE])
+                variables.extend_to('main_v_dc_tdc', voltage_data_tdc[:CHUNK_SIZE])
+                variables.extend_to('main_v_p_tdc', voltage_pulse_data_tdc[:CHUNK_SIZE])
+                variables.extend_to('main_l_p_tdc', laser_pulse_data_tdc[:CHUNK_SIZE])
             except Exception as exc:
-	            print(f"TDC: extend_to per-chunk failed (non-fatal): {exc}")
+                print(f"TDC: extend_to per-chunk failed (non-fatal): {exc}")
 
             # Remove saved data from memory
             del xx[:CHUNK_SIZE], yy[:CHUNK_SIZE], tt[:CHUNK_SIZE]
@@ -455,7 +455,7 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
     # Manager lists so variables.x / variables.y / ... are complete.
     has_residual = len(xx) > 0
     if chunk_id > 0 and has_residual:
-	    # There were earlier chunks; save the final partial chunk too.
+        # There were earlier chunks; save the final partial chunk too.
         chunk_id += 1
         chunk_data = {
             "x_bin": xx_list_bin[:CHUNK_SIZE],
@@ -486,47 +486,47 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
     # that didn't reach a CHUNK_SIZE boundary.  For chunk_id == 0 this
     # is the only path that populates variables.x etc.
     try:
-	    if has_residual or chunk_id == 0:
-		    variables.extend_to('x', xx)
-		    variables.extend_to('y', yy)
-		    variables.extend_to('t', tt)
-		    variables.extend_to('dld_start_counter', start_counter)
-		    variables.extend_to('main_v_dc_dld', voltage_data)
-		    variables.extend_to('main_v_p_dld', voltage_pulse_data)
-		    variables.extend_to('main_l_p_dld', laser_pulse_data)
-		    variables.extend_to('channel', channel_data)
-		    variables.extend_to('time_data', time_data)
-		    variables.extend_to('tdc_start_counter', tdc_start_counter)
-		    variables.extend_to('main_v_dc_tdc', voltage_data_tdc)
-		    variables.extend_to('main_v_p_tdc', voltage_pulse_data_tdc)
-		    variables.extend_to('main_l_p_tdc', laser_pulse_data_tdc)
+        if has_residual or chunk_id == 0:
+            variables.extend_to('x', xx)
+            variables.extend_to('y', yy)
+            variables.extend_to('t', tt)
+            variables.extend_to('dld_start_counter', start_counter)
+            variables.extend_to('main_v_dc_dld', voltage_data)
+            variables.extend_to('main_v_p_dld', voltage_pulse_data)
+            variables.extend_to('main_l_p_dld', laser_pulse_data)
+            variables.extend_to('channel', channel_data)
+            variables.extend_to('time_data', time_data)
+            variables.extend_to('tdc_start_counter', tdc_start_counter)
+            variables.extend_to('main_v_dc_tdc', voltage_data_tdc)
+            variables.extend_to('main_v_p_tdc', voltage_pulse_data_tdc)
+            variables.extend_to('main_l_p_tdc', laser_pulse_data_tdc)
     except Exception as exc:
-	    print(f"TDC: residual extend_to failed (non-fatal): {exc}")
+        print(f"TDC: residual extend_to failed (non-fatal): {exc}")
 
     if chunk_id == 0:
-	    # Single-shot .npy save for short experiments that never hit a
-	    # CHUNK_SIZE boundary.  Long experiments use the per-chunk
-	    # files written by save_chunk_worker instead.
-	    try:
-		    np.save(variables.path + "/temp_data/x.npy", np.array(xx))
-		    np.save(variables.path + "/temp_data/y.npy", np.array(yy))
-		    np.save(variables.path + "/temp_data/t.npy", np.array(tt))
-		    np.save(variables.path + "/temp_data/voltage.npy", np.array(voltage_data))
-		    np.save(variables.path + "/temp_data/voltage_pulse.npy", np.array(voltage_pulse_data))
-		    np.save(variables.path + "/temp_data/laser_pulse.npy", np.array(laser_pulse_data))
-		    np.save(variables.path + "/temp_data/start_counter.npy", np.array(start_counter))
-		    np.save(variables.path + "/temp_data/x_bin.npy", np.array(xx_list_bin))
-		    np.save(variables.path + "/temp_data/y_bin.npy", np.array(yy_list_bin))
-		    np.save(variables.path + "/temp_data/t_bin.npy", np.array(tt_list_bin))
-		    np.save(variables.path + "/temp_data/channel.npy", np.array(channel_data))
-		    np.save(variables.path + "/temp_data/time.npy", np.array(time_data))
-		    np.save(variables.path + "/temp_data/main_raw_counter.npy", np.array(tdc_start_counter))
-		    np.save(variables.path + "/temp_data/voltage_tdc.npy", np.array(voltage_data_tdc))
-		    np.save(variables.path + "/temp_data/voltage_pulse_tdc.npy", np.array(voltage_pulse_data_tdc))
-		    np.save(variables.path + "/temp_data/laser_pulse_tdc.npy", np.array(laser_pulse_data_tdc))
-	    except Exception as exc:
-		    print(f"TDC: single-shot .npy save failed: {exc}")
-	    print("data saved in share variables")
+        # Single-shot .npy save for short experiments that never hit a
+        # CHUNK_SIZE boundary.  Long experiments use the per-chunk
+        # files written by save_chunk_worker instead.
+        try:
+            np.save(variables.path + "/temp_data/x.npy", np.array(xx))
+            np.save(variables.path + "/temp_data/y.npy", np.array(yy))
+            np.save(variables.path + "/temp_data/t.npy", np.array(tt))
+            np.save(variables.path + "/temp_data/voltage.npy", np.array(voltage_data))
+            np.save(variables.path + "/temp_data/voltage_pulse.npy", np.array(voltage_pulse_data))
+            np.save(variables.path + "/temp_data/laser_pulse.npy", np.array(laser_pulse_data))
+            np.save(variables.path + "/temp_data/start_counter.npy", np.array(start_counter))
+            np.save(variables.path + "/temp_data/x_bin.npy", np.array(xx_list_bin))
+            np.save(variables.path + "/temp_data/y_bin.npy", np.array(yy_list_bin))
+            np.save(variables.path + "/temp_data/t_bin.npy", np.array(tt_list_bin))
+            np.save(variables.path + "/temp_data/channel.npy", np.array(channel_data))
+            np.save(variables.path + "/temp_data/time.npy", np.array(time_data))
+            np.save(variables.path + "/temp_data/main_raw_counter.npy", np.array(tdc_start_counter))
+            np.save(variables.path + "/temp_data/voltage_tdc.npy", np.array(voltage_data_tdc))
+            np.save(variables.path + "/temp_data/voltage_pulse_tdc.npy", np.array(voltage_pulse_data_tdc))
+            np.save(variables.path + "/temp_data/laser_pulse_tdc.npy", np.array(laser_pulse_data_tdc))
+        except Exception as exc:
+            print(f"TDC: single-shot .npy save failed: {exc}")
+        print("data saved in share variables")
     time.sleep(0.1)
     bufdatacb.close()
     bufdatacb_raw.close()

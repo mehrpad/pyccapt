@@ -396,17 +396,35 @@ class Ui_Baking(object):
 		self.presures.enableAutoRange(axis='x')
 
 	def save_data_csv(self):
-		"""
-		save_data_csv function.
-		Args:
-			None
-		Returns:
-			None
+		"""Prompt the user for a target file and save the baking log CSV.
+
+		Pops up the OS Save-As dialog pre-filled with a sensible default
+		filename (``manual_save_<timestamp>.csv``) under the existing
+		baking-log folder. Cancel leaves nothing on disk.
 		"""
 		now = datetime.now()
 		now_time = now.strftime("%d-%m-%Y_%H-%M-%S")
-		self.data.to_csv(str(self.save_path / f'manual_save_{now_time}.csv'),
-		                 sep=';', index=False)
+		default_path = str(self.save_path / f'manual_save_{now_time}.csv')
+		parent = self.parent if isinstance(self.parent, QtWidgets.QWidget) else None
+		file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+			parent,
+			"Save baking log as…",
+			default_path,
+			"CSV files (*.csv);;All files (*)",
+		)
+		if not file_path:
+			return  # user cancelled
+		# Default to .csv if the user didn't type an extension.
+		if not os.path.splitext(file_path)[1]:
+			file_path += '.csv'
+		try:
+			self.data.to_csv(file_path, sep=';', index=False)
+		except Exception as exc:
+			QtWidgets.QMessageBox.critical(
+				parent,
+				"Save failed",
+				f"Could not save baking log:\n{exc}",
+			)
 
 	def stop(self):
 		"""

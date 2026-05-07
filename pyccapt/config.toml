@@ -50,6 +50,49 @@ default_control_algorithm = "Proportional"
 default_ex_user = "user"
 default_ex_name = "test"
 
+# ---------------------------------------------------------------------------
+# Live (real-time) calibration of the visualization spectrum.
+#
+# Architecture: a background QThread snapshots the most recent ~100 000
+# events every ``live_calibration_refit_interval_s`` seconds, fits a
+# voltage + bowl + initial-mass-scale correction in the worker thread,
+# and the GUI applies the cached parameters on every render tick using
+# vectorized NumPy. The GUI thread is never blocked. See
+# ``pyccapt/control/core/live_calibration.py`` for the full algorithm.
+#
+# Set the interval to 0 to disable the live calibration entirely; the
+# spectrum will then always show uncalibrated mc/tof.
+live_calibration_refit_interval_s = 15.0
+# Minimum events required before the worker bothers to fit. Below this
+# count the GUI shows uncalibrated data with a "calibrating…" status.
+live_calibration_min_events = 5000
+# Voltage-fit R² floor. Fits below this quality are rejected and the
+# previous good parameters are kept (or none, if there are no previous
+# good parameters).
+live_calibration_min_fit_quality = 0.5
+# Mass window (Da) inside which the dominant peak is searched for. Pick
+# a window where you expect a strong, well-known peak for your sample.
+live_calibration_mass_window_min = 1.0
+live_calibration_mass_window_max = 60.0
+# Optional: target mass (Da) the dominant peak should land at after the
+# initial scaling. Leave commented to use the observed peak as its own
+# target (i.e. only correct shape, not absolute scale).
+# live_calibration_target_mass = 56.0    # e.g. Fe+ at 56 Da
+# Voltage-fit window size: number of consecutive ions per bin used to
+# compute the mean (V, t/peak) sample for the polynomial fit. Mirrors
+# ``sample_size`` in the offline pipeline (mode='ion_seq').
+live_calibration_volt_sample_size = 500
+# Polar-tile size (mm) for the bowl correction. The detector is split
+# into rings of this width and each ring into 8..96 angular sectors;
+# one (x_med, y_med, t_mean/peak) sample is taken per non-empty cell
+# and a global 6-parameter polynomial is fit to the samples. Mirrors
+# ``sample_size`` in calibration.bowl_correction(sampling_mode='polar').
+live_calibration_bowl_sample_size_mm = 4.0
+# EMA smoothing window: average the last N successful parameter sets
+# before the GUI applies them. Damps jitter in the displayed spectrum
+# from event-pool noise across successive refits. Set to 1 to disable.
+live_calibration_ema_window = 3
+
 # Vacuum-pressure alert thresholds (mbar). Each gauge in the Pumps & Vacuum
 # window turns red and the main GUI shows a warning when its reading is
 # above the matching value here. Lower the number to make the warning more

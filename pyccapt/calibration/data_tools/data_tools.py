@@ -591,22 +591,72 @@ def extract_data(data, variables, flightPathLength_d, max_mc):
 
 
 def pyccapt_raw_to_processed(data):
-    """Convert a raw pyccapt dataframe to the processed schema."""
+    """Convert a raw pyccapt dataframe to the processed schema.
+
+    Existing calibrated columns are preserved when present:
+
+    - If the input already has ``mc (Da)`` (e.g. it came from a partly-processed
+      bundle), it is copied through untouched.
+    - If the input already has ``mc_uc (Da)``, that is also copied through.
+    - Otherwise, when the inputs needed for the uncalibrated mc formula are all
+      present (``t (ns)``, ``high_voltage (V)``, ``x_det (cm)``, ``y_det (cm)``),
+      ``mc_uc (Da)`` is computed on the fly using
+      ``tof2mc(t0=0, V_pulse=0, flightPathLength=110, mode='voltage')`` — the
+      same uncalibrated formula the legacy raw-data notebook used to produce
+      Figure 6A in the PyCCAPT paper. This makes raw acquisition files (which
+      have never been through calibration) usable in downstream M/C plots.
+
+    Columns that have no obvious raw equivalent (``x/y/z (nm)``, ``t_c (ns)``,
+    ``delta_p``, ``multi``) are zero-initialized as before.
+    """
+    # Local import to avoid a circular dependency at module load (mc_tools is in
+    # a sibling subpackage that itself imports from data_tools).
+    from pyccapt.calibration.mc import mc_tools
+
+    n = len(data)
     data_processed = pd.DataFrame()
-    data_processed["x (nm)"] = np.zeros(len(data))
-    data_processed["y (nm)"] = np.zeros(len(data))
-    data_processed["z (nm)"] = np.zeros(len(data))
-    data_processed["mc (Da)"] = np.zeros(len(data))
-    data_processed["mc_uc (Da)"] = np.zeros(len(data))
+    data_processed["x (nm)"] = np.zeros(n)
+    data_processed["y (nm)"] = np.zeros(n)
+    data_processed["z (nm)"] = np.zeros(n)
+
+    if "mc (Da)" in data.columns:
+        data_processed["mc (Da)"] = data["mc (Da)"].to_numpy()
+    else:
+        data_processed["mc (Da)"] = np.zeros(n)
+
+    if "mc_uc (Da)" in data.columns:
+        data_processed["mc_uc (Da)"] = data["mc_uc (Da)"].to_numpy()
+    else:
+        required = {"t (ns)", "high_voltage (V)", "x_det (cm)", "y_det (cm)"}
+        if n > 0 and required.issubset(data.columns):
+            data_processed["mc_uc (Da)"] = mc_tools.tof2mc(
+                t=data["t (ns)"].to_numpy().astype(float),
+                t0=0,
+                V=data["high_voltage (V)"].to_numpy().astype(float),
+                xDet=data["x_det (cm)"].to_numpy().astype(float),
+                yDet=data["y_det (cm)"].to_numpy().astype(float),
+                flightPathLength=110,
+                V_pulse=np.zeros(n),
+                mode="voltage",
+            )
+        else:
+            data_processed["mc_uc (Da)"] = np.zeros(n)
+
     data_processed["high_voltage (V)"] = data["high_voltage (V)"].to_numpy()
     data_processed["pulse_v (V)"] = data["pulse_v (V)"].to_numpy()
     data_processed["pulse_l (pJ)"] = data["pulse_l (pJ)"].to_numpy()
     data_processed["t (ns)"] = data["t (ns)"].to_numpy()
-    data_processed["t_c (ns)"] = np.zeros(len(data))
+    data_processed["t_c (ns)"] = (
+        data["t_c (ns)"].to_numpy() if "t_c (ns)" in data.columns else np.zeros(n)
+    )
     data_processed["x_det (cm)"] = data["x_det (cm)"].to_numpy()
     data_processed["y_det (cm)"] = data["y_det (cm)"].to_numpy()
-    data_processed["delta_p"] = np.zeros(len(data))
-    data_processed["multi"] = np.zeros(len(data))
+    data_processed["delta_p"] = (
+        data["delta_p"].to_numpy() if "delta_p" in data.columns else np.zeros(n)
+    )
+    data_processed["multi"] = (
+        data["multi"].to_numpy() if "multi" in data.columns else np.zeros(n)
+    )
     data_processed["start_counter"] = data["start_counter"].to_numpy()
     if "event_group_id" in data.columns:
         data_processed["event_group_id"] = data["event_group_id"].to_numpy()

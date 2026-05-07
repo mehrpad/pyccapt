@@ -47,7 +47,20 @@ def _surface_concept_hit_from_time_data(time_data_chunk: Sequence[int] | np.ndar
 
 
 def _recover_surface_concept_partial_hits(chunk_channels: np.ndarray, chunk_times: np.ndarray) -> list[dict]:
-    recovered_hits = []
+    """Recover every (ch0, ch1) and (ch2, ch3) pair as a separate 2-DLTS hit.
+
+    Each invalid 4-DLTS chunk is scanned for *both* delay-line axes
+    independently. For axis x: every ch-0 timestamp is paired with the next
+    ch-1 timestamp (in TDC arrival order); same for axis y with channels 2
+    and 3. A chunk like ``[0, 0, 1, 1]`` — i.e. two ch-0 and two ch-1
+    timestamps from a multi-hit pulse — emits **two** x-axis partial hits
+    so both physical ions are captured.
+
+    Per-hit validity (detector area + peak-window membership) is enforced
+    later in :func:`build_surface_concept_recovery_diagnostics` and the
+    peak-summarizer; this function just enumerates the candidate pairs.
+    """
+    recovered_hits: list[dict] = []
     if len(chunk_channels) < 2:
         return recovered_hits
 
@@ -232,9 +245,14 @@ def extract_surface_concept_hits(
     recovered = diagnostics[diagnostics['dlts'] > 0].copy()
     hit_table = recovered.rename(columns={'accepted': 'in_detector'})
     hit_table['recovery'] = hit_table['dlts'].astype(int).astype(str) + ' DLTS'
-    hit_table = hit_table[
-        ['start_counter', 'high_voltage (V)', 'pulse', 'tof (ns)', 'x_det (cm)', 'y_det (cm)', 'dlts', 'detector_axis', 'recovery', 'in_detector']
-    ].reset_index(drop=True)
+    keep_columns = [
+        'start_counter', 'high_voltage (V)', 'pulse',
+        'tof (ns)', 'x_det (cm)', 'y_det (cm)',
+        'dlts', 'detector_axis', 'recovery', 'in_detector',
+    ]
+    if 'parent_pulse_length' in hit_table.columns:
+        keep_columns.append('parent_pulse_length')
+    hit_table = hit_table[keep_columns].reset_index(drop=True)
 
     stats = {
         'recovered_hits': int(len(recovered)),
@@ -308,11 +326,14 @@ def build_surface_concept_recovery_diagnostics(
             if is_valid:
                 det_x, det_y, tof = _surface_concept_hit_from_time_data(chunk_times)
                 radius = float(np.hypot(det_x, det_y))
+                # 4-DLTS hit: BOTH coordinates are reconstructed, so both must
+                # be within the physical detector.
                 in_detector = abs(det_x) <= detector_limit_cm and abs(det_y) <= detector_limit_cm
                 rows.append(
                     {
                         'sequence_index': sequence_index,
                         'chunk_index': chunk_index,
+                        'parent_pulse_length': length,
                         'start_counter': start_counter,
                         'high_voltage (V)': high_voltage,
                         'pulse': pulse,
@@ -334,6 +355,7 @@ def build_surface_concept_recovery_diagnostics(
                     {
                         'sequence_index': sequence_index,
                         'chunk_index': chunk_index,
+                        'parent_pulse_length': length,
                         'start_counter': start_counter,
                         'high_voltage (V)': high_voltage,
                         'pulse': pulse,
@@ -352,11 +374,22 @@ def build_surface_concept_recovery_diagnostics(
             for partial_hit in partial_hits:
                 det_x = float(partial_hit['x_det (cm)'])
                 det_y = float(partial_hit['y_det (cm)'])
-                in_detector = abs(det_x) <= detector_limit_cm and abs(det_y) <= detector_limit_cm
+                axis = str(partial_hit['detector_axis'])
+                # 2-DLTS hit: only the *recoverable* axis was measured; the
+                # other coordinate is set to 0.0 by the recovery routine and
+                # carries no information. So the detector-area check here
+                # only validates the reconstructed axis.
+                if axis == 'x':
+                    in_detector = abs(det_x) <= detector_limit_cm
+                elif axis == 'y':
+                    in_detector = abs(det_y) <= detector_limit_cm
+                else:
+                    in_detector = abs(det_x) <= detector_limit_cm and abs(det_y) <= detector_limit_cm
                 rows.append(
                     {
                         'sequence_index': sequence_index,
                         'chunk_index': chunk_index,
+                        'parent_pulse_length': length,
                         'start_counter': start_counter,
                         'high_voltage (V)': high_voltage,
                         'pulse': pulse,
@@ -365,7 +398,7 @@ def build_surface_concept_recovery_diagnostics(
                         'y_det (cm)': det_y,
                         'radius_cm': float(np.hypot(det_x, det_y)),
                         'dlts': 2,
-                        'detector_axis': str(partial_hit['detector_axis']),
+                        'detector_axis': axis,
                         'accepted': in_detector,
                         'status': '2 DLTS in detector' if in_detector else '2 DLTS outside detector',
                     }
@@ -821,3 +854,809 @@ def reconstruct_surface_concept_dataset(
         pulse_mode=pulse_mode,
     )
     return surface_concept_hits_to_processed_dataframe(analysis['hit_table'], pulse_mode=pulse_mode)
+
+
+# ---------------------------------------------------------------------------
+# Per-peak diagnostics: chunk-length distribution + detector-position plots
+# ---------------------------------------------------------------------------
+
+
+def _resolve_peak_signal_column(hit_table: pd.DataFrame, signal_kind: str) -> str:
+    signal_kind = _normalize_signal_kind(signal_kind)
+    if signal_kind == 'mc':
+        return 'mc (Da)'
+    return 'tof (ns)'
+
+
+def filter_peak_hits(
+    hit_table: pd.DataFrame,
+    window: dict,
+    *,
+    signal_kind: str = 'tof',
+    only_in_detector: bool = True,
+) -> pd.DataFrame:
+    """Return the rows of ``hit_table`` whose chosen signal lies in ``window``.
+
+    ``window`` is a dict with ``min``/``max`` keys (the format produced by
+    :func:`pyccapt.calibration.data_tools._raw_workflow_common.normalize_signal_windows`).
+    Setting ``only_in_detector=True`` (default) drops hits that failed the
+    per-axis detector-area check from
+    :func:`build_surface_concept_recovery_diagnostics`.
+    """
+    if hit_table is None or hit_table.empty:
+        return hit_table.iloc[0:0] if hit_table is not None else pd.DataFrame()
+    column = _resolve_peak_signal_column(hit_table, signal_kind)
+    if column not in hit_table.columns:
+        return hit_table.iloc[0:0]
+
+    frame = hit_table
+    if only_in_detector and 'in_detector' in frame.columns:
+        frame = frame[frame['in_detector']]
+    values = pd.to_numeric(frame[column], errors='coerce').to_numpy()
+    lower = float(window['min'])
+    upper = float(window['max'])
+    mask = (values >= lower) & (values <= upper)
+    return frame.loc[mask].copy()
+
+
+def plot_peak_chunk_length_distribution(
+    hit_table: pd.DataFrame,
+    windows: Sequence[dict],
+    *,
+    signal_kind: str = 'tof',
+    only_in_detector: bool = True,
+    max_length: int = 20,
+) -> plt.Figure | None:
+    """For every user peak window, render two side-by-side bars per parent
+    chunk length: how many *2-DLTS partial* hits and *4-DLTS full* hits in
+    that peak came from a parent pulse of that length.
+
+    ``parent_pulse_length`` must be present on ``hit_table`` (it is added by
+    :func:`build_surface_concept_recovery_diagnostics`).  Returns ``None`` if
+    the column is missing or no peak windows are supplied.
+    """
+    if hit_table is None or hit_table.empty or 'parent_pulse_length' not in hit_table.columns:
+        return None
+    if not windows:
+        return None
+
+    n_peaks = len(windows)
+    # Cap the figure height well below matplotlib's 2^16-pixel hard limit so
+    # IPython's ``bbox_inches='tight'`` PNG render can't blow the dimensions
+    # into the multi-million-pixel range that triggered "Image size too large"
+    # on user input.  20 in × 300 dpi = 6 000 px — comfortably below 65 535.
+    height_inches = min(max(2.4 * n_peaks, 3.0), 20.0)
+    fig, axes = plt.subplots(
+        n_peaks, 1,
+        figsize=(8.0, height_inches),
+        squeeze=False,
+    )
+    bins = np.arange(0.5, max_length + 1.5)
+    centers = np.arange(1, max_length + 1)
+
+    for index, window in enumerate(windows):
+        ax = axes[index][0]
+        peak = filter_peak_hits(hit_table, window, signal_kind=signal_kind, only_in_detector=only_in_detector)
+        if peak.empty:
+            ax.text(0.5, 0.5, "no hits in this peak window",
+                    ha='center', va='center', transform=ax.transAxes, color='gray')
+            ax.set_xlim(0.5, max_length + 0.5)
+            ax.set_xticks(centers)
+            ax.set_title(f"{window.get('label', f'Peak {index + 1}')}")
+            ax.set_xlabel("Parent pulse length (DLTS per pulse)")
+            ax.set_ylabel("Hit count")
+            continue
+
+        partial = peak[peak['dlts'] == 2]['parent_pulse_length'].to_numpy()
+        full    = peak[peak['dlts'] == 4]['parent_pulse_length'].to_numpy()
+        partial_hist = np.histogram(partial, bins=bins)[0]
+        full_hist    = np.histogram(full,    bins=bins)[0]
+
+        w = 0.4
+        ax.bar(centers - 0.5 * w, partial_hist, width=w, color=DLTS_COLORS.get(2, '#f59e0b'), label='2 DLTS')
+        ax.bar(centers + 0.5 * w, full_hist,    width=w, color=DLTS_COLORS.get(4, '#1f77b4'), label='4 DLTS')
+        ax.set_yscale('log')
+        ax.set_xlim(0.5, max_length + 0.5)
+        ax.set_xticks(centers)
+        ax.set_xlabel("Parent pulse length (DLTS per pulse)")
+        ax.set_ylabel("Hit count (log)")
+        ax.set_title(
+            f"{window.get('label', f'Peak {index + 1}')} — partial = {int(partial_hist.sum()):,}; "
+            f"full = {int(full_hist.sum()):,}"
+        )
+        ax.legend(loc='upper right', fontsize=8)
+    fig.tight_layout()
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Combinatorial per-pulse hit recovery (greedy / exhaustive).
+#
+# The pre-existing recovery walks chunks-of-4 and applies a fixed pairing
+# heuristic (``first ch=0`` with ``first ch=1``, etc.). It does not test
+# whether each pair lands inside the detector or in the user's peak window
+# before committing to the pairing — those checks happen afterwards.
+#
+# The combinatorial recovery below enumerates every reasonable
+# ``(ch_a, ch_b)`` partial-hit pair and every ``(ch=0, ch=1, ch=2, ch=3)``
+# complete-hit quadruple whose x-pair-sum and y-pair-sum coincide within a
+# user-set tolerance (default ±200 TDC bins, ≈1.4 ns at 6.86 ps/bin), then
+# selects the maximum set of valid hits whose timestamps don't overlap.
+# Two selection modes are offered:
+#
+#   - ``greedy`` (default, fast): O(N²) — rank candidates by validity then
+#     by signal distance to the nearest peak centre, pick the highest-ranked
+#     one whose timestamps are still free, repeat. Matches the legacy
+#     "first-occurrence" approach when no peak windows are supplied.
+#   - ``exhaustive`` (slow, opt-in): branch-and-bound search of the
+#     index-disjoint subsets of valid candidates; returns the largest one.
+#     Falls back to greedy when the candidate count exceeds
+#     ``exhaustive_max_candidates`` (default 80) so the worst case stays
+#     bounded.
+# ---------------------------------------------------------------------------
+
+
+_DEFAULT_PAIR_SUM_TOLERANCE_BINS = 200.0
+_DEFAULT_EXHAUSTIVE_MAX_CANDIDATES = 80
+
+
+def _signal_in_any_window(signal_value: float, peak_windows: Sequence[dict] | None) -> bool:
+    """Return ``True`` if ``signal_value`` lies inside any user-defined peak
+    window. With no windows supplied the predicate is vacuously true (the
+    user hasn't gated on signal yet)."""
+    if not peak_windows:
+        return True
+    for window in peak_windows:
+        if float(window['min']) <= signal_value <= float(window['max']):
+            return True
+    return False
+
+
+def _hit_in_detector_axis_aware(det_x: float, det_y: float, axis: str, limit_cm: float) -> bool:
+    """Detector-area validity gate.
+
+    Partial 2-DLTS hits only have one reconstructed coordinate, so only that
+    axis is checked. Complete 4-DLTS hits need both axes inside the detector.
+    """
+    if axis == 'x':
+        return abs(det_x) <= limit_cm
+    if axis == 'y':
+        return abs(det_y) <= limit_cm
+    return abs(det_x) <= limit_cm and abs(det_y) <= limit_cm
+
+
+def _signal_distance_to_nearest_peak(
+    signal_value: float, peak_windows: Sequence[dict] | None,
+) -> float:
+    """Distance from ``signal_value`` to the centre of its closest peak window.
+
+    Used as a tie-breaker in the greedy selector — when several valid
+    candidates compete for the same timestamp, we prefer the one whose
+    signal is best-centered in some peak. Returns ``+inf`` when no windows
+    are supplied or when ``signal_value`` is outside every window.
+    """
+    if not peak_windows:
+        return float('inf')
+    best = float('inf')
+    for window in peak_windows:
+        lo = float(window['min'])
+        hi = float(window['max'])
+        if lo <= signal_value <= hi:
+            distance = abs(signal_value - 0.5 * (lo + hi))
+            if distance < best:
+                best = distance
+    return best
+
+
+def _generate_partial_candidates_for_axis(
+    channels: np.ndarray,
+    times: np.ndarray,
+    axis: str,
+    low_channel: int,
+    high_channel: int,
+    *,
+    xy_factor: float,
+    xy_bin_shift: float,
+    tof_factor_2d: float,
+) -> list[dict]:
+    """Enumerate every ``(low_ch, high_ch)`` index pair as a candidate
+    partial hit on the given axis."""
+    candidates: list[dict] = []
+    low_indices = np.where(channels == low_channel)[0].tolist()
+    high_indices = np.where(channels == high_channel)[0].tolist()
+    for i_low in low_indices:
+        for i_high in high_indices:
+            t_low = float(times[i_low])
+            t_high = float(times[i_high])
+            position = _position_from_pair(t_low, t_high, xy_factor, xy_bin_shift)
+            tof = (t_low + t_high) * tof_factor_2d
+            candidates.append(
+                {
+                    'dlts': 2,
+                    'detector_axis': axis,
+                    'used_indices': frozenset({int(i_low), int(i_high)}),
+                    'x_det (cm)': position if axis == 'x' else 0.0,
+                    'y_det (cm)': position if axis == 'y' else 0.0,
+                    'tof (ns)': float(tof),
+                    'pair_sum_bins_x': float(t_low + t_high) if axis == 'x' else None,
+                    'pair_sum_bins_y': float(t_low + t_high) if axis == 'y' else None,
+                }
+            )
+    return candidates
+
+
+def _position_from_pair(first_time: float, second_time: float, xy_factor: float, xy_bin_shift: float) -> float:
+    """Same algebra as :func:`_surface_concept_position_from_pair` but with
+    explicit constants so the per-rig config can override them."""
+    difference = second_time - first_time
+    shifted = -0.5 * difference + xy_bin_shift
+    return ((shifted - xy_bin_shift) * xy_factor) * 0.1
+
+
+def _generate_complete_candidates(
+    channels: np.ndarray,
+    times: np.ndarray,
+    *,
+    xy_factor: float,
+    xy_bin_shift: float,
+    tof_factor_4d: float,
+    pair_sum_tolerance_bins: float,
+) -> list[dict]:
+    """Enumerate complete-event (ch=0, ch=1, ch=2, ch=3) candidates whose
+    x-pair-sum and y-pair-sum coincide within the tolerance.
+
+    Two timestamps from the same physical ion satisfy
+    ``(t0 + t1)/2 ≈ (t2 + t3)/2 = ion_arrival_time``, i.e.
+    ``|sum_x - sum_y| ≤ tolerance``. This filter is what lets the
+    combinatorial recovery distinguish a real complete event from a chance
+    coincidence of two different ions both firing partial pairs.
+    """
+    candidates: list[dict] = []
+    idx_0 = np.where(channels == 0)[0].tolist()
+    idx_1 = np.where(channels == 1)[0].tolist()
+    idx_2 = np.where(channels == 2)[0].tolist()
+    idx_3 = np.where(channels == 3)[0].tolist()
+    if not (idx_0 and idx_1 and idx_2 and idx_3):
+        return candidates
+
+    for i0 in idx_0:
+        t0 = float(times[i0])
+        for i1 in idx_1:
+            t1 = float(times[i1])
+            sum_x = t0 + t1
+            for i2 in idx_2:
+                t2 = float(times[i2])
+                for i3 in idx_3:
+                    t3 = float(times[i3])
+                    sum_y = t2 + t3
+                    if abs(sum_x - sum_y) > pair_sum_tolerance_bins:
+                        continue
+                    det_x = _position_from_pair(t0, t1, xy_factor, xy_bin_shift)
+                    det_y = _position_from_pair(t2, t3, xy_factor, xy_bin_shift)
+                    tof = (t0 + t1 + t2 + t3) * tof_factor_4d
+                    candidates.append(
+                        {
+                            'dlts': 4,
+                            'detector_axis': 'xy',
+                            'used_indices': frozenset({int(i0), int(i1), int(i2), int(i3)}),
+                            'x_det (cm)': det_x,
+                            'y_det (cm)': det_y,
+                            'tof (ns)': float(tof),
+                            'pair_sum_bins_x': sum_x,
+                            'pair_sum_bins_y': sum_y,
+                        }
+                    )
+    return candidates
+
+
+def _score_candidate_validity(
+    candidate: dict,
+    *,
+    peak_windows: Sequence[dict] | None,
+    detector_limit_cm: float,
+    signal_kind: str,
+) -> None:
+    """Mutate ``candidate`` in place with ``in_detector`` / ``in_peak`` /
+    ``valid`` booleans plus a tie-breaking ``signal_distance``."""
+    candidate['in_detector'] = _hit_in_detector_axis_aware(
+        candidate['x_det (cm)'], candidate['y_det (cm)'],
+        candidate['detector_axis'], detector_limit_cm,
+    )
+    column = 'mc (Da)' if signal_kind == 'mc' else 'tof (ns)'
+    signal_value = candidate.get(column)
+    if signal_value is None or not np.isfinite(signal_value):
+        candidate['in_peak'] = False
+        candidate['valid'] = False
+        candidate['signal_distance'] = float('inf')
+        return
+    candidate['in_peak'] = _signal_in_any_window(float(signal_value), peak_windows)
+    candidate['valid'] = bool(candidate['in_detector'] and candidate['in_peak'])
+    candidate['signal_distance'] = _signal_distance_to_nearest_peak(
+        float(signal_value), peak_windows
+    )
+
+
+def _select_max_disjoint_greedy(candidates: list[dict]) -> list[dict]:
+    """Greedy max-disjoint set on a homogeneous candidate list. Sorts by
+    ``signal_distance`` ascending (tighter peak match wins ties) and picks
+    the highest-ranked candidate whose timestamps are still free."""
+    ranked = sorted(
+        candidates,
+        key=lambda c: float(c.get('signal_distance', float('inf'))),
+    )
+    used: set[int] = set()
+    emitted: list[dict] = []
+    for candidate in ranked:
+        if candidate['used_indices'].isdisjoint(used):
+            emitted.append(candidate)
+            used.update(candidate['used_indices'])
+    return emitted
+
+
+def _select_max_disjoint_exhaustive(
+    candidates: list[dict],
+    *,
+    max_candidates: int = _DEFAULT_EXHAUSTIVE_MAX_CANDIDATES,
+) -> list[dict]:
+    """Branch-and-bound max-index-disjoint subset on a homogeneous candidate
+    list. Falls back to greedy when the candidate count exceeds
+    ``max_candidates`` so the worst case stays bounded."""
+    if len(candidates) > max_candidates:
+        return _select_max_disjoint_greedy(candidates)
+
+    ordered = sorted(
+        candidates,
+        key=lambda c: float(c.get('signal_distance', float('inf'))),
+    )
+
+    best_selection: list[int] = []
+
+    def _solve(idx: int, used: frozenset[int], selection: list[int]) -> None:
+        nonlocal best_selection
+        # Branch-and-bound: even if we took every remaining candidate, can we
+        # beat the current best? If not, prune.
+        if len(selection) + (len(ordered) - idx) <= len(best_selection):
+            return
+        if idx == len(ordered):
+            if len(selection) > len(best_selection):
+                best_selection = list(selection)
+            return
+        candidate = ordered[idx]
+        if candidate['used_indices'].isdisjoint(used):
+            selection.append(idx)
+            _solve(idx + 1, used | candidate['used_indices'], selection)
+            selection.pop()
+        _solve(idx + 1, used, selection)
+
+    _solve(0, frozenset(), [])
+    return [ordered[i] for i in best_selection]
+
+
+def _select_hits_two_stage(
+    valid_candidates: list[dict],
+    *,
+    mode: str,
+    exhaustive_max_candidates: int = _DEFAULT_EXHAUSTIVE_MAX_CANDIDATES,
+) -> list[dict]:
+    """Two-stage selection: COMPLETES first, then PARTIALS on remaining indices.
+
+    The user-facing rule is "always when all channels available we have to
+    first check full hit possibility then partial hit if full hit is not
+    valid." A clean ``[0, 1, 2, 3]`` chunk has
+
+    - 1 valid complete (4-DLTS) candidate, and
+    - 1 valid x-partial + 1 valid y-partial that overlap exactly the complete
+      on indices.
+
+    Optimising raw hit *count* picks the 2 partials (count = 2) over the
+    single complete (count = 1) — but physically that's one ion firing all
+    four channels, so the right answer is **1 complete**. Two-stage
+    selection enforces that:
+
+    - **Phase 1:** find the maximum index-disjoint subset of *valid complete*
+      candidates (greedy or exhaustive as the caller requests). Commit those
+      indices.
+    - **Phase 2:** filter valid partial candidates to those whose indices
+      don't collide with the chosen completes; pick the max-disjoint subset
+      of *those*.
+
+    This guarantees every valid complete is locked in before any partial
+    decomposition is considered, which is what the user asked for.
+    """
+    completes = [c for c in valid_candidates if int(c.get('dlts', 0)) == 4]
+    partials  = [c for c in valid_candidates if int(c.get('dlts', 0)) != 4]
+
+    selector = (_select_max_disjoint_exhaustive
+                if str(mode).lower() == 'exhaustive'
+                else _select_max_disjoint_greedy)
+
+    if str(mode).lower() == 'exhaustive':
+        chosen_completes = _select_max_disjoint_exhaustive(
+            completes, max_candidates=exhaustive_max_candidates,
+        )
+    else:
+        chosen_completes = _select_max_disjoint_greedy(completes)
+
+    used = frozenset()
+    if chosen_completes:
+        used = frozenset().union(*(c['used_indices'] for c in chosen_completes))
+
+    available_partials = [
+        p for p in partials if p['used_indices'].isdisjoint(used)
+    ]
+    if str(mode).lower() == 'exhaustive':
+        chosen_partials = _select_max_disjoint_exhaustive(
+            available_partials, max_candidates=exhaustive_max_candidates,
+        )
+    else:
+        chosen_partials = _select_max_disjoint_greedy(available_partials)
+
+    return list(chosen_completes) + list(chosen_partials)
+
+
+# Backwards-compatible aliases — the older single-stage selectors are kept
+# under their previous names so any direct callers (and the existing tests)
+# continue to work, but they now route through the two-stage logic so the
+# completes-first contract is uniform across modes.
+
+def _select_hits_greedy(valid_candidates: list[dict]) -> list[dict]:
+    return _select_hits_two_stage(valid_candidates, mode='greedy')
+
+
+def _select_hits_exhaustive(
+    valid_candidates: list[dict],
+    *,
+    max_candidates: int = _DEFAULT_EXHAUSTIVE_MAX_CANDIDATES,
+) -> list[dict]:
+    return _select_hits_two_stage(
+        valid_candidates,
+        mode='exhaustive',
+        exhaustive_max_candidates=max_candidates,
+    )
+
+
+def _compute_mc_for_candidates(
+    candidates: list[dict],
+    *,
+    high_voltage: float,
+    pulse_v: float,
+    flight_path_length_mm: float,
+    pulse_mode: str,
+    t0: float,
+) -> None:
+    """Fill the ``mc (Da)`` field on every candidate using the same uncalibrated
+    ``tof2mc`` formula the legacy notebook used (``t0=0``, ``V_pulse=zeros``,
+    ``fpl=110 mm`` by default; overridable per call)."""
+    if not candidates:
+        return
+    tof = np.array([float(c['tof (ns)']) for c in candidates])
+    x = np.array([float(c['x_det (cm)']) for c in candidates])
+    y = np.array([float(c['y_det (cm)']) for c in candidates])
+    n = len(candidates)
+    voltage = np.full(n, float(high_voltage))
+    pulse_arr = np.full(n, float(pulse_v)) if pulse_mode == 'voltage' else np.zeros(n)
+    mc_values = mc_tools.tof2mc(
+        t=tof, t0=t0, V=voltage, xDet=x, yDet=y,
+        flightPathLength=flight_path_length_mm,
+        V_pulse=pulse_arr, mode=pulse_mode,
+    )
+    for candidate, mc_value in zip(candidates, mc_values):
+        candidate['mc (Da)'] = float(mc_value)
+
+
+def extract_valid_hits_combinatorial(
+    record: dict,
+    *,
+    peak_windows: Sequence[dict] | None = None,
+    signal_kind: str = 'tof',
+    detector_limit_cm: float = 4.0,
+    mode: str = 'greedy',
+    pair_sum_tolerance_bins: float = _DEFAULT_PAIR_SUM_TOLERANCE_BINS,
+    flight_path_length_mm: float = 110.0,
+    pulse_mode: str = 'voltage',
+    t0: float = 0.0,
+    xy_factor: float = XY_FACTOR,
+    xy_bin_shift: float = XY_BIN_SHIFT,
+    tof_factor_4d: float = TOF_FACTOR_NS,
+    tof_factor_2d: float = TOF_FACTOR_NS_1D,
+    exhaustive_max_candidates: int = _DEFAULT_EXHAUSTIVE_MAX_CANDIDATES,
+) -> tuple[list[dict], list[dict]]:
+    """Per-pulse combinatorial hit recovery for one ``find_consecutive_sequences``
+    record.
+
+    Returns ``(emitted_hits, all_candidates)``. Each emitted hit is annotated
+    with ``parent_pulse_length``, ``high_voltage (V)``, ``pulse``,
+    ``start_counter``, ``in_detector``, ``in_peak`` and ``valid``. The full
+    candidate list (validity-scored, including ones that failed the validity
+    gate or lost to a winning conflict) is returned alongside so diagnostics
+    can show how many candidates were considered per pulse.
+    """
+    channels = np.asarray(record.get('channels', []), dtype=np.int64)
+    times = np.asarray(record.get('time_data', []), dtype=np.int64)
+    if channels.size == 0:
+        return [], []
+
+    high_voltage = float(record.get('high_voltage', 0.0))
+    pulse_v = float(record.get('pulse', 0.0))
+    start_counter_array = record.get('start_counter', [])
+    start_counter = int(start_counter_array[0]) if len(start_counter_array) else 0
+    pulse_length = int(channels.size)
+
+    complete_candidates = _generate_complete_candidates(
+        channels, times,
+        xy_factor=xy_factor,
+        xy_bin_shift=xy_bin_shift,
+        tof_factor_4d=tof_factor_4d,
+        pair_sum_tolerance_bins=pair_sum_tolerance_bins,
+    )
+    partial_x = _generate_partial_candidates_for_axis(
+        channels, times, 'x', 0, 1,
+        xy_factor=xy_factor, xy_bin_shift=xy_bin_shift, tof_factor_2d=tof_factor_2d,
+    )
+    partial_y = _generate_partial_candidates_for_axis(
+        channels, times, 'y', 2, 3,
+        xy_factor=xy_factor, xy_bin_shift=xy_bin_shift, tof_factor_2d=tof_factor_2d,
+    )
+    all_candidates = complete_candidates + partial_x + partial_y
+
+    # Always compute mc on every candidate so the validity gate can use either
+    # ``tof`` or ``mc`` interchangeably and downstream consumers (e.g.
+    # ``surface_concept_hits_to_processed_dataframe``) can build the
+    # processed dataframe without a missing-column error.
+    _compute_mc_for_candidates(
+        all_candidates,
+        high_voltage=high_voltage, pulse_v=pulse_v,
+        flight_path_length_mm=flight_path_length_mm,
+        pulse_mode=pulse_mode, t0=t0,
+    )
+
+    for candidate in all_candidates:
+        _score_candidate_validity(
+            candidate,
+            peak_windows=peak_windows,
+            detector_limit_cm=detector_limit_cm,
+            signal_kind=signal_kind,
+        )
+
+    valid_candidates = [c for c in all_candidates if c['valid']]
+    # Two-stage selection: lock valid completes first (in their max-disjoint
+    # set), THEN fill valid partials on the remaining indices. This enforces
+    # the user-stated rule "always when all channels available we have to
+    # first check full hit possibility then partial hit if full hit is not
+    # valid" — without it, the exhaustive mode prefers (count = 2 partials)
+    # over (count = 1 complete) on a clean [0, 1, 2, 3] chunk.
+    emitted = _select_hits_two_stage(
+        valid_candidates,
+        mode=mode.lower(),
+        exhaustive_max_candidates=exhaustive_max_candidates,
+    )
+
+    for hit in emitted:
+        hit['parent_pulse_length'] = pulse_length
+        hit['high_voltage (V)'] = high_voltage
+        hit['pulse'] = pulse_v
+        hit['start_counter'] = start_counter
+
+    return emitted, all_candidates
+
+
+def analyze_surface_concept_tdc_frame_combinatorial(
+    df_tdc: pd.DataFrame,
+    *,
+    peak_windows: Sequence[dict] | None = None,
+    signal_kind: str = 'tof',
+    detector_limit_cm: float = 4.0,
+    mode: str = 'greedy',
+    pair_sum_tolerance_bins: float = _DEFAULT_PAIR_SUM_TOLERANCE_BINS,
+    exhaustive_max_candidates: int = _DEFAULT_EXHAUSTIVE_MAX_CANDIDATES,
+    t0: float = 0.0,
+    flight_path_length_mm: float = 110.0,
+    pulse_mode: str = 'voltage',
+    show_progress: bool = False,
+    xy_factor: float = XY_FACTOR,
+    xy_bin_shift: float = XY_BIN_SHIFT,
+    tof_factor_4d: float = TOF_FACTOR_NS,
+    tof_factor_2d: float = TOF_FACTOR_NS_1D,
+) -> dict:
+    """Run the combinatorial per-pulse hit recovery on a Surface Concept tdc
+    frame.
+
+    This is the counterpart of :func:`analyze_surface_concept_tdc_frame` but
+    drives pair selection by detector-area + peak-window validity (rather
+    than by a fixed first-occurrence heuristic). Pass the user's peak
+    windows in either TOF (ns) or mass/charge (Da) units; choose ``mode``
+    ``'greedy'`` (default, fast O(N²)) or ``'exhaustive'`` (slow,
+    branch-and-bound, falls back to greedy when a pulse generates more than
+    ``exhaustive_max_candidates`` candidates).
+    """
+    required = {'start_counter', 'channel', 'time_data', 'high_voltage (V)'}
+    missing = required.difference(df_tdc.columns)
+    if missing:
+        raise ValueError(
+            f"Surface Concept tdc frame is missing required columns: {sorted(missing)}"
+        )
+
+    pulse_column = _surface_concept_pulse_column(df_tdc, pulse_mode)
+    sequence_records = raw_data_surface_concept.find_consecutive_sequences(
+        df_tdc['start_counter'].to_numpy(),
+        df_tdc['channel'].to_numpy(),
+        df_tdc['time_data'].to_numpy(),
+        df_tdc['high_voltage (V)'].to_numpy(),
+        df_tdc[pulse_column].to_numpy(),
+        print_stats=False,
+    )
+
+    rows: list[dict] = []
+    candidate_counts = {'total': 0, 'valid': 0, 'emitted': 0}
+    iterator = sequence_records
+    if show_progress:
+        iterator = tqdm(sequence_records, desc='Combinatorial recovery', unit='pulse')
+
+    for record in iterator:
+        emitted, all_candidates = extract_valid_hits_combinatorial(
+            record,
+            peak_windows=peak_windows,
+            signal_kind=signal_kind,
+            detector_limit_cm=detector_limit_cm,
+            mode=mode,
+            pair_sum_tolerance_bins=pair_sum_tolerance_bins,
+            flight_path_length_mm=flight_path_length_mm,
+            pulse_mode=pulse_mode,
+            t0=t0,
+            xy_factor=xy_factor,
+            xy_bin_shift=xy_bin_shift,
+            tof_factor_4d=tof_factor_4d,
+            tof_factor_2d=tof_factor_2d,
+            exhaustive_max_candidates=exhaustive_max_candidates,
+        )
+        candidate_counts['total'] += len(all_candidates)
+        candidate_counts['valid'] += sum(1 for c in all_candidates if c['valid'])
+        candidate_counts['emitted'] += len(emitted)
+        rows.extend(
+            {
+                'start_counter': hit['start_counter'],
+                'high_voltage (V)': hit['high_voltage (V)'],
+                'pulse': hit['pulse'],
+                'tof (ns)': hit['tof (ns)'],
+                'mc (Da)': hit.get('mc (Da)', float('nan')),
+                'x_det (cm)': hit['x_det (cm)'],
+                'y_det (cm)': hit['y_det (cm)'],
+                'dlts': int(hit['dlts']),
+                'detector_axis': str(hit['detector_axis']),
+                'recovery': f"{int(hit['dlts'])} DLTS",
+                'in_detector': bool(hit['in_detector']),
+                'in_peak': bool(hit['in_peak']),
+                'parent_pulse_length': int(hit['parent_pulse_length']),
+            }
+            for hit in emitted
+        )
+
+    hit_table = pd.DataFrame(rows) if rows else pd.DataFrame(
+        columns=[
+            'start_counter', 'high_voltage (V)', 'pulse', 'tof (ns)', 'mc (Da)',
+            'x_det (cm)', 'y_det (cm)', 'dlts', 'detector_axis', 'recovery',
+            'in_detector', 'in_peak', 'parent_pulse_length',
+        ]
+    )
+
+    return {
+        'hit_table': hit_table,
+        'candidate_counts': candidate_counts,
+        'mode': mode,
+        'peak_windows': list(peak_windows) if peak_windows else [],
+        'signal_kind': signal_kind,
+        'pair_sum_tolerance_bins': pair_sum_tolerance_bins,
+        'detector_limit_cm': detector_limit_cm,
+        'sequence_records': sequence_records,
+    }
+
+
+def plot_peak_detector_diagnostics(
+    hit_table: pd.DataFrame,
+    windows: Sequence[dict],
+    *,
+    signal_kind: str = 'tof',
+    only_in_detector: bool = True,
+    detector_limit_cm: float = 4.0,
+    bin_size_cm: float = 0.1,
+) -> plt.Figure | None:
+    """Per-peak detector position diagnostics.
+
+    For each peak window, render a 1-row × 3-column strip:
+
+    - **2D detector hist** of *all* hits in the window (4-DLTS only contribute
+      to the 2D map, since 2-DLTS hits have one coordinate set to zero and
+      would smear into a line on the axis).
+    - **1D x distribution** for hits whose recoverable axis is x — i.e. all
+      4-DLTS hits and all 2-DLTS x-axis partials.
+    - **1D y distribution** symmetric for the y axis.
+
+    Returns ``None`` if there are no windows or the hit table is empty.
+    """
+    if hit_table is None or hit_table.empty:
+        return None
+    if not windows:
+        return None
+
+    n_peaks = len(windows)
+    # Same safety cap as ``plot_peak_chunk_length_distribution``: matplotlib's
+    # 2^16 px hard limit + IPython's ``bbox_inches='tight'`` PNG render path
+    # was producing 46 M-px figures on long peak lists with
+    # ``constrained_layout=True``. ``tight_layout`` (called below) is more
+    # conservative; the cap further bounds the worst case.
+    height_inches = min(max(3.0 * n_peaks, 3.4), 24.0)
+    fig, axes = plt.subplots(
+        n_peaks, 3,
+        figsize=(11.0, height_inches),
+        squeeze=False,
+    )
+    edges = np.arange(-detector_limit_cm, detector_limit_cm + bin_size_cm, bin_size_cm)
+    label_4 = '4 DLTS'
+    label_2 = '2 DLTS'
+
+    for index, window in enumerate(windows):
+        peak_label = window.get('label', f'Peak {index + 1}')
+        peak = filter_peak_hits(hit_table, window, signal_kind=signal_kind, only_in_detector=only_in_detector)
+        ax_2d, ax_x, ax_y = axes[index]
+
+        if peak.empty:
+            for ax in (ax_2d, ax_x, ax_y):
+                ax.text(0.5, 0.5, "no hits", ha='center', va='center',
+                        transform=ax.transAxes, color='gray')
+            ax_2d.set_title(f"{peak_label}: 2D FDM")
+            ax_x.set_title(f"{peak_label}: x distribution")
+            ax_y.set_title(f"{peak_label}: y distribution")
+            continue
+
+        full_hits = peak[peak['dlts'] == 4]
+        partial_x = peak[(peak['dlts'] == 2) & (peak['detector_axis'] == 'x')]
+        partial_y = peak[(peak['dlts'] == 2) & (peak['detector_axis'] == 'y')]
+
+        # 2D detector map: only full 4-DLTS hits have both coords meaningful.
+        if not full_hits.empty:
+            ax_2d.hist2d(
+                full_hits['x_det (cm)'].to_numpy(),
+                full_hits['y_det (cm)'].to_numpy(),
+                bins=[edges, edges],
+                cmap='viridis',
+                norm=plt.matplotlib.colors.LogNorm(),
+            )
+        ax_2d.set_aspect('equal')
+        ax_2d.set_xlim(-detector_limit_cm, detector_limit_cm)
+        ax_2d.set_ylim(-detector_limit_cm, detector_limit_cm)
+        ax_2d.set_xlabel('x_det (cm)')
+        ax_2d.set_ylabel('y_det (cm)')
+        ax_2d.set_title(f"{peak_label}: 2D FDM (4 DLTS)")
+
+        # 1D x distribution: 4-DLTS hits + 2-DLTS x-axis partials.
+        if not full_hits.empty:
+            ax_x.hist(full_hits['x_det (cm)'].to_numpy(), bins=edges,
+                      color=DLTS_COLORS.get(4, '#1f77b4'), alpha=0.6, label=label_4)
+        if not partial_x.empty:
+            ax_x.hist(partial_x['x_det (cm)'].to_numpy(), bins=edges,
+                      color=DLTS_COLORS.get(2, '#f59e0b'), alpha=0.6, label=label_2)
+        ax_x.set_yscale('log')
+        ax_x.set_xlim(-detector_limit_cm, detector_limit_cm)
+        ax_x.set_xlabel('x_det (cm)')
+        ax_x.set_ylabel('Count (log)')
+        ax_x.set_title(f"{peak_label}: x distribution")
+        if not full_hits.empty or not partial_x.empty:
+            ax_x.legend(fontsize=8, loc='upper right')
+
+        # 1D y distribution: 4-DLTS hits + 2-DLTS y-axis partials.
+        if not full_hits.empty:
+            ax_y.hist(full_hits['y_det (cm)'].to_numpy(), bins=edges,
+                      color=DLTS_COLORS.get(4, '#1f77b4'), alpha=0.6, label=label_4)
+        if not partial_y.empty:
+            ax_y.hist(partial_y['y_det (cm)'].to_numpy(), bins=edges,
+                      color=DLTS_COLORS.get(2, '#f59e0b'), alpha=0.6, label=label_2)
+        ax_y.set_yscale('log')
+        ax_y.set_xlim(-detector_limit_cm, detector_limit_cm)
+        ax_y.set_xlabel('y_det (cm)')
+        ax_y.set_ylabel('Count (log)')
+        ax_y.set_title(f"{peak_label}: y distribution")
+        if not full_hits.empty or not partial_y.empty:
+            ax_y.legend(fontsize=8, loc='upper right')
+
+    fig.tight_layout()
+    return fig

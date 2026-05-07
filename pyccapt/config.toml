@@ -226,10 +226,29 @@ sc_detector_bins = 4900
 sc_detector_binning_factor = 2
 # Detector physical width (mm) used to convert bins to mm.
 sc_detector_width_mm = 80
+# Detector usable half-width (cm).  Hits with |x_det| or |y_det| beyond
+# this radius are flagged as "outside detector" and excluded from the
+# raw-data analysis peak yields.  80 mm full width → ±40 mm = ±4 cm.
+sc_detector_limit_cm = 4.0
 # Exposure time (TDC tick units, integer).  Controls how long the TDC
 # integrates between callbacks.  Lower = faster GUI updates, higher
 # CPU.  Surface Concept default 100 worked well in practice.
 sc_exposure_time = 100
+
+# ---------------------------------------------------------------------------
+# RoentDek hexanode (3-delay-line) calibration constants for the raw-data
+# analysis workflow.  Kept here so the same code can serve different rigs.
+# ---------------------------------------------------------------------------
+# Time-of-flight conversion: ns per TDC bin for the 6-DLTS sum reconstruction.
+ro_tof_ns_per_bin = 0.025
+# Number of TDC bins across the full detector face.
+ro_detector_bins = 4900
+# Internal binning factor applied by the controller.
+ro_detector_binning_factor = 2
+# Detector physical width (mm).  RoentDek hexanodes are typically 80 mm.
+ro_detector_width_mm = 80
+# Detector usable half-width (cm).  Same convention as the SC entry.
+ro_detector_limit_cm = 4.0
 
 # Speed slider range for both GUIs.  Mirrors the "Simple Mode" levels shown on
 # the SmarAct MCS2 hand-control display (1 = slowest, 11 = fastest).  Each

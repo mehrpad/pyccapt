@@ -3,15 +3,38 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import ipywidgets as widgets
 from IPython.display import display
 from ipywidgets import Output
 
-from pyccapt.calibration.data_tools import raw_data_workflow
+from pyccapt.calibration.data_tools import file_dialog, raw_data_workflow
 from pyccapt.calibration.leap_tools.cameca_raw import rhit_tools, str_tools
 
 label_layout = widgets.Layout(width="220px")
+field_layout = widgets.Layout(width="420px")
+
+
+def _browse_file(text_widget: widgets.Text, out: Output, variables=None) -> None:
+    try:
+        selected_path = file_dialog.choose_file_path(
+            file_dialog.resolve_initial_directory(
+                text_widget.value,
+                getattr(variables, "last_directory", None) if variables is not None else None,
+            )
+        )
+        if selected_path:
+            text_widget.value = selected_path
+            if variables is not None:
+                variables.last_directory = str(Path(selected_path).parent)
+    except Exception as exc:
+        with out:
+            print(f"File chooser failed: {exc}")
+
+
+def _path_row(label: str, text_widget: widgets.Text, button: widgets.Button) -> widgets.HBox:
+    return widgets.HBox([widgets.Label(value=label, layout=label_layout), text_widget, button])
 
 
 def _json_ready(value):
@@ -57,10 +80,14 @@ def call_cameca_raw_import_workflow(variables=None):
         "str_calibration": None,
     }
 
-    rhit_path = widgets.Text(value="", description="RHIT path:")
-    rhit_epos_path = widgets.Text(value="", description="Match EPOS:")
-    rhit_save_path = widgets.Text(value="", description="Save dataset:")
-    rhit_calibration_path = widgets.Text(value="", description="Save calib:")
+    rhit_path = widgets.Text(value="", description="", layout=field_layout)
+    rhit_epos_path = widgets.Text(value="", description="", layout=field_layout)
+    rhit_save_path = widgets.Text(value="", description="", layout=field_layout)
+    rhit_calibration_path = widgets.Text(value="", description="", layout=field_layout)
+    rhit_path_browse = widgets.Button(description="Browse")
+    rhit_epos_path_browse = widgets.Button(description="Browse")
+    rhit_save_path_browse = widgets.Button(description="Browse")
+    rhit_calibration_path_browse = widgets.Button(description="Browse")
     rhit_load_button = widgets.Button(description="Load RHIT")
     rhit_export_button = widgets.Button(description="Export RHIT dataset")
     rhit_save_calibration_button = widgets.Button(description="Save RHIT calibration")
@@ -70,10 +97,14 @@ def call_cameca_raw_import_workflow(variables=None):
         description="Load data:",
     )
 
-    str_path = widgets.Text(value="", description="STR/HITS path:")
-    str_rhit_path = widgets.Text(value="", description="Match RHIT:")
-    str_epos_path = widgets.Text(value="", description="RHIT EPOS:")
-    str_save_path = widgets.Text(value="", description="Save dataset:")
+    str_path = widgets.Text(value="", description="", layout=field_layout)
+    str_rhit_path = widgets.Text(value="", description="", layout=field_layout)
+    str_epos_path = widgets.Text(value="", description="", layout=field_layout)
+    str_save_path = widgets.Text(value="", description="", layout=field_layout)
+    str_path_browse = widgets.Button(description="Browse")
+    str_rhit_path_browse = widgets.Button(description="Browse")
+    str_epos_path_browse = widgets.Button(description="Browse")
+    str_save_path_browse = widgets.Button(description="Browse")
     str_load_button = widgets.Button(description="Load/process STR")
     str_export_button = widgets.Button(description="Export STR dataset")
     str_load_into_variables = widgets.Dropdown(
@@ -219,24 +250,33 @@ def call_cameca_raw_import_workflow(variables=None):
     str_load_button.on_click(on_load_str)
     str_export_button.on_click(on_export_str)
 
+    rhit_path_browse.on_click(lambda _: _browse_file(rhit_path, out, variables))
+    rhit_epos_path_browse.on_click(lambda _: _browse_file(rhit_epos_path, out, variables))
+    rhit_save_path_browse.on_click(lambda _: _browse_file(rhit_save_path, out, variables))
+    rhit_calibration_path_browse.on_click(lambda _: _browse_file(rhit_calibration_path, out, variables))
+    str_path_browse.on_click(lambda _: _browse_file(str_path, out, variables))
+    str_rhit_path_browse.on_click(lambda _: _browse_file(str_rhit_path, out, variables))
+    str_epos_path_browse.on_click(lambda _: _browse_file(str_epos_path, out, variables))
+    str_save_path_browse.on_click(lambda _: _browse_file(str_save_path, out, variables))
+
     tabs = widgets.Tab(
         [
             widgets.VBox(
                 [
-                    widgets.HBox([widgets.Label(value="RHIT file path:", layout=label_layout), rhit_path]),
-                    widgets.HBox([widgets.Label(value="Matching EPOS path:", layout=label_layout), rhit_epos_path]),
-                    widgets.HBox([widgets.Label(value="Save processed HDF5:", layout=label_layout), rhit_save_path]),
-                    widgets.HBox([widgets.Label(value="Save calibration JSON:", layout=label_layout), rhit_calibration_path]),
+                    _path_row("RHIT file path:", rhit_path, rhit_path_browse),
+                    _path_row("Matching EPOS path:", rhit_epos_path, rhit_epos_path_browse),
+                    _path_row("Save processed HDF5:", rhit_save_path, rhit_save_path_browse),
+                    _path_row("Save calibration JSON:", rhit_calibration_path, rhit_calibration_path_browse),
                     widgets.HBox([widgets.Label(value="Load into variables:", layout=label_layout), rhit_load_into_variables]),
                     widgets.HBox([rhit_load_button, rhit_export_button, rhit_save_calibration_button]),
                 ]
             ),
             widgets.VBox(
                 [
-                    widgets.HBox([widgets.Label(value="STR/HITS file path:", layout=label_layout), str_path]),
-                    widgets.HBox([widgets.Label(value="Matching RHIT path:", layout=label_layout), str_rhit_path]),
-                    widgets.HBox([widgets.Label(value="RHIT matching EPOS:", layout=label_layout), str_epos_path]),
-                    widgets.HBox([widgets.Label(value="Save processed HDF5:", layout=label_layout), str_save_path]),
+                    _path_row("STR/HITS file path:", str_path, str_path_browse),
+                    _path_row("Matching RHIT path:", str_rhit_path, str_rhit_path_browse),
+                    _path_row("RHIT matching EPOS:", str_epos_path, str_epos_path_browse),
+                    _path_row("Save processed HDF5:", str_save_path, str_save_path_browse),
                     widgets.HBox([widgets.Label(value="Load into variables:", layout=label_layout), str_load_into_variables]),
                     widgets.HBox([str_load_button, str_export_button]),
                 ]

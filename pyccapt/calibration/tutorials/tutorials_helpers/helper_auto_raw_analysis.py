@@ -992,7 +992,7 @@ def run_analysis(
     *,
     save_plots: bool = False,
     peak_units: str = "tof",
-    recovery_mode: str = "fixed",
+    recovery_mode: str = "exhaustive",
     pair_sum_tolerance_bins: float = 200.0,
 ) -> None:
     """Render every analysis section against ``variables.data`` and ``variables.data_tdc``.
@@ -1004,32 +1004,30 @@ def run_analysis(
       ``tof (ns)``. The TOF histogram overlays each window as a shaded band.
     - ``"mc"`` — windows are mass/charge intervals in Daltons. The per-peak
       table is computed against ``mc (Da)`` and the mc histogram overlays
-      each window. (This matches the legacy raw-data notebook's mc-binning
-      behaviour, but note that 1-DLTS partial reconstructions produce
-      systematically different mc values from 4-DLTS hits — so the legacy
-      uses *separate* windows per class.)
+      each window.
 
-    ``recovery_mode`` selects the Surface Concept partial-recovery algorithm
-    for the *Surface Concept* path:
+    ``recovery_mode`` selects the Surface Concept combinatorial per-pulse
+    hit-recovery algorithm:
 
-    - ``"fixed"`` (default) — the legacy per-chunk recovery: sort by channel,
-      split into chunks of 4, emit fixed-pairing partial hits when a chunk
-      isn't a clean ``[0, 1, 2, 3]``. Fast and reproduces the published
-      paper figures.
-    - ``"greedy"`` — combinatorial per-pulse recovery, fast O(N²). Enumerates
-      every candidate ``(0, 1)`` and ``(2, 3)`` pair and every complete-event
-      quadruple whose x-pair-sum matches the y-pair-sum within
-      ``pair_sum_tolerance_bins`` (default ±200 TDC bins ≈ 1.4 ns at 6.86
-      ps/bin), then greedily selects the best valid index-disjoint subset.
-      Validity = in-detector AND in any peak window.
-    - ``"exhaustive"`` — same candidate set as ``"greedy"`` but picks the
-      *maximum* index-disjoint subset via branch-and-bound. Slow but
-      optimal; falls back to greedy when a single pulse generates more than
-      ~80 candidates so the worst case stays bounded.
+    - ``"exhaustive"`` (default) — picks the *maximum* index-disjoint subset
+      of valid candidates via branch-and-bound. Slow but optimal; falls
+      back to greedy when a single pulse generates more than ~80 candidates
+      so the worst case stays bounded.
+    - ``"greedy"`` — fast O(N²) variant that ranks valid candidates by
+      complete-vs-partial first then by signal distance to the nearest peak
+      centre, picking the highest-ranked candidate whose timestamps are
+      still free at each step. Use when the analysis must run on a tight
+      time budget.
+
+    Both modes enumerate every candidate ``(0, 1)`` x-pair, every ``(2, 3)``
+    y-pair, and every complete-event quadruple whose x-pair-sum matches the
+    y-pair-sum within ``pair_sum_tolerance_bins`` (default ±200 TDC bins
+    ≈ 1.4 ns at 6.86 ps/bin). Validity = in-detector AND in any peak window.
+    Selection is two-stage: completes lock their timestamps first, then
+    partials run on the remaining indices.
 
     ``pair_sum_tolerance_bins`` controls the coincidence window for forming
-    complete-event candidates from individual delay-line pairs (only used
-    when ``recovery_mode != "fixed"``).
+    complete-event candidates from individual delay-line pairs.
     """
     peak_units = (peak_units or "tof").lower()
     if peak_units not in {"tof", "mc"}:
@@ -1093,59 +1091,58 @@ def run_analysis(
         detector_limit_cm = float(detector_constants["detector_limit_cm"])
         windows_for_recovery = _species_to_windows(species)
 
-        recovery_mode_value = (recovery_mode or "fixed").lower()
-        if recovery_mode_value not in {"fixed", "greedy", "exhaustive"}:
-            recovery_mode_value = "fixed"
+        recovery_mode_value = (recovery_mode or "exhaustive").lower()
+        if recovery_mode_value not in {"greedy", "exhaustive"}:
+            recovery_mode_value = "exhaustive"
 
-        if recovery_mode_value in {"greedy", "exhaustive"}:
-            _md(
-                f"_Surface Concept partial recovery mode: **{recovery_mode_value}** "
-                f"(combinatorial; pair-sum tolerance ±{int(pair_sum_tolerance_bins)} bins)._"
-            )
-            combinatorial_analysis = analyze_surface_concept_tdc_frame_combinatorial(
-                tdc_df,
-                peak_windows=windows_for_recovery,
-                signal_kind=peak_units,
-                detector_limit_cm=detector_limit_cm,
-                mode=recovery_mode_value,
-                pair_sum_tolerance_bins=float(pair_sum_tolerance_bins),
-                t0=0.0,
-                flight_path_length_mm=flight_path_length,
-                pulse_mode=pulse_mode,
-                show_progress=True,
-            )
-            # The combinatorial path is a *replacement* for the partial-recovery
-            # branch, not a wholesale replacement for analyze_surface_concept_tdc_frame
-            # (we still want sequence_stats, raw_summary, recovery_diagnostics for
-            # the rest of the page). Run the legacy analyzer too so the diagnostics
-            # are populated, then swap in the combinatorial hit_table for the parts
-            # of the workflow that drive peak yields and FDM.
-            analysis = analyze_surface_concept_tdc_frame(
-                tdc_df,
-                detector_limit_cm=detector_limit_cm,
-                flight_path_length_mm=flight_path_length,
-                pulse_mode=pulse_mode,
-                t0=0.0,
-                show_progress=False,
-            )
-            if not combinatorial_analysis["hit_table"].empty:
-                analysis["hit_table"] = combinatorial_analysis["hit_table"]
-            counts = combinatorial_analysis["candidate_counts"]
-            _md(
-                "**Combinatorial recovery candidates:**\n\n"
-                f"- Considered: {counts['total']:,}\n"
-                f"- Passed validity (in detector AND in peak window): {counts['valid']:,}\n"
-                f"- Emitted (after index-disjoint selection): {counts['emitted']:,}\n"
-            )
-        else:
-            analysis = analyze_surface_concept_tdc_frame(
-                tdc_df,
-                detector_limit_cm=detector_limit_cm,
-                flight_path_length_mm=flight_path_length,
-                pulse_mode=pulse_mode,
-                t0=0.0,
-                show_progress=True,
-            )
+        _md(
+            f"_Surface Concept partial recovery mode: **{recovery_mode_value}** "
+            f"(combinatorial; pair-sum tolerance ±{int(pair_sum_tolerance_bins)} bins)._"
+        )
+        # Recovery validity is geometric only — every hit whose tof is in
+        # [0, max_tof_ns] AND whose reconstructed position lands inside the
+        # detector is emitted. Peak windows are applied DOWNSTREAM, in the
+        # per-peak yield table and per-peak diagnostic plots, against the
+        # full hit table. This is what keeps the "Full spectrum" view
+        # honest — noise events between peaks are still in the hit table.
+        max_tof_ns = float(getattr(variables, "max_tof_ns", 5000.0) or 5000.0)
+        combinatorial_analysis = analyze_surface_concept_tdc_frame_combinatorial(
+            tdc_df,
+            peak_windows=windows_for_recovery,
+            signal_kind=peak_units,
+            detector_limit_cm=detector_limit_cm,
+            max_tof_ns=max_tof_ns,
+            mode=recovery_mode_value,
+            pair_sum_tolerance_bins=float(pair_sum_tolerance_bins),
+            t0=0.0,
+            flight_path_length_mm=flight_path_length,
+            pulse_mode=pulse_mode,
+            show_progress=True,
+        )
+        # The combinatorial path replaces only the partial-recovery branch.
+        # ``analyze_surface_concept_tdc_frame`` still produces sequence_stats,
+        # raw_summary, and recovery_diagnostics that the rest of the page
+        # consumes (DLTS-per-pulse plot, recovery summary, etc.) so we run it
+        # too and then swap in the combinatorial hit_table for the parts of
+        # the workflow that drive peak yields and FDM.
+        analysis = analyze_surface_concept_tdc_frame(
+            tdc_df,
+            detector_limit_cm=detector_limit_cm,
+            flight_path_length_mm=flight_path_length,
+            pulse_mode=pulse_mode,
+            t0=0.0,
+            show_progress=False,
+        )
+        if not combinatorial_analysis["hit_table"].empty:
+            analysis["hit_table"] = combinatorial_analysis["hit_table"]
+        counts = combinatorial_analysis["candidate_counts"]
+        _md(
+            "**Combinatorial recovery candidates:**\n\n"
+            f"- Considered: {counts['total']:,}\n"
+            f"- Passed geometry (in detector AND tof in [0, {int(max_tof_ns)}] ns): {counts['valid']:,}\n"
+            f"- Of those, also in a user peak window (informational): {counts.get('in_peak', 0):,}\n"
+            f"- Emitted (after index-disjoint two-stage selection): {counts['emitted']:,}\n"
+        )
 
         if not analysis["hit_table"].empty:
             plot_df = surface_concept_hits_to_processed_dataframe(
@@ -1572,11 +1569,10 @@ def call_auto_raw_data_analysis(variables) -> None:
     )
     recovery_mode = widgets.Dropdown(
         options=[
-            ("Fixed (per-chunk legacy)", "fixed"),
+            ("Exhaustive (combinatorial, slow — default)", "exhaustive"),
             ("Greedy (combinatorial, fast)", "greedy"),
-            ("Exhaustive (combinatorial, slow)", "exhaustive"),
         ],
-        value="fixed",
+        value="exhaustive",
         description="Recovery:",
         layout=widgets.Layout(width="380px"),
     )

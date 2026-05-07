@@ -2,8 +2,9 @@ from PyQt6.QtWidgets import QApplication, QFileDialog
 
 
 DATASET_FILTER = (
-    "Dataset files (*.epos *.pos *.apt *.h5 *.ato *.csv);;"
+    "Dataset files (*.epos *.pos *.apt *.h5 *.ato *.csv *.rhit *.RHIT);;"
     "LEAP (*.epos *.pos *.apt);;"
+    "LEAP CAMECA RHIT (*.rhit *.RHIT);;"
     "PyCCAPT / HDF5 (*.h5);;"
     "ATO (*.ato);;"
     "CSV (*.csv);;"
@@ -17,7 +18,7 @@ RANGE_FILTER = (
     "All Files (*)"
 )
 GENERIC_FILTER = (
-    "Dataset / range files (*.epos *.pos *.apt *.h5 *.ato *.csv *.rrng *.rng);;"
+    "Dataset / range files (*.epos *.pos *.apt *.h5 *.ato *.csv *.rhit *.RHIT *.rrng *.rng);;"
     "All Files (*)"
 )
 

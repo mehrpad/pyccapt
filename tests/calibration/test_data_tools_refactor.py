@@ -281,3 +281,20 @@ def test_pos_to_ccapt_uses_standard_pulse_columns(monkeypatch):
     assert "pulse" not in converted.columns
     assert converted["pulse_v (V)"].tolist() == [0.0, 0.0]
     assert converted["pulse_l (pJ)"].tolist() == [0.0, 0.0]
+
+
+def test_dataset_path_qt_filters_advertise_rhit_files():
+    """The Load-dataset button in the raw-data analysis notebook routes
+    through ``run_dataset_path_qt.py`` -> ``gui_fname`` -> Qt file dialog.
+    The dialog filter must list ``.rhit`` so the user can pick a Cameca
+    LEAP RHIT file from the dialog without having to type the path or
+    switch the dropdown to *All Files*. The dedicated
+    ``LEAP CAMECA RHIT`` entry also has to exist so the dialog can be
+    pre-filtered by extension."""
+    from pyccapt.calibration.data_tools import dataset_path_qt
+
+    assert "*.rhit" in dataset_path_qt.DATASET_FILTER
+    assert "*.RHIT" in dataset_path_qt.DATASET_FILTER
+    assert "LEAP CAMECA RHIT (*.rhit *.RHIT)" in dataset_path_qt.DATASET_FILTER
+    assert "*.rhit" in dataset_path_qt.GENERIC_FILTER
+    assert "*.RHIT" in dataset_path_qt.GENERIC_FILTER

@@ -495,32 +495,26 @@ def test_combinatorial_recovery_example1_two_x_pairs_when_both_in_detector():
     assert used == {0, 1, 2, 3}    # every timestamp claimed exactly once
 
 
-def test_combinatorial_recovery_example2_three_y_candidates_picks_only_valid_one():
+def test_combinatorial_recovery_example2_three_y_candidates_picks_only_geometric_one():
     """Example 2 — chunk [2, 3, 2, 2] (sorted as [2, 2, 2, 3]). Three
-    candidate y-pairs against the lone ch=3. Only one of them lands
-    inside a tight detector AND inside the user's peak window — that
-    single hit must be emitted; the other two must be dropped."""
+    candidate y-pairs against the lone ch=3. Two of them land *outside*
+    the detector and must be dropped. The remaining single in-detector
+    pair is emitted regardless of whether its tof falls in the user's
+    peak window — peak windows now filter at the per-peak yield helper,
+    not at recovery time, so the noise baseline survives in the hit table."""
     # Times chosen so:
-    #   pair (idx_ch2=0, idx_ch3=3): det_y inside, tof inside peak → VALID
+    #   pair (idx_ch2=0, idx_ch3=3): det_y inside detector, tof in peak → emitted
     #   pair (idx_ch2=1, idx_ch3=3): det_y outside detector              → invalid
-    #   pair (idx_ch2=2, idx_ch3=3): tof outside peak                    → invalid
-    #
-    # The position formula reduces to ``-0.5 * (t_high - t_low) * XY_FACTOR / 10``
-    # (cm). With XY_FACTOR ~= 0.0327 mm/bin, |det_y| < 4 cm requires
-    # |t_high - t_low| < ~24500 bins. So |Δ| = 1000 → in-detector.
-    #
-    # tof_2d = (t_low + t_high) * TOF_FACTOR_NS_1D. We pick the peak window
-    # so that only one combination is "in window".
-    t_ch2_a = 10000   # combo with t_ch3=11000 → tof = 21000 * 0.013716 = 288 ns
-    t_ch2_b = 100     # |Δ| with t_ch3=11000 = 10900 → in detector,
-                      # but tof = 11100 * 0.013716 = 152.2 ns → outside peak
-    t_ch2_c = 50000   # |Δ| with t_ch3=11000 = 39000 → OUTSIDE detector
+    #   pair (idx_ch2=2, idx_ch3=3): det_y outside detector              → invalid
+    t_ch2_a = 10000
+    t_ch2_b = 100      # |Δ| with t_ch3=11000 = 10900 bins → det_y far outside ±4 cm
+    t_ch2_c = 50000    # |Δ| with t_ch3=11000 = 39000 bins → det_y way outside
     t_ch3   = 11000
     record = _record(
         channels=[2, 2, 2, 3],
         times=[t_ch2_a, t_ch2_b, t_ch2_c, t_ch3],
     )
-    peak_window = [{'label': 'Al+', 'min': 280.0, 'max': 300.0}]   # captures only combo A
+    peak_window = [{'label': 'Al+', 'min': 280.0, 'max': 300.0}]
     hits, candidates = raw_data_workflow.extract_valid_hits_combinatorial(
         record,
         peak_windows=peak_window,
@@ -529,14 +523,16 @@ def test_combinatorial_recovery_example2_three_y_candidates_picks_only_valid_one
         mode='greedy',
     )
 
-    # Three y-candidates were considered (one per ch=2 against the lone ch=3).
     y_candidates = [c for c in candidates if c['detector_axis'] == 'y']
     assert len(y_candidates) == 3
-    # Only the one that is both in-detector AND in the peak window is emitted.
+    # Only one candidate passed the per-axis detector gate.
+    in_det_y = [c for c in y_candidates if c['in_detector']]
+    assert len(in_det_y) == 1
+    # Exactly that one is emitted (validity = geometric only).
     assert len(hits) == 1
     assert hits[0]['detector_axis'] == 'y'
-    # The emitted hit pairs ch=2 at index 0 with ch=3 at index 3.
     assert hits[0]['used_indices'] == frozenset({0, 3})
+    assert hits[0]['in_peak'] is True   # incidentally inside the peak window
 
 
 def test_combinatorial_recovery_example3_two_y_pairs_when_both_valid():
@@ -792,10 +788,72 @@ def test_combinatorial_recovery_greedy_and_exhaustive_agree_on_simple_inputs():
            sorted(h['detector_axis'] for h in hits_exhaust)
 
 
-def test_combinatorial_recovery_emits_no_hit_when_no_pair_lands_in_peak_window():
-    """If every candidate pair is in-detector but none have a tof inside
-    the user's peak window, the recovery emits nothing — the chunk drops to
-    the unrecoverable bucket. This is the contract Example 2 demands."""
+def test_combinatorial_recovery_noise_baseline_survives_full_pulse_range():
+    """End-to-end regression for the "Full spectrum" view: when the user
+    enters peak windows in TOF mode, the recovered hit table must still
+    contain noise events whose tof is between (but not inside) those peak
+    windows. The full-spectrum plot reads ``hit_table['tof (ns)']``
+    directly, so anything filtered out at recovery time disappears from
+    the noise baseline."""
+    # Build a fake tdc frame containing 4 pulses, each a clean 4-DLTS event,
+    # whose tofs are spaced across [50, 500] ns. Two of them fall inside
+    # the user's only peak window (300, 350); the other two are noise.
+    tdc = pd.DataFrame({
+        'start_counter':       np.repeat([1, 2, 3, 4], 4).astype(np.int64),
+        'channel':              np.tile([0, 1, 2, 3], 4).astype(np.int64),
+        # tof_4d = sum * TOF_FACTOR_NS = sum * 27.432 / 4000 ns/bin.
+        # Pick sums so tof = 80, 220, 320, 480 ns respectively.
+        'time_data':            np.array([
+            # pulse 1: tof_4d = 4*sum/4 * 27.432/4000 → sum bins = 80 / (27.432/4000) ≈ 11665
+            # We just need pair-sum coincidence (x_sum == y_sum) for the complete to form.
+            2916, 2916, 2916, 2917,                # tof ≈ 80 ns
+            8020, 8020, 8020, 8020,                # tof ≈ 220 ns
+            11665, 11665, 11665, 11665,            # tof ≈ 320 ns (in peak)
+            17500, 17500, 17500, 17500,            # tof ≈ 480 ns
+        ], dtype=np.int64),
+        'high_voltage (V)':    np.full(16, 5000.0),
+        'pulse_v (V)':          np.full(16, 0.0),
+    })
+    peak_windows = [{'label': 'Al+', 'min': 300.0, 'max': 350.0}]
+
+    result = raw_data_workflow.analyze_surface_concept_tdc_frame_combinatorial(
+        tdc,
+        peak_windows=peak_windows,
+        signal_kind='tof',
+        detector_limit_cm=10.0,
+        max_tof_ns=5000.0,
+        mode='exhaustive',
+        pair_sum_tolerance_bins=10.0,
+    )
+    hit_table = result['hit_table']
+
+    # Every pulse contributed at least one geometrically-valid hit, regardless
+    # of whether it was inside the peak window.
+    assert len(hit_table) == 4
+    tofs = sorted(hit_table['tof (ns)'].tolist())
+    # Two hits are inside the peak window, two are outside (noise baseline).
+    in_peak = sum(1 for t in tofs if 300.0 <= t <= 350.0)
+    out_of_peak = sum(1 for t in tofs if not (300.0 <= t <= 350.0))
+    assert in_peak == 1
+    assert out_of_peak == 3, (
+        "noise events outside the user peak window must remain in the "
+        "recovered hit table — that is what feeds the Full-spectrum plot. "
+        f"Got tofs={tofs}, in_peak={in_peak}, out_of_peak={out_of_peak}."
+    )
+
+
+def test_combinatorial_recovery_emits_geometric_hits_even_outside_peak_windows():
+    """The "Full spectrum" view depends on noise events outside any peak
+    window still being in the recovered hit table. So validity for emission
+    is GEOMETRIC ONLY — in-detector + tof in [0, max_tof_ns]. The peak-window
+    membership is computed (as ``in_peak``) but doesn't gate emission;
+    downstream per-peak yield helpers do their own filter against the full
+    hit table.
+
+    This test was previously asserting the opposite (no emission when no
+    pair was in peak), which made the recovered hit table contain only the
+    peak regions and broke the noise-baseline view.
+    """
     # Pick times so every (ch=2, ch=3) pair has small |Δ| (in detector) but
     # a low pair-sum → tof_2d ≈ 14-27 ns, well outside the (280, 300) window.
     record = _record(
@@ -807,12 +865,30 @@ def test_combinatorial_recovery_emits_no_hit_when_no_pair_lands_in_peak_window()
         peak_windows=[{'label': 'Al+', 'min': 280.0, 'max': 300.0}],
         signal_kind='tof',
         detector_limit_cm=10.0,
+        max_tof_ns=5000.0,
         mode='greedy',
     )
     y_candidates = [c for c in candidates if c['detector_axis'] == 'y']
-    assert all(c['in_detector'] for c in y_candidates)   # geometry was fine
-    assert not any(c['in_peak'] for c in y_candidates)   # tof failed
-    assert hits == []
+    assert all(c['in_detector'] for c in y_candidates)        # geometry was fine
+    assert all(c.get('in_tof_range') for c in y_candidates)   # tof_2d ≈ 14-27 ns ∈ [0, 5000]
+    assert not any(c['in_peak'] for c in y_candidates)         # but outside (280, 300)
+    # Even though no candidate is "in peak", at least one must be emitted
+    # (max-disjoint over the geometric subset; here all three y-pairs share
+    # ch=3 at index 1, so exactly one wins the index conflict).
+    assert len(hits) == 1
+    assert hits[0]['detector_axis'] == 'y'
+    assert hits[0]['in_peak'] is False
+    # max_tof gate: a pair whose tof exceeds max_tof_ns must NOT be emitted
+    # even with otherwise-valid geometry.
+    hits_short, _ = raw_data_workflow.extract_valid_hits_combinatorial(
+        record,
+        peak_windows=None,
+        signal_kind='tof',
+        detector_limit_cm=10.0,
+        max_tof_ns=10.0,        # tighter than any pair's tof_2d
+        mode='greedy',
+    )
+    assert hits_short == []
 
 
 def test_combinatorial_recovery_tags_emitted_hits_with_parent_pulse_length_and_metadata():

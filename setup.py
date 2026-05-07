@@ -78,6 +78,11 @@ calibration_deps = [
     "pyvista",
     "scikit-learn",
     "tqdm",
+    # uproot reads Cameca LEAP RHIT files (ROOT-format bundles) inside
+    # ``pyccapt.calibration.leap_tools.cameca_raw.rhit_load``. The helper
+    # raises an ImportError pointing here when missing, so without this
+    # dependency the raw-data analysis notebook fails on .RHIT input.
+    "uproot",
     "vispy",
 ]
 

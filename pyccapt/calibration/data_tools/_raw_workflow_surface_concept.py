@@ -1155,24 +1155,52 @@ def _score_candidate_validity(
     peak_windows: Sequence[dict] | None,
     detector_limit_cm: float,
     signal_kind: str,
+    max_tof_ns: float = 5000.0,
 ) -> None:
-    """Mutate ``candidate`` in place with ``in_detector`` / ``in_peak`` /
-    ``valid`` booleans plus a tie-breaking ``signal_distance``."""
+    """Mutate ``candidate`` in place with the validity booleans the selector
+    needs.
+
+    A candidate is *valid for emission* when it is geometrically real:
+
+    - the reconstructed coordinate is inside the detector face, AND
+    - its TOF is in ``[0, max_tof_ns]`` and finite.
+
+    The peak-window membership (``in_peak``) is computed too, but is
+    informational — it is **not** part of ``candidate['valid']``. That
+    means the recovery emits every geometrically valid hit, including
+    noise events that fall between the user's peak windows. Per-peak
+    yield tables / diagnostic plots downstream then filter the emitted
+    hit table by peak window themselves.
+
+    The previous policy ANDed ``in_peak`` into validity, which deleted
+    the noise from the recovered hit table — so the "Full spectrum" view
+    showed only the peak regions, defeating its purpose.
+    """
     candidate['in_detector'] = _hit_in_detector_axis_aware(
         candidate['x_det (cm)'], candidate['y_det (cm)'],
         candidate['detector_axis'], detector_limit_cm,
     )
+    tof_value = candidate.get('tof (ns)')
+    if tof_value is None or not np.isfinite(tof_value):
+        candidate['in_tof_range'] = False
+    else:
+        candidate['in_tof_range'] = bool(0.0 <= float(tof_value) <= max_tof_ns)
+
     column = 'mc (Da)' if signal_kind == 'mc' else 'tof (ns)'
     signal_value = candidate.get(column)
     if signal_value is None or not np.isfinite(signal_value):
         candidate['in_peak'] = False
-        candidate['valid'] = False
         candidate['signal_distance'] = float('inf')
-        return
-    candidate['in_peak'] = _signal_in_any_window(float(signal_value), peak_windows)
-    candidate['valid'] = bool(candidate['in_detector'] and candidate['in_peak'])
-    candidate['signal_distance'] = _signal_distance_to_nearest_peak(
-        float(signal_value), peak_windows
+    else:
+        candidate['in_peak'] = _signal_in_any_window(float(signal_value), peak_windows)
+        candidate['signal_distance'] = _signal_distance_to_nearest_peak(
+            float(signal_value), peak_windows
+        )
+
+    # Validity for SELECTION = geometric only. Peak windows are applied
+    # later, by the peak-yield helpers, against the full hit table.
+    candidate['valid'] = bool(
+        candidate['in_detector'] and candidate['in_tof_range']
     )
 
 
@@ -1350,6 +1378,7 @@ def extract_valid_hits_combinatorial(
     peak_windows: Sequence[dict] | None = None,
     signal_kind: str = 'tof',
     detector_limit_cm: float = 4.0,
+    max_tof_ns: float = 5000.0,
     mode: str = 'greedy',
     pair_sum_tolerance_bins: float = _DEFAULT_PAIR_SUM_TOLERANCE_BINS,
     flight_path_length_mm: float = 110.0,
@@ -1416,6 +1445,7 @@ def extract_valid_hits_combinatorial(
             peak_windows=peak_windows,
             detector_limit_cm=detector_limit_cm,
             signal_kind=signal_kind,
+            max_tof_ns=max_tof_ns,
         )
 
     valid_candidates = [c for c in all_candidates if c['valid']]
@@ -1446,6 +1476,7 @@ def analyze_surface_concept_tdc_frame_combinatorial(
     peak_windows: Sequence[dict] | None = None,
     signal_kind: str = 'tof',
     detector_limit_cm: float = 4.0,
+    max_tof_ns: float = 5000.0,
     mode: str = 'greedy',
     pair_sum_tolerance_bins: float = _DEFAULT_PAIR_SUM_TOLERANCE_BINS,
     exhaustive_max_candidates: int = _DEFAULT_EXHAUSTIVE_MAX_CANDIDATES,
@@ -1487,7 +1518,7 @@ def analyze_surface_concept_tdc_frame_combinatorial(
     )
 
     rows: list[dict] = []
-    candidate_counts = {'total': 0, 'valid': 0, 'emitted': 0}
+    candidate_counts = {'total': 0, 'valid': 0, 'in_peak': 0, 'emitted': 0}
     iterator = sequence_records
     if show_progress:
         iterator = tqdm(sequence_records, desc='Combinatorial recovery', unit='pulse')
@@ -1498,6 +1529,7 @@ def analyze_surface_concept_tdc_frame_combinatorial(
             peak_windows=peak_windows,
             signal_kind=signal_kind,
             detector_limit_cm=detector_limit_cm,
+            max_tof_ns=max_tof_ns,
             mode=mode,
             pair_sum_tolerance_bins=pair_sum_tolerance_bins,
             flight_path_length_mm=flight_path_length_mm,
@@ -1511,6 +1543,8 @@ def analyze_surface_concept_tdc_frame_combinatorial(
         )
         candidate_counts['total'] += len(all_candidates)
         candidate_counts['valid'] += sum(1 for c in all_candidates if c['valid'])
+        # ``in_peak`` is informational — emission no longer depends on it.
+        candidate_counts['in_peak'] += sum(1 for c in all_candidates if c.get('in_peak'))
         candidate_counts['emitted'] += len(emitted)
         rows.extend(
             {

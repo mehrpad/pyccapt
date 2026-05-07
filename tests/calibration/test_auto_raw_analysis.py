@@ -246,6 +246,73 @@ def test_load_calibrated_h5_works_without_tdc_and_range(tmp_path: Path):
     assert variables.data_tdc is None
 
 
+def test_load_calibrated_h5_dispatches_rhit_files_to_leap_loader(tmp_path: Path, monkeypatch):
+    """A LEAP CAMECA RHIT file is a Cameca ROOT bundle, not HDF5 — calling
+    pd.read_hdf on it raises HDF5ExtError ("file signature not found") which
+    is neither ``KeyError`` nor ``ValueError`` and therefore escapes the
+    calibrated→raw fallback. The loader must dispatch on the ``.rhit``
+    extension before that point and route to the LEAP RHIT loader.
+
+    This was the user-reported bug: ``R56_09048.RHIT`` blew up with
+    ``HDF5ExtError`` in the Loading-PyCCAPT-HDF5 progress block.
+    """
+    rhit_path = tmp_path / "R56_09048.RHIT"
+    rhit_path.write_bytes(b"placeholder-rhit-bytes-not-actually-root")
+
+    fake_hits = pd.DataFrame({
+        "mc":      [12.0, 27.0, 56.0],
+        "tof":     [200.0, 400.0, 600.0],
+        "VDC":     [4500.0, 4500.0, 4500.0],
+        "detx":    [1.0, -2.0, 0.5],
+        "dety":    [0.5, 1.5, -1.0],
+        "tElapsed": [0.0, 1.0, 2.0],
+        "pulse":   [0.0, 0.0, 0.0],
+    })
+
+    rhit_load_calls: list[str] = []
+
+    def fake_rhit_load(path):
+        rhit_load_calls.append(str(path))
+        return fake_hits, {}, {"format": "RHIT (Cameca ROOT)"}
+
+    # The RHIT branch imports its loader lazily, so we patch the module.
+    from pyccapt.calibration.leap_tools import cameca_raw as cameca_raw_pkg
+
+    monkeypatch.setattr(cameca_raw_pkg, "rhit_load", fake_rhit_load)
+
+    variables = Variables()
+    loaded_dld, loaded_tdc, loaded_range = helper_data_loader.load_calibrated_h5(
+        str(rhit_path), variables, show_progress=False
+    )
+
+    # The LEAP RHIT loader was actually called (we don't pretend to read the
+    # bytes — just assert that the helper dispatched on extension).
+    assert rhit_load_calls == [str(rhit_path)]
+
+    # The returned dld dataframe is the rhit_to_ccapt conversion: it has the
+    # processed-schema columns the rest of the analysis pipeline expects.
+    assert loaded_dld is not None
+    assert len(loaded_dld) == 3
+    expected_cols = {
+        "x (nm)", "y (nm)", "z (nm)",
+        "mc (Da)", "mc_uc (Da)",
+        "high_voltage (V)", "pulse_v (V)", "pulse_l (pJ)",
+        "t (ns)", "t_c (ns)",
+        "x_det (cm)", "y_det (cm)",
+        "delta_p", "multi", "start_counter",
+    }
+    assert expected_cols.issubset(loaded_dld.columns)
+    # Values come straight from the fake hits (with the cm = mm/10 conversion).
+    assert list(loaded_dld["mc (Da)"]) == [12.0, 27.0, 56.0]
+    assert list(loaded_dld["t (ns)"]) == [200.0, 400.0, 600.0]
+    assert list(loaded_dld["x_det (cm)"]) == [0.1, -0.2, 0.05]
+
+    # RHIT files have no raw delay-line tdc data and no /range group.
+    assert loaded_tdc is None
+    assert loaded_range is None
+    assert variables.data_tdc is None
+
+
 def test_load_calibrated_h5_accepts_show_progress_flag(tmp_path: Path):
     dld_df = _make_simple_dld(num_rows=2)
     h5_path = tmp_path / "dld_only_no_progress.h5"
@@ -922,11 +989,12 @@ def test_call_auto_raw_data_analysis_panel_has_save_dropdown_and_units_dropdown(
     assert {value for _label, value in by_desc["Save plots:"].options} == {True, False}
     assert by_desc["Peak units:"].value == "tof"
     assert {value for _label, value in by_desc["Peak units:"].options} == {"tof", "mc"}
-    # Recovery dropdown defaults to "fixed" (legacy paper-faithful) and offers
-    # the two combinatorial alternatives (greedy = fast, exhaustive = slow).
-    assert by_desc["Recovery:"].value == "fixed"
+    # Recovery dropdown defaults to the combinatorial "exhaustive" mode
+    # (slow but optimal); greedy is offered as a fast alternative. The
+    # legacy per-chunk "fixed" mode has been removed entirely.
+    assert by_desc["Recovery:"].value == "exhaustive"
     assert {value for _label, value in by_desc["Recovery:"].options} == {
-        "fixed", "greedy", "exhaustive",
+        "greedy", "exhaustive",
     }
 
 

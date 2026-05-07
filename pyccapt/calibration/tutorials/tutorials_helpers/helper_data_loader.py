@@ -189,19 +189,28 @@ def add_columns(variables, max_mc):
 
 
 def load_calibrated_h5(dataset_path, variables, *, range_path=None, show_progress=True):
-	"""Load a PyCCAPT ``.h5`` file for raw-data analysis.
+	"""Load a PyCCAPT ``.h5`` (or LEAP ``.RHIT``) file for raw-data analysis.
 
-	Two file layouts are supported:
+	Three file layouts are supported, dispatched by file extension:
 
-	1. **Calibrated bundle** (preferred) — produced by
+	1. **Calibrated PyCCAPT bundle** (``.h5``, preferred) — produced by
 	   ``data_tools.save_data(..., save_tdc=True, save_range=True)``. Contains
 	   ``/df`` (calibrated dld), and optionally ``/tdc`` (raw delay-line
 	   timestamps linked via ``event_group_id``) and ``/range`` (identified
 	   ion windows).
-	2. **Pure raw acquisition** — the file as written by the control software:
-	   ``/dld`` and ``/tdc`` groups (no ``/df``, no ``/range``). The dld
-	   records are converted to the processed dataframe schema in memory, and
-	   the linked raw tdc rows are kept on ``variables.data_tdc``.
+	2. **Pure raw PyCCAPT acquisition** (``.h5``) — the file as written by
+	   the control software: ``/dld`` and ``/tdc`` groups (no ``/df``,
+	   no ``/range``). The dld records are converted to the processed
+	   dataframe schema in memory, and the linked raw tdc rows are kept
+	   on ``variables.data_tdc``.
+	3. **LEAP CAMECA RHIT** (``.rhit``) — a Cameca-LEAP ROOT bundle. Decoded
+	   via :func:`pyccapt.calibration.leap_tools.cameca_raw.rhit_load` and
+	   converted to the processed dataframe schema with
+	   :func:`...rhit_to_ccapt`. RHIT files have no raw delay-line tdc data
+	   (the mass/charge and detector positions are already calibrated by the
+	   instrument), so ``variables.data_tdc`` is set to ``None`` and the
+	   downstream analyses that require ``/tdc`` (DLTS-per-pulse, combinatorial
+	   recovery) are skipped automatically.
 
 	Older datasets that store the range table in a separate
 	``<dataset>_range.h5`` file are also supported via ``range_path``.
@@ -228,40 +237,60 @@ def load_calibrated_h5(dataset_path, variables, *, range_path=None, show_progres
 		variables.result_data_name = variables.dataset_name
 		progress.update(1)
 
-		# First try the calibrated bundle layout (/df). If that fails because the
-		# file only has the raw acquisition groups, fall back to raw mode.
+		suffix = dataset_path_obj.suffix.lower()
+
 		dld_df = None
 		tdc_df = None
-		source = "calibrated"
-		progress.set_postfix_str("reading bundled /df and optional /tdc")
-		try:
-			loaded = data_tools.load_data(
-				str(dataset_path_obj), 'pyccapt', mode='processed', load_tdc=True
+		# LEAP RHIT path: the file is a Cameca ROOT bundle, not HDF5. Trying
+		# pd.read_hdf on it raises HDF5ExtError ("file signature not found")
+		# because it isn't HDF5 at all — so we MUST dispatch on extension
+		# before the calibrated-bundle attempt.
+		if suffix == ".rhit":
+			progress.set_postfix_str("reading LEAP RHIT raw data")
+			from pyccapt.calibration.leap_tools.cameca_raw import (
+				rhit_load,
+				rhit_to_ccapt,
 			)
-			if isinstance(loaded, tuple):
-				dld_df, tdc_df = loaded
-			else:
-				dld_df, tdc_df = loaded, None
-		except (KeyError, ValueError) as calibrated_error:
-			progress.set_postfix_str("falling back to raw /dld + /tdc groups")
-			try:
-				dld_df, tdc_df = data_loadcrop.fetch_dataset_with_tdc(str(dataset_path_obj))
-			except Exception as raw_error:
-				raise ValueError(
-					f"Could not load {dataset_path!r}: not a calibrated bundle "
-					f"({calibrated_error}) and not a recognizable raw acquisition file "
-					f"({raw_error})."
-				) from raw_error
-			source = "raw"
-		progress.update(1)
 
-		progress.set_postfix_str("normalizing loaded data")
-		if source == "raw":
-			# Apply the standard raw -> processed pipeline so downstream analyses
-			# see the same dataframe schema as a calibrated load.
-			dld_df = data_tools.remove_invalid_data(dld_df, max_tof=100000)
-			dld_df = data_tools.pyccapt_raw_to_processed(dld_df)
-		progress.update(1)
+			hits, _histograms, _metadata = rhit_load(str(dataset_path_obj))
+			dld_df = rhit_to_ccapt(hits)
+			tdc_df = None
+			source = "leap_rhit"
+			progress.update(1)   # step 2: read
+			progress.update(1)   # step 3: normalize (already processed-schema)
+		else:
+			# First try the calibrated bundle layout (/df). If that fails because the
+			# file only has the raw acquisition groups, fall back to raw mode.
+			source = "calibrated"
+			progress.set_postfix_str("reading bundled /df and optional /tdc")
+			try:
+				loaded = data_tools.load_data(
+					str(dataset_path_obj), 'pyccapt', mode='processed', load_tdc=True
+				)
+				if isinstance(loaded, tuple):
+					dld_df, tdc_df = loaded
+				else:
+					dld_df, tdc_df = loaded, None
+			except (KeyError, ValueError) as calibrated_error:
+				progress.set_postfix_str("falling back to raw /dld + /tdc groups")
+				try:
+					dld_df, tdc_df = data_loadcrop.fetch_dataset_with_tdc(str(dataset_path_obj))
+				except Exception as raw_error:
+					raise ValueError(
+						f"Could not load {dataset_path!r}: not a calibrated bundle "
+						f"({calibrated_error}) and not a recognizable raw acquisition file "
+						f"({raw_error})."
+					) from raw_error
+				source = "raw"
+			progress.update(1)
+
+			progress.set_postfix_str("normalizing loaded data")
+			if source == "raw":
+				# Apply the standard raw -> processed pipeline so downstream analyses
+				# see the same dataframe schema as a calibrated load.
+				dld_df = data_tools.remove_invalid_data(dld_df, max_tof=100000)
+				dld_df = data_tools.pyccapt_raw_to_processed(dld_df)
+			progress.update(1)
 
 		variables.data = dld_df
 		variables.data_backup = dld_df.copy()
@@ -272,10 +301,15 @@ def load_calibrated_h5(dataset_path, variables, *, range_path=None, show_progres
 		# then fall back to <dataset>_range.h5 next to the file.
 		progress.set_postfix_str("loading range table")
 		range_df = None
-		try:
-			range_df = pd.read_hdf(str(dataset_path_obj), key='range', mode='r')
-		except (KeyError, ValueError):
-			range_df = None
+		# Only PyCCAPT HDF5 files can carry an embedded /range group; trying
+		# pd.read_hdf on a Cameca RHIT raises HDF5ExtError ("file signature
+		# not found") which is NEITHER KeyError NOR ValueError, so it would
+		# escape the except below. Skip the embedded read for non-HDF5 files.
+		if suffix in {".h5", ".hdf5", ".hdf"}:
+			try:
+				range_df = pd.read_hdf(str(dataset_path_obj), key='range', mode='r')
+			except (KeyError, ValueError):
+				range_df = None
 
 		if range_df is None and range_path:
 			range_df = data_tools.read_range(range_path)

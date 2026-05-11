@@ -1,4 +1,4 @@
-﻿"""Integration-style process boundary tests for control module."""
+"""Integration-style process boundary tests for control module."""
 
 from __future__ import annotations
 

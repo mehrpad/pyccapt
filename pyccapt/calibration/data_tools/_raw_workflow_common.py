@@ -76,6 +76,7 @@ def _iter_columns_chunks(
     else:
         yield {name: source[name].to_numpy(dtype=float) for name in columns}
 
+
 TOF_FACTOR_NS = 27.432 / (1000.0 * 4.0)
 TOF_FACTOR_NS_1D = 27.432 / (1000.0 * 2.0)
 DETBINS = 4900
@@ -105,27 +106,27 @@ DLTS_COLORS = {
 
 # Match the SC defaults so existing tests / direct imports keep working.
 _SURFACE_CONCEPT_DEFAULT_CONSTANTS = {
-    'tof_ns_per_bin':     TOF_FACTOR_NS,
-    'tof_ns_per_bin_1d':  TOF_FACTOR_NS_1D,
-    'detector_bins':      DETBINS,
-    'binning_factor':     BINNING_FACTOR,
-    'detector_width_mm':  80.0,
-    'detector_limit_cm':  4.0,
-    'xy_factor':          XY_FACTOR,
-    'xy_bin_shift':       XY_BIN_SHIFT,
+    'tof_ns_per_bin': TOF_FACTOR_NS,
+    'tof_ns_per_bin_1d': TOF_FACTOR_NS_1D,
+    'detector_bins': DETBINS,
+    'binning_factor': BINNING_FACTOR,
+    'detector_width_mm': 80.0,
+    'detector_limit_cm': 4.0,
+    'xy_factor': XY_FACTOR,
+    'xy_bin_shift': XY_BIN_SHIFT,
 }
 
 # RoentDek default — keep the 80 mm geometry so existing fixtures still work.
 # The TOF bin width (25 ps) is a typical CTNM4 / CRTM-class TDC value; tune
 # via config for your specific board.
 _ROENTDEK_DEFAULT_CONSTANTS = {
-    'tof_ns_per_bin':     0.025,
-    'detector_bins':      4900,
-    'binning_factor':     2,
-    'detector_width_mm':  80.0,
-    'detector_limit_cm':  4.0,
-    'xy_factor':          80.0 / 4900.0 * 2.0,
-    'xy_bin_shift':       4900.0 / 2.0 / 2.0,
+    'tof_ns_per_bin': 0.025,
+    'detector_bins': 4900,
+    'binning_factor': 2,
+    'detector_width_mm': 80.0,
+    'detector_limit_cm': 4.0,
+    'xy_factor': 80.0 / 4900.0 * 2.0,
+    'xy_bin_shift': 4900.0 / 2.0 / 2.0,
 }
 
 
@@ -165,16 +166,16 @@ def load_detector_constants(detector_kind: str, conf=None) -> dict[str, float]:
         prefix = 'sc_'
 
     constants = {
-        'tof_ns_per_bin':    float(_config_get(conf, f'{prefix}tof_ns_per_bin',         defaults['tof_ns_per_bin'])),
-        'detector_bins':     int(_config_get(conf,   f'{prefix}detector_bins',          defaults['detector_bins'])),
-        'binning_factor':    int(_config_get(conf,   f'{prefix}detector_binning_factor', defaults['binning_factor'])),
-        'detector_width_mm': float(_config_get(conf, f'{prefix}detector_width_mm',      defaults['detector_width_mm'])),
-        'detector_limit_cm': float(_config_get(conf, f'{prefix}detector_limit_cm',      defaults['detector_limit_cm'])),
+        'tof_ns_per_bin': float(_config_get(conf, f'{prefix}tof_ns_per_bin', defaults['tof_ns_per_bin'])),
+        'detector_bins': int(_config_get(conf, f'{prefix}detector_bins', defaults['detector_bins'])),
+        'binning_factor': int(_config_get(conf, f'{prefix}detector_binning_factor', defaults['binning_factor'])),
+        'detector_width_mm': float(_config_get(conf, f'{prefix}detector_width_mm', defaults['detector_width_mm'])),
+        'detector_limit_cm': float(_config_get(conf, f'{prefix}detector_limit_cm', defaults['detector_limit_cm'])),
     }
     # Re-derive the spatial factors from the primitives so the returned dict
     # is always self-consistent even when the user only overrode part of the
     # geometry.
-    constants['xy_factor']    = constants['detector_width_mm'] / constants['detector_bins'] * constants['binning_factor']
+    constants['xy_factor'] = constants['detector_width_mm'] / constants['detector_bins'] * constants['binning_factor']
     constants['xy_bin_shift'] = constants['detector_bins'] / constants['binning_factor'] / 2.0
     if kind == 'surface_concept' or kind == 'single_delay_line':
         constants['tof_ns_per_bin_1d'] = constants['tof_ns_per_bin'] * 2.0
@@ -261,9 +262,7 @@ def load_numeric_text_table(file_path: str, *, delimiter: str | None = None, ski
 def _validate_numeric_table_columns(table: np.ndarray, columns: Sequence[int], label: str) -> None:
     max_index = max(columns)
     if table.shape[1] <= max_index:
-        raise ValueError(
-            f'{label} requires column index {max_index}, but the numeric table only has {table.shape[1]} columns'
-        )
+        raise ValueError(f'{label} requires column index {max_index}, but the numeric table only has {table.shape[1]} columns')
 
 
 def _compute_histogram_bins(values: np.ndarray, bin_size: float) -> np.ndarray:
@@ -514,7 +513,9 @@ def _binned_status_fraction(frame: pd.DataFrame, x_column: str, statuses: list[s
     return pd.DataFrame(rows)
 
 
-def _auto_peak_windows(values: np.ndarray, *, max_value: float | None = None, max_peaks: int = 3) -> list[dict[str, float | str]]:
+def _auto_peak_windows(
+    values: np.ndarray, *, max_value: float | None = None, max_peaks: int = 3
+) -> list[dict[str, float | str]]:
     finite = values[np.isfinite(values)]
     if max_value is not None:
         finite = finite[finite <= max_value]
@@ -582,10 +583,12 @@ def compute_tof_segment_drift(
 
     if _is_lazy(source):
         col = source[tof_column]
+
         def fetch_segment(start: int, stop: int) -> np.ndarray:
             return np.asarray(col[start:stop], dtype=float)
     else:
         full = source[tof_column].to_numpy(dtype=float)
+
         def fetch_segment(start: int, stop: int) -> np.ndarray:
             return full[start:stop]
 
@@ -602,10 +605,7 @@ def compute_tof_segment_drift(
         if segment_values.size == 0:
             continue
         for window in normalized_windows:
-            window_values = segment_values[
-                (segment_values >= float(window['min'])) &
-                (segment_values <= float(window['max']))
-            ]
+            window_values = segment_values[(segment_values >= float(window['min'])) & (segment_values <= float(window['max']))]
             if window_values.size < 5:
                 continue
             hist, edges = np.histogram(window_values, bins=max(20, min(80, window_values.size // 5)))
@@ -760,7 +760,9 @@ def compute_same_pulse_detector_separations(
     groups_with_pairs = 0
     skipped_large_groups = 0
     grouped_items = list(frame.groupby(group_column, sort=False))
-    grouped_iter = tqdm(grouped_items, desc='Computing same-pulse separations', unit='group') if show_progress else grouped_items
+    grouped_iter = (
+        tqdm(grouped_items, desc='Computing same-pulse separations', unit='group') if show_progress else grouped_items
+    )
     for _, group in grouped_iter:
         group_size = int(len(group))
         if group_size < 2:
@@ -878,7 +880,9 @@ def plot_same_pulse_detector_separations(
     return fig
 
 
-def _calculate_delta_p_and_multi(start_counter: np.ndarray, *, max_start_counter: int = 20000) -> tuple[np.ndarray, np.ndarray]:
+def _calculate_delta_p_and_multi(
+    start_counter: np.ndarray, *, max_start_counter: int = 20000
+) -> tuple[np.ndarray, np.ndarray]:
     delta_p = np.zeros(len(start_counter), dtype=np.uint32)
     multi = np.zeros(len(start_counter), dtype=np.uint32)
     if len(start_counter) == 0:
@@ -994,7 +998,11 @@ def plot_processed_dataset_overview(
             tof_edges = np.arange(tof_lo, tof_hi + bin_size, bin_size, dtype=float)
             if tof_edges.size >= 2:
                 tof_counts = _streaming_filtered_histogram(
-                    source, 't (ns)', tof_edges, upper_clip=tof_max, chunk_size=chunk_size,
+                    source,
+                    't (ns)',
+                    tof_edges,
+                    upper_clip=tof_max,
+                    chunk_size=chunk_size,
                 )
                 axes[0, 0].stairs(tof_counts, tof_edges, fill=True, color='#2563eb', alpha=0.65)
                 axes[0, 0].set_yscale('log')
@@ -1009,7 +1017,11 @@ def plot_processed_dataset_overview(
             mc_edges = np.arange(mc_lo, mc_hi + bin_size, bin_size, dtype=float)
             if mc_edges.size >= 2:
                 mc_counts = _streaming_filtered_histogram(
-                    source, 'mc (Da)', mc_edges, upper_clip=mc_max, chunk_size=chunk_size,
+                    source,
+                    'mc (Da)',
+                    mc_edges,
+                    upper_clip=mc_max,
+                    chunk_size=chunk_size,
                 )
                 axes[0, 1].stairs(mc_counts, mc_edges, fill=True, color='#d97706', alpha=0.65)
                 axes[0, 1].set_yscale('log')
@@ -1020,7 +1032,9 @@ def plot_processed_dataset_overview(
     # --- Detector heatmap ----------------------------------------------------
     if _has_column(source, 'x_det (cm)') and _has_column(source, 'y_det (cm)'):
         _plot_streaming_detector_map(
-            axes[1, 0], source, chunk_size=chunk_size,
+            axes[1, 0],
+            source,
+            chunk_size=chunk_size,
         )
     axes[1, 0].set_title(f'{title_prefix}: Detector map')
     axes[1, 0].set_xlabel('x_det (cm)')

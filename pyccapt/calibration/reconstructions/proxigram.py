@@ -10,8 +10,7 @@ from pyccapt.calibration.reconstructions import iso_surface
 
 
 def _interface_vertices_and_normals(
-        interface: Union[pv.PolyData, Dict[str, np.ndarray]],
-        flip_normals: bool = False
+    interface: Union[pv.PolyData, Dict[str, np.ndarray]], flip_normals: bool = False
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Return interface vertices and point normals."""
     if isinstance(interface, pv.PolyData):
@@ -65,21 +64,19 @@ def _matlab_bin_centers(dist: np.ndarray, bin_nm: float) -> Tuple[np.ndarray, np
 
     steps = np.diff(centers)
     step = np.median(steps) if steps.size else bin_nm
-    edges = np.concatenate((
-        [centers[0] - step / 2.0],
-        (centers[1:] + centers[:-1]) / 2.0,
-        [centers[-1] + step / 2.0]
-    ))
+    edges = np.concatenate(([centers[0] - step / 2.0], (centers[1:] + centers[:-1]) / 2.0, [centers[-1] + step / 2.0]))
     return centers, edges
 
 
 def patch_create_proxigram_mask(
-        pos_x, pos_y, pos_z,
-        mask,
-        interface: Union[pv.PolyData, Dict[str, np.ndarray]],
-        bin_nm: float,
-        flip_normals: bool = False,
-        symmetric_range: float = None,
+    pos_x,
+    pos_y,
+    pos_z,
+    mask,
+    interface: Union[pv.PolyData, Dict[str, np.ndarray]],
+    bin_nm: float,
+    flip_normals: bool = False,
+    symmetric_range: float = None,
 ):
     """Calculate a proxigram concentration profile for one species mask."""
     points_all = _stack_xyz(pos_x, pos_y, pos_z)
@@ -115,10 +112,29 @@ def patch_create_proxigram_mask(
     return proxigram_fraction, bin_vector
 
 
-def plot_proxigram(variables, isosurface_dic, proxigram_elements, figname='proxigram', save=False, bin_size=0.1,
-                   symmetric_range=None, flip_normals=False, range_sequence=None, range_mc=None, range_detx=None,
-                   range_dety=None, range_x=None, range_y=None, range_z=None, range_vol=None, smoothing_sigma=1.0,
-                   min_atoms_per_voxel=10, min_isosurface_vertices=20, pure_only=False, manual_iso_value=None):
+def plot_proxigram(
+    variables,
+    isosurface_dic,
+    proxigram_elements,
+    figname='proxigram',
+    save=False,
+    bin_size=0.1,
+    symmetric_range=None,
+    flip_normals=False,
+    range_sequence=None,
+    range_mc=None,
+    range_detx=None,
+    range_dety=None,
+    range_x=None,
+    range_y=None,
+    range_z=None,
+    range_vol=None,
+    smoothing_sigma=1.0,
+    min_atoms_per_voxel=10,
+    min_isosurface_vertices=20,
+    pure_only=False,
+    manual_iso_value=None,
+):
     """Plot proxigram lines relative to a single interface isosurface."""
     if not isinstance(isosurface_dic, dict) or not isosurface_dic:
         raise ValueError('Isosurface definition must be a non-empty dictionary')
@@ -172,9 +188,9 @@ def plot_proxigram(variables, isosurface_dic, proxigram_elements, figname='proxi
             continue
 
         try:
-            species_mask = iso_surface.build_element_mask(
-                variables, element_name, base_mask=mask_f, pure_only=pure_only
-            )[mask_f]
+            species_mask = iso_surface.build_element_mask(variables, element_name, base_mask=mask_f, pure_only=pure_only)[
+                mask_f
+            ]
         except ValueError as exc:
             print(exc)
             continue
@@ -217,10 +233,8 @@ def plot_proxigram(variables, isosurface_dic, proxigram_elements, figname='proxi
     ax.legend(fontsize=10, loc='best')
 
     y_pos = ax.get_ylim()[1] * 0.95
-    ax.text(-extent * 0.5 if extent > 0 else -0.5, y_pos, 'Precipitate',
-            ha='center', va='top', fontsize=10, alpha=0.6)
-    ax.text(extent * 0.5 if extent > 0 else 0.5, y_pos, 'Matrix',
-            ha='center', va='top', fontsize=10, alpha=0.6)
+    ax.text(-extent * 0.5 if extent > 0 else -0.5, y_pos, 'Precipitate', ha='center', va='top', fontsize=10, alpha=0.6)
+    ax.text(extent * 0.5 if extent > 0 else 0.5, y_pos, 'Matrix', ha='center', va='top', fontsize=10, alpha=0.6)
 
     if extent > 0:
         ax.axvspan(-extent, 0, alpha=0.05, color='blue')

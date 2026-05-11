@@ -20,13 +20,13 @@ CHUNK_SIZE = 100_000  # Adjust the chunk size if needed
 # STOP actually stops the TDC.
 QUEUE_GET_TIMEOUT_S = 0.05
 
+
 class BufDataCB4(scTDC.buffered_data_callbacks_pipe):
     """
     The class inherits from python wrapper module scTDC and class: buffered_data_callbacks_pipe
     """
 
-    def __init__(self, lib, dev_desc, data_field_selection, dld_events,
-                 max_buffered_data_len=500_000):
+    def __init__(self, lib, dev_desc, data_field_selection, dld_events, max_buffered_data_len=500_000):
         """
         Initialize the base class: scTDC.buffered_data_callbacks_pipe
 
@@ -119,10 +119,22 @@ def save_chunk_worker(save_queue):
 
 def load_and_concatenate_chunks(path, chunk_id):
     attr_names = [
-        "x_bin", "x", "y_bin", "y", "t_bin", "t",
-        "voltage", "voltage_pulse", "laser_pulse",
-        "start_counter", "channel", "time", "tdc_start_counter",
-        "voltage_tdc", "voltage_pulse_tdc", "laser_pulse_tdc"
+        "x_bin",
+        "x",
+        "y_bin",
+        "y",
+        "t_bin",
+        "t",
+        "voltage",
+        "voltage_pulse",
+        "laser_pulse",
+        "start_counter",
+        "channel",
+        "time",
+        "tdc_start_counter",
+        "voltage_tdc",
+        "voltage_pulse_tdc",
+        "laser_pulse_tdc",
     ]
 
     all_data = {attr: [] for attr in attr_names}  # Initialize storage
@@ -177,8 +189,10 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
 
     if retcode < 0:
         print("Error during init:", retcode, errmsg)
-        print(f"{initialize_devices.bcolors.FAIL}Error: Restart the TDC manually "
-              f"(Turn it On and Off){initialize_devices.bcolors.ENDC}")
+        print(
+            f"{initialize_devices.bcolors.FAIL}Error: Restart the TDC manually "
+            f"(Turn it On and Off){initialize_devices.bcolors.ENDC}"
+        )
         variables.flag_finished_tdc = True
         if not getattr(variables, "access_override_enabled", False):
             variables.flag_tdc_failure = True
@@ -191,13 +205,10 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
         print("TDC is successfully initialized")
         variables.flag_tdc_failure = False
 
-    DATA_FIELD_SEL = (scTDC.SC_DATA_FIELD_DIF1 |
-                      scTDC.SC_DATA_FIELD_DIF2 |
-                      scTDC.SC_DATA_FIELD_TIME |
-                      scTDC.SC_DATA_FIELD_START_COUNTER)
-    DATA_FIELD_SEL_raw = (scTDC.SC_DATA_FIELD_TIME |
-                          scTDC.SC_DATA_FIELD_CHANNEL |
-                          scTDC.SC_DATA_FIELD_START_COUNTER)
+    DATA_FIELD_SEL = (
+        scTDC.SC_DATA_FIELD_DIF1 | scTDC.SC_DATA_FIELD_DIF2 | scTDC.SC_DATA_FIELD_TIME | scTDC.SC_DATA_FIELD_START_COUNTER
+    )
+    DATA_FIELD_SEL_raw = scTDC.SC_DATA_FIELD_TIME | scTDC.SC_DATA_FIELD_CHANNEL | scTDC.SC_DATA_FIELD_START_COUNTER
 
     bufdatacb = BufDataCB4(device.lib, device.dev_desc, DATA_FIELD_SEL, dld_events=True)
     bufdatacb_raw = BufDataCB4(device.lib, device.dev_desc, DATA_FIELD_SEL_raw, dld_events=False)
@@ -227,8 +238,10 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
     retcode = bufdatacb.start_measurement(exposure_time)
     if errorcheck(device, bufdatacb, bufdatacb_raw, retcode) < 0:
         print("Error during read:", retcode, device.lib.sc_get_err_msg(retcode))
-        print(f"{initialize_devices.bcolors.FAIL}Error: Restart the TDC manually "
-              f"(Turn it On and Off){initialize_devices.bcolors.ENDC}")
+        print(
+            f"{initialize_devices.bcolors.FAIL}Error: Restart the TDC manually "
+            f"(Turn it On and Off){initialize_devices.bcolors.ENDC}"
+        )
         variables.flag_finished_tdc = True
         if not getattr(variables, "access_override_enabled", False):
             variables.flag_tdc_failure = True
@@ -351,8 +364,7 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
         if eventtype == QUEUE_ENDOFMEAS:
             retcode = bufdatacb.start_measurement(exposure_time, retries=10)
             if retcode < 0:
-                print("Error during read (error code: %s - error msg: %s):" % (
-                    retcode, device.lib.sc_get_err_msg(retcode)))
+                print("Error during read (error code: %s - error msg: %s):" % (retcode, device.lib.sc_get_err_msg(retcode)))
                 variables.flag_tdc_failure = True
                 # Clean teardown - the post-loop block at the end runs
                 # bufdatacb.close() etc.  We just break out here.
@@ -366,8 +378,7 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
             # against zero (would divide by zero on first chunk after a
             # bad value).
             try:
-                live_pulse_frequency = max(
-                    float(variables.pulse_frequency) * 1000.0, 1.0)
+                live_pulse_frequency = max(float(variables.pulse_frequency) * 1000.0, 1.0)
             except Exception:
                 live_pulse_frequency = pulse_frequency
             pulse_frequency = live_pulse_frequency
@@ -443,8 +454,10 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
             loop_delay_counter += 1
         loop_counter += 1
 
-    print("TDC process: for %s times loop time took longer than %s second" % (loop_delay_counter, loop_time),
-          'out of %s iterations' % loop_counter)
+    print(
+        "TDC process: for %s times loop time took longer than %s second" % (loop_delay_counter, loop_time),
+        'out of %s iterations' % loop_counter,
+    )
     variables.total_ions = events_detected
     variables.total_raw_signals = raw_signal_detected
     print("TDC Measurement stopped")

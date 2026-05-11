@@ -1,4 +1,4 @@
-﻿"""Parameter parsing and validation helpers for the main control GUI."""
+"""Parameter parsing and validation helpers for the main control GUI."""
 
 from __future__ import annotations
 
@@ -133,8 +133,7 @@ def load_electrode_items(file_path: str) -> list[str]:
             return names
 
     raise FileNotFoundError(
-        f"Could not load electrode configuration from {path} "
-        f"(or legacy fallback {path.with_suffix('.json')})."
+        f"Could not load electrode configuration from {path} (or legacy fallback {path.with_suffix('.json')})."
     )
 
 
@@ -317,4 +316,3 @@ def apply_form_values(
     variables.criteria_vdc = values.criteria_vdc
 
     return corrections
-

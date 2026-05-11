@@ -81,9 +81,7 @@ def _build_apt_section(name: str, data_bytes: bytes, record_size: int, record_co
 def _write_minimal_apt(path: Path) -> np.ndarray:
     ion_count = 2
     file_header = (
-        struct.pack("<4sii", b"APT\0", 540, 1)
-        + _pack_utf16_field("synthetic.apt", 256)
-        + struct.pack("<Qq", 0, ion_count)
+        struct.pack("<4sii", b"APT\0", 540, 1) + _pack_utf16_field("synthetic.apt", 256) + struct.pack("<Qq", 0, ion_count)
     )
 
     mass_values = np.asarray([27.0, 54.0], dtype=np.float32)
@@ -104,19 +102,21 @@ def _write_minimal_apt(path: Path) -> np.ndarray:
 
 
 def _write_minimal_epos(path: Path, trailing_bytes: bytes = b"") -> None:
-    record_dtype = np.dtype([
-        ("x", ">f4"),
-        ("y", ">f4"),
-        ("z", ">f4"),
-        ("mc", ">f4"),
-        ("tof", ">f4"),
-        ("hv", ">f4"),
-        ("pulse", ">f4"),
-        ("det_x", ">f4"),
-        ("det_y", ">f4"),
-        ("pslep", ">u4"),
-        ("ipp", ">u4"),
-    ])
+    record_dtype = np.dtype(
+        [
+            ("x", ">f4"),
+            ("y", ">f4"),
+            ("z", ">f4"),
+            ("mc", ">f4"),
+            ("tof", ">f4"),
+            ("hv", ">f4"),
+            ("pulse", ">f4"),
+            ("det_x", ">f4"),
+            ("det_y", ">f4"),
+            ("pslep", ">u4"),
+            ("ipp", ">u4"),
+        ]
+    )
     records = np.array(
         [
             (1.0, 2.0, 3.0, 27.0, 100.0, 5000.0, 12.0, 1.5, -1.5, 7, 1),

@@ -21,6 +21,7 @@ from pyccapt.calibration.core.mc_plot_peak_helpers import gaussian_mrp_report
 # Feature engineering
 # ---------------------------------------------------------------------------
 
+
 def _build_feature_matrix(voltage, x_det, y_det, ion_seq_norm):
     """Construct the feature matrix used by the GBCS model.
 
@@ -34,8 +35,8 @@ def _build_feature_matrix(voltage, x_det, y_det, ion_seq_norm):
     y_det = np.asarray(y_det, dtype=float)
     ion_seq_norm = np.asarray(ion_seq_norm, dtype=float)
 
-    r2 = x_det ** 2 + y_det ** 2
-    v2 = voltage ** 2
+    r2 = x_det**2 + y_det**2
+    v2 = voltage**2
     v_r2 = voltage * r2
 
     X = np.column_stack([voltage, x_det, y_det, ion_seq_norm, r2, v2, v_r2])
@@ -65,9 +66,15 @@ def _normalise_spatial(x_det, y_det):
 # Training data extraction
 # ---------------------------------------------------------------------------
 
+
 def _extract_training_data(
-    calibration_array, voltage, x_det, y_det, peaks,
-    max_samples_per_peak=20000, rng=None,
+    calibration_array,
+    voltage,
+    x_det,
+    y_det,
+    peaks,
+    max_samples_per_peak=20000,
+    rng=None,
 ):
     """Extract (features, correction_ratio) pairs from reference peaks.
 
@@ -101,7 +108,10 @@ def _extract_training_data(
             indices = rng.choice(indices, max_samples_per_peak, replace=False)
 
         X_peak, _ = _build_feature_matrix(
-            v_norm[indices], x_norm[indices], y_norm[indices], ion_seq_norm[indices],
+            v_norm[indices],
+            x_norm[indices],
+            y_norm[indices],
+            ion_seq_norm[indices],
         )
         ratio = calibration_array[indices] / pos
         all_X.append(X_peak)
@@ -120,8 +130,8 @@ def _extract_training_data(
 # Model training
 # ---------------------------------------------------------------------------
 
-def _train_gbcs(X, y, n_estimators=200, max_depth=5, learning_rate=0.05,
-                subsample=0.8, cv_folds=3, verbose=False):
+
+def _train_gbcs(X, y, n_estimators=200, max_depth=5, learning_rate=0.05, subsample=0.8, cv_folds=3, verbose=False):
     """Train a GradientBoostingRegressor and return model + diagnostics."""
     model = GradientBoostingRegressor(
         n_estimators=n_estimators,
@@ -136,11 +146,16 @@ def _train_gbcs(X, y, n_estimators=200, max_depth=5, learning_rate=0.05,
     # Cross-validation R^2
     cv_scores = cross_val_score(
         GradientBoostingRegressor(
-            n_estimators=n_estimators, max_depth=max_depth,
-            learning_rate=learning_rate, subsample=subsample,
-            loss="squared_error", random_state=42,
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            learning_rate=learning_rate,
+            subsample=subsample,
+            loss="squared_error",
+            random_state=42,
         ),
-        X, y, cv=min(cv_folds, max(2, X.shape[0] // 100)),
+        X,
+        y,
+        cv=min(cv_folds, max(2, X.shape[0] // 100)),
         scoring="r2",
     )
 
@@ -163,8 +178,8 @@ def _train_gbcs(X, y, n_estimators=200, max_depth=5, learning_rate=0.05,
 # Prediction & application
 # ---------------------------------------------------------------------------
 
-def _predict_correction(model, voltage, x_det, y_det, ion_seq_norm, norm_params,
-                        clamp_low=0.9, clamp_high=1.1):
+
+def _predict_correction(model, voltage, x_det, y_det, ion_seq_norm, norm_params, clamp_low=0.9, clamp_high=1.1):
     """Predict the correction factor for every ion and clamp for safety."""
     v_center, v_scale, s_scale = norm_params
     v_norm = (np.asarray(voltage, dtype=float) - v_center) / v_scale
@@ -180,13 +195,17 @@ def _predict_correction(model, voltage, x_det, y_det, ion_seq_norm, norm_params,
 # Quality evaluation
 # ---------------------------------------------------------------------------
 
+
 def _evaluate_peaks(calibration_array, peaks):
     """Compute weighted MRP score across peaks (same logic as adaptive residual)."""
     scores = []
     for peak in peaks:
         local_bin = max(1e-4, min(0.02, (peak["x2"] - peak["x1"]) / 80.0))
         report = gaussian_mrp_report(
-            calibration_array, peak["x1"], peak["x2"], bin_size=local_bin,
+            calibration_array,
+            peak["x1"],
+            peak["x2"],
+            bin_size=local_bin,
         )
         if report is None:
             continue
@@ -198,9 +217,7 @@ def _evaluate_peaks(calibration_array, peaks):
                 s += wt * max(0.0, float(val))
                 w += wt
         if w > 0:
-            n_ions = int(np.count_nonzero(
-                (calibration_array > peak["x1"]) & (calibration_array < peak["x2"])
-            ))
+            n_ions = int(np.count_nonzero((calibration_array > peak["x1"]) & (calibration_array < peak["x2"])))
             scores.append((s / w, max(1.0, np.sqrt(n_ions))))
     if not scores:
         return float("nan")
@@ -211,6 +228,7 @@ def _evaluate_peaks(calibration_array, peaks):
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def ml_calibration(
     variables,
@@ -268,8 +286,10 @@ def ml_calibration(
 
     # 1. Detect reference peaks
     peaks = cal.auto_detect_reference_peaks(
-        cal_array, n_peaks=max(3, int(n_peaks)),
-        prominence=prominence, distance=distance,
+        cal_array,
+        n_peaks=max(3, int(n_peaks)),
+        prominence=prominence,
+        distance=distance,
         hist_bin_size=hist_bin_size,
     )
     if len(peaks) < 2:
@@ -286,7 +306,11 @@ def ml_calibration(
 
     # 2. Extract training data
     X, y, peak_labels, norm_params = _extract_training_data(
-        cal_array, voltage, x_det, y_det, train_peaks,
+        cal_array,
+        voltage,
+        x_det,
+        y_det,
+        train_peaks,
         max_samples_per_peak=max_samples_per_peak,
     )
 
@@ -295,8 +319,12 @@ def ml_calibration(
 
     # 3. Train model
     model, diagnostics = _train_gbcs(
-        X, y, n_estimators=n_estimators, max_depth=max_depth,
-        learning_rate=learning_rate, subsample=subsample,
+        X,
+        y,
+        n_estimators=n_estimators,
+        max_depth=max_depth,
+        learning_rate=learning_rate,
+        subsample=subsample,
         verbose=verbose,
     )
 
@@ -305,8 +333,14 @@ def ml_calibration(
     ion_seq_norm = np.arange(n, dtype=float) / max(n - 1, 1)
 
     correction = _predict_correction(
-        model, voltage, x_det, y_det, ion_seq_norm, norm_params,
-        clamp_low=clamp_low, clamp_high=clamp_high,
+        model,
+        voltage,
+        x_det,
+        y_det,
+        ion_seq_norm,
+        norm_params,
+        clamp_low=clamp_low,
+        clamp_high=clamp_high,
     )
 
     # 5. Apply correction
@@ -322,7 +356,10 @@ def ml_calibration(
 
         # Feature importances
         _, feature_names = _build_feature_matrix(
-            np.zeros(1), np.zeros(1), np.zeros(1), np.zeros(1),
+            np.zeros(1),
+            np.zeros(1),
+            np.zeros(1),
+            np.zeros(1),
         )
         importances = model.feature_importances_
         ranked = sorted(zip(feature_names, importances), key=lambda x: -x[1])
@@ -345,7 +382,10 @@ def ml_calibration(
             print("[ML-GBCS] Correction rejected (no MRP improvement). Keeping previous calibration.")
 
     _, feature_names = _build_feature_matrix(
-        np.zeros(1), np.zeros(1), np.zeros(1), np.zeros(1),
+        np.zeros(1),
+        np.zeros(1),
+        np.zeros(1),
+        np.zeros(1),
     )
 
     return {

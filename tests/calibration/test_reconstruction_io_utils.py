@@ -71,4 +71,3 @@ def test_write_plotly_image_infers_format_from_filename(tmp_path: Path):
     kwargs = mock_write.call_args.kwargs
     assert kwargs["scale"] == 2
     assert kwargs["format"] == "svg"
-

@@ -1,4 +1,4 @@
-﻿"""Tests for main GUI parameter helpers."""
+"""Tests for main GUI parameter helpers."""
 
 from __future__ import annotations
 
@@ -88,14 +88,7 @@ def test_apply_form_values_returns_corrections(conf):
 def test_load_electrode_items_from_toml(tmp_path):
     toml_path = tmp_path / "electrode.toml"
     toml_path.write_text(
-        (
-            "# Electrode config\n"
-            "[electrodes]\n"
-            "names = [\n"
-            '  "E1",\n'
-            '  "E2",\n'
-            "]\n"
-        ),
+        ("# Electrode config\n[electrodes]\nnames = [\n  \"E1\",\n  \"E2\",\n]\n"),
         encoding="utf-8",
     )
 

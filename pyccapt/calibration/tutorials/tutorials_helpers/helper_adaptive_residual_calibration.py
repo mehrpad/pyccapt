@@ -30,23 +30,33 @@ def build_adaptive_residual_calibration_panel(variables, det_diam, flight_path_l
     lim_value = widgets.IntText(value=400, description="Lim tof/mc:", layout=_LABEL_LAYOUT)
     percent = widgets.IntText(value=50, description="Percent MRP:", layout=_LABEL_LAYOUT)
     bin_fdm = widgets.IntText(value=256, description="Bin FDM:", layout=_LABEL_LAYOUT)
-    plot_peak = widgets.Dropdown(options=[("True", True), ("False", False)], value=True, description="Plot peak", layout=_LABEL_LAYOUT)
+    plot_peak = widgets.Dropdown(
+        options=[("True", True), ("False", False)], value=True, description="Plot peak", layout=_LABEL_LAYOUT
+    )
     index_fig = widgets.IntText(value=1, description="Fig save index:", layout=_LABEL_LAYOUT)
-    save_fig = widgets.Dropdown(options=[("False", False), ("True", True)], value=False, description="Save fig:", layout=_LABEL_LAYOUT)
+    save_fig = widgets.Dropdown(
+        options=[("False", False), ("True", True)], value=False, description="Save fig:", layout=_LABEL_LAYOUT
+    )
     fig_w = widgets.FloatText(value=9.0, description="Fig. size W:", layout=_LABEL_LAYOUT)
     fig_h = widgets.FloatText(value=5.0, description="Fig. size H:", layout=_LABEL_LAYOUT)
     n_peaks = widgets.IntText(value=6, description="Max peaks:", layout=_LABEL_LAYOUT)
     prominence = widgets.IntText(value=100, description="Prominence:", layout=_LABEL_LAYOUT)
     distance = widgets.IntText(value=10, description="Peak distance:", layout=_LABEL_LAYOUT)
     n_windows = widgets.IntText(value=24, description="Index windows:", layout=_LABEL_LAYOUT)
-    overlap = widgets.FloatSlider(value=0.5, min=0.0, max=0.8, step=0.05, description="Overlap:", layout=_LABEL_LAYOUT, readout_format=".2f")
+    overlap = widgets.FloatSlider(
+        value=0.5, min=0.0, max=0.8, step=0.05, description="Overlap:", layout=_LABEL_LAYOUT, readout_format=".2f"
+    )
     template_bin = widgets.FloatText(value=0.01, description="Template bin:", layout=_LABEL_LAYOUT)
     smoothing = widgets.FloatText(value=0.5, description="Smoothness:", layout=_LABEL_LAYOUT)
-    apply_spatial = widgets.Dropdown(options=[("True", True), ("False", False)], value=True, description="Spatial pass:", layout=_LABEL_LAYOUT)
+    apply_spatial = widgets.Dropdown(
+        options=[("True", True), ("False", False)], value=True, description="Spatial pass:", layout=_LABEL_LAYOUT
+    )
     spatial_grid = widgets.IntText(value=12, description="Spatial grid:", layout=_LABEL_LAYOUT)
     min_window_ions = widgets.IntText(value=40, description="Min win ions:", layout=_LABEL_LAYOUT)
     min_cell_ions = widgets.IntText(value=35, description="Min cell ions:", layout=_LABEL_LAYOUT)
-    verbose = widgets.Dropdown(options=[("True", True), ("False", False)], value=True, description="Verbose:", layout=_LABEL_LAYOUT)
+    verbose = widgets.Dropdown(
+        options=[("True", True), ("False", False)], value=True, description="Verbose:", layout=_LABEL_LAYOUT
+    )
 
     plot_button = widgets.Button(description="Plot hist", layout=_LABEL_LAYOUT)
     run_button = widgets.Button(description="Run adaptive residual calibration", layout=_LABEL_LAYOUT, button_style="success")
@@ -237,5 +247,20 @@ def build_adaptive_residual_calibration_panel(variables, det_diam, flight_path_l
     )
     left = widgets.VBox([target, bin_size, lim_value, percent, bin_fdm, plot_peak, index_fig, save_fig, fig_w, fig_h])
     center = widgets.VBox([n_peaks, prominence, distance, n_windows, overlap, template_bin, smoothing, verbose])
-    right = widgets.VBox([apply_spatial, spatial_grid, min_window_ions, min_cell_ions, plot_button, run_button, save_button, back_button, reset_button, clear_button, gaussian_button, stat_button])
+    right = widgets.VBox(
+        [
+            apply_spatial,
+            spatial_grid,
+            min_window_ions,
+            min_cell_ions,
+            plot_button,
+            run_button,
+            save_button,
+            back_button,
+            reset_button,
+            clear_button,
+            gaussian_button,
+            stat_button,
+        ]
+    )
     return widgets.VBox([description, widgets.HBox([left, center, right]), widgets.VBox([out, out_status])])

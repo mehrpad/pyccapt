@@ -13,12 +13,36 @@ from pyccapt.calibration.data_tools.merge_range import merge_by_range
 from pyccapt.calibration.reconstructions.io_utils import save_matplotlib_figure
 
 
-def plot_density_map(x, y, z_weigth=False, log=True, bins=(256, 256), frac=1.0, axis_mode='normal', figure_size=(5, 4),
-                     variables=None, composition=None, roi=None,
-                     range_sequence=[], range_mc=[], range_detx=[], range_dety=[], range_x=[], range_y=[], range_z=[],
-                     range_vol=[], data_crop=False, draw_circle=False, mode_selector='circle', axis=['x', 'y'],
-                     save=False, figname='disparity_map', cmap='plasma',
-                     normalize=False, normalize_axes=False):
+def plot_density_map(
+    x,
+    y,
+    z_weigth=False,
+    log=True,
+    bins=(256, 256),
+    frac=1.0,
+    axis_mode='normal',
+    figure_size=(5, 4),
+    variables=None,
+    composition=None,
+    roi=None,
+    range_sequence=[],
+    range_mc=[],
+    range_detx=[],
+    range_dety=[],
+    range_x=[],
+    range_y=[],
+    range_z=[],
+    range_vol=[],
+    data_crop=False,
+    draw_circle=False,
+    mode_selector='circle',
+    axis=['x', 'y'],
+    save=False,
+    figname='disparity_map',
+    cmap='plasma',
+    normalize=False,
+    normalize_axes=False,
+):
     """
     Plot and crop the density map with the option to select a region of interest.
 
@@ -60,13 +84,13 @@ def plot_density_map(x, y, z_weigth=False, log=True, bins=(256, 256), frac=1.0, 
             if range_sequence is list:
                 mask_sequence = np.zeros_like(len(x), dtype=bool)
                 if range_sequence[0] < 1 and range_sequence[1] < 1:
-                    mask_sequence[int(len(x)*range_sequence[0]):int(len(x)*range_sequence[1])]=True
+                    mask_sequence[int(len(x) * range_sequence[0]) : int(len(x) * range_sequence[1])] = True
                 else:
-                    mask_sequence[range_sequence[0]:range_sequence[1]] = True
-                mask_sequence[range_sequence[0]:range_sequence[1]] = True
+                    mask_sequence[range_sequence[0] : range_sequence[1]] = True
+                mask_sequence[range_sequence[0] : range_sequence[1]] = True
             else:
                 mask_sequence = np.zeros(len(x), dtype=bool)
-                mask_sequence[:int(len(x)*range_sequence)] = True
+                mask_sequence[: int(len(x) * range_sequence)] = True
 
         else:
             mask_sequence = np.ones(len(x), dtype=bool)
@@ -147,7 +171,6 @@ def plot_density_map(x, y, z_weigth=False, log=True, bins=(256, 256), frac=1.0, 
     else:
         raise ValueError("Bins should be a tuple")
 
-
     if z_weigth is False:
         FDM, xedges, yedges = np.histogram2d(x, y, bins=bins)
     else:
@@ -193,18 +216,28 @@ def plot_density_map(x, y, z_weigth=False, log=True, bins=(256, 256), frac=1.0, 
             elliptical_shape_selector(ax1, fig1, variables, mode=mode_selector)
         if draw_circle:
             print('x:', variables.selected_x_fdm, 'y:', variables.selected_y_fdm, 'roi:', variables.roi_fdm)
-            circ = Circle((variables.selected_x_fdm, variables.selected_y_fdm), variables.roi_fdm, fill=True,
-                          alpha=0.3, color='green', linewidth=5)
+            circ = Circle(
+                (variables.selected_x_fdm, variables.selected_y_fdm),
+                variables.roi_fdm,
+                fill=True,
+                alpha=0.3,
+                color='green',
+                linewidth=5,
+            )
             ax1.add_patch(circ)
     if axis_mode == 'scalebar':
         fontprops = fm.FontProperties(size=10)
-        scalebar = AnchoredSizeBar(ax1.transData,
-                                   1, '1 cm', 'lower left',
-                                   pad=0.1,
-                                   color='white',
-                                   frameon=False,
-                                   size_vertical=0.1,
-                                   fontproperties=fontprops)
+        scalebar = AnchoredSizeBar(
+            ax1.transData,
+            1,
+            '1 cm',
+            'lower left',
+            pad=0.1,
+            color='white',
+            frameon=False,
+            size_vertical=0.1,
+            fontproperties=fontprops,
+        )
 
         ax1.add_artist(scalebar)
         plt.axis('off')  # Turn off both x and y axes
@@ -219,7 +252,7 @@ def plot_density_map(x, y, z_weigth=False, log=True, bins=(256, 256), frac=1.0, 
             ax1.set_xlabel(r"$x (nm)$", fontsize=10)
             ax1.set_ylabel(r"$z (nm)$", fontsize=10)
 
-    if roi and roi!=[0,0,0]:
+    if roi and roi != [0, 0, 0]:
         if axis == ['x', 'y'] or axis == ['y', 'x']:
             # plot a circle at position roi[0], roi[1] with radius roi[2]
             circ = Circle((roi[0], roi[1]), roi[2], fill=False, color='white', linewidth=1)

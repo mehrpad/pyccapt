@@ -1,4 +1,4 @@
-﻿"""Validation helpers used by calibration workflows."""
+"""Validation helpers used by calibration workflows."""
 
 from __future__ import annotations
 
@@ -32,9 +32,7 @@ def ensure_choice(value: str, *, field_name: str, allowed: Iterable[str]) -> str
     """Return `value` if it is in `allowed`, otherwise raise an input error."""
     allowed_values = tuple(allowed)
     if value not in allowed_values:
-        raise CalibrationInputError(
-            f"Invalid {field_name!r}: {value!r}. Allowed values are: {', '.join(allowed_values)}"
-        )
+        raise CalibrationInputError(f"Invalid {field_name!r}: {value!r}. Allowed values are: {', '.join(allowed_values)}")
     return value
 
 
@@ -86,6 +84,3 @@ def normalize_sampling_mode(mode: str | None) -> str:
         allowed = ", ".join(sorted(SAMPLING_MODES))
         raise CalibrationInputError(f"Invalid 'sampling_mode': {mode!r}. Allowed values are: {allowed}")
     return normalized
-
-
-

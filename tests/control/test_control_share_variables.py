@@ -1,4 +1,4 @@
-﻿"""Tests for control shared variable container."""
+"""Tests for control shared variable container."""
 
 from __future__ import annotations
 
@@ -97,4 +97,3 @@ def test_variables_can_be_unpickled_in_spawned_process_without_recursion(variabl
 
     assert process.exitcode == 0
     assert queue.get(timeout=2) == "COM1"
-

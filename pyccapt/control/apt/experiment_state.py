@@ -1,4 +1,4 @@
-﻿"""Experiment data/state helpers for APT control."""
+"""Experiment data/state helpers for APT control."""
 
 from __future__ import annotations
 
@@ -157,15 +157,15 @@ def validate_detector_data_lengths(variables: Any, conf: dict[str, Any], log_apt
         )
 
     elif variables.counter_source == "HSD":
-	    # The DRS records 1024 waveform samples per acquisition and one
-	    # DC / pulse voltage reading per acquisition, so the two groups
-	    # have different lengths by design (channel = 1024 * N, voltage
-	    # = N). Validate them as separate groups instead of mixing them.
-	    # main_l_p_drs is not produced by drs.experiment_measure, so it
-	    # is intentionally excluded.
+        # The DRS records 1024 waveform samples per acquisition and one
+        # DC / pulse voltage reading per acquisition, so the two groups
+        # have different lengths by design (channel = 1024 * N, voltage
+        # = N). Validate them as separate groups instead of mixing them.
+        # main_l_p_drs is not produced by drs.experiment_measure, so it
+        # is intentionally excluded.
         _warn_on_mismatch(
             log_apt,
-	        "hsd-channels",
+            "hsd-channels",
             [
                 variables.ch0_time,
                 variables.ch0_wave,
@@ -177,10 +177,10 @@ def validate_detector_data_lengths(variables: Any, conf: dict[str, Any], log_apt
                 variables.ch3_wave,
             ],
         )
-	    _warn_on_mismatch(
-		    log_apt,
-		    "hsd-voltages",
-		    [
+        _warn_on_mismatch(
+            log_apt,
+            "hsd-voltages",
+            [
                 variables.main_v_dc_drs,
                 variables.main_v_p_drs,
             ],
@@ -210,14 +210,13 @@ def reset_runtime_variables(
     # Plot pipes are now SharedRingBuffer instances - reset their indices
     # in one O(1) call instead of draining sample-by-sample.
     for buf in (x_plot, y_plot, t_plot, main_v_dc_plot):
-	    try:
-		    buf.reset()
-	    except AttributeError:
-		    # Backwards-compat: if a queue-style object is still passed,
-		    # drain it the old way.
-		    while not buf.empty():
-			    buf.get()
+        try:
+            buf.reset()
+        except AttributeError:
+            # Backwards-compat: if a queue-style object is still passed,
+            # drain it the old way.
+            while not buf.empty():
+                buf.get()
 
     for field in _CLEAR_LIST_FIELDS:
         variables.clear_to(field)
-

@@ -39,6 +39,7 @@ def _normalize_plotly_colors(values):
     """Normalize a sequence of stored range colors for Plotly usage."""
     return [_normalize_plotly_color(value) for value in values]
 
+
 def cart2pol(x, y):
     """
     Convert Cartesian coordinates to polar coordinates.
@@ -94,7 +95,7 @@ def atom_probe_recons_from_detector_Gault_et_al(detx, dety, hv, flight_path_leng
         float: z-coordinates of reconstructed atom positions in nm.
     """
     # Convert detector coordinates to polar form
-    rad, ang = cart2pol(detx * 1E1, dety * 1E1)
+    rad, ang = cart2pol(detx * 1e1, dety * 1e1)
 
     # Calculate effective detector area
     det_area = (np.max(rad) ** 2) * np.pi
@@ -121,7 +122,7 @@ def atom_probe_recons_from_detector_Gault_et_al(detx, dety, hv, flight_path_leng
 
     M = flight_path_length / (icf * radius_evolution)
 
-    spec_area = det_area / M ** 2
+    spec_area = det_area / M**2
 
     dz = omega / spec_area
     # icf_2 = theta_a / theta_p
@@ -164,22 +165,23 @@ def atom_probe_recons_Bas_et_al(detx, dety, hv, flight_path_length, kf, det_eff,
         float: y-coordinates of reconstructed atom positions in nm.
         float: z-coordinates of reconstructed atom positions in nm.
     """
-    radius_evolution = hv / (kf * (field_evap / 1E-9))
-    m = (flight_path_length * 1E-3) / (icf * radius_evolution)
+    radius_evolution = hv / (kf * (field_evap / 1e-9))
+    m = (flight_path_length * 1e-3) / (icf * radius_evolution)
 
-    x = (detx * 1E-2) / m
-    y = (dety * 1E-2) / m
+    x = (detx * 1e-2) / m
+    y = (dety * 1e-2) / m
 
-    rad, ang = cart2pol(detx * 1E-3, dety * 1E-3)
+    rad, ang = cart2pol(detx * 1e-3, dety * 1e-3)
     det_area = (np.max(rad) ** 2) * np.pi
 
-    omega = 1E-9 ** 3 / avg_dens
-    dz = (omega * ((flight_path_length * 1E-3) ** 2) * (kf ** 2) * ((field_evap / 1E-9) ** 2)) / (
-            det_area * det_eff * (icf ** 2) * (hv ** 2))
-    dz_p = radius_evolution * (1 - np.sqrt(1 - ((x ** 2 + y ** 2) / (radius_evolution ** 2))))
+    omega = 1e-9**3 / avg_dens
+    dz = (omega * ((flight_path_length * 1e-3) ** 2) * (kf**2) * ((field_evap / 1e-9) ** 2)) / (
+        det_area * det_eff * (icf**2) * (hv**2)
+    )
+    dz_p = radius_evolution * (1 - np.sqrt(1 - ((x**2 + y**2) / (radius_evolution**2))))
     z = np.cumsum(dz) + dz_p
 
-    return x * 1E9, y * 1E9, z * 1E9
+    return x * 1e9, y * 1e9, z * 1e9
 
 
 def draw_qube(fig, range, col=None, row=None):
@@ -191,9 +193,20 @@ def draw_qube(fig, range, col=None, row=None):
     y_corner = [y_range[0], y_range[0], y_range[1], y_range[1], y_range[0], y_range[0], y_range[1], y_range[1]]
     z_corner = [z_range[0], z_range[1], z_range[0], z_range[1], z_range[0], z_range[1], z_range[0], z_range[1]]
 
-    edges = [(0, 1), (1, 5), (5, 4), (4, 0),  # Bottom edges
-             (2, 3), (3, 7), (7, 6), (6, 2),  # Top edges
-             (0, 2), (1, 3), (5, 7), (4, 6)]  # Vertical edges
+    edges = [
+        (0, 1),
+        (1, 5),
+        (5, 4),
+        (4, 0),  # Bottom edges
+        (2, 3),
+        (3, 7),
+        (7, 6),
+        (6, 2),  # Top edges
+        (0, 2),
+        (1, 3),
+        (5, 7),
+        (4, 6),
+    ]  # Vertical edges
     if col is not None or row is not None:
         for edge in edges:
             fig.add_trace(
@@ -204,8 +217,10 @@ def draw_qube(fig, range, col=None, row=None):
                     mode='lines',
                     line=dict(color='black', width=2),
                     showlegend=False,
-                    hoverinfo='none'
-                ), row=row + 1, col=col + 1
+                    hoverinfo='none',
+                ),
+                row=row + 1,
+                col=col + 1,
             )
     else:
         for edge in edges:
@@ -217,14 +232,11 @@ def draw_qube(fig, range, col=None, row=None):
                     mode='lines',
                     line=dict(color='black', width=2),
                     showlegend=False,
-                    hoverinfo='none'
+                    hoverinfo='none',
                 )
             )
     # choose the figure font
-    font_dict = dict(family='Arial',
-                     size=10,
-                     color='black'
-                     )
+    font_dict = dict(family='Arial', size=10, color='black')
     fig.update_layout(font=font_dict)
     fig.update_layout(
         scene=dict(
@@ -235,19 +247,35 @@ def draw_qube(fig, range, col=None, row=None):
     )
 
     fig.update_scenes(zaxis_autorange="reversed")
-    fig.update_layout(
-        legend_title="",
-        legend={'itemsizing': 'constant'},
-        font=dict(size=8)
-    )
+    fig.update_layout(legend_title="", legend={'itemsizing': 'constant'}, font=dict(size=8))
     return fig
 
 
-def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save, figname, save, make_gif=False,
-                        make_evaporation_gif=False, range_sequence=[], range_mc=[], range_detx=[], range_dety=[],
-                        range_x=[], range_y=[], range_z=[], range_vol=[], ions_individually_plots=False,
-                        detailed_isotope_charge=False, colab=False, cluster_result=None,
-                        cluster_display_mode='overlay', cluster_opacity_override=None, element_alpha=None):
+def reconstruction_plot(
+    variables,
+    element_percentage,
+    opacity,
+    rotary_fig_save,
+    figname,
+    save,
+    make_gif=False,
+    make_evaporation_gif=False,
+    range_sequence=[],
+    range_mc=[],
+    range_detx=[],
+    range_dety=[],
+    range_x=[],
+    range_y=[],
+    range_z=[],
+    range_vol=[],
+    ions_individually_plots=False,
+    detailed_isotope_charge=False,
+    colab=False,
+    cluster_result=None,
+    cluster_display_mode='overlay',
+    cluster_opacity_override=None,
+    element_alpha=None,
+):
     """
     Generate a 3D plot for atom probe reconstruction data.
 
@@ -280,7 +308,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
     if range_sequence or range_detx or range_dety or range_mc or range_x or range_y or range_z:
         if range_sequence:
             mask_sequence = np.zeros_like(variables.dld_x_det, dtype=bool)
-            mask_sequence[range_sequence[0]:range_sequence[1]] = True
+            mask_sequence[range_sequence[0] : range_sequence[1]] = True
         else:
             mask_sequence = np.ones_like(variables.dld_x_det, dtype=bool)
         if range_detx and range_dety:
@@ -348,8 +376,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
         # Generate the specs dictionary based on the number of rows and columns
         specs = [[{"type": "scatter3d", "rowspan": 1, "colspan": 1} for _ in range(cols)] for _ in range(rows)]
 
-        fig = make_subplots(rows=rows, cols=cols, subplot_titles=subplot_titles,
-                            start_cell="top-left", specs=specs)
+        fig = make_subplots(rows=rows, cols=cols, subplot_titles=subplot_titles, start_cell="top-left", specs=specs)
         for row in range(rows):
             for col in range(cols):
                 index = col + row * 3
@@ -380,7 +407,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                         size=1,
                         color=colors[index],
                         opacity=element_alpha[index],
-                    )
+                    ),
                 )
                 fig = draw_qube(fig, range_cube, col, row)
 
@@ -417,7 +444,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                             size=1,
                             color=colors[index],
                             opacity=element_alpha[index],
-                        )
+                        ),
                     )
                 )
 
@@ -448,9 +475,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                 variables,
                 cluster_result,
                 opacity=(
-                    float(cluster_opacity_override)
-                    if cluster_opacity_override is not None
-                    else min(1.0, opacity + 0.25)
+                    float(cluster_opacity_override) if cluster_opacity_override is not None else min(1.0, opacity + 0.25)
                 ),
                 valid_mask=mask_f,
             ):
@@ -505,7 +530,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                             size=1,
                             color=colors[index],
                             opacity=element_alpha[index],
-                        )
+                        ),
                     )
                 )
             print(' Plotted the ions up to the event:', q)
@@ -522,27 +547,13 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
         # Save the images as a GIF using imageio
         save_gif(images, variables, f"rota_evaporation_{figname}.gif", fps=2)
 
-    fig.update_layout(
-        legend=dict(
-            yanchor="top",
-            y=0.99,
-            xanchor="left",
-            x=0.99
-        )
-    )
+    fig.update_layout(legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.99))
 
     config = dict(
         {
             'scrollZoom': True,
             'displayModeBar': True,
-            'modeBarButtonsToAdd': [
-                'drawline',
-                'drawopenpath',
-                'drawclosedpath',
-                'drawcircle',
-                'drawrect',
-                'eraseshape'
-            ]
+            'modeBarButtonsToAdd': ['drawline', 'drawopenpath', 'drawclosedpath', 'drawcircle', 'drawrect', 'eraseshape'],
         }
     )
 
@@ -553,18 +564,13 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                 backgroundcolor="rgb(255,255,255)",
                 gridcolor="lightgrey",
             ),
-            yaxis=dict(
-                backgroundcolor="rgb(255,255,255)",
-                gridcolor="lightgrey"
-            ),
-            zaxis=dict(
-                backgroundcolor="rgb(255,255,255)",
-                gridcolor="lightgrey"
-            )))
+            yaxis=dict(backgroundcolor="rgb(255,255,255)", gridcolor="lightgrey"),
+            zaxis=dict(backgroundcolor="rgb(255,255,255)", gridcolor="lightgrey"),
+        )
+    )
 
     # Show the plot in the Jupyter cell output
     variables.plotly_3d_reconstruction = go.FigureWidget(fig)
-
 
     if not colab:
         pio.renderers.default = 'browser'
@@ -607,9 +613,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
             print(e)
 
 
-
-def scatter_plot(data, range_data, variables, element_percentage, selected_area, x_or_y, figname, figure_size,
-                 save=False):
+def scatter_plot(data, range_data, variables, element_percentage, selected_area, x_or_y, figname, figure_size, save=False):
     """
     Generate a scatter plot based on the provided data.
 
@@ -675,8 +679,22 @@ def scatter_plot(data, range_data, variables, element_percentage, selected_area,
     plt.show()
 
 
-def projection(variables, element_percentage, range_sequence=[], range_mc=[], range_detx=[], range_dety=[], range_x=[],
-               range_y=[], range_z=[], range_vol=[], x_or_y='x', figname='projection', figure_size=(5, 5), save=False):
+def projection(
+    variables,
+    element_percentage,
+    range_sequence=[],
+    range_mc=[],
+    range_detx=[],
+    range_dety=[],
+    range_x=[],
+    range_y=[],
+    range_z=[],
+    range_vol=[],
+    x_or_y='x',
+    figname='projection',
+    figure_size=(5, 5),
+    save=False,
+):
     """
     Generate a projection plot based on the provided data.
 
@@ -703,7 +721,7 @@ def projection(variables, element_percentage, range_sequence=[], range_mc=[], ra
         if range_sequence:
             if range_sequence:
                 mask_sequence = np.zeros_like(variables.dld_x_det, dtype=bool)
-                mask_sequence[range_sequence[0]:range_sequence[1]] = True
+                mask_sequence[range_sequence[0] : range_sequence[1]] = True
             else:
                 mask_sequence = np.ones_like(variables.dld_x_det, dtype=bool)
         if range_detx and range_dety:
@@ -736,18 +754,15 @@ def projection(variables, element_percentage, range_sequence=[], range_mc=[], ra
     else:
         mask = np.ones(len(variables.mc_uc), dtype=bool)
 
-
     ions = variables.range_data['ion'].tolist()
     colors = _normalize_plotly_colors(variables.range_data['color'].tolist())
     mc_low = variables.range_data['mc_low'].tolist()
     mc_up = variables.range_data['mc_up'].tolist()
 
-
     if isinstance(element_percentage, list):
         pass
     else:
         print('element_percentage should be a list')
-
 
     for index, elemen in enumerate(ions):
         mask_spacial = (variables.mc > mc_low[index]) & (variables.mc < mc_up[index])
@@ -768,11 +783,9 @@ def projection(variables, element_percentage, range_sequence=[], range_mc=[], ra
         else:
             name_element = '%s' % ions[index]
         if x_or_y == 'x':
-            ax.scatter(variables.x[mask], variables.z[mask], s=0.1,
-                       label=name_element, color=colors[index])
+            ax.scatter(variables.x[mask], variables.z[mask], s=0.1, label=name_element, color=colors[index])
         elif x_or_y == 'y':
-            ax.scatter(variables.y[mask], variables.z[mask], s=0.1,
-                       label=name_element, color=colors[index])
+            ax.scatter(variables.y[mask], variables.z[mask], s=0.1, label=name_element, color=colors[index])
 
     # ax.xaxis.tick_top()
     ax.invert_yaxis()
@@ -791,8 +804,21 @@ def projection(variables, element_percentage, range_sequence=[], range_mc=[], ra
     plt.show()
 
 
-def heatmap(variables, element_percentage, range_sequence=[], range_mc=[], range_detx=[], range_dety=[], range_x=[],
-            range_y=[], range_z=[], range_vol=[], figure_name='hetmap', figure_sie=(5, 5), save=False):
+def heatmap(
+    variables,
+    element_percentage,
+    range_sequence=[],
+    range_mc=[],
+    range_detx=[],
+    range_dety=[],
+    range_x=[],
+    range_y=[],
+    range_z=[],
+    range_vol=[],
+    figure_name='hetmap',
+    figure_sie=(5, 5),
+    save=False,
+):
     """
     Generate a heatmap based on the provided data.
 
@@ -821,7 +847,7 @@ def heatmap(variables, element_percentage, range_sequence=[], range_mc=[], range
         if range_sequence:
             if range_sequence:
                 mask_sequence = np.zeros_like(variables.dld_x_det, dtype=bool)
-                mask_sequence[range_sequence[0]:range_sequence[1]] = True
+                mask_sequence[range_sequence[0] : range_sequence[1]] = True
             else:
                 mask_sequence = np.ones_like(variables.dld_x_det, dtype=bool)
         if range_detx and range_dety:
@@ -884,8 +910,14 @@ def heatmap(variables, element_percentage, range_sequence=[], range_mc=[], range
         else:
             name_element = '%s' % ions[index]
 
-        ax.scatter(variables.dld_x_det[new_mask] * 10, variables.dld_y_det[new_mask] * 10, s=2, label=name_element,
-                   color=colors[index], alpha=0.1)
+        ax.scatter(
+            variables.dld_x_det[new_mask] * 10,
+            variables.dld_y_det[new_mask] * 10,
+            s=2,
+            label=name_element,
+            color=colors[index],
+            alpha=0.1,
+        )
 
     ax.set_xlabel("det_x (cm)", color="red", fontsize=10)
     ax.set_ylabel("det_y (cm)", color="red", fontsize=10)
@@ -900,9 +932,26 @@ def heatmap(variables, element_percentage, range_sequence=[], range_mc=[], range
     plt.show()
 
 
-def reconstruction_2d_histogram(variables, x, y, bins, percentage, range_sequence=[], range_mc=[], range_detx=[],
-                                range_dety=[], range_x=[], range_y=[], range_z=[], range_vol=[], xlabel='X-axis',
-                                ylabel='Y-axis', save=False, figure_name=None, figure_size=None):
+def reconstruction_2d_histogram(
+    variables,
+    x,
+    y,
+    bins,
+    percentage,
+    range_sequence=[],
+    range_mc=[],
+    range_detx=[],
+    range_dety=[],
+    range_x=[],
+    range_y=[],
+    range_z=[],
+    range_vol=[],
+    xlabel='X-axis',
+    ylabel='Y-axis',
+    save=False,
+    figure_name=None,
+    figure_size=None,
+):
     """
     Generate a 2D histogram based on the provided data.
 
@@ -932,7 +981,7 @@ def reconstruction_2d_histogram(variables, x, y, bins, percentage, range_sequenc
     if range_sequence or range_mc or range_detx or range_dety or range_x or range_y or range_z:
         if range_sequence:
             mask_sequence = np.zeros_like(variables.dld_x_det, dtype=bool)
-            mask_sequence[range_sequence[0]:range_sequence[1]] = True
+            mask_sequence[range_sequence[0] : range_sequence[1]] = True
         else:
             mask_sequence = np.ones_like(variables.dld_x_det, dtype=bool)
         if range_detx and range_dety:
@@ -1005,8 +1054,9 @@ def reconstruction_2d_histogram(variables, x, y, bins, percentage, range_sequenc
     plt.show()
 
 
-def detector_animation(variables, points_per_frame, ranged, selected_area_specially, selected_area_temporally,
-                       figure_name, figure_sie, save):
+def detector_animation(
+    variables, points_per_frame, ranged, selected_area_specially, selected_area_temporally, figure_name, figure_sie, save
+):
     """
     Generate a animated heatmap based on the provided data.
 
@@ -1024,18 +1074,30 @@ def detector_animation(variables, points_per_frame, ranged, selected_area_specia
         None
     """
     if selected_area_specially:
-        mask_spacial = (variables.x >= variables.selected_x1) & (variables.x <= variables.selected_x2) & \
-                       (variables.y >= variables.selected_y1) & (variables.y <= variables.selected_y2) & \
-                       (variables.z >= variables.selected_z1) & (variables.z <= variables.selected_z2)
+        mask_spacial = (
+            (variables.x >= variables.selected_x1)
+            & (variables.x <= variables.selected_x2)
+            & (variables.y >= variables.selected_y1)
+            & (variables.y <= variables.selected_y2)
+            & (variables.z >= variables.selected_z1)
+            & (variables.z <= variables.selected_z2)
+        )
     elif selected_area_temporally:
-        mask_spacial = np.logical_and((variables.mc_calib > variables.selected_x1),
-                                      (variables.mc_calib < variables.selected_x2))
+        mask_spacial = np.logical_and(
+            (variables.mc_calib > variables.selected_x1), (variables.mc_calib < variables.selected_x2)
+        )
     elif selected_area_specially and selected_area_temporally:
-        mask_temporally = np.logical_and((variables.mc_calib > variables.selected_x1),
-                                         (variables.mc_calib < variables.selected_x2))
-        mask_specially = (variables.x >= variables.selected_x1) & (variables.x <= variables.selected_x2) & \
-                         (variables.y >= variables.selected_y1) & (variables.y <= variables.selected_y2) & \
-                         (variables.z >= variables.selected_z1) & (variables.z <= variables.selected_z2)
+        mask_temporally = np.logical_and(
+            (variables.mc_calib > variables.selected_x1), (variables.mc_calib < variables.selected_x2)
+        )
+        mask_specially = (
+            (variables.x >= variables.selected_x1)
+            & (variables.x <= variables.selected_x2)
+            & (variables.y >= variables.selected_y1)
+            & (variables.y <= variables.selected_y2)
+            & (variables.z >= variables.selected_z1)
+            & (variables.z <= variables.selected_z2)
+        )
         mask_spacial = mask_specially & mask_temporally
     else:
         mask_spacial = np.ones(len(variables.mc), dtype=bool)
@@ -1078,8 +1140,7 @@ def detector_animation(variables, points_per_frame, ranged, selected_area_specia
                 name_element = 'unranged'
             else:
                 name_element = '%s' % ions[index]
-            ax.scatter(x, y, s=2, label=name_element,
-                       color=colors[index], alpha=0.1)
+            ax.scatter(x, y, s=2, label=name_element, color=colors[index], alpha=0.1)
             ax.set_title(f'Ion index: {start_idx} to {end_idx}')
             ax.set_xlabel("det_x (cm)", color="red", fontsize=10)
             ax.set_ylabel("det_y (cm)", color="red", fontsize=10)
@@ -1095,9 +1156,25 @@ def detector_animation(variables, points_per_frame, ranged, selected_area_specia
         rcParams['svg.fonttype'] = 'none'
         animation.save(resolve_result_file(variables, f"{figure_name}.gif"), writer='imagemagick')
     plt.close()
-def x_y_z_calculation_and_plot(variables, element_percentage, kf, det_eff, icf, field_evap,
-                               avg_dens, flight_path_length, rotary_fig_save, mode, opacity, figname, save,
-                               colab=False, cluster_result=None):
+
+
+def x_y_z_calculation_and_plot(
+    variables,
+    element_percentage,
+    kf,
+    det_eff,
+    icf,
+    field_evap,
+    avg_dens,
+    flight_path_length,
+    rotary_fig_save,
+    mode,
+    opacity,
+    figname,
+    save,
+    colab=False,
+    cluster_result=None,
+):
     """
     Calculate the x, y, z coordinates of the atoms and plot them.
 
@@ -1130,12 +1207,13 @@ def x_y_z_calculation_and_plot(variables, element_percentage, kf, det_eff, icf, 
     dld_x = variables.dld_x_det
     dld_y = variables.dld_y_det
     if mode == 'Gault':
-        px, py, pz = atom_probe_recons_from_detector_Gault_et_al(dld_x, dld_y, dld_Voltage,
-                                                                 flight_path_length, kf, det_eff, icf,
-                                                                 field_evap, avg_dens)
+        px, py, pz = atom_probe_recons_from_detector_Gault_et_al(
+            dld_x, dld_y, dld_Voltage, flight_path_length, kf, det_eff, icf, field_evap, avg_dens
+        )
     elif mode == 'Bas':
-        px, py, pz = atom_probe_recons_Bas_et_al(dld_x, dld_y, dld_Voltage, flight_path_length, kf, det_eff,
-                                                 icf, field_evap, avg_dens)
+        px, py, pz = atom_probe_recons_Bas_et_al(
+            dld_x, dld_y, dld_Voltage, flight_path_length, kf, det_eff, icf, field_evap, avg_dens
+        )
     variables.x = px
     variables.y = py
     variables.z = pz
@@ -1149,7 +1227,3 @@ def x_y_z_calculation_and_plot(variables, element_percentage, kf, det_eff, icf, 
         colab=colab,
         cluster_result=cluster_result,
     )
-
-
-
-

@@ -10,46 +10,71 @@ from pyccapt.calibration.data_tools.merge_range import merge_by_range
 from pyccapt.calibration.reconstructions.io_utils import save_matplotlib_figure
 
 
-def sdm(particles, bin_size, variables=None, roi=[0,0,0.5], z_cut=True, normalize=False, plot_mode='bar', plot=False,
-        save=False, figure_size=(6, 6), figname='sdm', histogram_type='1d', axes=None, i_composition=None,
-        j_composition=None, plot_roi=False, theta_x=0, phi_y=0, log=False, frac=1.0,
-        range_sequence=[], range_mc=[], range_detx=[], range_dety=[], range_x=[], range_y=[], range_z=[],
-        range_vol=[]):
+def sdm(
+    particles,
+    bin_size,
+    variables=None,
+    roi=[0, 0, 0.5],
+    z_cut=True,
+    normalize=False,
+    plot_mode='bar',
+    plot=False,
+    save=False,
+    figure_size=(6, 6),
+    figname='sdm',
+    histogram_type='1d',
+    axes=None,
+    i_composition=None,
+    j_composition=None,
+    plot_roi=False,
+    theta_x=0,
+    phi_y=0,
+    log=False,
+    frac=1.0,
+    range_sequence=[],
+    range_mc=[],
+    range_detx=[],
+    range_dety=[],
+    range_x=[],
+    range_y=[],
+    range_z=[],
+    range_vol=[],
+):
     """
-	Computes 1D or 2D histograms for a set of particle coordinates.
+        Computes 1D or 2D histograms for a set of particle coordinates.
 
-	Parameters
-	----------
-	particles : (N, 3) np.array
-		Set of particle coordinates for which to compute the SDM.
-	bin_size : float
-		Bin size for each histogram.
-	variables : variables object
-	normalize : bool, optional
-		Option to normalize the histograms. If True, the histogram values are normalized.
-	roi : list, optional
-	    Region of interest for the SDM. Default is [0, 0, 1].
-	z_cut : bool, optional
-	    Cut the z distances over 1 nm
-	plot_mode : str, optional
-		The plot mode for the histograms. Options are 'bar' or 'line'.
-	plot : bool, optional
-		Option to plot the histograms. If True, the histograms are plotted.
-	save : bool, optional
-		Option to save the histograms. If True, the histograms are saved.
-	figure_size : (float, float), optional
-		The size of the figure in inches.
-	figname : str, optional
-		The name of the figure.
-	histogram_type : str, optional
-		Type of histogram. Options are '1D' or '2D' or '3D'.
-	axes : list or None, optional
-		Specifies the axes for 1D or 2D histograms. For '1d', provide a list like ['x'], ['y'], or ['z'].
-		For '2d', provide a list like ['x', 'y'], ['y', 'z'], or ['x', 'z'] or ['x', 'y', 'z'].
-	i_composition : list, optional
-	    Composition of the first element in the SDM.
-	j_composition : list, optional
-	    Composition of the second element in the SDM.
+        Parameters
+        ----------
+        particles : (N, 3) np.array
+                Set of particle coordinates for which to compute the SDM.
+        bin_size : float
+                Bin size for each histogram.
+        variables : variables object
+        normalize : bool, optional
+                Option to normalize the histograms. If True, the histogram values are normalized.
+        roi : list, optional
+            Region of interest for the SDM. Default is [0, 0, 1].
+        z_cut : bool, optional
+            Cut the z distances over 1 nm
+        plot_mode : str, optional
+                The plot mode for the histograms. Options are 'bar' or 'line'.
+        plot : bool, optional
+                Option to plot the histograms. If True, the histograms are plotted.
+        save : bool, optional
+                Option to save the histograms. If True, the histograms are saved.
+        figure_size : (float, float), optional
+                The size of the figure in inches.
+        figname : str, optional
+                The name of the figure.
+        histogram_type : str, optional
+                Type of histogram. Options are '1D' or '2D' or '3D'.
+        axes : list or None, optional
+                Specifies the axes for 1D or 2D histograms. For '1d', provide a list like ['x'], ['y'], or ['z'].
+                For '2d', provide a list like ['x', 'y'], ['y', 'z'], or ['x', 'z'] or ['x', 'y', 'z'].
+        i_composition : list, optional
+            Composition of the first element in the SDM.
+        j_composition : list, optional
+            Composition of the second element in the SDM.
     plot_roi : bool, optional
         Option to plot the region of interest. If True, the region of interest is plotted.
     theta_x : float, optional
@@ -58,14 +83,14 @@ def sdm(particles, bin_size, variables=None, roi=[0,0,0.5], z_cut=True, normaliz
         Rotation angle around the y-axis.
     log : bool, optional
         Option to plot the SDM in log scale. If True, the SDM is plotted in log scale.
-	frac : float, optional
-	    Fraction of the second element in the SDM.
-	range_sequence : list, optional
-	    Sequence range for the SDM.
-	range_mc : list, optional
-	    Mass-to-charge range for the SDM.
-	range_detx : list, optional
-	    Detector x-coordinate range for the SDM.
+        frac : float, optional
+            Fraction of the second element in the SDM.
+        range_sequence : list, optional
+            Sequence range for the SDM.
+        range_mc : list, optional
+            Mass-to-charge range for the SDM.
+        range_detx : list, optional
+            Detector x-coordinate range for the SDM.
     range_dety : list, optional
         Detector y-coordinate range for the SDM.
     range_x : list, optional
@@ -77,24 +102,24 @@ def sdm(particles, bin_size, variables=None, roi=[0,0,0.5], z_cut=True, normaliz
     range_vol : list, optional
         Volume range for the SDM.
 
-	Returns
-	-------
-	histograms : list of np.array
-		List of 1D or 2D histograms based on user preferences.
-	edges : list of np.array
-		Bin edges for each histogram.
-	"""
+        Returns
+        -------
+        histograms : list of np.array
+                List of 1D or 2D histograms based on user preferences.
+        edges : list of np.array
+                Bin edges for each histogram.
+    """
     if range_sequence or range_mc or range_detx or range_dety or range_x or range_y or range_z or range_vol:
         if range_sequence:
             if range_sequence:
                 mask_sequence = np.zeros(len(particles), dtype=bool)
                 if range_sequence[0] < 1 and range_sequence[1] < 1:
-                    mask_sequence[int(len(particles)*range_sequence[0]):int(len(particles)*range_sequence[1])]=True
+                    mask_sequence[int(len(particles) * range_sequence[0]) : int(len(particles) * range_sequence[1])] = True
                 else:
-                    mask_sequence[range_sequence[0]:range_sequence[1]] = True
+                    mask_sequence[range_sequence[0] : range_sequence[1]] = True
             else:
                 mask_sequence = np.zeros(len(particles), dtype=bool)
-                mask_sequence[:int(len(particles)*range_sequence)] = True
+                mask_sequence[: int(len(particles) * range_sequence)] = True
 
         else:
             mask_sequence = np.ones(len(particles), dtype=bool)
@@ -226,16 +251,21 @@ def sdm(particles, bin_size, variables=None, roi=[0,0,0.5], z_cut=True, normaliz
     else:
         particles_i_masked = particles[mask_i]
         particles_j_masked = particles[mask_j]
-        shift = np.empty((len(particles_i_masked), len(particles_j_masked),3), dtype=np.result_type(
-                                                                        particles, particles))
+        shift = np.empty((len(particles_i_masked), len(particles_j_masked), 3), dtype=np.result_type(particles, particles))
         for i in range(len(particles_i_masked)):
             delta = particles_i_masked[i, :] - particles[mask_j]
 
-            shift[i, :, 0] = (np.cos(theta) * delta[:, 0] + np.sin(theta) * np.sin(phi) * delta[:, 1] + np.sin(theta) *
-                           np.cos(phi) * delta[:, 2])
+            shift[i, :, 0] = (
+                np.cos(theta) * delta[:, 0]
+                + np.sin(theta) * np.sin(phi) * delta[:, 1]
+                + np.sin(theta) * np.cos(phi) * delta[:, 2]
+            )
             shift[i, :, 1] = np.cos(phi) * delta[:, 1] - np.sin(phi) * delta[:, 2]
-            shift[i, :, 2] = -np.sin(theta) * delta[:, 0] + np.cos(theta) * np.sin(
-                phi) * delta[:, 1] + np.cos(theta) * np.cos(phi) * delta[:, 2]
+            shift[i, :, 2] = (
+                -np.sin(theta) * delta[:, 0]
+                + np.cos(theta) * np.sin(phi) * delta[:, 1]
+                + np.cos(theta) * np.cos(phi) * delta[:, 2]
+            )
         if 'x' in axes:
             dx = shift[:, :, 0]
         if 'y' in axes:
@@ -244,6 +274,7 @@ def sdm(particles, bin_size, variables=None, roi=[0,0,0.5], z_cut=True, normaliz
             dz = shift[:, :, 2]
 
     edges_list = []
+
     def _symmetric_edges(*arrays):
         finite_arrays = [np.asarray(arr, dtype=float).ravel() for arr in arrays if arr is not None]
         finite_arrays = [arr[np.isfinite(arr)] for arr in finite_arrays if arr.size > 0]
@@ -369,7 +400,6 @@ def sdm(particles, bin_size, variables=None, roi=[0,0,0.5], z_cut=True, normaliz
             histograms[-1] = histograms[-1] / np.max(histograms[-1])
 
     if plot or save:
-
         # Plot histograms
         if histogram_type == '1D':
             fig, ax = plt.subplots(figsize=figure_size)
@@ -397,12 +427,10 @@ def sdm(particles, bin_size, variables=None, roi=[0,0,0.5], z_cut=True, normaliz
 
                         # Draw dashed line
                         yy = max(y1, y2)
-                        plt.annotate('', xy=(x2, yy), xytext=(x1, yy),
-                                     arrowprops=dict(arrowstyle='<->', color='blue', lw=1.5))
+                        plt.annotate('', xy=(x2, yy), xytext=(x1, yy), arrowprops=dict(arrowstyle='<->', color='blue', lw=1.5))
 
                         # Annotate with distance
-                        plt.text((x1 + x2) / 2, max(y1, y2) + 0.1, f'{x2 - x1:.2f}',
-                                 color='blue', ha='center', va='bottom')
+                        plt.text((x1 + x2) / 2, max(y1, y2) + 0.1, f'{x2 - x1:.2f}', color='blue', ha='center', va='bottom')
                 except Exception as e:
                     print('error:', e)
                     print('No peaks found in the histogram')
@@ -410,7 +438,7 @@ def sdm(particles, bin_size, variables=None, roi=[0,0,0.5], z_cut=True, normaliz
         elif histogram_type == '2D':
             if figure_size[0] - figure_size[1] > 2:
                 print('The figure size is not appropriate for 2D histogram')
-                figure_size = (5,4)
+                figure_size = (5, 4)
                 print('The figure size is changed to:', figure_size)
             fig, ax = plt.subplots(figsize=figure_size)
             img = ax.imshow(histograms[-1].T, origin='lower', extent=extent, aspect="auto")
@@ -443,7 +471,7 @@ def sdm(particles, bin_size, variables=None, roi=[0,0,0.5], z_cut=True, normaliz
                 FDM = FDM / np.max(FDM)
             cmap_instance = copy(cm.get_cmap('plasma'))
             cmap_instance.set_bad(cmap_instance(0))
-            fig1, ax1 = plt.subplots(figsize=(5,4))
+            fig1, ax1 = plt.subplots(figsize=(5, 4))
             if log and not normalize:
                 FDM = np.log1p(FDM)
                 pcm = ax1.pcolormesh(xedges, yedges, FDM.T, cmap=cmap_instance, norm=colors.LogNorm(), rasterized=True)
@@ -519,4 +547,3 @@ def sdm(particles, bin_size, variables=None, roi=[0,0,0.5], z_cut=True, normaliz
 #     dev = dev[:i + 1, :]
 #
 #     return np0, dev
-

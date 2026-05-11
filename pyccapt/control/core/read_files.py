@@ -1,4 +1,4 @@
-﻿"""File-loading helpers for the control package."""
+"""File-loading helpers for the control package."""
 
 from __future__ import annotations
 
@@ -126,8 +126,5 @@ def load_config_file(config_file_path: str | Path) -> dict[str, Any]:
     if suffix == ".toml":
         return normalize_control_config(read_toml_file(path))
     if suffix == ".json":
-        raise ValueError(
-            f"JSON config is no longer supported for control runtime: {path}. "
-            "Please migrate to config.toml."
-        )
+        raise ValueError(f"JSON config is no longer supported for control runtime: {path}. Please migrate to config.toml.")
     raise ValueError(f"Unsupported config format for {path}. Use a .toml configuration file.")

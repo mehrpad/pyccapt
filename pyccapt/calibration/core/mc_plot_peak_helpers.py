@@ -22,7 +22,7 @@ _MRP_PHYSICAL_CEILING = 1500.0
 
 def _gaussian(x, amp, mu, sigma, bg):
     """Gaussian with constant background."""
-    return amp * np.exp(-((x - mu) ** 2) / (2 * sigma ** 2)) + bg
+    return amp * np.exp(-((x - mu) ** 2) / (2 * sigma**2)) + bg
 
 
 _FWHM_FACTOR = 2.0 * np.sqrt(2.0 * np.log(2.0))
@@ -163,14 +163,14 @@ def _voigt(x, amp, mu, sigma, gamma, bg):
     fg = _FWHM_FACTOR * sigma
     fl = 2.0 * gamma
     f5 = fg**5 + 2.69269 * fg**4 * fl + 2.42843 * fg**3 * fl**2 + 4.47163 * fg**2 * fl**3 + 0.07842 * fg * fl**4 + fl**5
-    f_v = f5 ** 0.2 if f5 > 0 else max(fg, fl)
+    f_v = f5**0.2 if f5 > 0 else max(fg, fl)
     if f_v > 0:
         eta = 1.36603 * (fl / f_v) - 0.47719 * (fl / f_v) ** 2 + 0.11116 * (fl / f_v) ** 3
         eta = np.clip(eta, 0.0, 1.0)
     else:
         eta = 0.0
-    gauss = np.exp(-((x - mu) ** 2) / (2 * sigma ** 2))
-    lorentz = gamma ** 2 / ((x - mu) ** 2 + gamma ** 2)
+    gauss = np.exp(-((x - mu) ** 2) / (2 * sigma**2))
+    lorentz = gamma**2 / ((x - mu) ** 2 + gamma**2)
     return amp * ((1 - eta) * gauss + eta * lorentz) + bg
 
 
@@ -179,7 +179,7 @@ def _voigt_fwhm(sigma, gamma):
     fg = _FWHM_FACTOR * sigma
     fl = 2.0 * gamma
     f5 = fg**5 + 2.69269 * fg**4 * fl + 2.42843 * fg**3 * fl**2 + 4.47163 * fg**2 * fl**3 + 0.07842 * fg * fl**4 + fl**5
-    return f5 ** 0.2 if f5 > 0 else max(fg, fl)
+    return f5**0.2 if f5 > 0 else max(fg, fl)
 
 
 def _fit_voigt_mrp(x, y, peak_idx):
@@ -282,9 +282,7 @@ def _fit_voigt_mrp(x, y, peak_idx):
     # sampling above. Use the wider analytic span so legitimate tail widths
     # are not falsely marked NaN.
     sanitize_full_span = max(fit_span, 2.0 * wide_half_span)
-    widths, result = _sanitize_tail_widths(
-        widths, result, sanitize_full_span, max(base_edge_tol, fit_span / 200.0)
-    )
+    widths, result = _sanitize_tail_widths(widths, result, sanitize_full_span, max(base_edge_tol, fit_span / 200.0))
 
     return result, True, float(fwhm), profile_type
 
@@ -467,7 +465,9 @@ def build_calibration_core_mask(calibration_array, x1, x2, calibration_mode='mc'
     if values.size == 0 or right <= left:
         return np.zeros_like(np.asarray(calibration_array, dtype=bool), dtype=bool)
 
-    base_mask = np.logical_and(np.asarray(calibration_array, dtype=float) > left, np.asarray(calibration_array, dtype=float) < right)
+    base_mask = np.logical_and(
+        np.asarray(calibration_array, dtype=float) > left, np.asarray(calibration_array, dtype=float) < right
+    )
     if calibration_mode != 'mc' or np.count_nonzero(base_mask) < 25:
         return base_mask
 
@@ -541,10 +541,21 @@ def apply_hist_info_legend(plotter, label='mc', mrp_all=False, background=None, 
                 if legend_mode == 'long':
                     txt = (
                         'plot bin: %s Da\nnum atoms: %.2f$e^6$\nbackG: %s ppm/Da\nMRP(0.5): %s\nMRP(0.1): %s\nMRP(0.01): %s'
-                        % (plotter.bin_width, len(plotter.mc_tof) / 1000000, round(plotter.background_ppm), _format_mrp_value(mrp_list[0]), _format_mrp_value(mrp_list[1]), _format_mrp_value(mrp_list[2]))
+                        % (
+                            plotter.bin_width,
+                            len(plotter.mc_tof) / 1000000,
+                            round(plotter.background_ppm),
+                            _format_mrp_value(mrp_list[0]),
+                            _format_mrp_value(mrp_list[1]),
+                            _format_mrp_value(mrp_list[2]),
+                        )
                     )
                 else:
-                    txt = 'MRP(0.5): %s\nMRP(0.1): %s\nMRP(0.01): %s' % (_format_mrp_value(mrp_list[0]), _format_mrp_value(mrp_list[1]), _format_mrp_value(mrp_list[2]))
+                    txt = 'MRP(0.5): %s\nMRP(0.1): %s\nMRP(0.01): %s' % (
+                        _format_mrp_value(mrp_list[0]),
+                        _format_mrp_value(mrp_list[1]),
+                        _format_mrp_value(mrp_list[2]),
+                    )
             else:
                 if legend_mode == 'long':
                     txt = 'plot bin: %s Da\nnum atoms: %.2f$e^6$\nbackG: %s ppm/Da\nFW%d%%M: %s' % (
@@ -567,7 +578,11 @@ def apply_hist_info_legend(plotter, label='mc', mrp_all=False, background=None, 
                         _format_mrp_value(mrp_list[2]),
                     )
                 else:
-                    txt = 'MRP(0.5): %s\nMRP(0.1): %s\nMRP(0.01): %s' % (_format_mrp_value(mrp_list[0]), _format_mrp_value(mrp_list[1]), _format_mrp_value(mrp_list[2]))
+                    txt = 'MRP(0.5): %s\nMRP(0.1): %s\nMRP(0.01): %s' % (
+                        _format_mrp_value(mrp_list[0]),
+                        _format_mrp_value(mrp_list[1]),
+                        _format_mrp_value(mrp_list[2]),
+                    )
             else:
                 if legend_mode == 'long':
                     txt = 'plot bin: %s Da\nnum atoms: %.2f$e^6$\nMRP(%s): %s' % (
@@ -585,10 +600,21 @@ def apply_hist_info_legend(plotter, label='mc', mrp_all=False, background=None, 
                 if legend_mode == 'long':
                     txt = (
                         'plot bin: %s ns\nnum atoms: %.2f$e^6$\nbackG: %s ppm/ns\nMRP(0.5): %s\nMRP(0.1): %s\nMRP(0.01): %s'
-                        % (plotter.bin_width, len(plotter.mc_tof) / 1000000, round(plotter.background_ppm), _format_mrp_value(mrp_list[0]), _format_mrp_value(mrp_list[1]), _format_mrp_value(mrp_list[2]))
+                        % (
+                            plotter.bin_width,
+                            len(plotter.mc_tof) / 1000000,
+                            round(plotter.background_ppm),
+                            _format_mrp_value(mrp_list[0]),
+                            _format_mrp_value(mrp_list[1]),
+                            _format_mrp_value(mrp_list[2]),
+                        )
                     )
                 else:
-                    txt = 'MRP(0.5): %s\nMRP(0.1): %s\nMRP(0.01): %s' % (_format_mrp_value(mrp_list[0]), _format_mrp_value(mrp_list[1]), _format_mrp_value(mrp_list[2]))
+                    txt = 'MRP(0.5): %s\nMRP(0.1): %s\nMRP(0.01): %s' % (
+                        _format_mrp_value(mrp_list[0]),
+                        _format_mrp_value(mrp_list[1]),
+                        _format_mrp_value(mrp_list[2]),
+                    )
             else:
                 if legend_mode == 'long':
                     txt = 'plot bin: %s ns\nnum atoms: %.2f$e^6$\nbackG: %s ppm/ns\nMRP(%s): %s' % (
@@ -611,7 +637,11 @@ def apply_hist_info_legend(plotter, label='mc', mrp_all=False, background=None, 
                         _format_mrp_value(mrp_list[2]),
                     )
                 else:
-                    txt = 'MRP(0.5): %s\nMRP(0.1): %s\nMRP(0.01): %s' % (_format_mrp_value(mrp_list[0]), _format_mrp_value(mrp_list[1]), _format_mrp_value(mrp_list[2]))
+                    txt = 'MRP(0.5): %s\nMRP(0.1): %s\nMRP(0.01): %s' % (
+                        _format_mrp_value(mrp_list[0]),
+                        _format_mrp_value(mrp_list[1]),
+                        _format_mrp_value(mrp_list[2]),
+                    )
             else:
                 if legend_mode == 'long':
                     txt = 'plot bin: %s ns\nnum atoms: %.2f$e^6$ \nMRP(%s): %s' % (
@@ -628,8 +658,8 @@ def apply_hist_info_legend(plotter, label='mc', mrp_all=False, background=None, 
     props = dict(boxstyle='round', facecolor='#CCCCCC', alpha=1)
     if loc == 'left':
         plotter.ax.text(
-            .01,
-            .95,
+            0.01,
+            0.95,
             txt,
             va='top',
             ma='left',
@@ -642,8 +672,8 @@ def apply_hist_info_legend(plotter, label='mc', mrp_all=False, background=None, 
         )
     elif loc == 'right':
         plotter.ax.text(
-            .98,
-            .95,
+            0.98,
+            0.95,
             txt,
             va='top',
             ma='left',
@@ -701,10 +731,12 @@ def calculate_mrp(plotter):
             peak_right,
             bin_size=_MRP_INTERNAL_BIN_SIZE,
         )
-        peak_reports.append({
-            'histogram_mrp': mrp_values,
-            'histogram_peak_sides': _mrp_sides_from_values(peak_center, mrp_values),
-        })
+        peak_reports.append(
+            {
+                'histogram_mrp': mrp_values,
+                'histogram_peak_sides': _mrp_sides_from_values(peak_center, mrp_values),
+            }
+        )
 
     max_report = peak_reports[idx_max]
     if max_report is not None:
@@ -799,8 +831,9 @@ def gaussian_mrp_report(calibration_array, x1, x2, bin_size=_MRP_INTERNAL_BIN_SI
     If the requested *bin_size* is too fine to find any peaks, the function
     retries with progressively larger bin sizes before giving up.
     """
-    report = _gaussian_mrp_report_core(calibration_array, x1, x2, bin_size=bin_size,
-                                        peak_center=peak_center, _reference_guard=_reference_guard)
+    report = _gaussian_mrp_report_core(
+        calibration_array, x1, x2, bin_size=bin_size, peak_center=peak_center, _reference_guard=_reference_guard
+    )
     if report is not None:
         return report
 
@@ -812,14 +845,17 @@ def gaussian_mrp_report(calibration_array, x1, x2, bin_size=_MRP_INTERNAL_BIN_SI
         if rounded in seen or rounded <= 0:
             continue
         seen.add(rounded)
-        report = _gaussian_mrp_report_core(calibration_array, x1, x2, bin_size=rounded,
-                                            peak_center=peak_center, _reference_guard=_reference_guard)
+        report = _gaussian_mrp_report_core(
+            calibration_array, x1, x2, bin_size=rounded, peak_center=peak_center, _reference_guard=_reference_guard
+        )
         if report is not None:
             return report
     return None
 
 
-def _gaussian_mrp_report_core(calibration_array, x1, x2, bin_size=_MRP_INTERNAL_BIN_SIZE, peak_center=None, _reference_guard=True):
+def _gaussian_mrp_report_core(
+    calibration_array, x1, x2, bin_size=_MRP_INTERNAL_BIN_SIZE, peak_center=None, _reference_guard=True
+):
     """Single-attempt MRP report computation (inner implementation)."""
     values = np.asarray(calibration_array, dtype=float)
     values = values[np.isfinite(values)]
@@ -914,19 +950,24 @@ def _gaussian_mrp_report_core(calibration_array, x1, x2, bin_size=_MRP_INTERNAL_
         used_x2 - used_x1,
         max(hist_bin_size * 2.0, (used_x2 - used_x1) / 200.0),
     )
-    histogram_peak_sides = [[float('nan'), float('nan')] if not np.isfinite(width) else sides for width, sides in zip(histogram_widths, histogram_peak_sides)]
+    histogram_peak_sides = [
+        [float('nan'), float('nan')] if not np.isfinite(width) else sides
+        for width, sides in zip(histogram_widths, histogram_peak_sides)
+    ]
 
     peak_position = float(x[peaks[peak_idx]])
     gaussian_peak_sides = _mrp_sides_from_values(peak_position, gauss_mrp if gauss_ok else [float('nan')] * 3)
     voigt_peak_sides = _mrp_sides_from_values(peak_position, voigt_mrp if voigt_ok else [float('nan')] * 3)
-    recommended_mrp, recommended_label = _recommended_mrp_payload({
-        'gaussian_ok': gauss_ok,
-        'gaussian_mrp': gauss_mrp if gauss_ok else [float('nan')] * 3,
-        'voigt_ok': voigt_ok,
-        'voigt_mrp': voigt_mrp if voigt_ok else [float('nan')] * 3,
-        'histogram_mrp': hist_mrp,
-        'profile_type': profile_type,
-    })
+    recommended_mrp, recommended_label = _recommended_mrp_payload(
+        {
+            'gaussian_ok': gauss_ok,
+            'gaussian_mrp': gauss_mrp if gauss_ok else [float('nan')] * 3,
+            'voigt_ok': voigt_ok,
+            'voigt_mrp': voigt_mrp if voigt_ok else [float('nan')] * 3,
+            'histogram_mrp': hist_mrp,
+            'profile_type': profile_type,
+        }
+    )
     if recommended_label.startswith('Voigt'):
         recommended_peak_sides = voigt_peak_sides
     elif recommended_label == 'Gaussian':
@@ -998,7 +1039,8 @@ def _gaussian_mrp_report_core(calibration_array, x1, x2, bin_size=_MRP_INTERNAL_
         'window_warning': (
             f'Selected window was expanded from [{requested_x1:.4f}, {requested_x2:.4f}] '
             f'to [{used_x1:.4f}, {used_x2:.4f}] for stable MRP fitting.'
-            if window_expanded else ''
+            if window_expanded
+            else ''
         ),
         'robustness_warning': robustness_warning,
     }
@@ -1012,7 +1054,9 @@ def find_peaks_and_widths(plotter, prominence=None, distance=None, percent=50):
     plotter.distance = distance
     x_axis = plotter.x_centers if getattr(plotter, 'x_centers', None) is not None else plotter.x[:-1]
     try:
-        plotter.peaks, plotter.properties = find_peaks(plotter.y, prominence=plotter.prominence, distance=plotter.distance, height=0)
+        plotter.peaks, plotter.properties = find_peaks(
+            plotter.y, prominence=plotter.prominence, distance=plotter.distance, height=0
+        )
         plotter.peak_widths = peak_widths(plotter.y, plotter.peaks, rel_height=(rel_percent / 100), prominence_data=None)
         plotter.prominences = peak_prominences(plotter.y, plotter.peaks, wlen=None)
 

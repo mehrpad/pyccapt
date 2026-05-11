@@ -1,4 +1,4 @@
-﻿import copy
+import copy
 import datetime
 import multiprocessing
 import time
@@ -128,7 +128,9 @@ class APT_Exp_Control:
         if self.tdc_process is None and self.hsd_process is None:
             print("No counter source selected")
 
-    def main_ex_loop(self, ):
+    def main_ex_loop(
+        self,
+    ):
         """
         Execute main experiment loop.
 
@@ -187,8 +189,7 @@ class APT_Exp_Control:
             # control_p_aggressive_up_factor (down-gain stays normal so
             # the loop still brakes gently when rate is too high).
             if error > 0.05:
-                voltage_step = (error * self.variables.vdc_step_up * 10
-                                * self._p_aggressive_factor)
+                voltage_step = error * self.variables.vdc_step_up * 10 * self._p_aggressive_factor
             elif error < -0.05:
                 voltage_step = error * self.variables.vdc_step_down * 10
             else:
@@ -210,20 +211,16 @@ class APT_Exp_Control:
             self._adapt_last_sign = sign
 
             if self._adapt_same_sign >= self._adapt_grow_threshold:
-                self._adapt_factor = min(self._adapt_factor * 1.1,
-                                         self._adapt_max_factor)
+                self._adapt_factor = min(self._adapt_factor * 1.1, self._adapt_max_factor)
                 self._adapt_same_sign = 0
             elif self._adapt_flip_count >= self._adapt_shrink_threshold:
-                self._adapt_factor = max(self._adapt_factor * 0.7,
-                                         self._adapt_min_factor)
+                self._adapt_factor = max(self._adapt_factor * 0.7, self._adapt_min_factor)
                 self._adapt_flip_count = 0
 
             if error > 0.05:
-                voltage_step = (error * self.variables.vdc_step_up * 10
-                                * self._adapt_factor)
+                voltage_step = error * self.variables.vdc_step_up * 10 * self._adapt_factor
             elif error < -0.05:
-                voltage_step = (error * self.variables.vdc_step_down * 10
-                                * self._adapt_factor)
+                voltage_step = error * self.variables.vdc_step_down * 10 * self._adapt_factor
             else:
                 voltage_step = 0
             voltage_step = max(-40, min(40, voltage_step))
@@ -250,8 +247,7 @@ class APT_Exp_Control:
                         self.variables.specimen_voltage = self.specimen_voltage
                         self.variables.specimen_voltage_plot = self.specimen_voltage
                     if self.pulse_mode in ['Voltage', 'VoltageLaser']:
-                        new_vp = (self.specimen_voltage * (self.pulse_fraction / 100) /
-                                  self.pulse_amp_per_supply_voltage)
+                        new_vp = self.specimen_voltage * (self.pulse_fraction / 100) / self.pulse_amp_per_supply_voltage
                         if self.pulse_voltage_max > new_vp > self.pulse_voltage_min and self._vp_active():
                             apt_exp_control_func.command_v_p(self.com_port_v_p, 'VOLT %s' % new_vp)
                             self.pulse_voltage = new_vp * self.pulse_amp_per_supply_voltage
@@ -273,8 +269,7 @@ class APT_Exp_Control:
 
     def _build_pid(self):
         """(Re)create the PID controller from the current config gains."""
-        self.pid = PID(self._pid_kp, self._pid_ki, self._pid_kd,
-                       setpoint=self.detection_rate)
+        self.pid = PID(self._pid_kp, self._pid_ki, self._pid_kd, setpoint=self.detection_rate)
         self.pid.sample_time = 1.0 / self.variables.ex_freq
         self.pid.output_limits = (-self._pid_max_step, self._pid_max_step)
         # P-on-measurement avoids derivative kick on setpoint changes.
@@ -355,19 +350,25 @@ class APT_Exp_Control:
             self.log_apt.info('Control alg.   : %s', self.control_algorithm)
             self.log_apt.info('Detection rate : %s', getattr(self.variables, 'detection_rate', '<unset>'))
             self.log_apt.info('Ex frequency   : %s Hz', getattr(self.variables, 'ex_freq', '<unset>'))
-            self.log_apt.info('Vdc range      : %s -> %s V',
-                              getattr(self.variables, 'vdc_min', '<unset>'),
-                              getattr(self.variables, 'vdc_max', '<unset>'))
+            self.log_apt.info(
+                'Vdc range      : %s -> %s V',
+                getattr(self.variables, 'vdc_min', '<unset>'),
+                getattr(self.variables, 'vdc_max', '<unset>'),
+            )
             if self.access_override_enabled:
-                self.log_apt.warning('Super-user override active. Disabled devices: %s',
-                                     sorted(self.override_disabled_devices))
+                self.log_apt.warning(
+                    'Super-user override active. Disabled devices: %s', sorted(self.override_disabled_devices)
+                )
             loggi.log_configuration_snapshot(self.log_apt, self.conf, self.variables)
         except Exception:
             self.log_apt.debug('Could not log experiment context', exc_info=True)
-        if self._is_config_enabled('signal_generator') and not self._is_override_disabled("signal_generator") and \
-                self.pulse_mode in ['Voltage', 'VoltageLaser'] and not self.initialization_error:
-            self.initialization_error = apt_exp_control_func.initialization_signal_generator(self.variables,
-                                                                                             self.log_apt)
+        if (
+            self._is_config_enabled('signal_generator')
+            and not self._is_override_disabled("signal_generator")
+            and self.pulse_mode in ['Voltage', 'VoltageLaser']
+            and not self.initialization_error
+        ):
+            self.initialization_error = apt_exp_control_func.initialization_signal_generator(self.variables, self.log_apt)
             if not self.initialization_error:
                 self.initialization_signal_generator = True
 
@@ -378,20 +379,24 @@ class APT_Exp_Control:
                     baudrate=115200,
                     bytesize=serial.EIGHTBITS,
                     parity=serial.PARITY_NONE,
-                    stopbits=serial.STOPBITS_ONE
+                    stopbits=serial.STOPBITS_ONE,
                 )
             except Exception as e:
                 print('Can not open the COM port for V_dc')
                 print(e)
                 self.initialization_v_dc = True
             if not self.initialization_error:
-                self.initialization_error = apt_exp_control_func.initialization_v_dc(self.com_port_v_dc, self.log_apt,
-                                                                                     self.variables)
+                self.initialization_error = apt_exp_control_func.initialization_v_dc(
+                    self.com_port_v_dc, self.log_apt, self.variables
+                )
             if not self.initialization_error:
                 self.initialization_v_dc = True
 
-        if self._is_config_enabled('v_p') and not self._is_override_disabled("v_p") and \
-                self.pulse_mode in ['Voltage', 'VoltageLaser']:
+        if (
+            self._is_config_enabled('v_p')
+            and not self._is_override_disabled("v_p")
+            and self.pulse_mode in ['Voltage', 'VoltageLaser']
+        ):
             # Initialize pulser
             try:
                 self.com_port_v_p = serial.Serial(self.variables.COM_PORT_V_p, baudrate=115200, timeout=0.01)
@@ -400,14 +405,14 @@ class APT_Exp_Control:
                 print(e)
                 self.initialization_v_p = True
             if not self.initialization_error:
-                self.initialization_error = apt_exp_control_func.initialization_v_p(self.com_port_v_p, self.log_apt,
-                                                                                    self.variables)
+                self.initialization_error = apt_exp_control_func.initialization_v_p(
+                    self.com_port_v_p, self.log_apt, self.variables
+                )
 
             if not self.initialization_error:
                 self.initialization_v_p = True
         elif self._is_config_enabled('laser') and self.pulse_mode in ['Laser', 'VoltageLaser']:
-            print(f"{initialize_devices.bcolors.WARNING}Warning: turn on the laser manually"
-                  f"{initialize_devices.bcolors.ENDC}")
+            print(f"{initialize_devices.bcolors.WARNING}Warning: turn on the laser manually{initialize_devices.bcolors.ENDC}")
 
         self.variables.specimen_voltage = self.variables.vdc_min
         if self.pulse_mode in ['Voltage', 'VoltageLaser']:
@@ -436,8 +441,10 @@ class APT_Exp_Control:
                     time.sleep(0.1)
             elif self.pulse_mode in ['Laser', 'VoltageLaser']:
                 if self._is_config_enabled('laser'):
-                    print(f"{initialize_devices.bcolors.WARNING}Warning: enable output of laser manually"
-                          f"{initialize_devices.bcolors.ENDC}")
+                    print(
+                        f"{initialize_devices.bcolors.WARNING}Warning: enable output of laser manually"
+                        f"{initialize_devices.bcolors.ENDC}"
+                    )
             if self._vdc_active():
                 apt_exp_control_func.command_v_dc(self.com_port_v_dc, "F1")
                 time.sleep(0.1)
@@ -452,16 +459,11 @@ class APT_Exp_Control:
         # Loaded from config.toml and initialised once; the per-iteration
         # branch above reads them.  `_switch_control_algorithm` rebuilds the
         # PID object on demand when the user changes mode mid-run.
-        self._p_aggressive_factor = float(self.conf.get(
-            'control_p_aggressive_up_factor', 3.0))
-        self._adapt_min_factor = float(self.conf.get(
-            'control_adaptive_min_factor', 0.3))
-        self._adapt_max_factor = float(self.conf.get(
-            'control_adaptive_max_factor', 3.0))
-        self._adapt_grow_threshold = int(self.conf.get(
-            'control_adaptive_grow_threshold', 5))
-        self._adapt_shrink_threshold = int(self.conf.get(
-            'control_adaptive_shrink_threshold', 3))
+        self._p_aggressive_factor = float(self.conf.get('control_p_aggressive_up_factor', 3.0))
+        self._adapt_min_factor = float(self.conf.get('control_adaptive_min_factor', 0.3))
+        self._adapt_max_factor = float(self.conf.get('control_adaptive_max_factor', 3.0))
+        self._adapt_grow_threshold = int(self.conf.get('control_adaptive_grow_threshold', 5))
+        self._adapt_shrink_threshold = int(self.conf.get('control_adaptive_shrink_threshold', 3))
         self._adapt_factor = 1.0
         self._adapt_same_sign = 0
         self._adapt_flip_count = 0
@@ -470,8 +472,7 @@ class APT_Exp_Control:
         self._pid_kp = float(self.conf.get('control_pid_kp', 1.0))
         self._pid_ki = float(self.conf.get('control_pid_ki', 0.1))
         self._pid_kd = float(self.conf.get('control_pid_kd', 0.05))
-        self._pid_max_step = float(self.conf.get(
-            'control_pid_max_step_v', 40.0))
+        self._pid_max_step = float(self.conf.get('control_pid_max_step_v', 40.0))
         self.pid = None
         if self.control_algorithm == 'PID':
             self._build_pid()
@@ -539,11 +540,10 @@ class APT_Exp_Control:
                         if not self.initialization_v_p and not self._is_override_disabled("v_p"):
                             try:
                                 # Initialize pulser
-                                self.com_port_v_p = serial.Serial(self.variables.COM_PORT_V_p, baudrate=115200,
-                                                                  timeout=0.01)
-                                self.initialization_error = apt_exp_control_func.initialization_v_p(self.com_port_v_p,
-                                                                                                    self.log_apt,
-                                                                                                    self.variables)
+                                self.com_port_v_p = serial.Serial(self.variables.COM_PORT_V_p, baudrate=115200, timeout=0.01)
+                                self.initialization_error = apt_exp_control_func.initialization_v_p(
+                                    self.com_port_v_p, self.log_apt, self.variables
+                                )
                                 self.initialization_v_p = True
                                 apt_exp_control_func.command_v_p(self.com_port_v_p, 'OUTPut ON')
                             except Exception as e:
@@ -552,15 +552,14 @@ class APT_Exp_Control:
                         # if the pulse mode is changed from voltage to laser, we need to turn on the signal generator
                         if not self.initialization_signal_generator and not self._is_override_disabled("signal_generator"):
                             self.initialization_error = apt_exp_control_func.initialization_signal_generator(
-                                self.variables,
-                                self.log_apt)
+                                self.variables, self.log_apt
+                            )
                             if not self.initialization_error:
                                 self.initialization_signal_generator = True
                         # set the v_dc and v_p
                         self.pulse_voltage_min = self.variables.v_p_min / self.pulse_amp_per_supply_voltage
                         self.pulse_voltage_max = self.variables.v_p_max / self.pulse_amp_per_supply_voltage
-                        start_vp = (self.specimen_voltage * (self.pulse_fraction / 100) /
-                                    self.pulse_amp_per_supply_voltage)
+                        start_vp = self.specimen_voltage * (self.pulse_fraction / 100) / self.pulse_amp_per_supply_voltage
                         if start_vp < self.pulse_voltage_min:
                             start_vp = self.variables.v_p_min / self.variables.pulse_amp_per_supply_voltage
 
@@ -585,12 +584,12 @@ class APT_Exp_Control:
                             for _ in range(10):
                                 self.specimen_voltage -= decrement_vol
                                 if self._vdc_active():
-                                    apt_exp_control_func.command_v_dc(self.com_port_v_dc,
-                                                                      ">S0 %s" % self.specimen_voltage)
+                                    apt_exp_control_func.command_v_dc(self.com_port_v_dc, ">S0 %s" % self.specimen_voltage)
                                 time.sleep(0.3)
                             if self._vdc_active() and self.pulse_mode in ['Voltage', 'VoltageLaser']:
-                                new_vp = (self.specimen_voltage * (self.pulse_fraction / 100) /
-                                          self.pulse_amp_per_supply_voltage)
+                                new_vp = (
+                                    self.specimen_voltage * (self.pulse_fraction / 100) / self.pulse_amp_per_supply_voltage
+                                )
                                 if self.pulse_voltage_max > new_vp > self.pulse_voltage_min and self._vp_active():
                                     apt_exp_control_func.command_v_p(self.com_port_v_p, 'VOLT %s' % new_vp)
                                     self.pulse_voltage = new_vp * self.pulse_amp_per_supply_voltage
@@ -600,7 +599,6 @@ class APT_Exp_Control:
                             self.variables.specimen_voltage_plot = self.specimen_voltage
                             self.variables.flag_new_min_voltage = False
 
-
                 # main loop function
                 self.main_ex_loop()
 
@@ -609,10 +607,10 @@ class APT_Exp_Control:
 
                 # Measure time
                 current_time = datetime.datetime.now()
-                current_time_with_microseconds = current_time.strftime(
-                    "%Y-%m-%d %H:%M:%S.%f")  # Format with microseconds
-                current_time_unix = datetime.datetime.strptime(current_time_with_microseconds,
-                                                               "%Y-%m-%d %H:%M:%S.%f").timestamp()
+                current_time_with_microseconds = current_time.strftime("%Y-%m-%d %H:%M:%S.%f")  # Format with microseconds
+                current_time_unix = datetime.datetime.strptime(
+                    current_time_with_microseconds, "%Y-%m-%d %H:%M:%S.%f"
+                ).timestamp()
                 time_ex.append(current_time_unix)
 
                 if self.variables.stop_flag:
@@ -703,11 +701,14 @@ class APT_Exp_Control:
         time.sleep(1)
 
         self.log_apt.info('Experiment is finished')
-        print("Experiment process: Experiment loop took longer than %s Millisecond for %s times out of %s "
-              "iteration" % (int(1000 / self.variables.ex_freq), index_time, steps))
+        print(
+            "Experiment process: Experiment loop took longer than %s Millisecond for %s times out of %s "
+            "iteration" % (int(1000 / self.variables.ex_freq), index_time, steps)
+        )
         self.log_apt.warning(
             'Experiment loop took longer than %s (ms) for %s times out of %s iteration.'
-            % (int(1000 / self.variables.ex_freq), index_time, steps))
+            % (int(1000 / self.variables.ex_freq), index_time, steps)
+        )
 
         if self.variables.counter_source == 'TDC' and self.detector_runtime.tdc_process is not None:
             print('Waiting for TDC process to be finished for maximum 60 seconds...')
@@ -874,8 +875,6 @@ def run_experiment(variables, conf, experiment_finished_event, x_plot, y_plot, t
         # Logging setup must never block the experiment from starting.
         print(f"[apt] Could not initialise application logging: {_exc}")
 
-    apt_exp_control = APT_Exp_Control(variables, conf, experiment_finished_event, x_plot, y_plot, t_plot,
-                                      main_v_dc_plot)
+    apt_exp_control = APT_Exp_Control(variables, conf, experiment_finished_event, x_plot, y_plot, t_plot, main_v_dc_plot)
 
     apt_exp_control.run_experiment()
-

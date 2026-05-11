@@ -213,7 +213,9 @@ def resolve_deconvolution_components(range_data, window_range, candidate_text=""
 
     components = manual_components + rows
     if not components:
-        raise ValueError("No deconvolution candidates were found. Load a range table or enter manual candidates like Cr@52.0, Mo@52.9")
+        raise ValueError(
+            "No deconvolution candidates were found. Load a range table or enter manual candidates like Cr@52.0, Mo@52.9"
+        )
 
     dedup = {}
     for comp in components:

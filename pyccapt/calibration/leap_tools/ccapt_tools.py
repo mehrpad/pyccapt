@@ -48,8 +48,20 @@ def ccapt_to_epos(data, path=None, name=None, chunk_size=1_000_000):
     """
 
     dd = data[
-        ['x (nm)', 'y (nm)', 'z (nm)', 'mc (Da)', 't (ns)', 'high_voltage (V)', 'pulse_v (V)', 'x_det (cm)',
-         'y_det (cm)', 'delta_p', 'multi']]
+        [
+            'x (nm)',
+            'y (nm)',
+            'z (nm)',
+            'mc (Da)',
+            't (ns)',
+            'high_voltage (V)',
+            'pulse_v (V)',
+            'x_det (cm)',
+            'y_det (cm)',
+            'delta_p',
+            'multi',
+        ]
+    ]
     dd['x_det (cm)'] = dd['x_det (cm)'] * 10
     dd['y_det (cm)'] = dd['y_det (cm)'] * 10
 
@@ -60,7 +72,7 @@ def ccapt_to_epos(data, path=None, name=None, chunk_size=1_000_000):
     if name is not None:
         with open(path + name, 'w+b') as f:
             for i in range(0, len(dd), chunk_size):
-                chunk = dd.iloc[i:i + chunk_size]
+                chunk = dd.iloc[i : i + chunk_size]
                 records = chunk.to_records(index=False)
                 list_records = list(records)
                 d = tuple(chain(*list_records))
@@ -69,14 +81,13 @@ def ccapt_to_epos(data, path=None, name=None, chunk_size=1_000_000):
     else:
         epos = b''
         for i in range(0, len(dd), chunk_size):
-            chunk = dd.iloc[i:i + chunk_size]
+            chunk = dd.iloc[i : i + chunk_size]
             records = chunk.to_records(index=False)
             list_records = list(records)
             d = tuple(chain(*list_records))
             epos_chunk = struct.pack('>' + 'fffffffffII' * len(chunk), *d)
             epos += epos_chunk
         return epos
-
 
 
 def pos_to_ccapt(file_path):
@@ -92,22 +103,25 @@ def pos_to_ccapt(file_path):
     """
     pos = leap_tools.read_pos(file_path)
     length = len(pos)
-    ccapt = pd.DataFrame({'x (nm)': pos['x (nm)'].to_numpy(dtype=np.float32, copy=False),
-                          'y (nm)': pos['y (nm)'].to_numpy(dtype=np.float32, copy=False),
-                          'z (nm)': pos['z (nm)'].to_numpy(dtype=np.float32, copy=False),
-                          'mc (Da)': pos['m/n (Da)'].to_numpy(dtype=np.float32, copy=False),
-                          'mc_uc (Da)': np.zeros(length, dtype=np.float32),
-                          'high_voltage (V)': np.zeros(length, dtype=np.float32),
-                          'pulse_v (V)': np.zeros(length, dtype=np.float32),
-                          'pulse_l (pJ)': np.zeros(length, dtype=np.float32),
-                          't (ns)': np.zeros(length, dtype=np.float32),
-                          't_c (ns)': np.zeros(length, dtype=np.float32),
-                          'x_det (cm)': np.zeros(length, dtype=np.float32),
-                          'y_det (cm)': np.zeros(length, dtype=np.float32),
-                          'delta_p': np.zeros(length, dtype=np.int32),
-                          'multi': np.zeros(length, dtype=np.int32),
-                          'start_counter': np.zeros(length, dtype=np.int32),
-                          })
+    ccapt = pd.DataFrame(
+        {
+            'x (nm)': pos['x (nm)'].to_numpy(dtype=np.float32, copy=False),
+            'y (nm)': pos['y (nm)'].to_numpy(dtype=np.float32, copy=False),
+            'z (nm)': pos['z (nm)'].to_numpy(dtype=np.float32, copy=False),
+            'mc (Da)': pos['m/n (Da)'].to_numpy(dtype=np.float32, copy=False),
+            'mc_uc (Da)': np.zeros(length, dtype=np.float32),
+            'high_voltage (V)': np.zeros(length, dtype=np.float32),
+            'pulse_v (V)': np.zeros(length, dtype=np.float32),
+            'pulse_l (pJ)': np.zeros(length, dtype=np.float32),
+            't (ns)': np.zeros(length, dtype=np.float32),
+            't_c (ns)': np.zeros(length, dtype=np.float32),
+            'x_det (cm)': np.zeros(length, dtype=np.float32),
+            'y_det (cm)': np.zeros(length, dtype=np.float32),
+            'delta_p': np.zeros(length, dtype=np.int32),
+            'multi': np.zeros(length, dtype=np.int32),
+            'start_counter': np.zeros(length, dtype=np.int32),
+        }
+    )
     return ccapt
 
 
@@ -124,22 +138,25 @@ def epos_to_ccapt(file_path):
     """
     epos = leap_tools.read_epos(file_path)
     length = len(epos)
-    ccapt = pd.DataFrame({'x (nm)': epos['x (nm)'].to_numpy(dtype=np.float32, copy=False),
-                          'y (nm)': epos['y (nm)'].to_numpy(dtype=np.float32, copy=False),
-                          'z (nm)': epos['z (nm)'].to_numpy(dtype=np.float32, copy=False),
-                          'mc (Da)': epos['m/n (Da)'].to_numpy(dtype=np.float32, copy=False),
-                          'mc_uc (Da)': np.zeros(length, dtype=np.float32),
-                          'high_voltage (V)': epos['HV_DC (V)'].to_numpy(dtype=np.float32, copy=False),
-                          'pulse_v (V)': epos['pulse (V)'].to_numpy(dtype=np.float32, copy=False),
-                          'pulse_l (pJ)': np.zeros(length, dtype=np.float32),
-                          't (ns)': epos['TOF (ns)'].to_numpy(dtype=np.float32, copy=False),
-                          't_c (ns)': np.zeros(length, dtype=np.float32),
-                          'x_det (cm)': epos['det_x (mm)'].to_numpy(dtype=np.float32, copy=False) / 10,
-                          'y_det (cm)': epos['det_y (mm)'].to_numpy(dtype=np.float32, copy=False) / 10,
-                          'delta_p': epos['pslep'].to_numpy(dtype=np.int32, copy=False),
-                          'multi': epos['ipp'].to_numpy(dtype=np.int32, copy=False),
-                          'start_counter': np.zeros(length, dtype=np.int32),
-                          })
+    ccapt = pd.DataFrame(
+        {
+            'x (nm)': epos['x (nm)'].to_numpy(dtype=np.float32, copy=False),
+            'y (nm)': epos['y (nm)'].to_numpy(dtype=np.float32, copy=False),
+            'z (nm)': epos['z (nm)'].to_numpy(dtype=np.float32, copy=False),
+            'mc (Da)': epos['m/n (Da)'].to_numpy(dtype=np.float32, copy=False),
+            'mc_uc (Da)': np.zeros(length, dtype=np.float32),
+            'high_voltage (V)': epos['HV_DC (V)'].to_numpy(dtype=np.float32, copy=False),
+            'pulse_v (V)': epos['pulse (V)'].to_numpy(dtype=np.float32, copy=False),
+            'pulse_l (pJ)': np.zeros(length, dtype=np.float32),
+            't (ns)': epos['TOF (ns)'].to_numpy(dtype=np.float32, copy=False),
+            't_c (ns)': np.zeros(length, dtype=np.float32),
+            'x_det (cm)': epos['det_x (mm)'].to_numpy(dtype=np.float32, copy=False) / 10,
+            'y_det (cm)': epos['det_y (mm)'].to_numpy(dtype=np.float32, copy=False) / 10,
+            'delta_p': epos['pslep'].to_numpy(dtype=np.int32, copy=False),
+            'multi': epos['ipp'].to_numpy(dtype=np.int32, copy=False),
+            'start_counter': np.zeros(length, dtype=np.int32),
+        }
+    )
     return ccapt
 
 
@@ -161,44 +178,48 @@ def epos_lazy_to_ccapt_chunks(epos_table, chunk_size: int = 1 << 20):
     n_rows = epos_table.n_rows
     if n_rows == 0:
         # Yield one empty frame so downstream writers see the right schema.
-        yield pd.DataFrame({
-            'x (nm)': np.empty(0, dtype=np.float32),
-            'y (nm)': np.empty(0, dtype=np.float32),
-            'z (nm)': np.empty(0, dtype=np.float32),
-            'mc (Da)': np.empty(0, dtype=np.float32),
-            'mc_uc (Da)': np.empty(0, dtype=np.float32),
-            'high_voltage (V)': np.empty(0, dtype=np.float32),
-            'pulse_v (V)': np.empty(0, dtype=np.float32),
-            'pulse_l (pJ)': np.empty(0, dtype=np.float32),
-            't (ns)': np.empty(0, dtype=np.float32),
-            't_c (ns)': np.empty(0, dtype=np.float32),
-            'x_det (cm)': np.empty(0, dtype=np.float32),
-            'y_det (cm)': np.empty(0, dtype=np.float32),
-            'delta_p': np.empty(0, dtype=np.int32),
-            'multi': np.empty(0, dtype=np.int32),
-            'start_counter': np.empty(0, dtype=np.int32),
-        })
+        yield pd.DataFrame(
+            {
+                'x (nm)': np.empty(0, dtype=np.float32),
+                'y (nm)': np.empty(0, dtype=np.float32),
+                'z (nm)': np.empty(0, dtype=np.float32),
+                'mc (Da)': np.empty(0, dtype=np.float32),
+                'mc_uc (Da)': np.empty(0, dtype=np.float32),
+                'high_voltage (V)': np.empty(0, dtype=np.float32),
+                'pulse_v (V)': np.empty(0, dtype=np.float32),
+                'pulse_l (pJ)': np.empty(0, dtype=np.float32),
+                't (ns)': np.empty(0, dtype=np.float32),
+                't_c (ns)': np.empty(0, dtype=np.float32),
+                'x_det (cm)': np.empty(0, dtype=np.float32),
+                'y_det (cm)': np.empty(0, dtype=np.float32),
+                'delta_p': np.empty(0, dtype=np.int32),
+                'multi': np.empty(0, dtype=np.int32),
+                'start_counter': np.empty(0, dtype=np.int32),
+            }
+        )
         return
     for start in range(0, n_rows, chunk_size):
         stop = min(start + chunk_size, n_rows)
         length = stop - start
-        yield pd.DataFrame({
-            'x (nm)': epos_table['x (nm)'][start:stop].astype(np.float32, copy=False),
-            'y (nm)': epos_table['y (nm)'][start:stop].astype(np.float32, copy=False),
-            'z (nm)': epos_table['z (nm)'][start:stop].astype(np.float32, copy=False),
-            'mc (Da)': epos_table['m/n (Da)'][start:stop].astype(np.float32, copy=False),
-            'mc_uc (Da)': np.zeros(length, dtype=np.float32),
-            'high_voltage (V)': epos_table['HV_DC (V)'][start:stop].astype(np.float32, copy=False),
-            'pulse_v (V)': epos_table['pulse (V)'][start:stop].astype(np.float32, copy=False),
-            'pulse_l (pJ)': np.zeros(length, dtype=np.float32),
-            't (ns)': epos_table['TOF (ns)'][start:stop].astype(np.float32, copy=False),
-            't_c (ns)': np.zeros(length, dtype=np.float32),
-            'x_det (cm)': epos_table['det_x (mm)'][start:stop].astype(np.float32, copy=False) / 10.0,
-            'y_det (cm)': epos_table['det_y (mm)'][start:stop].astype(np.float32, copy=False) / 10.0,
-            'delta_p': epos_table['pslep'][start:stop].astype(np.int32, copy=False),
-            'multi': epos_table['ipp'][start:stop].astype(np.int32, copy=False),
-            'start_counter': np.zeros(length, dtype=np.int32),
-        })
+        yield pd.DataFrame(
+            {
+                'x (nm)': epos_table['x (nm)'][start:stop].astype(np.float32, copy=False),
+                'y (nm)': epos_table['y (nm)'][start:stop].astype(np.float32, copy=False),
+                'z (nm)': epos_table['z (nm)'][start:stop].astype(np.float32, copy=False),
+                'mc (Da)': epos_table['m/n (Da)'][start:stop].astype(np.float32, copy=False),
+                'mc_uc (Da)': np.zeros(length, dtype=np.float32),
+                'high_voltage (V)': epos_table['HV_DC (V)'][start:stop].astype(np.float32, copy=False),
+                'pulse_v (V)': epos_table['pulse (V)'][start:stop].astype(np.float32, copy=False),
+                'pulse_l (pJ)': np.zeros(length, dtype=np.float32),
+                't (ns)': epos_table['TOF (ns)'][start:stop].astype(np.float32, copy=False),
+                't_c (ns)': np.zeros(length, dtype=np.float32),
+                'x_det (cm)': epos_table['det_x (mm)'][start:stop].astype(np.float32, copy=False) / 10.0,
+                'y_det (cm)': epos_table['det_y (mm)'][start:stop].astype(np.float32, copy=False) / 10.0,
+                'delta_p': epos_table['pslep'][start:stop].astype(np.int32, copy=False),
+                'multi': epos_table['ipp'][start:stop].astype(np.int32, copy=False),
+                'start_counter': np.zeros(length, dtype=np.int32),
+            }
+        )
 
 
 def apt_to_ccapt(file_path):

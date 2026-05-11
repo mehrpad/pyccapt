@@ -1,4 +1,4 @@
-﻿"""Runtime helpers for control GUI entrypoints and experiment bootstrap."""
+"""Runtime helpers for control GUI entrypoints and experiment bootstrap."""
 
 from __future__ import annotations
 
@@ -55,9 +55,7 @@ def find_project_root(start: Path | None = None) -> Path:
             if (root / "config.toml").exists() and (root / "control").exists():
                 return root
 
-    raise FileNotFoundError(
-        f"Could not locate project root from {start_path}. Expected config.toml."
-    )
+    raise FileNotFoundError(f"Could not locate project root from {start_path}. Expected config.toml.")
 
 
 def project_path(*parts: str, root: Path | None = None) -> Path:
@@ -83,17 +81,13 @@ def load_project_config(
     if config_name is not None:
         config_path = project_root / config_name
         if config_path.suffix.lower() != ".toml":
-            raise ValueError(
-                f"Unsupported config file {config_path.name}. Control config must be TOML (config.toml)."
-            )
+            raise ValueError(f"Unsupported config file {config_path.name}. Control config must be TOML (config.toml).")
     else:
         toml_path = project_root / "config.toml"
         if toml_path.exists():
             config_path = toml_path
         else:
-            raise FileNotFoundError(
-                f"No config file found in {project_root}. Expected config.toml."
-            )
+            raise FileNotFoundError(f"No config file found in {project_root}. Expected config.toml.")
 
     conf = read_files.load_config_file(config_path)
     if change_cwd:
@@ -102,52 +96,47 @@ def load_project_config(
 
 
 def create_shared_context(conf: dict[str, Any]) -> SharedContext:
-	"""Create manager namespace, shared variables, and plot ring buffers.
+    """Create manager namespace, shared variables, and plot ring buffers.
 
-	The ring buffers replace the old multiprocessing.Queue plot pipeline:
-	bounded memory (4 MB / signal), zero-copy reads, no pickling per
-	chunk.  Owner is the parent process; child processes attach to the
-	same shared blocks by name.
-	"""
+    The ring buffers replace the old multiprocessing.Queue plot pipeline:
+    bounded memory (4 MB / signal), zero-copy reads, no pickling per
+    chunk.  Owner is the parent process; child processes attach to the
+    same shared blocks by name.
+    """
     manager = multiprocessing.Manager()
     namespace = manager.Namespace()
     variables = share_variables.Variables(conf, namespace)
 
-	# Unique per-launch suffix so we never collide with a stale block
-	# left behind by a crashed previous run.
-	suffix = uuid.uuid4().hex[:8]
-	x_plot = SharedRingBuffer.create(f"pyccapt_xplot_{suffix}",
-	                                 _PLOT_BUFFER_CAPACITY, "float32")
-	y_plot = SharedRingBuffer.create(f"pyccapt_yplot_{suffix}",
-	                                 _PLOT_BUFFER_CAPACITY, "float32")
-	t_plot = SharedRingBuffer.create(f"pyccapt_tplot_{suffix}",
-	                                 _PLOT_BUFFER_CAPACITY, "float32")
-	main_v_dc_plot = SharedRingBuffer.create(f"pyccapt_vplot_{suffix}",
-	                                         _PLOT_BUFFER_CAPACITY, "float32")
+    # Unique per-launch suffix so we never collide with a stale block
+    # left behind by a crashed previous run.
+    suffix = uuid.uuid4().hex[:8]
+    x_plot = SharedRingBuffer.create(f"pyccapt_xplot_{suffix}", _PLOT_BUFFER_CAPACITY, "float32")
+    y_plot = SharedRingBuffer.create(f"pyccapt_yplot_{suffix}", _PLOT_BUFFER_CAPACITY, "float32")
+    t_plot = SharedRingBuffer.create(f"pyccapt_tplot_{suffix}", _PLOT_BUFFER_CAPACITY, "float32")
+    main_v_dc_plot = SharedRingBuffer.create(f"pyccapt_vplot_{suffix}", _PLOT_BUFFER_CAPACITY, "float32")
 
     return SharedContext(
         manager=manager,
         namespace=namespace,
         variables=variables,
-	    x_plot=x_plot,
-	    y_plot=y_plot,
-	    t_plot=t_plot,
-	    main_v_dc_plot=main_v_dc_plot,
+        x_plot=x_plot,
+        y_plot=y_plot,
+        t_plot=t_plot,
+        main_v_dc_plot=main_v_dc_plot,
     )
 
 
 def release_shared_context(context: SharedContext) -> None:
-	"""Tear down ring buffers and the manager.  Call on full shutdown."""
-	for buf in (context.x_plot, context.y_plot, context.t_plot,
-	            context.main_v_dc_plot):
-		try:
-			buf.unlink()
-		except Exception:
-			pass
-	try:
-		context.manager.shutdown()
-	except Exception:
-		pass
+    """Tear down ring buffers and the manager.  Call on full shutdown."""
+    for buf in (context.x_plot, context.y_plot, context.t_plot, context.main_v_dc_plot):
+        try:
+            buf.unlink()
+        except Exception:
+            pass
+    try:
+        context.manager.shutdown()
+    except Exception:
+        pass
 
 
 def ensure_counter_file(root: Path | None = None) -> Path:
@@ -156,4 +145,3 @@ def ensure_counter_file(root: Path | None = None) -> Path:
     if not counter_path.exists():
         counter_path.write_text("1", encoding="utf-8")
     return counter_path
-

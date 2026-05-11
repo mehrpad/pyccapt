@@ -1,4 +1,4 @@
-﻿import functools
+import functools
 
 import ipywidgets as widgets
 import numpy as np
@@ -31,15 +31,33 @@ def call_ion_list(variables, selector, path='../../../files/'):
     elementMassList = dataframe['weight']
     abundanceList = dataframe['abundance']
 
-
     elements = list(zip(elementsList, elementIsotopeList, elementMassList, abundanceList))
     dropdownList = []
     for element in elements:
-        tupleElement = ("{} ({}) ({:.2f})".format(element[0], element[1], element[3]),
-                        "{}({})[{}]".format(element[0], element[1], element[2]))
+        tupleElement = (
+            "{} ({}) ({:.2f})".format(element[0], element[1], element[3]),
+            "{}({})[{}]".format(element[0], element[1], element[2]),
+        )
         dropdownList.append(tupleElement)
 
-    chargeList = [(1, 1,), (2, 2,), (3, 3,), (4, 4,)]
+    chargeList = [
+        (
+            1,
+            1,
+        ),
+        (
+            2,
+            2,
+        ),
+        (
+            3,
+            3,
+        ),
+        (
+            4,
+            4,
+        ),
+    ]
     dropdown = wd.dropdownWidget(dropdownList, "Elements")
     dropdown.observe(wd.on_change)
 
@@ -91,13 +109,9 @@ def call_ion_list(variables, selector, path='../../../files/'):
 
     # Create a button widget to trigger the function
     button_plot = widgets.Button(description="Plot")
-    reset_back_button = widgets.Button(
-        description='Reset back correction',
-        layout=label_layout
-    )
+    reset_back_button = widgets.Button(description='Reset back correction', layout=label_layout)
     button_fit = widgets.Button(description="Fit")
-    calibration_mode = widgets.Dropdown(
-        options=[('mass_to_charge', 'mc_calib'), ('time_of_flight', 'tof_calib')])
+    calibration_mode = widgets.Dropdown(options=[('mass_to_charge', 'mc_calib'), ('time_of_flight', 'tof_calib')])
 
     def parametric_fit(variables, calibration_mode, out_mc):
 
@@ -109,12 +123,14 @@ def call_ion_list(variables, selector, path='../../../files/'):
                 print('Number of peaks and number of materials are not equal')
         else:
             if calibration_mode.value == 'tof_calib':
+
                 def parametric(t, t0, c, d):
                     return c * ((t - t0) ** 2) + d * t
 
                 def parametric_calib(t, mc_ideal):
                     fitresult, _ = curve_fit(parametric, t, mc_ideal, maxfev=2000)
                     return fitresult
+
                 if len(peaks_chos) > 2:
                     fitresult = parametric_calib(peaks_chos, variables.list_material)
 
@@ -123,17 +139,22 @@ def call_ion_list(variables, selector, path='../../../files/'):
                     print('Number of peaks is less than 3. Select more peaks at least 3 peaks')
 
             elif calibration_mode.value == 'mc_calib':
+
                 def shift_3(mc, a, b, c):
-                    return mc ** a + b * mc + c
+                    return mc**a + b * mc + c
                     # return a * mc + b
+
                 def shift_calib_3(mc, mc_ideal):
                     fitresult, _ = curve_fit(shift_3, mc, mc_ideal, maxfev=2000)
                     return fitresult
+
                 def shift_2(mc, a, b):
-                    return mc ** a + b
+                    return mc**a + b
+
                 def shift_calib_2(mc, mc_ideal):
                     fitresult, _ = curve_fit(shift_2, mc, mc_ideal, maxfev=2000)
                     return fitresult
+
                 if len(peaks_chos) > 2:
                     fitresult = shift_calib_3(peaks_chos, variables.list_material)
                     variables.mc_calib = shift_3(variables.mc_calib_backup, *fitresult)
@@ -165,12 +186,17 @@ def call_ion_list(variables, selector, path='../../../files/'):
         with out_mc:  # Capture the output within the 'out' widget
             # Call the function
             mc_hist = mc_plot.AptHistPlotter(variables.mc_calib[variables.mc_calib < lim_value], variables)
-            mc_hist.plot_histogram(bin_width=bin_size_value, normalize=mode_value, label='mc', steps='stepfilled',
-                                   log=log_value, fig_size=figure_size)
+            mc_hist.plot_histogram(
+                bin_width=bin_size_value,
+                normalize=mode_value,
+                label='mc',
+                steps='stepfilled',
+                log=log_value,
+                fig_size=figure_size,
+            )
 
             if mode_value != 'normalized':
-                mc_hist.find_peaks_and_widths(prominence=prominence_value, distance=distance_value,
-                                              percent=percent_value)
+                mc_hist.find_peaks_and_widths(prominence=prominence_value, distance=distance_value, percent=percent_value)
                 mc_hist.plot_peaks()
                 mc_hist.plot_hist_info_legend(label=target_value, background=None, loc='right')
 
@@ -199,16 +225,27 @@ def call_ion_list(variables, selector, path='../../../files/'):
             # Call the function
             if target_value == 'mc_calib':
                 mc_hist = mc_plot.AptHistPlotter(variables.mc_calib[variables.mc_calib < lim_value], variables)
-                mc_hist.plot_histogram(bin_width=bin_size_value, normalize=mode_value, label='mc', steps='stepfilled',
-                                       log=log_value, fig_size=figure_size)
+                mc_hist.plot_histogram(
+                    bin_width=bin_size_value,
+                    normalize=mode_value,
+                    label='mc',
+                    steps='stepfilled',
+                    log=log_value,
+                    fig_size=figure_size,
+                )
             elif target_value == 'tof_calib':
                 mc_hist = mc_plot.AptHistPlotter(variables.dld_t_calib[variables.dld_t_calib < lim_value], variables)
-                mc_hist.plot_histogram(bin_width=bin_size_value, normalize=mode_value, label='tof', steps='stepfilled',
-                                       log=log_value, fig_size=figure_size)
+                mc_hist.plot_histogram(
+                    bin_width=bin_size_value,
+                    normalize=mode_value,
+                    label='tof',
+                    steps='stepfilled',
+                    log=log_value,
+                    fig_size=figure_size,
+                )
 
             if not mode_value:
-                mc_hist.find_peaks_and_widths(prominence=prominence_value, distance=distance_value,
-                                              percent=percent_value)
+                mc_hist.find_peaks_and_widths(prominence=prominence_value, distance=distance_value, percent=percent_value)
                 mc_hist.plot_peaks()
                 mc_hist.plot_hist_info_legend(label='mc', background=None, loc='right')
 
@@ -223,20 +260,22 @@ def call_ion_list(variables, selector, path='../../../files/'):
     reset_back_button.on_click(lambda b: reset_back_on_click(variables))
     button_plot_result.on_click(lambda b: plot_fit_result(b, variables, calibration_mode, out_mc))
 
-    widget_container = widgets.VBox([
-        widgets.HBox([widgets.Label(value="Calibration mde:", layout=label_layout), calibration_mode]),
-        widgets.HBox([widgets.Label(value="Bin Size:", layout=label_layout), bin_size_widget]),
-        widgets.HBox([widgets.Label(value="Log:", layout=label_layout), log_widget]),
-        widgets.HBox([widgets.Label(value="Normalize:", layout=label_layout), mode_widget]),
-        widgets.HBox([widgets.Label(value="Prominence:", layout=label_layout), prominence_widget]),
-        widgets.HBox([widgets.Label(value="Distance:", layout=label_layout), distance_widget]),
-        widgets.HBox([widgets.Label(value="Lim:", layout=label_layout), lim_widget]),
-        widgets.HBox([widgets.Label(value="Percent:", layout=label_layout), percent_widget]),
-        widgets.HBox([widgets.Label(value="Figname:", layout=label_layout), figname_widget]),
-        widgets.HBox([widgets.Label(value="Fig. size W:", layout=label_layout), figure_mc_size_x]),
-        widgets.HBox([widgets.Label(value="Fig. size H:", layout=label_layout), figure_mc_size_y]),
-        widgets.HBox([button_plot, button_fit, button_plot_result, reset_back_button]),
-    ])
+    widget_container = widgets.VBox(
+        [
+            widgets.HBox([widgets.Label(value="Calibration mde:", layout=label_layout), calibration_mode]),
+            widgets.HBox([widgets.Label(value="Bin Size:", layout=label_layout), bin_size_widget]),
+            widgets.HBox([widgets.Label(value="Log:", layout=label_layout), log_widget]),
+            widgets.HBox([widgets.Label(value="Normalize:", layout=label_layout), mode_widget]),
+            widgets.HBox([widgets.Label(value="Prominence:", layout=label_layout), prominence_widget]),
+            widgets.HBox([widgets.Label(value="Distance:", layout=label_layout), distance_widget]),
+            widgets.HBox([widgets.Label(value="Lim:", layout=label_layout), lim_widget]),
+            widgets.HBox([widgets.Label(value="Percent:", layout=label_layout), percent_widget]),
+            widgets.HBox([widgets.Label(value="Figname:", layout=label_layout), figname_widget]),
+            widgets.HBox([widgets.Label(value="Fig. size W:", layout=label_layout), figure_mc_size_x]),
+            widgets.HBox([widgets.Label(value="Fig. size H:", layout=label_layout), figure_mc_size_y]),
+            widgets.HBox([button_plot, button_fit, button_plot_result, reset_back_button]),
+        ]
+    )
 
     ion_list_box = widgets.VBox([dropdown, chargeDropdown, buttonAdd, buttonDelete, buttonReset])
 
@@ -255,4 +294,3 @@ def call_ion_list(variables, selector, path='../../../files/'):
 def reset_back_on_click(variables):
     variables.dld_t_calib = np.copy(variables.dld_t_calib_backup)
     variables.mc_calib = np.copy(variables.mc_calib_backup)
-

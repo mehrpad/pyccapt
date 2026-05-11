@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 import pandas as pd
 
 from pyccapt.calibration.core import calibration
@@ -63,4 +63,3 @@ def test_reconstruction_reexports_rotate_z():
     assert np.isclose(x_rot, 0.0)
     assert np.isclose(y_rot, 1.0)
     assert z_rot == 2.0
-

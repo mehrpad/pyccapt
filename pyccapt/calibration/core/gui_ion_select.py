@@ -7,7 +7,6 @@ from PyQt6.QtWidgets import QApplication, QMainWindow, QTableWidget, QTableWidge
 
 
 class MyWindow(QMainWindow):
-
     def __init__(self, data, variables):
         super().__init__()
         self.data = data
@@ -42,18 +41,15 @@ class MyWindow(QMainWindow):
         # the loop and fall back to plain text when the package is missing —
         # the rest of the dialog still renders.
         try:
-            from PyQt6.QtWebEngineWidgets import QWebEngineView   # noqa: F401
+            from PyQt6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
+
             webengine_available = True
         except ImportError:
             webengine_available = False
 
         for row, (_, row_data) in enumerate(self.data.iterrows()):
             for col, value in enumerate(row_data):
-                is_latex = (
-                    isinstance(value, str)
-                    and value.startswith('$')
-                    and value.endswith('$')
-                )
+                is_latex = isinstance(value, str) and value.startswith('$') and value.endswith('$')
                 if is_latex and webengine_available:
                     # Remove the surrounding ``$``s and embed the formula in a
                     # one-liner MathJax page, then render it as a cell widget.
@@ -66,9 +62,7 @@ class MyWindow(QMainWindow):
                         f'<body>\\({formula}\\)</body></html>'
                     )
                     formula_item = QTableWidgetItem()
-                    formula_item.setFlags(
-                        formula_item.flags() & ~Qt.ItemFlag.ItemIsEditable
-                    )
+                    formula_item.setFlags(formula_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                     self.tableWidget.setCellWidget(row + 1, col, webview)
                 else:
                     # Either the value isn't a LaTeX formula, or PyQt6-WebEngine
@@ -108,7 +102,7 @@ class MyWindow(QMainWindow):
             new_selected_row = selected_items[0].row()
             selected_row = selected_items[0].row()
 
-            selected_data = self.data.iloc[selected_row - 1:selected_row]
+            selected_data = self.data.iloc[selected_row - 1 : selected_row]
 
             print(selected_data)
 
@@ -121,9 +115,9 @@ class MyWindow(QMainWindow):
             target_complex_list = [item for sublist in target_complex_list for item in sublist]
             # Find rows with matching 'element' and 'complex' lists
             matching_rows = self.data[
-                (self.data['element'].apply(lambda x: all(item in x for item in target_element_list))) &
-                (self.data['complex'].apply(lambda x: all(item in x for item in target_complex_list)))
-                ]
+                (self.data['element'].apply(lambda x: all(item in x for item in target_element_list)))
+                & (self.data['complex'].apply(lambda x: all(item in x for item in target_complex_list)))
+            ]
             # Create a new DataFrame with matching rows
             new_df = pd.DataFrame(matching_rows)
             # Reset the index of the new DataFrame if needed

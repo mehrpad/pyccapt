@@ -18,8 +18,7 @@ def merge_by_range(data_df, range_df, full=False):
     data_mc = data_df['mc (Da)']
 
     # Use broadcasting to create masks for matching conditions
-    mask = (range_df['mc_low'].values[:, None] <= data_mc.values) & (
-                range_df['mc_up'].values[:, None] >= data_mc.values)
+    mask = (range_df['mc_low'].values[:, None] <= data_mc.values) & (range_df['mc_up'].values[:, None] >= data_mc.values)
 
     # Find the matching range index for each data row (max mask index per row)
     matched_idx = mask.argmax(axis=0)  # For each data point, find the index of the matching range in range_df
@@ -42,7 +41,7 @@ def merge_by_range(data_df, range_df, full=False):
         'element': ['noise'],
         'complex': [np.nan],
         'isotope': [np.nan],
-        'charge': np.nan
+        'charge': np.nan,
     }
     if full:
         # For valid matches, update with the corresponding values

@@ -113,8 +113,11 @@ def _load_rhit_reference(path, epos_path, calibration_method: str = "metadata"):
             print("  EPOS path provided but calibration method='metadata' -- ignoring EPOS.")
     elif method == "pmass_match":
         hits, calibration = rhit_tools.rhit_calibrate_from_epos(
-            hits, epos=None, method="pmass_match",
-            metadata=metadata, rhit_histograms=histograms,
+            hits,
+            epos=None,
+            method="pmass_match",
+            metadata=metadata,
+            rhit_histograms=histograms,
         )
     elif method in {"spectrum_match", "event_match"}:
         if not epos_path:
@@ -123,7 +126,11 @@ def _load_rhit_reference(path, epos_path, calibration_method: str = "metadata"):
                 "Either provide one or switch to 'metadata' / 'pmass_match'."
             )
         hits, calibration = rhit_tools.rhit_calibrate_from_epos(
-            hits, epos_path, method=method, metadata=metadata, rhit_histograms=histograms,
+            hits,
+            epos_path,
+            method=method,
+            metadata=metadata,
+            rhit_histograms=histograms,
         )
     else:
         raise ValueError(f"Unknown calibration method: {method!r}")
@@ -303,15 +310,11 @@ def call_cameca_raw_import_workflow(variables=None):
                 if state["rhit_hits"] is None:
                     raise ValueError("Load a RHIT file first.")
                 if not rhit_raw_hdf5_path.value:
-                    raise ValueError(
-                        "Provide an output path in 'Save raw analysis HDF5' before exporting."
-                    )
+                    raise ValueError("Provide an output path in 'Save raw analysis HDF5' before exporting.")
                 output = rhit_tools.rhit_to_raw_hdf5(
                     state["rhit_hits"], rhit_raw_hdf5_path.value, pulse_mode=rhit_pulse_mode.value
                 )
-                print(
-                    f"Saved raw-analysis HDF5 to:\n  {output}"
-                )
+                print(f"Saved raw-analysis HDF5 to:\n  {output}")
                 print(
                     "  Contains both 'dld/' (extract_mode='dld') and 'tdc/' (extract_mode='tdc_sc')\n"
                     "  groups so it loads directly into the PyCCAPT raw-data analysis workflow.\n"
@@ -353,8 +356,7 @@ def call_cameca_raw_import_workflow(variables=None):
                 if "nFull6Channels" in metadata:
                     print(f"Events with all 6 channels: {metadata['nFull6Channels']:,}")
                 print(
-                    "STR data is in raw TDC counts at this point. To get mm/ns/Da columns, "
-                    "click 'Calibrate from RHIT' below."
+                    "STR data is in raw TDC counts at this point. To get mm/ns/Da columns, click 'Calibrate from RHIT' below."
                 )
                 if metadata.get("note"):
                     print(metadata["note"])
@@ -439,15 +441,9 @@ def call_cameca_raw_import_workflow(variables=None):
                 if state["str_hits"] is None:
                     raise ValueError("Load a STR/HITS file first.")
                 if not str_raw_hdf5_path.value:
-                    raise ValueError(
-                        "Provide an output path in 'Save raw analysis HDF5' before exporting."
-                    )
-                output = str_tools.str_to_raw_hdf5(
-                    state["str_hits"], str_raw_hdf5_path.value, pulse_mode=str_pulse_mode.value
-                )
-                print(
-                    f"Saved raw-analysis HDF5 to:\n  {output}"
-                )
+                    raise ValueError("Provide an output path in 'Save raw analysis HDF5' before exporting.")
+                output = str_tools.str_to_raw_hdf5(state["str_hits"], str_raw_hdf5_path.value, pulse_mode=str_pulse_mode.value)
+                print(f"Saved raw-analysis HDF5 to:\n  {output}")
                 print(
                     "  Contains:\n"
                     "    - 'dld/' (loads with extract_mode='dld') -- per-event calibrated x/y/t,\n"
@@ -505,10 +501,10 @@ def call_cameca_raw_import_workflow(variables=None):
                     _path_row("Save calibration JSON:", rhit_calibration_path, rhit_calibration_path_browse),
                     widgets.HBox([widgets.Label(value="Load into variables:", layout=label_layout), rhit_load_into_variables]),
                     widgets.HBox([widgets.Label(value="Pulse mode:", layout=label_layout), rhit_pulse_mode]),
-                    widgets.HBox([widgets.Label(value="EPOS calibration mode:", layout=label_layout), rhit_calibration_method]),
                     widgets.HBox(
-                        [rhit_load_button, rhit_export_button, rhit_export_raw_button, rhit_save_calibration_button]
+                        [widgets.Label(value="EPOS calibration mode:", layout=label_layout), rhit_calibration_method]
                     ),
+                    widgets.HBox([rhit_load_button, rhit_export_button, rhit_export_raw_button, rhit_save_calibration_button]),
                 ]
             ),
             widgets.VBox(
@@ -521,9 +517,7 @@ def call_cameca_raw_import_workflow(variables=None):
                     widgets.HBox([widgets.Label(value="Load into variables:", layout=label_layout), str_load_into_variables]),
                     widgets.HBox([widgets.Label(value="Pulse mode:", layout=label_layout), str_pulse_mode]),
                     widgets.HBox([widgets.Label(value="EPOS calibration mode:", layout=label_layout), str_calibration_method]),
-                    widgets.HBox(
-                        [str_load_button, str_calibrate_button, str_export_button, str_export_raw_button]
-                    ),
+                    widgets.HBox([str_load_button, str_calibrate_button, str_export_button, str_export_raw_button]),
                 ]
             ),
         ]

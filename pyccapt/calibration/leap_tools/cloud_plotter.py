@@ -140,4 +140,3 @@ def cloud_plotter(
         plotly.offline.plot(figure, filename=str(output_dir / f"{filename}.html"), show_link=False)
         return None
     return figure
-

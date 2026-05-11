@@ -42,7 +42,9 @@ def build_peak_spectral_analysis_panel(variables, label_layout=None):
     ppm_target_right = widgets.FloatText(value=0.0)
     deconv_candidates = widgets.Textarea(value="", layout=widgets.Layout(width="320px", height="90px"))
     deconv_shape = widgets.Dropdown(options=[("gaussian", "gaussian"), ("pseudo_voigt", "pseudo_voigt")], value="pseudo_voigt")
-    deconv_background = widgets.Dropdown(options=[("linear", "linear"), ("constant", "constant"), ("none", "none")], value="linear")
+    deconv_background = widgets.Dropdown(
+        options=[("linear", "linear"), ("constant", "constant"), ("none", "none")], value="linear"
+    )
     deconv_fwhm = widgets.FloatText(value=0.08)
 
     plot_button = widgets.Button(description="Plot hist")
@@ -276,12 +278,21 @@ def build_peak_spectral_analysis_panel(variables, label_layout=None):
                 ax.step(result["x"], result["y"], where="mid", color="black", linewidth=1.1, label="histogram")
                 ax.plot(result["x"], result["fit_y"], color="#2166AC", linewidth=2, label="total fit")
                 if np.any(result["background_y"] > 0):
-                    ax.plot(result["x"], result["background_y"], color="#D6604D", linestyle="--", linewidth=1.6, label="background")
+                    ax.plot(
+                        result["x"], result["background_y"], color="#D6604D", linestyle="--", linewidth=1.6, label="background"
+                    )
                 colors = plt.cm.tab10(np.linspace(0, 1, max(1, len(result["component_curves"]))))
                 for idx, curve in enumerate(result["component_curves"]):
                     label = result["components"].iloc[idx]["label"]
                     center = result["components"].iloc[idx]["center"]
-                    ax.plot(result["x"], curve + result["background_y"], color=colors[idx % len(colors)], alpha=0.85, linewidth=1.1, label=f"{label}@{center:.3f}")
+                    ax.plot(
+                        result["x"],
+                        curve + result["background_y"],
+                        color=colors[idx % len(colors)],
+                        alpha=0.85,
+                        linewidth=1.1,
+                        label=f"{label}@{center:.3f}",
+                    )
                 if log_hist.value:
                     ax.set_yscale("log")
                 ax.set_xlabel(xlabel)
@@ -292,7 +303,11 @@ def build_peak_spectral_analysis_panel(variables, label_layout=None):
                 plt.show()
                 print(f"Fit success: {result['success']} | shape={result['shape']} | background={result['background_mode']}")
                 print(f"Shared FWHM: {result['fwhm']:.5f} | RMSE: {result['rmse']:.4f}")
-                display(result["components"][["label", "center", "fitted_counts", "fraction"]].sort_values("fitted_counts", ascending=False).reset_index(drop=True))
+                display(
+                    result["components"][["label", "center", "fitted_counts", "fraction"]]
+                    .sort_values("fitted_counts", ascending=False)
+                    .reset_index(drop=True)
+                )
                 display(result["grouped_components"])
         except Exception as exc:
             with out_status:
@@ -342,44 +357,50 @@ def build_peak_spectral_analysis_panel(variables, label_layout=None):
         layout=widgets.Layout(width="960px"),
     )
 
-    left = widgets.VBox([
-        widgets.HBox([widgets.Label(value="Target:", layout=label_layout), target]),
-        widgets.HBox([widgets.Label(value="Bin size:", layout=label_layout), bin_size]),
-        widgets.HBox([widgets.Label(value="Lim:", layout=label_layout), lim_value]),
-        widgets.HBox([widgets.Label(value="Log hist:", layout=label_layout), log_hist]),
-        widgets.HBox([widgets.Label(value="Fig size:", layout=label_layout), widgets.HBox([fig_w, fig_h])]),
-        widgets.HBox([widgets.Label(value="Peak left:", layout=label_layout), peak_left]),
-        widgets.HBox([widgets.Label(value="Peak right:", layout=label_layout), peak_right]),
-        widgets.HBox([load_selection_button, suggest_bg_button]),
-        widgets.HBox([widgets.Label(value="Bg gap:", layout=label_layout), bg_gap]),
-        widgets.HBox([widgets.Label(value="Bg width:", layout=label_layout), bg_width]),
-        widgets.HBox([widgets.Label(value="Bg left start:", layout=label_layout), bg_left_start]),
-        widgets.HBox([widgets.Label(value="Bg left end:", layout=label_layout), bg_left_end]),
-        widgets.HBox([widgets.Label(value="Bg right start:", layout=label_layout), bg_right_start]),
-        widgets.HBox([widgets.Label(value="Bg right end:", layout=label_layout), bg_right_end]),
-    ])
+    left = widgets.VBox(
+        [
+            widgets.HBox([widgets.Label(value="Target:", layout=label_layout), target]),
+            widgets.HBox([widgets.Label(value="Bin size:", layout=label_layout), bin_size]),
+            widgets.HBox([widgets.Label(value="Lim:", layout=label_layout), lim_value]),
+            widgets.HBox([widgets.Label(value="Log hist:", layout=label_layout), log_hist]),
+            widgets.HBox([widgets.Label(value="Fig size:", layout=label_layout), widgets.HBox([fig_w, fig_h])]),
+            widgets.HBox([widgets.Label(value="Peak left:", layout=label_layout), peak_left]),
+            widgets.HBox([widgets.Label(value="Peak right:", layout=label_layout), peak_right]),
+            widgets.HBox([load_selection_button, suggest_bg_button]),
+            widgets.HBox([widgets.Label(value="Bg gap:", layout=label_layout), bg_gap]),
+            widgets.HBox([widgets.Label(value="Bg width:", layout=label_layout), bg_width]),
+            widgets.HBox([widgets.Label(value="Bg left start:", layout=label_layout), bg_left_start]),
+            widgets.HBox([widgets.Label(value="Bg left end:", layout=label_layout), bg_left_end]),
+            widgets.HBox([widgets.Label(value="Bg right start:", layout=label_layout), bg_right_start]),
+            widgets.HBox([widgets.Label(value="Bg right end:", layout=label_layout), bg_right_end]),
+        ]
+    )
 
-    center = widgets.VBox([
-        widgets.HTML(value="<b>Background ppm</b>"),
-        widgets.HBox([widgets.Label(value="Ppm bg left:", layout=label_layout), ppm_bg_left]),
-        widgets.HBox([widgets.Label(value="Ppm bg right:", layout=label_layout), ppm_bg_right]),
-        widgets.HBox([widgets.Label(value="Ppm target left:", layout=label_layout), ppm_target_left]),
-        widgets.HBox([widgets.Label(value="Ppm target right:", layout=label_layout), ppm_target_right]),
-        copy_peak_to_ppm_button,
-        widgets.HTML(value="<b>Peak deconvolution</b>"),
-        widgets.HBox([widgets.Label(value="Candidates:", layout=label_layout), deconv_candidates]),
-        widgets.HBox([widgets.Label(value="Shape:", layout=label_layout), deconv_shape]),
-        widgets.HBox([widgets.Label(value="Background mode:", layout=label_layout), deconv_background]),
-        widgets.HBox([widgets.Label(value="Initial FWHM:", layout=label_layout), deconv_fwhm]),
-    ])
+    center = widgets.VBox(
+        [
+            widgets.HTML(value="<b>Background ppm</b>"),
+            widgets.HBox([widgets.Label(value="Ppm bg left:", layout=label_layout), ppm_bg_left]),
+            widgets.HBox([widgets.Label(value="Ppm bg right:", layout=label_layout), ppm_bg_right]),
+            widgets.HBox([widgets.Label(value="Ppm target left:", layout=label_layout), ppm_target_left]),
+            widgets.HBox([widgets.Label(value="Ppm target right:", layout=label_layout), ppm_target_right]),
+            copy_peak_to_ppm_button,
+            widgets.HTML(value="<b>Peak deconvolution</b>"),
+            widgets.HBox([widgets.Label(value="Candidates:", layout=label_layout), deconv_candidates]),
+            widgets.HBox([widgets.Label(value="Shape:", layout=label_layout), deconv_shape]),
+            widgets.HBox([widgets.Label(value="Background mode:", layout=label_layout), deconv_background]),
+            widgets.HBox([widgets.Label(value="Initial FWHM:", layout=label_layout), deconv_fwhm]),
+        ]
+    )
 
-    right = widgets.VBox([
-        plot_button,
-        fit_background_button,
-        estimate_ppm_button,
-        deconvolve_button,
-        clear_button,
-    ])
+    right = widgets.VBox(
+        [
+            plot_button,
+            fit_background_button,
+            estimate_ppm_button,
+            deconvolve_button,
+            clear_button,
+        ]
+    )
 
     return widgets.VBox([description, widgets.HBox([left, center, right]), widgets.VBox([out, out_status])])
 

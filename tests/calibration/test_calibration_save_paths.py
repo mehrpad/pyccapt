@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
@@ -22,5 +22,3 @@ def test_plot_fdm_uses_shared_save_helper(tmp_path: Path):
     assert kwargs["directory"] == variables.result_path
     assert kwargs["stem"] == "fdm_7"
     assert kwargs["formats"] == ("png", "svg")
-
-

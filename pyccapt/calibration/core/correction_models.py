@@ -8,22 +8,22 @@ from collections.abc import Mapping
 
 def voltage_corr(x, a, b, c):
     """Quadratic voltage correction model."""
-    return a + b * x + c * (x ** 2)
+    return a + b * x + c * (x**2)
 
 
 def bowl_corr(data_xy, a, b, c, d, e, f):
     """Quadratic bowl correction model."""
     x = data_xy[0]
     y = data_xy[1]
-    return a + b * x + c * y + d * (x ** 2) + e * x * y + f * (y ** 2)
+    return a + b * x + c * y + d * (x**2) + e * x * y + f * (y**2)
 
 
 def bowl_corr_radial(data_xy, a, b, c, d, e):
     """Radial-dominant bowl correction model using r^2 as the primary term."""
     x = np.asarray(data_xy[0], dtype=float)
     y = np.asarray(data_xy[1], dtype=float)
-    r2 = x ** 2 + y ** 2
-    return a + b * r2 + c * (r2 ** 2) + d * x + e * y
+    r2 = x**2 + y**2
+    return a + b * r2 + c * (r2**2) + d * x + e * y
 
 
 def robust_voltage_fit(dld_high_voltage, dld_t):
@@ -59,9 +59,7 @@ def hybrid_calibration_model(dld_x, dld_y, dld_t):
 
     x_values = np.column_stack((dld_x, dld_y))
     y_values = 1 / dld_t
-    x_train, x_test, y_train, y_test = train_test_split(
-        x_values, y_values, test_size=0.2, random_state=42
-    )
+    x_train, x_test, y_train, y_test = train_test_split(x_values, y_values, test_size=0.2, random_state=42)
 
     model = RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42)
     model.fit(x_train, y_train)

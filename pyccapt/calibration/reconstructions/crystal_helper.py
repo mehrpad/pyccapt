@@ -5,6 +5,7 @@ from scipy.spatial.transform import Rotation
 import matplotlib.pyplot as plt
 from scipy.interpolate import griddata
 
+
 def filter_atoms_in_cone_and_hemisphere(structure, cone_r, cone_L, hemi_z_base):
     """
     Filters atoms that are inside a cone and inside/below a hemisphere.
@@ -24,7 +25,6 @@ def filter_atoms_in_cone_and_hemisphere(structure, cone_r, cone_L, hemi_z_base):
     x = coords[:, 0]
     y = coords[:, 1]
     z = coords[:, 2]
-
 
     # Determine the center of the cone base
     x_center = (x.min() + x.max()) / 2
@@ -123,6 +123,7 @@ def find_phi_and_theta(sdm_param, theta_min, theta_max, phi_min, phi_max):
 
     return theta_value, phi_value
 
+
 def rotate_structure(structure, theta_deg, phi_deg):
     """
     Rotates the atomic coordinates of a pymatgen Structure based on given angles
@@ -157,8 +158,9 @@ def rotate_structure(structure, theta_deg, phi_deg):
         rotated_sites.append((site.specie, [new_x, new_y, new_z]))
 
     # Create a new structure with the rotated coordinates
-    rotated_structure = Structure(structure.lattice, [s[0] for s in rotated_sites],
-                                  [s[1] for s in rotated_sites], coords_are_cartesian=True)
+    rotated_structure = Structure(
+        structure.lattice, [s[0] for s in rotated_sites], [s[1] for s in rotated_sites], coords_are_cartesian=True
+    )
 
     return rotated_structure
 
@@ -201,6 +203,7 @@ def rotate_structure(structure, theta_deg, phi_deg):
 #                                   [s[1] for s in rotated_sites], coords_are_cartesian=True)
 #
 #     return rotated_structure
+
 
 def apply_noise_to_structure(structure, noise_levels=(5, 5, 2), noise_type='correlative'):
     """
@@ -289,6 +292,7 @@ def project_to_surface(structure):
 
     return projected_structure
 
+
 def stereographic_projection(structure, d_z=0):
     """
     Projects all atomic positions onto the surface
@@ -317,13 +321,12 @@ def stereographic_projection(structure, d_z=0):
     coords[:, 1] = coords[:, 1] - mid_y
 
     coords[:, 0] = coords[:, 0] / (1 - coords[:, 2] + 1e-6)
-    coords[:, 1] = coords[:, 1] / (1 - coords[:, 2] +  1e-6)
+    coords[:, 1] = coords[:, 1] / (1 - coords[:, 2] + 1e-6)
     coords[:, 2] = 0
     print(coords.shape)
     print(np.max(coords[:, 0]), np.min(coords[:, 0]))
     print(np.max(coords[:, 1]), np.min(coords[:, 1]))
     print(np.max(coords[:, 2]), np.min(coords[:, 2]))
-
 
     # Create a new structure with the projected coordinates
     projected_structure = Structure(structure.lattice, structure.species, coords)
@@ -342,7 +345,7 @@ def pyccapt_to_pymatgen(data, range):
     Returns:
         pymatgen Structure object
     """
-    #a simple identity lattice (1x1x1 unit cell)
+    # a simple identity lattice (1x1x1 unit cell)
     identity_lattice = Lattice.eye(3)  # This creates an identity 3x3 lattice
 
     # Extract the species and coordinates from the data
@@ -354,4 +357,3 @@ def pyccapt_to_pymatgen(data, range):
     return structure
 
     return structure
-

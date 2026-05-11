@@ -126,9 +126,7 @@ def fetch_dataset_with_tdc(
 
     tdc_df = fetch_dataset_from_dld_grp(filename, extract_mode=tdc_extract_mode)
     if tdc_df is None:
-        raise FileNotFoundError(
-            f"Failed to load tdc group from {filename!r} with mode {tdc_extract_mode!r}"
-        )
+        raise FileNotFoundError(f"Failed to load tdc group from {filename!r} with mode {tdc_extract_mode!r}")
 
     dld_gid, tdc_gid, tdc_has_match = build_event_group_mapping(
         dld_df["start_counter"].to_numpy(),
@@ -147,20 +145,12 @@ def filter_tdc_by_dld(dld_df: pd.DataFrame, tdc_df: pd.DataFrame) -> pd.DataFram
     rows (pulses that never produced a dld event) are always preserved.
     """
     if EVENT_GROUP_ID_COLUMN not in tdc_df.columns or TDC_HAS_DLD_MATCH_COLUMN not in tdc_df.columns:
-        raise ValueError(
-            "tdc_df is missing the event_group_id/has_dld_match columns; "
-            "load it via fetch_dataset_with_tdc()."
-        )
+        raise ValueError("tdc_df is missing the event_group_id/has_dld_match columns; load it via fetch_dataset_with_tdc().")
     if EVENT_GROUP_ID_COLUMN not in dld_df.columns:
-        raise ValueError(
-            "dld_df is missing the event_group_id column; load it via "
-            "fetch_dataset_with_tdc()."
-        )
+        raise ValueError("dld_df is missing the event_group_id column; load it via fetch_dataset_with_tdc().")
 
     surviving_groups = pd.unique(dld_df[EVENT_GROUP_ID_COLUMN].to_numpy())
-    keep = (~tdc_df[TDC_HAS_DLD_MATCH_COLUMN].to_numpy()) | (
-        tdc_df[EVENT_GROUP_ID_COLUMN].isin(surviving_groups).to_numpy()
-    )
+    keep = (~tdc_df[TDC_HAS_DLD_MATCH_COLUMN].to_numpy()) | (tdc_df[EVENT_GROUP_ID_COLUMN].isin(surviving_groups).to_numpy())
     return tdc_df.loc[keep].reset_index(drop=True).copy()
 
 
@@ -225,8 +215,9 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld', *, lazy: bool 
                 (dld_high_voltage, dld_pulse_v, dld_pulse_l, dld_start_counter, dld_t, dld_x, dld_y),
                 axis=1,
             )
-            dld_group_storage = create_pandas_dataframe(dld_group_array, mode='dld',
-                                                        flag_old_pyccpat_data=flag_old_pyccpat_data)
+            dld_group_storage = create_pandas_dataframe(
+                dld_group_array, mode='dld', flag_old_pyccpat_data=flag_old_pyccpat_data
+            )
             return dld_group_storage
         except KeyError as error:
             print(error)
@@ -280,6 +271,7 @@ def _fetch_dataset_from_dld_grp_lazy(filename: str, extract_mode: str):
     analyses via :meth:`LazyTable.iter_chunks`.
     """
     from pyccapt.calibration.data_tools import lazy_io
+
     group = 'dld' if extract_mode == 'dld' else 'tdc'
     raw = lazy_io.open_pyccapt_raw_hdf5(filename)
     # Filter to one group + rename to the calibration column names so callers
@@ -314,13 +306,14 @@ def _fetch_dataset_from_dld_grp_lazy(filename: str, extract_mode: str):
 
     if not selected:
         raw.close()
-        raise ValueError(
-            f"No /{group}/* columns found in {filename}. Is this a pyccapt-raw HDF5?"
-        )
+        raise ValueError(f"No /{group}/* columns found in {filename}. Is this a pyccapt-raw HDF5?")
 
     from pyccapt.calibration.data_tools.lazy_io import LazyTable
+
     return LazyTable(
-        selected, source_path=raw.source_path, close=raw.close,
+        selected,
+        source_path=raw.source_path,
+        close=raw.close,
     )
 
 
@@ -338,9 +331,21 @@ def concatenate_dataframes_of_dld_grp(dataframe_list: list) -> pd.DataFrame:
     return dld_master_dataframe
 
 
-def plot_crop_experiment_history(data: pd.DataFrame, variables, max_tof, frac=1.0, bins=(1200, 800), figure_size=(8, 3),
-                                 draw_rect=False, data_crop=True, pulse_plot=False, dc_plot=True, pulse_mode='voltage',
-                                 save=True, figname=''):
+def plot_crop_experiment_history(
+    data: pd.DataFrame,
+    variables,
+    max_tof,
+    frac=1.0,
+    bins=(1200, 800),
+    figure_size=(8, 3),
+    draw_rect=False,
+    data_crop=True,
+    pulse_plot=False,
+    dc_plot=True,
+    pulse_mode='voltage',
+    save=True,
+    figname='',
+):
     """
     Plots the experiment history.
 
@@ -362,7 +367,7 @@ def plot_crop_experiment_history(data: pd.DataFrame, variables, max_tof, frac=1.
     """
 
     if max_tof > 0:
-        mask_1 = (data['t (ns)'].to_numpy() > max_tof)
+        mask_1 = data['t (ns)'].to_numpy() > max_tof
         data.drop(np.where(mask_1)[0], inplace=True)
         data.reset_index(inplace=True, drop=True)
     if frac < 1:
@@ -415,7 +420,7 @@ def plot_crop_experiment_history(data: pd.DataFrame, variables, max_tof, frac=1.
             ax2.spines.right.set_position(("axes", 1.29))
         # Plot high voltage curve
         xaxis2 = np.arange(len(high_voltage))
-        dc_curve, = ax2.plot(xaxis2, high_voltage, color='red', linewidth=2)
+        (dc_curve,) = ax2.plot(xaxis2, high_voltage, color='red', linewidth=2)
         ax2.set_ylabel("DC Voltage [kV]", color="red", fontsize=10)
         ax2.set_ylim([min(high_voltage), max(high_voltage) + 0.5])
         ax2.spines['right'].set_color('red')  # Set Y-axis color to red
@@ -426,14 +431,14 @@ def plot_crop_experiment_history(data: pd.DataFrame, variables, max_tof, frac=1.
         ax3 = ax1.twinx()
         ax3.spines.right.set_position(("axes", 1.13))
         if pulse_mode == 'laser':
-            pulse_curve, = ax3.plot(xaxis, pulse, color='fuchsia', linewidth=2)
+            (pulse_curve,) = ax3.plot(xaxis, pulse, color='fuchsia', linewidth=2)
             ax3.set_ylabel("Pulse Energy [$pJ$]", color="fuchsia", fontsize=10)
             range = max(pulse) - min(pulse)
             ax3.set_ylim([min(pulse) - range * 0.1, max(pulse) + range * 0.1])
             ax3.ticklabel_format(style='sci', axis='y', scilimits=(0, 0))
         elif pulse_mode == 'voltage':
             pulse = pulse / 1000
-            pulse_curve, = ax3.plot(xaxis, pulse, color='fuchsia', linewidth=2)
+            (pulse_curve,) = ax3.plot(xaxis, pulse, color='fuchsia', linewidth=2)
             ax3.set_ylabel("Pulse Voltage [kV]", color="fuchsia", fontsize=10)
             ax3.set_ylim([min(pulse), max(pulse) + 0.5])
         ax3.spines['right'].set_color('fuchsia')  # Set Y-axis color to red
@@ -465,8 +470,7 @@ def plot_crop_experiment_history(data: pd.DataFrame, variables, max_tof, frac=1.
             rectangle_box_selector(ax1, variables)
         plt.connect('key_press_event', selectors_data.toggle_selector(variables))
     if draw_rect:
-        left, bottom, width, height = (
-            variables.selected_x1, 0, variables.selected_x2 - variables.selected_x1, np.max(tof))
+        left, bottom, width, height = (variables.selected_x1, 0, variables.selected_x2 - variables.selected_x1, np.max(tof))
         rect = Rectangle((left, bottom), width, height, fill=True, alpha=0.3, color="r", linewidth=5)
         ax1.add_patch(rect)
 
@@ -485,9 +489,28 @@ def plot_crop_experiment_history(data: pd.DataFrame, variables, max_tof, frac=1.
     plt.show()
 
 
-def plot_crop_fdm(x, y, bins=(256, 256), frac=1.0, axis_mode='normal', figure_size=(5, 4), variables=None,
-                  range_sequence=[], range_mc=[], range_detx=[], range_dety=[], range_x=[], range_y=[], range_z=[],
-                  range_vol=[], data_crop=False, draw_circle=False, mode_selector='circle', save=False, figname='FDM'):
+def plot_crop_fdm(
+    x,
+    y,
+    bins=(256, 256),
+    frac=1.0,
+    axis_mode='normal',
+    figure_size=(5, 4),
+    variables=None,
+    range_sequence=[],
+    range_mc=[],
+    range_detx=[],
+    range_dety=[],
+    range_x=[],
+    range_y=[],
+    range_z=[],
+    range_vol=[],
+    data_crop=False,
+    draw_circle=False,
+    mode_selector='circle',
+    save=False,
+    figname='FDM',
+):
     """
     Plot and crop the FDM with the option to select a region of interest.
 
@@ -519,7 +542,7 @@ def plot_crop_fdm(x, y, bins=(256, 256), frac=1.0, axis_mode='normal', figure_si
     if range_sequence or range_mc or range_detx or range_dety or range_x or range_y or range_z:
         if range_sequence:
             mask_sequence = np.zeros(len(x), dtype=bool)
-            mask_sequence[range_sequence[0]:range_sequence[1]] = True
+            mask_sequence[range_sequence[0] : range_sequence[1]] = True
         else:
             mask_sequence = np.ones(len(x), dtype=bool)
         if range_detx and range_dety:
@@ -563,9 +586,7 @@ def plot_crop_fdm(x, y, bins=(256, 256), frac=1.0, axis_mode='normal', figure_si
         x = x[mask_fraq]
         y = y[mask_fraq]
 
-
     fig1, ax1 = plt.subplots(figsize=figure_size, constrained_layout=True)
-
 
     # Check if the bin is a list
     if isinstance(bins, list):
@@ -597,18 +618,28 @@ def plot_crop_fdm(x, y, bins=(256, 256), frac=1.0, axis_mode='normal', figure_si
             elliptical_shape_selector(ax1, fig1, variables, mode=mode_selector)
         if draw_circle:
             print('x:', variables.selected_x_fdm, 'y:', variables.selected_y_fdm, 'roi:', variables.roi_fdm)
-            circ = Circle((variables.selected_x_fdm, variables.selected_y_fdm), variables.roi_fdm, fill=True,
-                          alpha=0.3, color='green', linewidth=5)
+            circ = Circle(
+                (variables.selected_x_fdm, variables.selected_y_fdm),
+                variables.roi_fdm,
+                fill=True,
+                alpha=0.3,
+                color='green',
+                linewidth=5,
+            )
             ax1.add_patch(circ)
     if axis_mode == 'scalebar':
         fontprops = fm.FontProperties(size=10)
-        scalebar = AnchoredSizeBar(ax1.transData,
-                                   1, '1 cm', 'lower left',
-                                   pad=0.1,
-                                   color='white',
-                                   frameon=False,
-                                   size_vertical=0.1,
-                                   fontproperties=fontprops)
+        scalebar = AnchoredSizeBar(
+            ax1.transData,
+            1,
+            '1 cm',
+            'lower left',
+            pad=0.1,
+            color='white',
+            frameon=False,
+            size_vertical=0.1,
+            fontproperties=fontprops,
+        )
 
         ax1.add_artist(scalebar)
         plt.axis('off')  # Turn off both x and y axes
@@ -683,14 +714,16 @@ def rectangle_box_selector(axisObject, variables):
     Returns:
         None
     """
-    selectors_data.toggle_selector.RS = RectangleSelector(axisObject,
-                                                          lambda eclick, erelease: selectors_data.line_select_callback(
-                                                              eclick, erelease, variables),
-                                                          useblit=True,
-                                                          button=[1, 3],
-                                                          minspanx=1, minspany=1,
-                                                          spancoords='pixels',
-                                                          interactive=True)
+    selectors_data.toggle_selector.RS = RectangleSelector(
+        axisObject,
+        lambda eclick, erelease: selectors_data.line_select_callback(eclick, erelease, variables),
+        useblit=True,
+        button=[1, 3],
+        minspanx=1,
+        minspany=1,
+        spancoords='pixels',
+        interactive=True,
+    )
 
 
 def crop_dataset(dld_master_dataframe, variables):
@@ -718,7 +751,7 @@ def crop_dataset(dld_master_dataframe, variables):
     if right < left:
         raise ValueError('End index must be greater than or equal to start index')
 
-    data_crop = dld_master_dataframe.iloc[left:right + 1, :].copy()
+    data_crop = dld_master_dataframe.iloc[left : right + 1, :].copy()
     data_crop.reset_index(inplace=True, drop=True)
     return data_crop
 
@@ -737,27 +770,27 @@ def elliptical_shape_selector(axisObject, figureObject, variables, mode='circle'
         None
     """
     if mode == 'circle':
-        selectors_data.toggle_selector.ES = selectors_data.CircleSelector(axisObject,
-                                                                          lambda eclick,
-                                                                                 erelease: selectors_data.onselect(
-                                                                              eclick,
-                                                                              erelease,
-                                                                              variables),
-                                                                          useblit=True,
-                                                                          button=[1, 3],
-                                                                          minspanx=1, minspany=1,
-                                                                          spancoords='pixels',
-                                                                          interactive=True)
+        selectors_data.toggle_selector.ES = selectors_data.CircleSelector(
+            axisObject,
+            lambda eclick, erelease: selectors_data.onselect(eclick, erelease, variables),
+            useblit=True,
+            button=[1, 3],
+            minspanx=1,
+            minspany=1,
+            spancoords='pixels',
+            interactive=True,
+        )
     elif mode == 'ellipse':
-        selectors_data.toggle_selector.ES = EllipseSelector(axisObject,
-                                                            lambda eclick, erelease: selectors_data.onselect(eclick,
-                                                                                                             erelease,
-                                                                                                             variables),
-                                                            useblit=True,
-                                                            button=[1, 3],
-                                                            minspanx=1, minspany=1,
-                                                            spancoords='pixels',
-                                                            interactive=True)
+        selectors_data.toggle_selector.ES = EllipseSelector(
+            axisObject,
+            lambda eclick, erelease: selectors_data.onselect(eclick, erelease, variables),
+            useblit=True,
+            button=[1, 3],
+            minspanx=1,
+            minspany=1,
+            spancoords='pixels',
+            interactive=True,
+        )
 
     figureObject.canvas.mpl_connect('key_press_event', selectors_data.toggle_selector)
 
@@ -792,8 +825,7 @@ def crop_data_after_selection(data_crop, variables):
     y_min, y_max = float(np.min(y)), float(np.max(y))
     if center_x < x_min or center_x > x_max or center_y < y_min or center_y > y_max:
         raise ValueError(
-            f'Crop center must stay inside detector bounds: '
-            f'x in [{x_min:.4f}, {x_max:.4f}], y in [{y_min:.4f}, {y_max:.4f}]'
+            f'Crop center must stay inside detector bounds: x in [{x_min:.4f}, {x_max:.4f}], y in [{y_min:.4f}, {y_max:.4f}]'
         )
 
     detector_dist = np.sqrt((x - center_x) ** 2 + (y - center_y) ** 2)
@@ -834,24 +866,26 @@ def create_pandas_dataframe(data_crop, mode='dld', flag_old_pyccpat_data=False):
             data_crop[:, 5] = ((data_crop[:, 5] - XYBINSHIFT) * XYFACTOR) * 0.1  # from mm to in cm by dividing by 10
             data_crop[:, 6] = ((data_crop[:, 6] - XYBINSHIFT) * XYFACTOR) * 0.1  # from mm to in cm by dividing by 10
 
-        hdf_dataframe = pd.DataFrame(data=data_crop,
-                                     columns=['high_voltage (V)', 'pulse_v (V)',
-                                              'pulse_l (pJ)', 'start_counter', 't (ns)',
-                                              'x_det (cm)', 'y_det (cm)'])
+        hdf_dataframe = pd.DataFrame(
+            data=data_crop,
+            columns=['high_voltage (V)', 'pulse_v (V)', 'pulse_l (pJ)', 'start_counter', 't (ns)', 'x_det (cm)', 'y_det (cm)'],
+        )
 
         hdf_dataframe['start_counter'] = hdf_dataframe['start_counter'].astype('uint32')
     elif mode == 'tdc_sc':
-        hdf_dataframe = pd.DataFrame(data=data_crop,
-                                     columns=['channel', 'start_counter', 'high_voltage (V)', 'pulse_v (V)',
-                                              'pulse_l (pJ)', 'time_data'])
+        hdf_dataframe = pd.DataFrame(
+            data=data_crop,
+            columns=['channel', 'start_counter', 'high_voltage (V)', 'pulse_v (V)', 'pulse_l (pJ)', 'time_data'],
+        )
 
         hdf_dataframe['channel'] = hdf_dataframe['channel'].astype('uint32')
         hdf_dataframe['start_counter'] = hdf_dataframe['start_counter'].astype('uint32')
         hdf_dataframe['time_data'] = hdf_dataframe['time_data'].astype('uint32')
     elif mode == 'tdc_ro':
-        hdf_dataframe = pd.DataFrame(data=data_crop,
-                                     columns=['channel', 'start_counter', 'high_voltage (V)', 'pulse_v (V)',
-                                              'pulse_l (pJ)', 'time_data'])
+        hdf_dataframe = pd.DataFrame(
+            data=data_crop,
+            columns=['channel', 'start_counter', 'high_voltage (V)', 'pulse_v (V)', 'pulse_l (pJ)', 'time_data'],
+        )
 
         hdf_dataframe['channel'] = hdf_dataframe['channel'].astype('uint32')
         hdf_dataframe['start_counter'] = hdf_dataframe['start_counter'].astype('uint32')

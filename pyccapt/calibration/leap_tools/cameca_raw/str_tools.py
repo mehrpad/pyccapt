@@ -125,8 +125,10 @@ def str_load(file_path: str | Path, verbose: bool = True) -> tuple[pd.DataFrame,
     if verbose:
         print(f"  STR/HITS file: {file_path}")
         print(f"  File size: {file_path.stat().st_size:,} bytes; TLV records: {n_fields:,}")
-        print(f"  Header version byte: 0x{int(metadata.get('version', 0)):02x} "
-              f"({'STR v2' if metadata.get('version') == 2 else 'HITS v3' if metadata.get('version') == 3 else 'unknown'})")
+        print(
+            f"  Header version byte: 0x{int(metadata.get('version', 0)):02x} "
+            f"({'STR v2' if metadata.get('version') == 2 else 'HITS v3' if metadata.get('version') == 3 else 'unknown'})"
+        )
         labels = metadata.get("detectorLabels", "").replace("\x00", "?")
         print(f"  Detector channel labels: {labels!r}")
         print(f"  Thresholds: {metadata.get('thresholds')}")
@@ -137,10 +139,17 @@ def str_load(file_path: str | Path, verbose: bool = True) -> tuple[pd.DataFrame,
         order = np.argsort(-tag_counts)
         print("  Per-tag occurrence counts (top 25 by frequency):")
         named = {
-            0x01: "detxt1", 0x02: "detxt2", 0x03: "detyt1", 0x04: "detyt2",
-            0x21: "detwt1", 0x22: "detwt2", 0x18: "quality/event-end",
-            0x05: "pulse-counter-A", 0x0B: "pulse-counter-B",
-            0xA0: "version", 0x1B: "voltage",
+            0x01: "detxt1",
+            0x02: "detxt2",
+            0x03: "detyt1",
+            0x04: "detyt2",
+            0x21: "detwt1",
+            0x22: "detwt2",
+            0x18: "quality/event-end",
+            0x05: "pulse-counter-A",
+            0x0B: "pulse-counter-B",
+            0xA0: "version",
+            0x1B: "voltage",
         }
         for slot in order[:25]:
             tag_value = int(unique_tags[slot])
@@ -333,8 +342,14 @@ def _normalize_rhit_inputs(
     return rhit_hits.copy(), histograms, metadata
 
 
-def _mc_correlation_cost(parameters: np.ndarray, tof_tdc: np.ndarray, vdc: np.ndarray, constant: float,
-                         reference_hist: np.ndarray, mc_edges: np.ndarray) -> float:
+def _mc_correlation_cost(
+    parameters: np.ndarray,
+    tof_tdc: np.ndarray,
+    vdc: np.ndarray,
+    constant: float,
+    reference_hist: np.ndarray,
+    mc_edges: np.ndarray,
+) -> float:
     t0_tdc = parameters[0]
     clock_ns = parameters[1]
     if clock_ns <= 0.0:
@@ -481,8 +496,7 @@ def str_to_ccapt(hits: pd.DataFrame, drop_invalid: bool = True) -> pd.DataFrame:
     missing = required.difference(hits.columns)
     if missing:
         raise ValueError(
-            "STR data must be calibrated before conversion to a PyCCAPT dataset. "
-            f"Missing columns: {sorted(missing)}"
+            f"STR data must be calibrated before conversion to a PyCCAPT dataset. Missing columns: {sorted(missing)}"
         )
 
     if drop_invalid:
@@ -519,8 +533,7 @@ def _require_h5py():
         import h5py  # type: ignore
     except ImportError as exc:  # pragma: no cover - depends on optional runtime package
         raise ImportError(
-            "STR raw-HDF5 export requires the optional 'h5py' package. "
-            "Install it with 'pip install h5py'."
+            "STR raw-HDF5 export requires the optional 'h5py' package. Install it with 'pip install h5py'."
         ) from exc
     return h5py
 
@@ -560,31 +573,19 @@ def _build_str_tdc_table(
         event_index = hits["ionIdx"].to_numpy(dtype=np.uint32)
     else:
         event_index = np.arange(n, dtype=np.uint32)
-    high_voltage_per_event = (
-        hits["VDC"].to_numpy(dtype=float)
-        if "VDC" in hits.columns
-        else np.zeros(n, dtype=float)
-    )
+    high_voltage_per_event = hits["VDC"].to_numpy(dtype=float) if "VDC" in hits.columns else np.zeros(n, dtype=float)
     if pulse_mode == "laser":
         pulse_v_per_event = np.zeros(n, dtype=float)
         laser_per_event = (
-            hits["laserpower"].to_numpy(dtype=float)
-            if "laserpower" in hits.columns
-            else np.zeros(n, dtype=float)
+            hits["laserpower"].to_numpy(dtype=float) if "laserpower" in hits.columns else np.zeros(n, dtype=float)
         )
     else:
-        pulse_v_per_event = (
-            hits["pulse"].to_numpy(dtype=float)
-            if "pulse" in hits.columns
-            else np.zeros(n, dtype=float)
-        )
+        pulse_v_per_event = hits["pulse"].to_numpy(dtype=float) if "pulse" in hits.columns else np.zeros(n, dtype=float)
         laser_per_event = np.zeros(n, dtype=float)
 
     # Stack per-channel arrays as columns so we can iterate "down events, across
     # channels" without materializing six separate Python loops.
-    channel_columns_present: list[tuple[int, str]] = [
-        (idx, col) for idx, col in _STR_CHANNEL_COLUMNS if col in hits.columns
-    ]
+    channel_columns_present: list[tuple[int, str]] = [(idx, col) for idx, col in _STR_CHANNEL_COLUMNS if col in hits.columns]
     if not channel_columns_present:
         return {}
 
@@ -595,7 +596,7 @@ def _build_str_tdc_table(
         values_matrix[:, column_position] = hits[column].to_numpy(dtype=float)
         channel_ids[column_position] = channel_index
     finite_mask = np.isfinite(values_matrix)  # (n_events, n_channels)
-    n_per_event = finite_mask.sum(axis=1)     # (n_events,) hits per event
+    n_per_event = finite_mask.sum(axis=1)  # (n_events,) hits per event
     total_rows = int(n_per_event.sum())
     if total_rows == 0:
         return {}
@@ -694,9 +695,7 @@ def str_to_raw_hdf5(
             grp.create_dataset("y", data=det_y_cm, compression="gzip", compression_opts=4)
             grp.attrs["num_entries"] = n_valid
             grp.attrs["num_dropped_nan"] = int(n_dropped)
-            grp.attrs["units"] = (
-                "high_voltage=V, pulse=V, laser_intensity=pJ, t=ns, x=cm, y=cm, start_counter=uint32"
-            )
+            grp.attrs["units"] = "high_voltage=V, pulse=V, laser_intensity=pJ, t=ns, x=cm, y=cm, start_counter=uint32"
             grp.attrs["source"] = "str_to_raw_hdf5"
             grp.attrs["pulse_mode"] = pulse_mode
 
@@ -706,12 +705,9 @@ def str_to_raw_hdf5(
                 tdc.create_dataset(name, data=array, compression="gzip", compression_opts=4)
             tdc.attrs["num_entries"] = int(tdc_table["channel"].shape[0])
             tdc.attrs["channel_count"] = 6
-            tdc.attrs["channel_map"] = (
-                "0=detxt1, 1=detxt2, 2=detyt1, 3=detyt2, 4=detwt1, 5=detwt2"
-            )
+            tdc.attrs["channel_map"] = "0=detxt1, 1=detxt2, 2=detyt1, 3=detyt2, 4=detwt1, 5=detwt2"
             tdc.attrs["units"] = (
-                "channel=uint32, time_data=TDC counts (uint32), high_voltage=V, "
-                "pulse=V, laser_pulse=pJ, start_counter=uint32"
+                "channel=uint32, time_data=TDC counts (uint32), high_voltage=V, pulse=V, laser_pulse=pJ, start_counter=uint32"
             )
             tdc.attrs["source"] = "str_to_raw_hdf5"
             tdc.attrs["pulse_mode"] = pulse_mode

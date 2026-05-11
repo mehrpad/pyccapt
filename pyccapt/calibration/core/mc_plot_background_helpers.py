@@ -28,7 +28,7 @@ def plot_background(plotter, mode, non_peaks=None, lam=1e6, tol=1e-1, max_iter=1
         lowerLim = 3.5
         mask = np.logical_and((plotter.x >= lowerLim), (plotter.x <= upperLim))
         bg_4 = np.sum(plotter.y[np.array(mask[:-1])]) / (upperLim - lowerLim)
-        plotter.background_ppm = round(bg_4 / len(plotter.mc_tof) * 1E6, 2)
+        plotter.background_ppm = round(bg_4 / len(plotter.mc_tof) * 1e6, 2)
         handles, labels = plt.gca().get_legend_handles_labels()
         handles.append(plt.Line2D([], [], linestyle='none'))
         labels.append('Noise ppm: ' + str(plotter.background_ppm))
@@ -39,7 +39,7 @@ def plot_background(plotter, mode, non_peaks=None, lam=1e6, tol=1e-1, max_iter=1
         lowerLim = 99.5
         mask = np.logical_and((plotter.x >= lowerLim), (plotter.x <= upperLim))
         bg_100 = np.sum(plotter.y[np.array(mask[:-1])]) / (upperLim - lowerLim)
-        plotter.background_ppm = round(bg_100 / len(plotter.mc_tof) * 1E6, 2)
+        plotter.background_ppm = round(bg_100 / len(plotter.mc_tof) * 1e6, 2)
         handles, labels = plt.gca().get_legend_handles_labels()
         handles.append(plt.Line2D([], [], linestyle='none'))
         labels.append('Noise ppm: ' + str(plotter.background_ppm))
@@ -56,7 +56,7 @@ def plot_background(plotter, mode, non_peaks=None, lam=1e6, tol=1e-1, max_iter=1
                         noise += plotter.y[i]
                 handles, labels = plt.gca().get_legend_handles_labels()
                 handles.append(plt.Line2D([], [], linestyle='none'))
-                plotter.background_ppm = round(noise / len(plotter.mc_tof) * 1E6 / np.max(plotter.mc_tof), 2)
+                plotter.background_ppm = round(noise / len(plotter.mc_tof) * 1e6 / np.max(plotter.mc_tof), 2)
                 labels.append('Noise ppm: ' + str(plotter.background_ppm))
                 plt.legend(handles, labels, frameon=False, loc='upper left')
 
@@ -73,7 +73,7 @@ def plot_background(plotter, mode, non_peaks=None, lam=1e6, tol=1e-1, max_iter=1
             effective_heights = np.array(effective_heights)
             handles, labels = plt.gca().get_legend_handles_labels()
             handles.append(plt.Line2D([], [], linestyle='none'))
-            plotter.background_ppm = round(np.sum(effective_heights) / len(plotter.mc_tof) * 1E6 / np.max(plotter.mc_tof), 2)
+            plotter.background_ppm = round(np.sum(effective_heights) / len(plotter.mc_tof) * 1e6 / np.max(plotter.mc_tof), 2)
             labels.append('Noise ppm: ' + str(plotter.background_ppm))
             plt.legend(handles, labels, frameon=False, loc='upper left')
 
@@ -98,7 +98,7 @@ def manual_background_fit(plotter):
         if event.button == 1 and event.inaxes == plotter.ax:
             x_value, y_value = event.xdata, event.ydata
             selected_points.append((x_value, y_value))
-            marker, = plotter.ax.plot(x_value, y_value, 'ro')
+            (marker,) = plotter.ax.plot(x_value, y_value, 'ro')
             point_markers.append(marker)
             plotter.fig.canvas.draw()
         elif event.button == 3:
@@ -150,13 +150,21 @@ def calculate_noise(plotter, fig_size=(9, 5), plot_without_noise=False):
 
     handles, labels = plt.gca().get_legend_handles_labels()
     handles.append(plt.Line2D([], [], linestyle='none'))
-    plotter.background_ppm = round(np.sum(effective_heights) / len(plotter.mc_tof) * 1E6 / np.max(plotter.mc_tof), 2)
+    plotter.background_ppm = round(np.sum(effective_heights) / len(plotter.mc_tof) * 1e6 / np.max(plotter.mc_tof), 2)
     labels.append('Noise ppm: ' + str(plotter.background_ppm))
     plt.legend(handles, labels, frameon=False, loc='upper left')
 
     if plot_without_noise:
         new_fig, new_ax = plt.subplots(figsize=fig_size)
-        new_ax.hist(plotter.x[:-1], plotter.x, weights=y_noise_removed, alpha=0.9, color='slategray', edgecolor='k', histtype='stepfilled')
+        new_ax.hist(
+            plotter.x[:-1],
+            plotter.x,
+            weights=y_noise_removed,
+            alpha=0.9,
+            color='slategray',
+            edgecolor='k',
+            histtype='stepfilled',
+        )
         new_ax.set_xlabel('Mass/Charge [Da]' if plotter.ax.get_xlabel() == 'Mass/Charge [Da]' else 'Time of Flight [ns]')
         new_ax.set_ylabel('Event Counts')
         new_ax.set_yscale('log' if plotter.ax.get_yscale() == 'log' else 'linear')

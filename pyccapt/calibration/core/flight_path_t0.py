@@ -57,8 +57,7 @@ def suggest_isotope_option(
     index = int((isotope_table["weight"].astype(float) - target_mass).abs().idxmin())
     row = isotope_table.loc[index]
     return (
-        f"{row['element']}-{int(row['isotope'])} | "
-        f"mass={float(row['weight']):.5f} | abundance={float(row['abundance']):.4f}"
+        f"{row['element']}-{int(row['isotope'])} | mass={float(row['weight']):.5f} | abundance={float(row['abundance']):.4f}"
     )
 
 
@@ -270,13 +269,13 @@ def fit_flight_path_and_t0(peak_table: pd.DataFrame, *, pulse_mode: str) -> dict
     slope, intercept = np.polyfit(factor, tof_ns, deg=1)
     predicted = intercept + slope * factor
     residuals = tof_ns - predicted
-    ss_res = float(np.sum(residuals ** 2))
+    ss_res = float(np.sum(residuals**2))
     ss_tot = float(np.sum((tof_ns - np.mean(tof_ns)) ** 2))
     r_squared = 1.0 - ss_res / ss_tot if ss_tot > 0 else 1.0
     return {
         "flight_path_length_mm": float(slope),
         "t0_ns": float(intercept),
-        "rmse_ns": float(np.sqrt(np.mean(residuals ** 2))),
+        "rmse_ns": float(np.sqrt(np.mean(residuals**2))),
         "r_squared": float(r_squared),
         "num_ions": int(len(peak_table)),
         "factor": factor,
@@ -396,8 +395,12 @@ def preview_mass_spectrum_after_t0(
     if not np.any(mask_original) and not np.any(mask_recalculated):
         raise ValueError("No finite mass/charge values are available for the preview.")
 
-    upper = float(max(np.max(original[mask_original]) if np.any(mask_original) else 0.0,
-                      np.max(recalculated[mask_recalculated]) if np.any(mask_recalculated) else 0.0))
+    upper = float(
+        max(
+            np.max(original[mask_original]) if np.any(mask_original) else 0.0,
+            np.max(recalculated[mask_recalculated]) if np.any(mask_recalculated) else 0.0,
+        )
+    )
     upper = max(upper, bin_width)
     bins = np.arange(0.0, upper + bin_width, bin_width)
 

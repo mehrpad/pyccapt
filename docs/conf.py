@@ -62,7 +62,7 @@ extensions = [
     'myst_parser',
     'sphinx_markdown_tables',
     'sphinxcontrib.bibtex',
-    ]
+]
 
 # The html index document.
 bibtex_bibfiles = ['references.bib']
@@ -121,10 +121,10 @@ html_css_files = [
 ]
 
 html_context = {
-  'display_github': True,
-  'github_user': 'mmonajem',
-  'github_repo': 'pyccapt',
-  'github_version': 'master/docs/',
+    'display_github': True,
+    'github_user': 'mmonajem',
+    'github_repo': 'pyccapt',
+    'github_version': 'master/docs/',
 }
 
 html_theme_options = {

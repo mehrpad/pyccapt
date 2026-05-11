@@ -1,4 +1,4 @@
-﻿"""Process coordination helpers for main control GUI."""
+"""Process coordination helpers for main control GUI."""
 
 from __future__ import annotations
 
@@ -65,7 +65,7 @@ class ProcessCoordinator:
         variables: Any,
         conf: dict[str, Any],
         camera_closed_event: Any,
-            camera_command_queue: Any,
+        camera_command_queue: Any,
     ) -> Any:
         """Spawn the camera subprocess.
 
@@ -87,7 +87,7 @@ class ProcessCoordinator:
         variables: Any,
         conf: dict[str, Any],
         visualization_closed_event: Any,
-            visualization_command_queue: Any,
+        visualization_command_queue: Any,
         x_plot: Any,
         y_plot: Any,
         t_plot: Any,

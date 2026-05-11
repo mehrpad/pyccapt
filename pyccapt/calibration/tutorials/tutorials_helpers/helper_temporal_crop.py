@@ -147,19 +147,21 @@ def call_plot_crop_experiment(variables, pulse_mode):
     button_reset.on_click(lambda b: reset(variables, out))
     button_sync.on_click(sync_from_drawn)
 
-    widget_container = widgets.VBox([
-        widgets.HBox([max_tof_label, max_tof_widget]),
-        widgets.HBox([frac_label, frac_widget]),
-        widgets.HBox([bins_label, widgets.HBox([bins_x, bins_y])]),
-        widgets.HBox([figure_size_label, widgets.HBox([figure_size_x, figure_size_y])]),
-        widgets.HBox([pulse_plot_label, pulse_plot_widget]),
-        widgets.HBox([dc_plot_label, dc_plot_widget]),
-        widgets.HBox([pulse_mode_label, pulse_mode_widget]),
-        widgets.HBox([use_manual_label, use_manual_values]),
-        widgets.HBox([index_label, widgets.HBox([start_widget, end_widget])]),
-        widgets.HBox([save_label, save_widget]),
-        widgets.HBox([figname_label, figname_widget]),
-        widgets.HBox([button_plot, button_sync, button_apply, button_reset]),
-    ])
+    widget_container = widgets.VBox(
+        [
+            widgets.HBox([max_tof_label, max_tof_widget]),
+            widgets.HBox([frac_label, frac_widget]),
+            widgets.HBox([bins_label, widgets.HBox([bins_x, bins_y])]),
+            widgets.HBox([figure_size_label, widgets.HBox([figure_size_x, figure_size_y])]),
+            widgets.HBox([pulse_plot_label, pulse_plot_widget]),
+            widgets.HBox([dc_plot_label, dc_plot_widget]),
+            widgets.HBox([pulse_mode_label, pulse_mode_widget]),
+            widgets.HBox([use_manual_label, use_manual_values]),
+            widgets.HBox([index_label, widgets.HBox([start_widget, end_widget])]),
+            widgets.HBox([save_label, save_widget]),
+            widgets.HBox([figname_label, figname_widget]),
+            widgets.HBox([button_plot, button_sync, button_apply, button_reset]),
+        ]
+    )
     display(widget_container)
     display(out)

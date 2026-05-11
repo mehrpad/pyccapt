@@ -95,9 +95,9 @@ Last detection rate: {variables.detection_rate_current_plot:.3f}%
 -----------------------------------------------------
 """
     else:
-	    # Defensive default so the file write never raises
-	    # UnboundLocalError when pulse_mode is something unexpected.
-	    statistics = f"""
+        # Defensive default so the file write never raises
+        # UnboundLocalError when pulse_mode is something unexpected.
+        statistics = f"""
 Experiment Elapsed Time (Sec): {variables.elapsed_time:.3f}
 Experiment Total Ions: {variables.total_ions}
 Specimen Max Achieved Voltage (V): {variables.specimen_voltage:.3f}

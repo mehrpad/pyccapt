@@ -147,7 +147,7 @@ def test_surface_concept_recovery_falls_back_to_y_when_no_x_pair():
     still produce a y-axis hit on its own."""
     sequence_records = [
         {
-            'channels': [0, 2, 3, 0],   # has ch0 + ch2 + ch3 but no ch1
+            'channels': [0, 2, 3, 0],  # has ch0 + ch2 + ch3 but no ch1
             'time_data': [100, 120, 130, 105],
             'start_counter': [10],
             'valid_event': [False],
@@ -196,7 +196,7 @@ def test_surface_concept_recovery_validates_axis_specific_detector_bounds():
     sequence_records = [
         {
             'channels': [0, 1],
-            'time_data': [100, 110],   # |det_x| ≈ small → in_detector
+            'time_data': [100, 110],  # |det_x| ≈ small → in_detector
             'start_counter': [10],
             'valid_event': [False],
             'high_voltage': 5000.0,
@@ -211,9 +211,7 @@ def test_surface_concept_recovery_validates_axis_specific_detector_bounds():
             'pulse': 0.0,
         },
     ]
-    hit_table, _ = raw_data_workflow.extract_surface_concept_hits(
-        sequence_records, detector_limit_cm=0.05
-    )
+    hit_table, _ = raw_data_workflow.extract_surface_concept_hits(sequence_records, detector_limit_cm=0.05)
 
     assert hit_table['detector_axis'].tolist() == ['x', 'x']
     assert hit_table['in_detector'].tolist() == [True, False]
@@ -228,7 +226,7 @@ def test_surface_concept_recovery_carries_parent_pulse_length_on_hit_table():
             'channels': [0, 1, 2, 3],
             'time_data': [100, 110, 120, 130],
             'start_counter': [10],
-            'valid_event': [True],   # full 4-DLTS
+            'valid_event': [True],  # full 4-DLTS
             'high_voltage': 5000.0,
             'pulse': 0.0,
         },
@@ -236,15 +234,13 @@ def test_surface_concept_recovery_carries_parent_pulse_length_on_hit_table():
             'channels': [0, 0, 1, 1],
             'time_data': [200, 202, 210, 212],
             'start_counter': [11],
-            'valid_event': [False],   # invalid → multi-pair recovery (2 x-hits)
+            'valid_event': [False],  # invalid → multi-pair recovery (2 x-hits)
             'high_voltage': 5000.0,
             'pulse': 0.0,
         },
     ]
 
-    hit_table, _ = raw_data_workflow.extract_surface_concept_hits(
-        sequence_records, detector_limit_cm=10.0
-    )
+    hit_table, _ = raw_data_workflow.extract_surface_concept_hits(sequence_records, detector_limit_cm=10.0)
 
     assert 'parent_pulse_length' in hit_table.columns
     # Full 4-DLTS hit: parent pulse length = 4.
@@ -262,20 +258,25 @@ def test_plot_peak_chunk_length_distribution_groups_partial_hits_by_parent_lengt
 
     matplotlib.use('Agg')
 
-    hit_table = pd.DataFrame({
-        'tof (ns)':            [400.0, 405.0, 600.0, 600.5, 600.0],
-        'mc (Da)':             [27.0, 27.05, 1.0, 1.05, 27.0],
-        'x_det (cm)':          [0.1, 0.0, 0.0, 0.0, 0.2],
-        'y_det (cm)':          [0.0, 0.05, 0.0, 0.0, 0.0],
-        'dlts':                [4, 2, 2, 2, 2],
-        'detector_axis':       ['xy', 'x', 'y', 'y', 'x'],
-        'in_detector':         [True, True, True, True, True],
-        'parent_pulse_length': [4, 4, 8, 8, 8],
-    })
+    hit_table = pd.DataFrame(
+        {
+            'tof (ns)': [400.0, 405.0, 600.0, 600.5, 600.0],
+            'mc (Da)': [27.0, 27.05, 1.0, 1.05, 27.0],
+            'x_det (cm)': [0.1, 0.0, 0.0, 0.0, 0.2],
+            'y_det (cm)': [0.0, 0.05, 0.0, 0.0, 0.0],
+            'dlts': [4, 2, 2, 2, 2],
+            'detector_axis': ['xy', 'x', 'y', 'y', 'x'],
+            'in_detector': [True, True, True, True, True],
+            'parent_pulse_length': [4, 4, 8, 8, 8],
+        }
+    )
     windows = [{'label': 'Al+', 'min': 380.0, 'max': 420.0}]
 
     fig = raw_data_workflow.plot_peak_chunk_length_distribution(
-        hit_table, windows, signal_kind='tof', only_in_detector=True,
+        hit_table,
+        windows,
+        signal_kind='tof',
+        only_in_detector=True,
     )
     assert fig is not None
     fig.canvas.draw()
@@ -294,22 +295,25 @@ def test_plot_peak_helpers_cap_figure_height_to_safe_bounds_for_many_peaks():
     # 60 peaks would have produced figsize=(11, 180) — a 60 in × 300 dpi
     # PNG → 18 000 px height; combined with bbox_inches='tight' resampling
     # this could escalate to >65 535 px. The cap brings it back below 24 in.
-    windows = [
-        {'label': f'P{n}', 'min': 0.0 + n, 'max': 1.0 + n} for n in range(60)
-    ]
-    hit_table = pd.DataFrame({
-        'tof (ns)':            [0.5, 1.5, 2.5],
-        'mc (Da)':             [0.5, 1.5, 2.5],
-        'x_det (cm)':          [0.0, 0.1, -0.1],
-        'y_det (cm)':          [0.0, 0.0, 0.0],
-        'dlts':                [4, 2, 4],
-        'detector_axis':       ['xy', 'x', 'xy'],
-        'in_detector':         [True, True, True],
-        'parent_pulse_length': [4, 4, 4],
-    })
+    windows = [{'label': f'P{n}', 'min': 0.0 + n, 'max': 1.0 + n} for n in range(60)]
+    hit_table = pd.DataFrame(
+        {
+            'tof (ns)': [0.5, 1.5, 2.5],
+            'mc (Da)': [0.5, 1.5, 2.5],
+            'x_det (cm)': [0.0, 0.1, -0.1],
+            'y_det (cm)': [0.0, 0.0, 0.0],
+            'dlts': [4, 2, 4],
+            'detector_axis': ['xy', 'x', 'xy'],
+            'in_detector': [True, True, True],
+            'parent_pulse_length': [4, 4, 4],
+        }
+    )
 
     fig_chunk = raw_data_workflow.plot_peak_chunk_length_distribution(
-        hit_table, windows, signal_kind='tof', only_in_detector=True,
+        hit_table,
+        windows,
+        signal_kind='tof',
+        only_in_detector=True,
     )
     assert fig_chunk is not None
     chunk_h = fig_chunk.get_size_inches()[1]
@@ -320,8 +324,11 @@ def test_plot_peak_helpers_cap_figure_height_to_safe_bounds_for_many_peaks():
     matplotlib.pyplot.close(fig_chunk)
 
     fig_det = raw_data_workflow.plot_peak_detector_diagnostics(
-        hit_table, windows, signal_kind='tof',
-        only_in_detector=True, detector_limit_cm=4.0,
+        hit_table,
+        windows,
+        signal_kind='tof',
+        only_in_detector=True,
+        detector_limit_cm=4.0,
     )
     assert fig_det is not None
     det_h = fig_det.get_size_inches()[1]
@@ -339,24 +346,29 @@ def test_plot_peak_detector_diagnostics_returns_figure_for_each_peak():
 
     matplotlib.use('Agg')
 
-    hit_table = pd.DataFrame({
-        'tof (ns)':            [400.0, 405.0],
-        'mc (Da)':             [27.0, 27.05],
-        'x_det (cm)':          [0.1, 0.2],
-        'y_det (cm)':          [0.0, 0.0],
-        'dlts':                [4, 2],
-        'detector_axis':       ['xy', 'x'],
-        'in_detector':         [True, True],
-        'parent_pulse_length': [4, 4],
-    })
+    hit_table = pd.DataFrame(
+        {
+            'tof (ns)': [400.0, 405.0],
+            'mc (Da)': [27.0, 27.05],
+            'x_det (cm)': [0.1, 0.2],
+            'y_det (cm)': [0.0, 0.0],
+            'dlts': [4, 2],
+            'detector_axis': ['xy', 'x'],
+            'in_detector': [True, True],
+            'parent_pulse_length': [4, 4],
+        }
+    )
     windows = [
-        {'label': 'Al+',  'min': 380.0, 'max': 420.0},
-        {'label': 'Al2+', 'min': 100.0, 'max': 200.0},   # empty peak
+        {'label': 'Al+', 'min': 380.0, 'max': 420.0},
+        {'label': 'Al2+', 'min': 100.0, 'max': 200.0},  # empty peak
     ]
 
     fig = raw_data_workflow.plot_peak_detector_diagnostics(
-        hit_table, windows, signal_kind='tof',
-        only_in_detector=True, detector_limit_cm=4.0,
+        hit_table,
+        windows,
+        signal_kind='tof',
+        only_in_detector=True,
+        detector_limit_cm=4.0,
     )
     assert fig is not None
     # 2 peaks × 3 panels = 6 axes total.
@@ -369,14 +381,14 @@ def test_load_detector_constants_returns_self_consistent_geometry():
     self-consistent dict for SC and RoentDek even when the caller supplies
     only a subset of overrides."""
     sc = raw_data_workflow.load_detector_constants('surface_concept', None)
-    assert sc['detector_bins']  == 4900
+    assert sc['detector_bins'] == 4900
     assert sc['detector_width_mm'] == 80.0
     # xy_factor is derived from width / bins * binning_factor — must match
     # the historical XY_FACTOR even after the refactor.
     assert sc['xy_factor'] == raw_data_workflow.XY_FACTOR
 
     ro = raw_data_workflow.load_detector_constants('roentdek', None)
-    assert ro['detector_bins']  == 4900
+    assert ro['detector_bins'] == 4900
     assert ro['detector_width_mm'] == 80.0
     # xy_factor self-consistency.
     assert ro['xy_factor'] == 80.0 / 4900.0 * 2.0
@@ -479,7 +491,7 @@ def test_combinatorial_recovery_example1_two_x_pairs_when_both_in_detector():
     )
     hits, candidates = raw_data_workflow.extract_valid_hits_combinatorial(
         record,
-        peak_windows=None,                # no signal gate → all in-detector pairs are valid
+        peak_windows=None,  # no signal gate → all in-detector pairs are valid
         signal_kind='tof',
         detector_limit_cm=10.0,
         mode='greedy',
@@ -492,7 +504,7 @@ def test_combinatorial_recovery_example1_two_x_pairs_when_both_in_detector():
     axes = sorted(h['detector_axis'] for h in hits)
     assert axes == ['x', 'x']
     used = set().union(*(h['used_indices'] for h in hits))
-    assert used == {0, 1, 2, 3}    # every timestamp claimed exactly once
+    assert used == {0, 1, 2, 3}  # every timestamp claimed exactly once
 
 
 def test_combinatorial_recovery_example2_three_y_candidates_picks_only_geometric_one():
@@ -507,9 +519,9 @@ def test_combinatorial_recovery_example2_three_y_candidates_picks_only_geometric
     #   pair (idx_ch2=1, idx_ch3=3): det_y outside detector              → invalid
     #   pair (idx_ch2=2, idx_ch3=3): det_y outside detector              → invalid
     t_ch2_a = 10000
-    t_ch2_b = 100      # |Δ| with t_ch3=11000 = 10900 bins → det_y far outside ±4 cm
-    t_ch2_c = 50000    # |Δ| with t_ch3=11000 = 39000 bins → det_y way outside
-    t_ch3   = 11000
+    t_ch2_b = 100  # |Δ| with t_ch3=11000 = 10900 bins → det_y far outside ±4 cm
+    t_ch2_c = 50000  # |Δ| with t_ch3=11000 = 39000 bins → det_y way outside
+    t_ch3 = 11000
     record = _record(
         channels=[2, 2, 2, 3],
         times=[t_ch2_a, t_ch2_b, t_ch2_c, t_ch3],
@@ -532,7 +544,7 @@ def test_combinatorial_recovery_example2_three_y_candidates_picks_only_geometric
     assert len(hits) == 1
     assert hits[0]['detector_axis'] == 'y'
     assert hits[0]['used_indices'] == frozenset({0, 3})
-    assert hits[0]['in_peak'] is True   # incidentally inside the peak window
+    assert hits[0]['in_peak'] is True  # incidentally inside the peak window
 
 
 def test_combinatorial_recovery_example3_two_y_pairs_when_both_valid():
@@ -579,7 +591,7 @@ def test_combinatorial_recovery_prefers_one_complete_over_two_partials():
         channels=[0, 1, 2, 3],
         # Pair sums chosen so x_sum == y_sum within tolerance → complete
         # candidate is geometrically valid.
-        times=[100, 110, 105, 105],   # x_sum = 210, y_sum = 210
+        times=[100, 110, 105, 105],  # x_sum = 210, y_sum = 210
     )
     for mode in ('greedy', 'exhaustive'):
         hits, _ = raw_data_workflow.extract_valid_hits_combinatorial(
@@ -633,11 +645,11 @@ def test_combinatorial_recovery_phase2_partials_run_on_indices_left_by_completes
         by_dlts = sorted(int(h['dlts']) for h in hits)
         assert by_dlts == [2, 4], f"mode={mode!r}: expected dlts mix [2, 4], got {by_dlts}"
         complete = [h for h in hits if int(h['dlts']) == 4][0]
-        partial  = [h for h in hits if int(h['dlts']) == 2][0]
+        partial = [h for h in hits if int(h['dlts']) == 2][0]
         assert complete['used_indices'] == frozenset({0, 1, 2, 3}), (
             f"mode={mode!r}: phase-1 complete must lock in indices {{0,1,2,3}}"
         )
-        assert partial['used_indices']  == frozenset({4, 5}), (
+        assert partial['used_indices'] == frozenset({4, 5}), (
             f"mode={mode!r}: phase-2 partial must run on the remaining indices {{4,5}}"
         )
         assert partial['detector_axis'] == 'x'
@@ -671,9 +683,16 @@ def test_combinatorial_recovery_two_stage_on_multi_hit_pulse_in_both_modes():
     record = _record(
         channels=[0, 1, 2, 3, 0, 1, 2, 3, 0, 1],
         times=[
-            10000, 11000, 10500, 10500,   # ion A indices 0..3
-            49000, 51000, 49500, 50500,   # ion B indices 4..7
-            200, 210,                       # stray x-pair indices 8..9
+            10000,
+            11000,
+            10500,
+            10500,  # ion A indices 0..3
+            49000,
+            51000,
+            49500,
+            50500,  # ion B indices 4..7
+            200,
+            210,  # stray x-pair indices 8..9
         ],
     )
     for mode in ('greedy', 'exhaustive'):
@@ -687,11 +706,10 @@ def test_combinatorial_recovery_two_stage_on_multi_hit_pulse_in_both_modes():
         )
         by_dlts = sorted(int(h['dlts']) for h in hits)
         assert by_dlts == [2, 4, 4], (
-            f"mode={mode!r}: two-stage failed — expected 2 completes + 1 partial, "
-            f"got dlts mix {by_dlts}"
+            f"mode={mode!r}: two-stage failed — expected 2 completes + 1 partial, got dlts mix {by_dlts}"
         )
         completes = [h for h in hits if int(h['dlts']) == 4]
-        partial   = [h for h in hits if int(h['dlts']) == 2][0]
+        partial = [h for h in hits if int(h['dlts']) == 2][0]
         locked_indices = frozenset().union(*(c['used_indices'] for c in completes))
         assert locked_indices == frozenset({0, 1, 2, 3, 4, 5, 6, 7}), (
             f"mode={mode!r}: phase-1 must lock both ions' complete-event indices"
@@ -753,7 +771,7 @@ def test_combinatorial_recovery_axis_aware_detector_gate():
     # Times chosen so the x-pair has a huge difference → |det_x| outside.
     record = _record(
         channels=[0, 1],
-        times=[100, 100000],   # Δ = 99900 → |det_x| massive → outside
+        times=[100, 100000],  # Δ = 99900 → |det_x| massive → outside
     )
     hits, _ = raw_data_workflow.extract_valid_hits_combinatorial(
         record,
@@ -776,16 +794,21 @@ def test_combinatorial_recovery_greedy_and_exhaustive_agree_on_simple_inputs():
         times=[100, 200, 110, 210],
     )
     hits_greedy, _ = raw_data_workflow.extract_valid_hits_combinatorial(
-        record, peak_windows=None, signal_kind='tof',
-        detector_limit_cm=10.0, mode='greedy',
+        record,
+        peak_windows=None,
+        signal_kind='tof',
+        detector_limit_cm=10.0,
+        mode='greedy',
     )
     hits_exhaust, _ = raw_data_workflow.extract_valid_hits_combinatorial(
-        record, peak_windows=None, signal_kind='tof',
-        detector_limit_cm=10.0, mode='exhaustive',
+        record,
+        peak_windows=None,
+        signal_kind='tof',
+        detector_limit_cm=10.0,
+        mode='exhaustive',
     )
     assert len(hits_greedy) == len(hits_exhaust) == 2
-    assert sorted(h['detector_axis'] for h in hits_greedy) == \
-           sorted(h['detector_axis'] for h in hits_exhaust)
+    assert sorted(h['detector_axis'] for h in hits_greedy) == sorted(h['detector_axis'] for h in hits_exhaust)
 
 
 def test_combinatorial_recovery_noise_baseline_survives_full_pulse_range():
@@ -798,22 +821,39 @@ def test_combinatorial_recovery_noise_baseline_survives_full_pulse_range():
     # Build a fake tdc frame containing 4 pulses, each a clean 4-DLTS event,
     # whose tofs are spaced across [50, 500] ns. Two of them fall inside
     # the user's only peak window (300, 350); the other two are noise.
-    tdc = pd.DataFrame({
-        'start_counter':       np.repeat([1, 2, 3, 4], 4).astype(np.int64),
-        'channel':              np.tile([0, 1, 2, 3], 4).astype(np.int64),
-        # tof_4d = sum * TOF_FACTOR_NS = sum * 27.432 / 4000 ns/bin.
-        # Pick sums so tof = 80, 220, 320, 480 ns respectively.
-        'time_data':            np.array([
-            # pulse 1: tof_4d = 4*sum/4 * 27.432/4000 → sum bins = 80 / (27.432/4000) ≈ 11665
-            # We just need pair-sum coincidence (x_sum == y_sum) for the complete to form.
-            2916, 2916, 2916, 2917,                # tof ≈ 80 ns
-            8020, 8020, 8020, 8020,                # tof ≈ 220 ns
-            11665, 11665, 11665, 11665,            # tof ≈ 320 ns (in peak)
-            17500, 17500, 17500, 17500,            # tof ≈ 480 ns
-        ], dtype=np.int64),
-        'high_voltage (V)':    np.full(16, 5000.0),
-        'pulse_v (V)':          np.full(16, 0.0),
-    })
+    tdc = pd.DataFrame(
+        {
+            'start_counter': np.repeat([1, 2, 3, 4], 4).astype(np.int64),
+            'channel': np.tile([0, 1, 2, 3], 4).astype(np.int64),
+            # tof_4d = sum * TOF_FACTOR_NS = sum * 27.432 / 4000 ns/bin.
+            # Pick sums so tof = 80, 220, 320, 480 ns respectively.
+            'time_data': np.array(
+                [
+                    # pulse 1: tof_4d = 4*sum/4 * 27.432/4000 → sum bins = 80 / (27.432/4000) ≈ 11665
+                    # We just need pair-sum coincidence (x_sum == y_sum) for the complete to form.
+                    2916,
+                    2916,
+                    2916,
+                    2917,  # tof ≈ 80 ns
+                    8020,
+                    8020,
+                    8020,
+                    8020,  # tof ≈ 220 ns
+                    11665,
+                    11665,
+                    11665,
+                    11665,  # tof ≈ 320 ns (in peak)
+                    17500,
+                    17500,
+                    17500,
+                    17500,  # tof ≈ 480 ns
+                ],
+                dtype=np.int64,
+            ),
+            'high_voltage (V)': np.full(16, 5000.0),
+            'pulse_v (V)': np.full(16, 0.0),
+        }
+    )
     peak_windows = [{'label': 'Al+', 'min': 300.0, 'max': 350.0}]
 
     result = raw_data_workflow.analyze_surface_concept_tdc_frame_combinatorial(
@@ -869,9 +909,9 @@ def test_combinatorial_recovery_emits_geometric_hits_even_outside_peak_windows()
         mode='greedy',
     )
     y_candidates = [c for c in candidates if c['detector_axis'] == 'y']
-    assert all(c['in_detector'] for c in y_candidates)        # geometry was fine
-    assert all(c.get('in_tof_range') for c in y_candidates)   # tof_2d ≈ 14-27 ns ∈ [0, 5000]
-    assert not any(c['in_peak'] for c in y_candidates)         # but outside (280, 300)
+    assert all(c['in_detector'] for c in y_candidates)  # geometry was fine
+    assert all(c.get('in_tof_range') for c in y_candidates)  # tof_2d ≈ 14-27 ns ∈ [0, 5000]
+    assert not any(c['in_peak'] for c in y_candidates)  # but outside (280, 300)
     # Even though no candidate is "in peak", at least one must be emitted
     # (max-disjoint over the geometric subset; here all three y-pairs share
     # ch=3 at index 1, so exactly one wins the index conflict).
@@ -885,7 +925,7 @@ def test_combinatorial_recovery_emits_geometric_hits_even_outside_peak_windows()
         peak_windows=None,
         signal_kind='tof',
         detector_limit_cm=10.0,
-        max_tof_ns=10.0,        # tighter than any pair's tof_2d
+        max_tof_ns=10.0,  # tighter than any pair's tof_2d
         mode='greedy',
     )
     assert hits_short == []
@@ -898,7 +938,9 @@ def test_combinatorial_recovery_tags_emitted_hits_with_parent_pulse_length_and_m
     record = _record(
         channels=[0, 1, 0, 1],
         times=[100, 110, 200, 210],
-        start=42, hv=4321.0, pulse=12.5,
+        start=42,
+        hv=4321.0,
+        pulse=12.5,
     )
     hits, _ = raw_data_workflow.extract_valid_hits_combinatorial(
         record,
@@ -919,13 +961,15 @@ def test_analyze_surface_concept_tdc_frame_combinatorial_returns_hit_table():
     """End-to-end smoke test for the combinatorial ``analyze_*`` orchestrator
     on a tiny tdc dataframe. Hit table must carry parent_pulse_length and
     detector_axis; candidate counts must be populated."""
-    tdc = pd.DataFrame({
-        'start_counter':       [1, 1, 1, 1],
-        'channel':             [0, 0, 1, 1],
-        'time_data':           [100, 200, 110, 210],
-        'high_voltage (V)':    [3000.0, 3000.0, 3000.0, 3000.0],
-        'pulse_v (V)':         [400.0, 400.0, 400.0, 400.0],
-    })
+    tdc = pd.DataFrame(
+        {
+            'start_counter': [1, 1, 1, 1],
+            'channel': [0, 0, 1, 1],
+            'time_data': [100, 200, 110, 210],
+            'high_voltage (V)': [3000.0, 3000.0, 3000.0, 3000.0],
+            'pulse_v (V)': [400.0, 400.0, 400.0, 400.0],
+        }
+    )
     result = raw_data_workflow.analyze_surface_concept_tdc_frame_combinatorial(
         tdc,
         peak_windows=None,
@@ -934,10 +978,9 @@ def test_analyze_surface_concept_tdc_frame_combinatorial_returns_hit_table():
         mode='greedy',
     )
     hit_table = result['hit_table']
-    assert {'parent_pulse_length', 'detector_axis', 'in_peak', 'in_detector'} \
-        .issubset(hit_table.columns)
+    assert {'parent_pulse_length', 'detector_axis', 'in_peak', 'in_detector'}.issubset(hit_table.columns)
     assert (hit_table['parent_pulse_length'] == 4).all()
     counts = result['candidate_counts']
     assert counts['emitted'] == len(hit_table)
     assert counts['valid'] >= counts['emitted']
-    assert counts['total']  >= counts['valid']
+    assert counts['total'] >= counts['valid']

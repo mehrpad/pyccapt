@@ -141,11 +141,17 @@ def call_mc_plot(variables, selector):
             else:
                 hist = variables.data['t (ns)']
             mc_hist = mc_plot.AptHistPlotter(hist[hist < lim_value], variables)
-            mc_hist.plot_histogram(bin_width=bin_size_value, normalize=mode_value, label='mc', steps='stepfilled',
-                                   log=log_value, grid=grid_value, fig_size=figure_size)
+            mc_hist.plot_histogram(
+                bin_width=bin_size_value,
+                normalize=mode_value,
+                label='mc',
+                steps='stepfilled',
+                log=log_value,
+                grid=grid_value,
+                fig_size=figure_size,
+            )
             if mode_value != 'normalized':
-                mc_hist.find_peaks_and_widths(prominence=prominence_value, distance=distance_value,
-                                              percent=percent_value)
+                mc_hist.find_peaks_and_widths(prominence=prominence_value, distance=distance_value, percent=percent_value)
                 if plot_peak.value:
                     mc_hist.plot_peaks()
                 mc_hist.plot_hist_info_legend(label='mc', mrp_all=mrp_all_widget.value, background=None, loc='right')
@@ -161,27 +167,31 @@ def call_mc_plot(variables, selector):
     load_selection_button.on_click(on_load_selection)
     gaussian_mrp_button.on_click(on_gaussian_mrp)
 
-    widget_container = widgets.VBox([
-        widgets.HBox([widgets.Label(value='Target:', layout=label_layout), target_mode]),
-        widgets.HBox([widgets.Label(value='Bin Size:', layout=label_layout), bin_size_widget]),
-        widgets.HBox([widgets.Label(value='Log:', layout=label_layout), log_widget]),
-        widgets.HBox([widgets.Label(value='Grid:', layout=label_layout), grid_widget]),
-        widgets.HBox([widgets.Label(value='Normalize:', layout=label_layout), mode_widget]),
-        widgets.HBox([widgets.Label(value='Prominence:', layout=label_layout), prominence_widget]),
-        widgets.HBox([widgets.Label(value='Distance:', layout=label_layout), distance_widget]),
-        widgets.HBox([widgets.Label(value='Lim:', layout=label_layout), lim_widget]),
-        widgets.HBox([widgets.Label(value='Percent:', layout=label_layout), percent_widget]),
-        widgets.HBox([widgets.Label(value='MRP all:', layout=label_layout), mrp_all_widget]),
-        widgets.HBox([widgets.Label(value='Plot peak:', layout=label_layout), plot_peak]),
-        widgets.HBox([widgets.Label(value='Save:', layout=label_layout), save]),
-        widgets.HBox([widgets.Label(value='Fig name:', layout=label_layout), figname_widget]),
-        widgets.HBox([widgets.Label(value='Fig size:', layout=label_layout),
-                      widgets.HBox([figure_mc_size_x, figure_mc_size_y])]),
-        widgets.HBox([widgets.Label(value='MRP range:', layout=label_layout),
-                      widgets.HBox([mrp_left_widget, mrp_right_widget])]),
-        widgets.HBox([load_selection_button, gaussian_mrp_button]),
-        widgets.HBox([button_plot]),
-    ])
+    widget_container = widgets.VBox(
+        [
+            widgets.HBox([widgets.Label(value='Target:', layout=label_layout), target_mode]),
+            widgets.HBox([widgets.Label(value='Bin Size:', layout=label_layout), bin_size_widget]),
+            widgets.HBox([widgets.Label(value='Log:', layout=label_layout), log_widget]),
+            widgets.HBox([widgets.Label(value='Grid:', layout=label_layout), grid_widget]),
+            widgets.HBox([widgets.Label(value='Normalize:', layout=label_layout), mode_widget]),
+            widgets.HBox([widgets.Label(value='Prominence:', layout=label_layout), prominence_widget]),
+            widgets.HBox([widgets.Label(value='Distance:', layout=label_layout), distance_widget]),
+            widgets.HBox([widgets.Label(value='Lim:', layout=label_layout), lim_widget]),
+            widgets.HBox([widgets.Label(value='Percent:', layout=label_layout), percent_widget]),
+            widgets.HBox([widgets.Label(value='MRP all:', layout=label_layout), mrp_all_widget]),
+            widgets.HBox([widgets.Label(value='Plot peak:', layout=label_layout), plot_peak]),
+            widgets.HBox([widgets.Label(value='Save:', layout=label_layout), save]),
+            widgets.HBox([widgets.Label(value='Fig name:', layout=label_layout), figname_widget]),
+            widgets.HBox(
+                [widgets.Label(value='Fig size:', layout=label_layout), widgets.HBox([figure_mc_size_x, figure_mc_size_y])]
+            ),
+            widgets.HBox(
+                [widgets.Label(value='MRP range:', layout=label_layout), widgets.HBox([mrp_left_widget, mrp_right_widget])]
+            ),
+            widgets.HBox([load_selection_button, gaussian_mrp_button]),
+            widgets.HBox([button_plot]),
+        ]
+    )
 
     display(widget_container)
     display(out)

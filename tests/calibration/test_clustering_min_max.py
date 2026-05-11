@@ -162,4 +162,3 @@ def test_normalize_clustering_method_supports_new_aliases():
     assert normalize_clustering_method("Comp-Seeded Support HDBSCAN") == "comp-seeded-support-hdbscan"
     assert normalize_clustering_method("Composition GMM Voxel") == "composition-gmm-voxel"
     assert normalize_clustering_method("CompSpace Agnostic + Seeded") == "compspace-agnostic-seeded"
-

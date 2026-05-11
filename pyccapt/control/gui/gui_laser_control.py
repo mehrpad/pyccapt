@@ -1,4 +1,4 @@
-﻿import logging
+import logging
 import re
 import sys
 import threading
@@ -26,8 +26,7 @@ class _LaserStageReferenceWorker(QtCore.QThread):
     finished_with_error = QtCore.pyqtSignal(str)
     finished_ok = QtCore.pyqtSignal()
 
-    def __init__(self, stage_device, cancel_event, referencing_options,
-                 timeout_s, velocity_m_s):
+    def __init__(self, stage_device, cancel_event, referencing_options, timeout_s, velocity_m_s):
         super().__init__()
         self.stage_device = stage_device
         self.cancel_event = cancel_event
@@ -256,17 +255,18 @@ class Ui_Laser_Control(object):
         self.laser_scan_mode5.addItem("")
         self.gridLayout_5.addWidget(self.laser_scan_mode5, 0, 5, 1, 1)
         self.scanning_disp = QtWidgets.QGraphicsView(parent=Laser_Control)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
-                                           QtWidgets.QSizePolicy.Policy.Expanding)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Expanding)
         sizePolicy.setHorizontalStretch(1)
         sizePolicy.setVerticalStretch(1)
         sizePolicy.setHeightForWidth(self.scanning_disp.sizePolicy().hasHeightForWidth())
         self.scanning_disp.setSizePolicy(sizePolicy)
         self.scanning_disp.setMinimumSize(QtCore.QSize(250, 250))
-        self.scanning_disp.setStyleSheet("QWidget{\n"
-                                         "                                    border: 0.5px solid gray;\n"
-                                         "                                    }\n"
-                                         "                                ")
+        self.scanning_disp.setStyleSheet(
+            "QWidget{\n"
+            "                                    border: 0.5px solid gray;\n"
+            "                                    }\n"
+            "                                "
+        )
         self.scanning_disp.setObjectName("scanning_disp")
         self.gridLayout_5.addWidget(self.scanning_disp, 0, 6, 4, 1)
         self.label_13 = QtWidgets.QLabel(parent=Laser_Control)
@@ -282,8 +282,9 @@ class Ui_Laser_Control(object):
         self.gridLayout_5.addWidget(self.laser_focus_mode, 1, 5, 1, 1)
         self.horizontalLayout = QtWidgets.QHBoxLayout()
         self.horizontalLayout.setObjectName("horizontalLayout")
-        spacerItem = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Policy.Expanding,
-                                           QtWidgets.QSizePolicy.Policy.Minimum)
+        spacerItem = QtWidgets.QSpacerItem(
+            40, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum
+        )
         self.horizontalLayout.addItem(spacerItem)
         self.label_9 = QtWidgets.QLabel(parent=Laser_Control)
         font = QtGui.QFont()
@@ -292,8 +293,7 @@ class Ui_Laser_Control(object):
         self.label_9.setObjectName("label_9")
         self.horizontalLayout.addWidget(self.label_9)
         self.laser_power_disp = QtWidgets.QLCDNumber(parent=Laser_Control)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred,
-                                           QtWidgets.QSizePolicy.Policy.Preferred)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.laser_power_disp.sizePolicy().hasHeightForWidth())
@@ -306,12 +306,14 @@ class Ui_Laser_Control(object):
         font = QtGui.QFont()
         font.setPointSize(9)
         self.laser_power_disp.setFont(font)
-        self.laser_power_disp.setStyleSheet("QLCDNumber{\n"
-                                            "                                            border: 2px solid green;\n"
-                                            "                                            border-radius: 10px;\n"
-                                            "                                            padding: 0 8px;\n"
-                                            "                                            }\n"
-                                            "                                        ")
+        self.laser_power_disp.setStyleSheet(
+            "QLCDNumber{\n"
+            "                                            border: 2px solid green;\n"
+            "                                            border-radius: 10px;\n"
+            "                                            padding: 0 8px;\n"
+            "                                            }\n"
+            "                                        "
+        )
         self.laser_power_disp.setObjectName("laser_power_disp")
         self.horizontalLayout.addWidget(self.laser_power_disp)
         self.label_10 = QtWidgets.QLabel(parent=Laser_Control)
@@ -321,8 +323,7 @@ class Ui_Laser_Control(object):
         self.label_10.setObjectName("label_10")
         self.horizontalLayout.addWidget(self.label_10)
         self.laser_pulse_energy_disp = QtWidgets.QLCDNumber(parent=Laser_Control)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred,
-                                           QtWidgets.QSizePolicy.Policy.Preferred)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.laser_pulse_energy_disp.sizePolicy().hasHeightForWidth())
@@ -334,12 +335,14 @@ class Ui_Laser_Control(object):
         font = QtGui.QFont()
         font.setPointSize(9)
         self.laser_pulse_energy_disp.setFont(font)
-        self.laser_pulse_energy_disp.setStyleSheet("QLCDNumber{\n"
-                                                   "                                            border: 2px solid green;\n"
-                                                   "                                            border-radius: 10px;\n"
-                                                   "                                            padding: 0 8px;\n"
-                                                   "                                            }\n"
-                                                   "                                        ")
+        self.laser_pulse_energy_disp.setStyleSheet(
+            "QLCDNumber{\n"
+            "                                            border: 2px solid green;\n"
+            "                                            border-radius: 10px;\n"
+            "                                            padding: 0 8px;\n"
+            "                                            }\n"
+            "                                        "
+        )
         self.laser_pulse_energy_disp.setObjectName("laser_pulse_energy_disp")
         self.horizontalLayout.addWidget(self.laser_pulse_energy_disp)
         self.label_11 = QtWidgets.QLabel(parent=Laser_Control)
@@ -349,8 +352,7 @@ class Ui_Laser_Control(object):
         self.label_11.setObjectName("label_11")
         self.horizontalLayout.addWidget(self.label_11)
         self.laser_repetion_rate_disp = QtWidgets.QLCDNumber(parent=Laser_Control)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred,
-                                           QtWidgets.QSizePolicy.Policy.Preferred)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.laser_repetion_rate_disp.sizePolicy().hasHeightForWidth())
@@ -360,16 +362,19 @@ class Ui_Laser_Control(object):
         font = QtGui.QFont()
         font.setPointSize(9)
         self.laser_repetion_rate_disp.setFont(font)
-        self.laser_repetion_rate_disp.setStyleSheet("QLCDNumber{\n"
-                                                    "                                            border: 2px solid green;\n"
-                                                    "                                            border-radius: 10px;\n"
-                                                    "                                            padding: 0 8px;\n"
-                                                    "                                            }\n"
-                                                    "                                        ")
+        self.laser_repetion_rate_disp.setStyleSheet(
+            "QLCDNumber{\n"
+            "                                            border: 2px solid green;\n"
+            "                                            border-radius: 10px;\n"
+            "                                            padding: 0 8px;\n"
+            "                                            }\n"
+            "                                        "
+        )
         self.laser_repetion_rate_disp.setObjectName("laser_repetion_rate_disp")
         self.horizontalLayout.addWidget(self.laser_repetion_rate_disp)
-        spacerItem1 = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Policy.Expanding,
-                                            QtWidgets.QSizePolicy.Policy.Minimum)
+        spacerItem1 = QtWidgets.QSpacerItem(
+            40, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum
+        )
         self.horizontalLayout.addItem(spacerItem1)
         self.gridLayout_5.addLayout(self.horizontalLayout, 2, 0, 1, 6)
         # ------------------------------------------------------------------
@@ -429,12 +434,12 @@ class Ui_Laser_Control(object):
             w.setVisible(False)
 
         for row, (lbl, mm, um, nm) in enumerate(
-                (
-                        (self.label_19, self.laser_x_mm, self.laser_x_um, self.laser_x_nm),
-                        (self.label_17, self.laser_y_mm, self.laser_y_um, self.laser_y_nm),
-                        (self.label_18, self.laser_z_mm, self.laser_z_um, self.laser_z_nm),
-                ),
-                start=1,
+            (
+                (self.label_19, self.laser_x_mm, self.laser_x_um, self.laser_x_nm),
+                (self.label_17, self.laser_y_mm, self.laser_y_um, self.laser_y_nm),
+                (self.label_18, self.laser_z_mm, self.laser_z_um, self.laser_z_nm),
+            ),
+            start=1,
         ):
             self.gridLayout_4.addWidget(lbl, row, 0, 1, 1)
             self.gridLayout_4.addWidget(mm, row, 1, 1, 1)
@@ -462,15 +467,12 @@ class Ui_Laser_Control(object):
         self._stage_locator = self.conf.get('stage_smartact_laser', '')
         self._stage_connect_error = ""
         self.flag_super_user_stage = False  # gates the Reference button
-        self._referencing_options = int(self.conf.get(
-            'stage_referencing_options',
-            mcs2_stage.SmarActStage.REFERENCING_OPTIONS_DEFAULT))
-        self._reference_timeout_s = float(self.conf.get(
-            'stage_reference_timeout_s', 120))
-        self._reference_velocity_m_s = float(self.conf.get(
-            'stage_reference_velocity_mm_s', 5.0)) * 1e-3
-        self._home_velocity_m_s = float(self.conf.get(
-            'stage_home_velocity_mm_s', 1.0)) * 1e-3
+        self._referencing_options = int(
+            self.conf.get('stage_referencing_options', mcs2_stage.SmarActStage.REFERENCING_OPTIONS_DEFAULT)
+        )
+        self._reference_timeout_s = float(self.conf.get('stage_reference_timeout_s', 120))
+        self._reference_velocity_m_s = float(self.conf.get('stage_reference_velocity_mm_s', 5.0)) * 1e-3
+        self._home_velocity_m_s = float(self.conf.get('stage_home_velocity_mm_s', 1.0)) * 1e-3
 
         # Header
         self.label_14 = QtWidgets.QLabel("Speed", parent=Laser_Control)
@@ -479,11 +481,11 @@ class Ui_Laser_Control(object):
         self.gridLayout_2.addWidget(self.label_14, 0, 1, 1, 1)
 
         # Per-axis labels
-        self.label_15 = QtWidgets.QLabel("X", parent=Laser_Control);
+        self.label_15 = QtWidgets.QLabel("X", parent=Laser_Control)
         self.label_15.setFont(bold_font)
-        self.label_16 = QtWidgets.QLabel("Y", parent=Laser_Control);
+        self.label_16 = QtWidgets.QLabel("Y", parent=Laser_Control)
         self.label_16.setFont(bold_font)
-        self.label_speed_z = QtWidgets.QLabel("Z", parent=Laser_Control);
+        self.label_speed_z = QtWidgets.QLabel("Z", parent=Laser_Control)
         self.label_speed_z.setFont(bold_font)
 
         def _make_speed_slider():
@@ -500,20 +502,20 @@ class Ui_Laser_Control(object):
         self.laser_speed_y = _make_speed_slider()
         self.laser_speed_z = _make_speed_slider()
 
-        self.laser_speed_x_label = QtWidgets.QLabel(parent=Laser_Control);
+        self.laser_speed_x_label = QtWidgets.QLabel(parent=Laser_Control)
         self.laser_speed_x_label.setMinimumWidth(230)
-        self.laser_speed_y_label = QtWidgets.QLabel(parent=Laser_Control);
+        self.laser_speed_y_label = QtWidgets.QLabel(parent=Laser_Control)
         self.laser_speed_y_label.setMinimumWidth(230)
-        self.laser_speed_z_label = QtWidgets.QLabel(parent=Laser_Control);
+        self.laser_speed_z_label = QtWidgets.QLabel(parent=Laser_Control)
         self.laser_speed_z_label.setMinimumWidth(230)
 
         for row, (lbl, sl, val) in enumerate(
-                (
-                        (self.label_15, self.laser_speed_x, self.laser_speed_x_label),
-                        (self.label_16, self.laser_speed_y, self.laser_speed_y_label),
-                        (self.label_speed_z, self.laser_speed_z, self.laser_speed_z_label),
-                ),
-                start=1,
+            (
+                (self.label_15, self.laser_speed_x, self.laser_speed_x_label),
+                (self.label_16, self.laser_speed_y, self.laser_speed_y_label),
+                (self.label_speed_z, self.laser_speed_z, self.laser_speed_z_label),
+            ),
+            start=1,
         ):
             self.gridLayout_2.addWidget(lbl, row, 0, 1, 1)
             self.gridLayout_2.addWidget(sl, row, 1, 1, 1)
@@ -527,8 +529,9 @@ class Ui_Laser_Control(object):
         self.gridLayout_5.addLayout(self.gridLayout_2, 3, 1, 1, 1)
         self.gridLayout = QtWidgets.QGridLayout()
         self.gridLayout.setObjectName("gridLayout")
-        spacerItem2 = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Policy.Expanding,
-                                            QtWidgets.QSizePolicy.Policy.Minimum)
+        spacerItem2 = QtWidgets.QSpacerItem(
+            40, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum
+        )
         self.gridLayout.addItem(spacerItem2, 0, 0, 1, 1)
         self.laser_up = QtWidgets.QPushButton(parent=Laser_Control)
         self.laser_up.setMinimumSize(QtCore.QSize(50, 25))
@@ -536,8 +539,9 @@ class Ui_Laser_Control(object):
         self.laser_up.setStyleSheet("")
         self.laser_up.setObjectName("laser_up")
         self.gridLayout.addWidget(self.laser_up, 0, 1, 1, 1)
-        spacerItem3 = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Policy.Expanding,
-                                            QtWidgets.QSizePolicy.Policy.Minimum)
+        spacerItem3 = QtWidgets.QSpacerItem(
+            40, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum
+        )
         self.gridLayout.addItem(spacerItem3, 0, 2, 1, 1)
         self.laser_left = QtWidgets.QPushButton(parent=Laser_Control)
         self.laser_left.setMinimumSize(QtCore.QSize(50, 25))
@@ -545,8 +549,9 @@ class Ui_Laser_Control(object):
         self.laser_left.setStyleSheet("")
         self.laser_left.setObjectName("laser_left")
         self.gridLayout.addWidget(self.laser_left, 1, 0, 1, 1)
-        spacerItem4 = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Policy.Expanding,
-                                            QtWidgets.QSizePolicy.Policy.Minimum)
+        spacerItem4 = QtWidgets.QSpacerItem(
+            40, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum
+        )
         self.gridLayout.addItem(spacerItem4, 1, 1, 1, 1)
         self.leser_right = QtWidgets.QPushButton(parent=Laser_Control)
         self.leser_right.setMinimumSize(QtCore.QSize(50, 25))
@@ -554,8 +559,9 @@ class Ui_Laser_Control(object):
         self.leser_right.setStyleSheet("")
         self.leser_right.setObjectName("leser_right")
         self.gridLayout.addWidget(self.leser_right, 1, 2, 1, 1)
-        spacerItem5 = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Policy.Expanding,
-                                            QtWidgets.QSizePolicy.Policy.Minimum)
+        spacerItem5 = QtWidgets.QSpacerItem(
+            40, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum
+        )
         self.gridLayout.addItem(spacerItem5, 2, 0, 1, 1)
         self.laser_down = QtWidgets.QPushButton(parent=Laser_Control)
         self.laser_down.setMinimumSize(QtCore.QSize(50, 25))
@@ -563,8 +569,9 @@ class Ui_Laser_Control(object):
         self.laser_down.setStyleSheet("")
         self.laser_down.setObjectName("laser_down")
         self.gridLayout.addWidget(self.laser_down, 2, 1, 1, 1)
-        spacerItem6 = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Policy.Expanding,
-                                            QtWidgets.QSizePolicy.Policy.Minimum)
+        spacerItem6 = QtWidgets.QSpacerItem(
+            40, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum
+        )
         self.gridLayout.addItem(spacerItem6, 2, 2, 1, 1)
         self.gridLayout_5.addLayout(self.gridLayout, 3, 2, 1, 1)
         self.verticalLayout = QtWidgets.QVBoxLayout()
@@ -573,8 +580,9 @@ class Ui_Laser_Control(object):
         self.laser_forward.setStyleSheet("")
         self.laser_forward.setObjectName("laser_forward")
         self.verticalLayout.addWidget(self.laser_forward)
-        spacerItem7 = QtWidgets.QSpacerItem(17, 24, QtWidgets.QSizePolicy.Policy.Minimum,
-                                            QtWidgets.QSizePolicy.Policy.Expanding)
+        spacerItem7 = QtWidgets.QSpacerItem(
+            17, 24, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding
+        )
         self.verticalLayout.addItem(spacerItem7)
         self.laser_backward = QtWidgets.QPushButton(parent=Laser_Control)
         self.laser_backward.setStyleSheet("")
@@ -593,14 +601,10 @@ class Ui_Laser_Control(object):
         self.laser_stage_reference.setEnabled(False)
         self._stage_button_layout.addWidget(self.laser_stage_reference)
         self.laser_stage_stop = QtWidgets.QPushButton("STOP", parent=Laser_Control)
-        self.laser_stage_stop.setStyleSheet(
-            "QPushButton{background: rgb(220,80,80); color: white; font-weight: bold;}"
-        )
+        self.laser_stage_stop.setStyleSheet("QPushButton{background: rgb(220,80,80); color: white; font-weight: bold;}")
         self._stage_button_layout.addWidget(self.laser_stage_stop)
         self.laser_stage_superuser = QtWidgets.QPushButton("Override Access", parent=Laser_Control)
-        self.laser_stage_superuser.setStyleSheet(
-            "QPushButton{background: rgb(193, 193, 193)}"
-        )
+        self.laser_stage_superuser.setStyleSheet("QPushButton{background: rgb(193, 193, 193)}")
         self._original_laser_stage_superuser_style = self.laser_stage_superuser.styleSheet()
         self._stage_button_layout.addWidget(self.laser_stage_superuser)
         self.gridLayout_5.addLayout(self._stage_button_layout, 3, 5, 1, 1)
@@ -633,8 +637,7 @@ class Ui_Laser_Control(object):
         self.Error.setObjectName("Error")
         self.gridLayout_5.addWidget(self.Error, 4, 0, 1, 4)
         self.start_scanning = QtWidgets.QPushButton(parent=Laser_Control)
-        self.start_scanning.setStyleSheet("QPushButton{background: rgb(193, 193, 193)}\n"
-                                          "                                ")
+        self.start_scanning.setStyleSheet("QPushButton{background: rgb(193, 193, 193)}\n                                ")
         self.start_scanning.setObjectName("start_scanning")
         self.gridLayout_5.addWidget(self.start_scanning, 4, 6, 1, 1)
         # Mode-switch buttons: NKTPBus <-> CLI. Both gated behind Override
@@ -642,9 +645,7 @@ class Ui_Laser_Control(object):
         # are closely related: one is the inverse of the other.
         mode_switch_layout = QtWidgets.QHBoxLayout()
         self.switch_to_cli_button = QtWidgets.QPushButton(parent=Laser_Control)
-        self.switch_to_cli_button.setStyleSheet(
-            "QPushButton{background: rgb(193, 193, 193)}"
-        )
+        self.switch_to_cli_button.setStyleSheet("QPushButton{background: rgb(193, 193, 193)}")
         self.switch_to_cli_button.setObjectName("switch_to_cli_button")
         # CLI is the "we want this for normal operation" direction. Same
         # gating as Nktpbus mode -- Override Access required.
@@ -652,9 +653,7 @@ class Ui_Laser_Control(object):
         mode_switch_layout.addWidget(self.switch_to_cli_button)
 
         self.nktpbus_mode_switch = QtWidgets.QPushButton(parent=Laser_Control)
-        self.nktpbus_mode_switch.setStyleSheet(
-            "QPushButton{background: rgb(193, 193, 193)}"
-        )
+        self.nktpbus_mode_switch.setStyleSheet("QPushButton{background: rgb(193, 193, 193)}")
         self.nktpbus_mode_switch.setObjectName("nktpbus_mode_switch")
         # Switching to NKTPBus drops CLI control of the laser - gated behind
         # Override Access (same button as the stage Reference).
@@ -714,14 +713,10 @@ class Ui_Laser_Control(object):
         self.switch_to_cli_button.clicked.connect(self.switch_to_cli_clicked)
 
         self.laser_wavelegnth.currentIndexChanged.connect(self.laser_wavelegnth_changed)
-        self.laser_wavelegnth.currentIndexChanged.connect(
-            lambda _i: self._update_wavelength_nm_label()
-        )
+        self.laser_wavelegnth.currentIndexChanged.connect(lambda _i: self._update_wavelength_nm_label())
         self.laser_power.valueChanged.connect(self.laser_power_changed)
         self.laser_rate.currentIndexChanged.connect(self.laser_rate_changed)
-        self.laser_rate.currentIndexChanged.connect(
-            lambda _i: self._clamp_divider_to_min_output_rate()
-        )
+        self.laser_rate.currentIndexChanged.connect(lambda _i: self._clamp_divider_to_min_output_rate())
         self.laser_divition_factor.valueChanged.connect(self.laser_divition_factor_changed)
         # Initialise the (nnnn nm) label now that the combo is populated.
         self._update_wavelength_nm_label()
@@ -777,8 +772,7 @@ class Ui_Laser_Control(object):
             # disabled but don't bother the user with an error.
             self._stage_connect_error = ""
             self._set_stage_movement_enabled(False)
-            for sl_lbl in (self.laser_speed_x_label, self.laser_speed_y_label,
-                           self.laser_speed_z_label):
+            for sl_lbl in (self.laser_speed_x_label, self.laser_speed_y_label, self.laser_speed_z_label):
                 sl_lbl.setEnabled(False)
             return
         try:
@@ -797,9 +791,15 @@ class Ui_Laser_Control(object):
         self._refresh_stage_position()
 
     def _set_stage_movement_enabled(self, enabled):
-        for btn in (self.laser_up, self.laser_down, self.laser_left,
-                    self.leser_right, self.laser_forward, self.laser_backward,
-                    self.laser_home):
+        for btn in (
+            self.laser_up,
+            self.laser_down,
+            self.laser_left,
+            self.leser_right,
+            self.laser_forward,
+            self.laser_backward,
+            self.laser_home,
+        ):
             btn.setEnabled(enabled)
         # Reference stays gated behind Override Access (and also requires
         # the device to be connected).
@@ -825,10 +825,9 @@ class Ui_Laser_Control(object):
                 "  - Nktpbus mode (hands the laser over to NKT control software)"
             )
             warning.setInformativeText(
-                "Make sure nothing is in the way of the laser stage and you really want to switch laser modes. Continue?")
-            warning.setStandardButtons(
-                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
+                "Make sure nothing is in the way of the laser stage and you really want to switch laser modes. Continue?"
             )
+            warning.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No)
             warning.setDefaultButton(QtWidgets.QMessageBox.StandardButton.No)
             if warning.exec() != QtWidgets.QMessageBox.StandardButton.Yes:
                 self.error_message("Override Access canceled.")
@@ -840,23 +839,25 @@ class Ui_Laser_Control(object):
             self.flag_super_user_stage = False
             self.laser_stage_superuser.setStyleSheet(self._original_laser_stage_superuser_style)
             self.error_message("!!! Override Access deactivated !!!")
-        self.laser_stage_reference.setEnabled(
-            self.flag_super_user_stage and self.stage_device is not None
-        )
+        self.laser_stage_reference.setEnabled(self.flag_super_user_stage and self.stage_device is not None)
         self.nktpbus_mode_switch.setEnabled(self.flag_super_user_stage)
         self.switch_to_cli_button.setEnabled(self.flag_super_user_stage)
 
     def _axis_velocity_m_s(self, axis):
         slider = (self.laser_speed_x, self.laser_speed_y, self.laser_speed_z)[axis]
         return mcs2_stage.speed_level_to_m_s(
-            slider.value(), self._speed_max_level, self._speed_max_mm_s,
+            slider.value(),
+            self._speed_max_level,
+            self._speed_max_mm_s,
             table=self._speed_table,
         )
 
     def _update_stage_speed_label(self, slider):
         level = slider.value()
         v_m_s = mcs2_stage.speed_level_to_m_s(
-            level, self._speed_max_level, self._speed_max_mm_s,
+            level,
+            self._speed_max_level,
+            self._speed_max_mm_s,
             table=self._speed_table,
         )
         step_m = mcs2_stage.click_step_m(v_m_s, self._click_duration_s)
@@ -878,7 +879,10 @@ class Ui_Laser_Control(object):
         step_m = mcs2_stage.click_step_m(vel, self._click_duration_s)
         try:
             self.stage_device.move_relative_axis(
-                axis=axis, delta_m=sign * step_m, velocity_m_s=vel, wait=False,
+                axis=axis,
+                delta_m=sign * step_m,
+                velocity_m_s=vel,
+                wait=False,
             )
         except mcs2_stage.SmarActStageError as exc:
             self.error_message(f"Move failed: {exc}")
@@ -893,7 +897,9 @@ class Ui_Laser_Control(object):
         # Home click with the X slider at level 1 takes minutes.
         try:
             self.stage_device.move_absolute(
-                x_m=x_m, y_m=y_m, z_m=z_m,
+                x_m=x_m,
+                y_m=y_m,
+                z_m=z_m,
                 velocity_m_s=self._home_velocity_m_s,
                 wait=False,
             )
@@ -904,19 +910,19 @@ class Ui_Laser_Control(object):
         if self.stage_device is None:
             self.error_message(self._stage_connect_error or "Laser stage not connected.")
             return
-        if (self._stage_reference_worker is not None
-                and self._stage_reference_worker.isRunning()):
+        if self._stage_reference_worker is not None and self._stage_reference_worker.isRunning():
             self.error_message("Reference already in progress.")
             return
         self._stage_reference_cancel = threading.Event()
         self._stage_reference_worker = _LaserStageReferenceWorker(
-            self.stage_device, self._stage_reference_cancel,
-            self._referencing_options, self._reference_timeout_s,
+            self.stage_device,
+            self._stage_reference_cancel,
+            self._referencing_options,
+            self._reference_timeout_s,
             self._reference_velocity_m_s,
         )
         self._stage_reference_worker.finished_ok.connect(self._on_stage_reference_done)
-        self._stage_reference_worker.finished_with_error.connect(
-            self._on_stage_reference_failed)
+        self._stage_reference_worker.finished_with_error.connect(self._on_stage_reference_failed)
         self._set_stage_jog_enabled(False)
         self.laser_stage_reference.setEnabled(False)
         self.error_message("Referencing - keep the path clear; press STOP to abort.")
@@ -926,8 +932,7 @@ class Ui_Laser_Control(object):
         self._stage_reference_worker = None
         self._stage_reference_cancel = None
         self._set_stage_jog_enabled(True)
-        self.laser_stage_reference.setEnabled(
-            self.flag_super_user_stage and self.stage_device is not None)
+        self.laser_stage_reference.setEnabled(self.flag_super_user_stage and self.stage_device is not None)
         self._last_stage_position_error = ""
         self._consecutive_stage_position_errors = 0
         self.error_message("Reference complete.")
@@ -936,15 +941,20 @@ class Ui_Laser_Control(object):
         self._stage_reference_worker = None
         self._stage_reference_cancel = None
         self._set_stage_jog_enabled(True)
-        self.laser_stage_reference.setEnabled(
-            self.flag_super_user_stage and self.stage_device is not None)
+        self.laser_stage_reference.setEnabled(self.flag_super_user_stage and self.stage_device is not None)
         self.error_message(f"Reference failed: {message}")
 
     def _set_stage_jog_enabled(self, enabled):
         """Enable/disable jog + Home for the duration of a reference run."""
-        for btn in (self.laser_up, self.laser_down, self.laser_left,
-                    self.leser_right, self.laser_forward, self.laser_backward,
-                    self.laser_home):
+        for btn in (
+            self.laser_up,
+            self.laser_down,
+            self.laser_left,
+            self.leser_right,
+            self.laser_forward,
+            self.laser_backward,
+            self.laser_home,
+        ):
             btn.setEnabled(enabled and self.stage_device is not None)
 
     def _stage_stop(self):
@@ -968,8 +978,7 @@ class Ui_Laser_Control(object):
                 self.error_message(f"Position read failed: {text}")
             else:
                 self._consecutive_stage_position_errors += 1
-                if (self._consecutive_stage_position_errors == 4
-                        and self._stage_poll_timer is not None):
+                if self._consecutive_stage_position_errors == 4 and self._stage_poll_timer is not None:
                     self._stage_poll_timer.setInterval(5000)
             return
         if self._consecutive_stage_position_errors:
@@ -977,12 +986,9 @@ class Ui_Laser_Control(object):
             self._consecutive_stage_position_errors = 0
             if self._stage_poll_timer is not None:
                 self._stage_poll_timer.setInterval(500)
-        self._set_stage_axis(pos['x'], self.laser_x_mm, self.laser_x_um,
-                             self.laser_x_nm, self.laser_x_cord)
-        self._set_stage_axis(pos['y'], self.laser_y_mm, self.laser_y_um,
-                             self.laser_y_nm, self.laser_y_cord)
-        self._set_stage_axis(pos['z'], self.laser_z_mm, self.laser_z_um,
-                             self.laser_z_nm, self.laser_z_cord)
+        self._set_stage_axis(pos['x'], self.laser_x_mm, self.laser_x_um, self.laser_x_nm, self.laser_x_cord)
+        self._set_stage_axis(pos['y'], self.laser_y_mm, self.laser_y_um, self.laser_y_nm, self.laser_y_cord)
+        self._set_stage_axis(pos['z'], self.laser_z_mm, self.laser_z_um, self.laser_z_nm, self.laser_z_cord)
 
     @staticmethod
     def _set_stage_axis(value_m, mm_lcd, um_lcd, nm_lcd, single_lcd):
@@ -1074,90 +1080,90 @@ class Ui_Laser_Control(object):
 
     def laser_enable_clicked(self):
         """
-            Handle the close event of the GatesWindow.
+        Handle the close event of the GatesWindow.
 
-            Args:
-                None
-            Return:
-                None
-            """
+        Args:
+            None
+        Return:
+            None
+        """
         self.enable_ouput_mode = True
 
     def laser_on_clicked(self):
         """
-            Handle the close event of the GatesWindow.
+        Handle the close event of the GatesWindow.
 
-            Args:
-                None
-            Return:
-                None
-            """
+        Args:
+            None
+        Return:
+            None
+        """
         self.on_mode = True
 
     def laser_standby_clicked(self):
         """
-            Handle the close event of the GatesWindow.
+        Handle the close event of the GatesWindow.
 
-            Args:
-                None
-            Return:
-                None
-            """
+        Args:
+            None
+        Return:
+            None
+        """
         self.standby_mode = True
 
     def laser_listen_clicked(self):
         """
-            Handle the close event of the GatesWindow.
+        Handle the close event of the GatesWindow.
 
-            Args:
-                None
-            Return:
-                None
-            """
+        Args:
+            None
+        Return:
+            None
+        """
         self.listen_mode = True
 
     def laser_wavelegnth_changed(self):
         """
-            Handle the close event of the GatesWindow.
+        Handle the close event of the GatesWindow.
 
-            Args:
-                None
-            Return:
-                None
-            """
+        Args:
+            None
+        Return:
+            None
+        """
         self.change_laser_wavelegnth = True
 
     def laser_power_changed(self):
         """
-            Handle the close event of the GatesWindow.
+        Handle the close event of the GatesWindow.
 
-            Args:
-                None
-            Return:
-                None
-            """
+        Args:
+            None
+        Return:
+            None
+        """
         self.change_laser_power = True
 
     def laser_rate_changed(self):
         """
-            Handle the close event of the GatesWindow.
+        Handle the close event of the GatesWindow.
 
-            Args:
-                None
-            Return:
-                None
-            """
+        Args:
+            None
+        Return:
+            None
+        """
         self.change_laser_rate = True
 
     def laser_divition_factor_changed(self):
         """
-            Handle the close event of the GatesWindow.
+        Handle the close event of the GatesWindow.
 
-            Args:
-                None
-            Return:
-                None
-            """
+        Args:
+            None
+        Return:
+            None
+        """
         self.change_laser_divition_factor = True
 
     def get_frequency(self, index):
@@ -1170,15 +1176,7 @@ class Ui_Laser_Control(object):
         Return:
             None
         """
-        repetition_rates = {
-            4: 400000,
-            5: 500000,
-            6: 579710,
-            7: 720720,
-            8: 800000,
-            9: 898876,
-            10: 1000000
-        }
+        repetition_rates = {4: 400000, 5: 500000, 6: 579710, 7: 720720, 8: 800000, 9: 898876, 10: 1000000}
         return repetition_rates.get(index, "Invalid index")
 
     def check_laser_status(self):
@@ -1304,10 +1302,7 @@ class Ui_Laser_Control(object):
                     # wavelength translation; recompute everything.
                     self._sync_controls_from_device()
                 else:
-                    self.error_message(
-                        "Cannot change wavelength while the laser is "
-                        "emitting. Press Standby first."
-                    )
+                    self.error_message("Cannot change wavelength while the laser is emitting. Press Standby first.")
                 self.change_laser_wavelegnth = False
 
             if self.change_laser_power:
@@ -1439,8 +1434,7 @@ class Ui_Laser_Control(object):
             # and the auto-hide message line so the operator cannot miss
             # what happened.
             self._set_laser_disconnected_banner(
-                "switched to NKTPBus mode -- use NKT Photonics software, "
-                "or click 'Switch to CLI' to come back."
+                "switched to NKTPBus mode -- use NKT Photonics software, or click 'Switch to CLI' to come back."
             )
             self.error_message(
                 "Switched to NKTPBus mode. You can now use the NKT "
@@ -1652,10 +1646,10 @@ class Ui_Laser_Control(object):
             code = status_text.strip().rsplit(' ', 1)[-1]
         except Exception:
             return
-        is_listen = (code == '9')
-        is_standby = (code == '33')
-        is_on = (code == '65')
-        is_output = (code == '129')
+        is_listen = code == '9'
+        is_standby = code == '33'
+        is_on = code == '65'
+        is_output = code == '129'
         is_known = is_listen or is_standby or is_on or is_output
         if not is_known:
             # Transitioning (state 1) or unknown state -- leave whatever
@@ -1700,17 +1694,9 @@ class Ui_Laser_Control(object):
             except Exception:
                 pass
             return
-        self.laser_connection_banner.setText(
-            f"⚠  LASER NOT CONNECTED — {reason}"
-        )
+        self.laser_connection_banner.setText(f"⚠  LASER NOT CONNECTED — {reason}")
         self.laser_connection_banner.setStyleSheet(
-            "QLabel{"
-            "background: #fff0f0;"
-            "color: #c00000;"
-            "border: 1px solid #c00000;"
-            "border-radius: 4px;"
-            "padding: 4px;"
-            "}"
+            "QLabel{background: #fff0f0;color: #c00000;border: 1px solid #c00000;border-radius: 4px;padding: 4px;}"
         )
         self.laser_connection_banner.setVisible(True)
         try:
@@ -1755,10 +1741,7 @@ class Ui_Laser_Control(object):
 
         if databack != 0:
             error_text = device.last_error or "no response from device"
-            reason = (
-                f"Laser: could not open {com_port}: {error_text}. "
-                f"Available ports: {_available_serial_ports_text()}"
-            )
+            reason = f"Laser: could not open {com_port}: {error_text}. Available ports: {_available_serial_ports_text()}"
             print(reason)
             self._set_laser_disconnected_banner(reason)
             self._apply_button_locks_for_status(None)
@@ -1872,60 +1855,44 @@ class Ui_Laser_Control(object):
         # Drop our own CLI handle (if any) before NKTPDLL takes the port.
         self._close_laser_device()
 
-        self.error_message(
-            f"Switching to CLI on {port}... please wait."
-        )
+        self.error_message(f"Switching to CLI on {port}... please wait.")
         QtWidgets.QApplication.processEvents()
 
         try:
             nktpbus_switch.switch_to_cli(port)
         except nktpbus_switch.NKTPSwitchError as exc:
-            self._set_laser_disconnected_banner(
-                f"switch to CLI failed: {exc}"
-            )
+            self._set_laser_disconnected_banner(f"switch to CLI failed: {exc}")
             self.error_message(f"Could not switch laser to CLI: {exc}")
             return
         except Exception as exc:
-            self._set_laser_disconnected_banner(
-                f"switch to CLI failed: {exc}"
-            )
+            self._set_laser_disconnected_banner(f"switch to CLI failed: {exc}")
             self.error_message(f"Unexpected error switching to CLI: {exc}")
             return
 
         # Give the laser firmware a moment to flip its UART driver from
         # 115 200 (Interbus) down to 38 400 (CLI). Keep the GUI alive.
-        self.error_message(
-            "Register written. Waiting for the laser UART to flip to "
-            "38 400 baud..."
-        )
+        self.error_message("Register written. Waiting for the laser UART to flip to 38 400 baud...")
         self._wait_with_gui_pump(self.CLI_SWITCH_INITIAL_DELAY_S)
 
         # Up to N tries with a delay in between. The status line gets
         # rewritten on each attempt so the operator can see progress
         # rather than staring at an unchanging banner.
         for attempt in range(1, self.CLI_SWITCH_NUM_ATTEMPTS + 1):
-            self.error_message(
-                f"Switching to CLI -- connection attempt {attempt} of "
-                f"{self.CLI_SWITCH_NUM_ATTEMPTS}..."
-            )
+            self.error_message(f"Switching to CLI -- connection attempt {attempt} of {self.CLI_SWITCH_NUM_ATTEMPTS}...")
             QtWidgets.QApplication.processEvents()
             if self._open_laser_cli(port):
                 self.error_message(
-                    f"Laser switched to CLI and reconnected "
-                    f"(attempt {attempt} of {self.CLI_SWITCH_NUM_ATTEMPTS})."
+                    f"Laser switched to CLI and reconnected (attempt {attempt} of {self.CLI_SWITCH_NUM_ATTEMPTS})."
                 )
                 return
             if attempt < self.CLI_SWITCH_NUM_ATTEMPTS:
                 self.error_message(
-                    f"Attempt {attempt} did not respond yet. "
-                    f"Retrying in {self.CLI_SWITCH_RETRY_DELAY_S:.1f} s..."
+                    f"Attempt {attempt} did not respond yet. Retrying in {self.CLI_SWITCH_RETRY_DELAY_S:.1f} s..."
                 )
                 self._wait_with_gui_pump(self.CLI_SWITCH_RETRY_DELAY_S)
 
         # All attempts exhausted.
-        self._set_laser_disconnected_banner(
-            "switch to CLI completed but the laser still does not reply"
-        )
+        self._set_laser_disconnected_banner("switch to CLI completed but the laser still does not reply")
         self.error_message(
             f"Switch register was written but CLI is still not "
             f"responding after {self.CLI_SWITCH_NUM_ATTEMPTS} attempts. "
@@ -1935,38 +1902,41 @@ class Ui_Laser_Control(object):
 
     def error_message(self, message):
         """
-            Display an error message and start a timer to hide it after 8 seconds
+        Display an error message and start a timer to hide it after 8 seconds
 
-            Args:
-                message (str): Error message to display
+        Args:
+            message (str): Error message to display
 
-            Return:
-                None
-            """
+        Return:
+            None
+        """
         _translate = QtCore.QCoreApplication.translate
-        self.Error.setText(_translate("OXCART",
-                                      "<html><head/><body><p><span style=\" color:#ff0000;\">"
-                                      + message + "</span></p></body></html>"))
+        self.Error.setText(
+            _translate(
+                "OXCART", "<html><head/><body><p><span style=\" color:#ff0000;\">" + message + "</span></p></body></html>"
+            )
+        )
 
         self.timer_hide_error.start(8000)
 
-    def hideMessage(self, ):
+    def hideMessage(
+        self,
+    ):
         """
-            Hide the message and stop the timer
-            Args:
-                None
+        Hide the message and stop the timer
+        Args:
+            None
 
-            Return:
-                None
-            """
+        Return:
+            None
+        """
         # Hide the message and stop the timer
         _translate = QtCore.QCoreApplication.translate
-        self.Error.setText(_translate("OXCART",
-                                      "<html><head/><body><p><span style=\" "
-                                      "color:#ff0000;\"></span></p></body></html>"))
+        self.Error.setText(
+            _translate("OXCART", "<html><head/><body><p><span style=\" color:#ff0000;\"></span></p></body></html>")
+        )
 
         self.timer_hide_error.stop()
-
 
     def stop(self):
         """Stop background workers and release device handles.
@@ -2101,4 +2071,3 @@ if __name__ == "__main__":
     ui.setupUi(Laser_Control)
     Laser_Control.show()
     sys.exit(app.exec())
-

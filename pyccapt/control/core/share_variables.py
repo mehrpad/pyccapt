@@ -1,4 +1,4 @@
-﻿"""Shared process-safe variables used by the control module.
+"""Shared process-safe variables used by the control module.
 
 Variable ownership
 ------------------
@@ -47,193 +47,183 @@ class Variables:
     # listed as readers; only data-flow consumers are.
     # ------------------------------------------------------------------
     _OWNERSHIP = {
-	    # --- Setup parameters (GUI inputs the experiment loop reads) -----
-	    "ex_time": ("main", ("exp",)),
-	    "max_ions": ("main", ("exp",)),
-	    "ex_freq": ("main", ("exp",)),
-	    "user_name": ("main", ("exp",)),
-	    "ex_name": ("main", ("exp",)),
-	    "exp_name": ("main", ("exp",)),
-	    "electrode": ("main", ("exp",)),
-	    "email": ("main", ("exp",)),
-	    "vdc_min": ("main", ("exp",)),
-	    "vdc_max": ("main", ("exp",)),
-	    "vdc_step_up": ("main", ("exp",)),
-	    "vdc_step_down": ("main", ("exp",)),
-	    "v_p_min": ("main", ("exp",)),
-	    "v_p_max": ("main", ("exp",)),
-	    "pulse_fraction": ("main", ("exp",)),
-	    "pulse_frequency": ("main", ("exp",)),
-	    "pulse_mode": ("main", ("exp",)),
-	    "control_algorithm": ("main", ("exp",)),
-	    "criteria_time": ("main", ("exp",)),
-	    "criteria_ions": ("main", ("exp",)),
-	    "criteria_vdc": ("main", ("exp",)),
-	    "criteria_laser": ("main", ("exp",)),
-	    "detection_rate": ("main", ("exp",)),
-	    "hit_display": ("main", ("viz",)),
-	    "fixed_laser": ("main", ("exp",)),
-	    "laser_num_ions_per_step": ("main", ("exp",)),
-	    "laser_increase_per_step": ("main", ("exp",)),
-	    "laser_start": ("main", ("exp",)),
-	    "laser_stop": ("main", ("exp",)),
-	    "counter_source": ("main", ("exp",)),
-	    "access_override_enabled": ("main", ("exp",)),
-	    "override_disabled_devices": ("main", ("exp",)),
-
-	    # --- Live experiment statistics (exp writes, GUI/viz read) -------
-	    "elapsed_time": ("exp", ("main",)),
-	    "total_ions": ("exp", ("main", "viz")),
-	    "total_raw_signals": ("exp", ("main",)),
-	    "specimen_voltage": ("exp", ("main", "viz")),
-	    "pulse_voltage": ("exp", ("main", "viz")),
-	    "detection_rate_current": ("exp", ("main", "viz")),
-	    "specimen_voltage_plot": ("exp", ("viz",)),
-	    "detection_rate_current_plot": ("exp", ("viz",)),
-	    "count": ("exp", ("main",)),
-	    "count_last": ("exp", ()),
-	    "count_temp": ("exp", ()),
-	    "avg_n_count": ("exp", ()),
-	    "counter": ("exp", ("main",)),
-	    "start_time": ("main", ("exp", "viz")),
-	    "end_time": ("exp", ("main",)),
-
-	    # --- Lifecycle / flow-control flags ------------------------------
-	    "start_flag": ("main", ("exp",)),
-	    "stop_flag": ("main", ("exp", "tdc")),
-	    "end_experiment": ("exp", ("main",)),
-	    "flag_end_experiment": ("exp", ("main",)),
-	    "flag_visualization_start": ("exp", ("viz",)),
-	    "flag_pumps_vacuum_start": ("main", ("pump",)),
-	    "flag_finished_tdc": ("tdc", ("exp",)),
-	    "flag_stop_tdc": ("exp", ("tdc",)),
-	    "flag_tdc_failure": ("tdc", ("exp", "main")),
-
-	    # --- Visualization controls / clear handshakes -------------------
-	    "vdc_hold": ("viz", ("exp",)),
-	    "reset_heatmap": ("viz", ("viz",)),  # internal to viz
-	    "plot_clear_flag": ("main", ("viz",)),
-	    "flag_visualization_win_show": ("main", ("viz",)),  # being replaced by Queue
-	    "flag_new_min_voltage": ("main", ("exp",)),
-
-	    # --- Camera handshakes --------------------------------------------
-	    "camera_0_ExposureTime": ("main", ("cam",)),
-	    "camera_1_ExposureTime": ("main", ("cam",)),
-	    "flag_camera_grab": ("main", ("cam",)),
-	    "flag_camera_win_show": ("main", ("cam",)),  # being replaced by Queue
-	    "flag_cameras_take_screenshot": ("main", ("cam", "viz")),
-	    "last_screen_shot": ("main", ("cam", "viz")),
-	    "light": ("main", ("cam",)),
-	    "light_switch": ("main", ("cam",)),
-	    "alignment_window": ("main", ("cam",)),
-
-	    # --- Laser GUI fields (main process, no separate subprocess) ----
-	    "laser_pulse_energy": ("main", ("exp",)),
-	    "laser_power": ("main", ("exp",)),
-	    "laser_freq": ("main", ("exp",)),
-	    "laser_division_factor": ("main", ("exp",)),
-	    "laser_average_power": ("main", ("exp",)),
-	    # Set by the laser GUI on every CLI session open/close so the main
-	    # GUI status bar can show a "laser disconnected" warning, and so
-	    # the experiment subprocess can refuse to start in laser pulse
-	    # mode when the laser was never reached on CLI.
-	    "flag_laser_connected": ("main", ("exp",)),
-
-	    # --- Gates ---------------------------------------------------------
-	    "flag_main_gate": ("main", ("exp",)),
-	    "flag_load_gate": ("main", ("exp",)),
-	    "flag_cryo_gate": ("main", ("exp",)),
-
-	    # --- Pumps & vacuum (pump thread writes, GUIs read) --------------
-	    "temperature": ("pump", ("main", "exp")),
-	    "vacuum_main": ("pump", ("main", "exp", "viz")),
-	    "vacuum_buffer": ("pump", ("main",)),
-	    "vacuum_buffer_backing": ("pump", ("main",)),
-	    "vacuum_load_lock": ("pump", ("main",)),
-	    "vacuum_load_lock_backing": ("pump", ("main",)),
-	    "vacuum_cryo_load_lock": ("pump", ("main",)),
-	    "vacuum_cryo_load_lock_backing": ("pump", ("main",)),
-	    "set_temperature_cryo": ("main", ("pump",)),
-	    "set_temperature_ll": ("main", ("pump",)),
-	    "set_temperature_flag_cryo": ("main", ("pump",)),
-	    "set_temperature_flag_ll": ("main", ("pump",)),
-	    "flag_pump_load_lock": ("main", ("pump",)),
-	    "flag_pump_load_lock_click": ("main", ("pump",)),
-	    "flag_pump_load_lock_led": ("pump", ("main",)),
-	    "flag_pump_cryo_load_lock": ("main", ("pump",)),
-	    "flag_pump_cryo_load_lock_click": ("main", ("pump",)),
-	    "flag_pump_cryo_load_lock_led": ("pump", ("main",)),
-
-	    # --- Path / metadata fields --------------------------------------
-	    "path": ("exp", ("exp", "viz", "main")),
-	    "path_meta": ("exp", ("exp", "viz", "main")),
-	    "log_path": ("main", ("exp",)),
-	    "hdf5_path": ("exp", ("main",)),
-	    "hdf5_data_name": ("exp", ("main",)),
-	    "data": ("exp", ("exp",)),  # catch-all output dict
-
-	    # --- Counters used by viz / exp (incremented in place) -----------
-	    "index_save_image": ("viz", ("viz",)),
-	    "index_plot": ("viz", ("viz",)),
-	    "index_plot_save": ("viz", ("viz",)),
-	    "index_wait_on_plot_start": ("viz", ("viz",)),
-	    "clear_index_save_image": ("main", ("viz",)),
-	    "index_warning_message": ("main", ("main",)),
-	    "index_line": ("main", ("main",)),
-	    "number_of_experiment_in_text_line": ("main", ("main",)),
-	    "index_experiment_in_text_line": ("main", ("main",)),
-
-	    # --- TDC list-typed fields (TDC writes per-event, exp/viz drain) -
-	    # Where readership is unclear the entry is "?" - please audit
-	    # before adding new dependencies.
-	    "main_counter": ("exp", ("exp",)),
-	    "main_raw_counter": ("exp", ("exp",)),
-	    "main_temperature": ("exp", ("exp",)),
-	    "main_chamber_vacuum": ("exp", ("exp",)),
-	    "laser_degree": ("?", ("?",)),
-	    "laser_intensity": ("exp", ("exp",)),
-	    "x": ("tdc", ("exp", "viz")),
-	    "y": ("tdc", ("exp", "viz")),
-	    "t": ("tdc", ("exp", "viz")),
-	    "dld_start_counter": ("tdc", ("exp",)),
-	    "time_stamp": ("tdc", ("exp",)),
-	    "main_v_dc_dld": ("tdc", ("exp",)),
-	    "main_v_p_dld": ("tdc", ("exp",)),
-	    "main_l_p_dld": ("tdc", ("exp",)),
-	    "main_v_dc_tdc": ("tdc", ("exp",)),
-	    "main_v_p_tdc": ("tdc", ("exp",)),
-	    "main_l_p_tdc": ("tdc", ("exp",)),
-	    "main_v_dc_hsd": ("tdc", ("exp",)),
-	    "main_v_p_hsd": ("tdc", ("exp",)),
-	    "main_l_p_hsd": ("tdc", ("exp",)),
-	    "main_v_dc_drs": ("drs", ("exp",)),
-	    "main_v_p_drs": ("drs", ("exp",)),
-	    "main_l_p_drs": ("drs", ("exp",)),
-	    "main_v_p": ("?", ("?",)),
-	    "main_p_tdc_roentdek": ("tdc", ("exp",)),
-	    "channel": ("tdc", ("viz",)),
-	    "time_data": ("tdc", ("viz",)),
-	    "tdc_start_counter": ("tdc", ("viz",)),
-	    "ch0_time": ("tdc", ("viz",)),
-	    "ch0_wave": ("tdc", ("viz",)),
-	    "ch1_time": ("tdc", ("viz",)),
-	    "ch1_wave": ("tdc", ("viz",)),
-	    "ch2_time": ("tdc", ("viz",)),
-	    "ch2_wave": ("tdc", ("viz",)),
-	    "ch3_time": ("tdc", ("viz",)),
-	    "ch3_wave": ("tdc", ("viz",)),
-	    "ch4_time": ("tdc", ("viz",)),
-	    "ch4_wave": ("tdc", ("viz",)),
-	    "ch5_time": ("tdc", ("viz",)),
-	    "ch5_wave": ("tdc", ("viz",)),
-	    "ch0": ("tdc", ("viz",)),
-	    "ch1": ("tdc", ("viz",)),
-	    "ch2": ("tdc", ("viz",)),
-	    "ch3": ("tdc", ("viz",)),
-	    "ch4": ("tdc", ("viz",)),
-	    "ch5": ("tdc", ("viz",)),
-	    "ch6": ("tdc", ("viz",)),
-	    "ch7": ("tdc", ("viz",)),
+        # --- Setup parameters (GUI inputs the experiment loop reads) -----
+        "ex_time": ("main", ("exp",)),
+        "max_ions": ("main", ("exp",)),
+        "ex_freq": ("main", ("exp",)),
+        "user_name": ("main", ("exp",)),
+        "ex_name": ("main", ("exp",)),
+        "exp_name": ("main", ("exp",)),
+        "electrode": ("main", ("exp",)),
+        "email": ("main", ("exp",)),
+        "vdc_min": ("main", ("exp",)),
+        "vdc_max": ("main", ("exp",)),
+        "vdc_step_up": ("main", ("exp",)),
+        "vdc_step_down": ("main", ("exp",)),
+        "v_p_min": ("main", ("exp",)),
+        "v_p_max": ("main", ("exp",)),
+        "pulse_fraction": ("main", ("exp",)),
+        "pulse_frequency": ("main", ("exp",)),
+        "pulse_mode": ("main", ("exp",)),
+        "control_algorithm": ("main", ("exp",)),
+        "criteria_time": ("main", ("exp",)),
+        "criteria_ions": ("main", ("exp",)),
+        "criteria_vdc": ("main", ("exp",)),
+        "criteria_laser": ("main", ("exp",)),
+        "detection_rate": ("main", ("exp",)),
+        "hit_display": ("main", ("viz",)),
+        "fixed_laser": ("main", ("exp",)),
+        "laser_num_ions_per_step": ("main", ("exp",)),
+        "laser_increase_per_step": ("main", ("exp",)),
+        "laser_start": ("main", ("exp",)),
+        "laser_stop": ("main", ("exp",)),
+        "counter_source": ("main", ("exp",)),
+        "access_override_enabled": ("main", ("exp",)),
+        "override_disabled_devices": ("main", ("exp",)),
+        # --- Live experiment statistics (exp writes, GUI/viz read) -------
+        "elapsed_time": ("exp", ("main",)),
+        "total_ions": ("exp", ("main", "viz")),
+        "total_raw_signals": ("exp", ("main",)),
+        "specimen_voltage": ("exp", ("main", "viz")),
+        "pulse_voltage": ("exp", ("main", "viz")),
+        "detection_rate_current": ("exp", ("main", "viz")),
+        "specimen_voltage_plot": ("exp", ("viz",)),
+        "detection_rate_current_plot": ("exp", ("viz",)),
+        "count": ("exp", ("main",)),
+        "count_last": ("exp", ()),
+        "count_temp": ("exp", ()),
+        "avg_n_count": ("exp", ()),
+        "counter": ("exp", ("main",)),
+        "start_time": ("main", ("exp", "viz")),
+        "end_time": ("exp", ("main",)),
+        # --- Lifecycle / flow-control flags ------------------------------
+        "start_flag": ("main", ("exp",)),
+        "stop_flag": ("main", ("exp", "tdc")),
+        "end_experiment": ("exp", ("main",)),
+        "flag_end_experiment": ("exp", ("main",)),
+        "flag_visualization_start": ("exp", ("viz",)),
+        "flag_pumps_vacuum_start": ("main", ("pump",)),
+        "flag_finished_tdc": ("tdc", ("exp",)),
+        "flag_stop_tdc": ("exp", ("tdc",)),
+        "flag_tdc_failure": ("tdc", ("exp", "main")),
+        # --- Visualization controls / clear handshakes -------------------
+        "vdc_hold": ("viz", ("exp",)),
+        "reset_heatmap": ("viz", ("viz",)),  # internal to viz
+        "plot_clear_flag": ("main", ("viz",)),
+        "flag_visualization_win_show": ("main", ("viz",)),  # being replaced by Queue
+        "flag_new_min_voltage": ("main", ("exp",)),
+        # --- Camera handshakes --------------------------------------------
+        "camera_0_ExposureTime": ("main", ("cam",)),
+        "camera_1_ExposureTime": ("main", ("cam",)),
+        "flag_camera_grab": ("main", ("cam",)),
+        "flag_camera_win_show": ("main", ("cam",)),  # being replaced by Queue
+        "flag_cameras_take_screenshot": ("main", ("cam", "viz")),
+        "last_screen_shot": ("main", ("cam", "viz")),
+        "light": ("main", ("cam",)),
+        "light_switch": ("main", ("cam",)),
+        "alignment_window": ("main", ("cam",)),
+        # --- Laser GUI fields (main process, no separate subprocess) ----
+        "laser_pulse_energy": ("main", ("exp",)),
+        "laser_power": ("main", ("exp",)),
+        "laser_freq": ("main", ("exp",)),
+        "laser_division_factor": ("main", ("exp",)),
+        "laser_average_power": ("main", ("exp",)),
+        # Set by the laser GUI on every CLI session open/close so the main
+        # GUI status bar can show a "laser disconnected" warning, and so
+        # the experiment subprocess can refuse to start in laser pulse
+        # mode when the laser was never reached on CLI.
+        "flag_laser_connected": ("main", ("exp",)),
+        # --- Gates ---------------------------------------------------------
+        "flag_main_gate": ("main", ("exp",)),
+        "flag_load_gate": ("main", ("exp",)),
+        "flag_cryo_gate": ("main", ("exp",)),
+        # --- Pumps & vacuum (pump thread writes, GUIs read) --------------
+        "temperature": ("pump", ("main", "exp")),
+        "vacuum_main": ("pump", ("main", "exp", "viz")),
+        "vacuum_buffer": ("pump", ("main",)),
+        "vacuum_buffer_backing": ("pump", ("main",)),
+        "vacuum_load_lock": ("pump", ("main",)),
+        "vacuum_load_lock_backing": ("pump", ("main",)),
+        "vacuum_cryo_load_lock": ("pump", ("main",)),
+        "vacuum_cryo_load_lock_backing": ("pump", ("main",)),
+        "set_temperature_cryo": ("main", ("pump",)),
+        "set_temperature_ll": ("main", ("pump",)),
+        "set_temperature_flag_cryo": ("main", ("pump",)),
+        "set_temperature_flag_ll": ("main", ("pump",)),
+        "flag_pump_load_lock": ("main", ("pump",)),
+        "flag_pump_load_lock_click": ("main", ("pump",)),
+        "flag_pump_load_lock_led": ("pump", ("main",)),
+        "flag_pump_cryo_load_lock": ("main", ("pump",)),
+        "flag_pump_cryo_load_lock_click": ("main", ("pump",)),
+        "flag_pump_cryo_load_lock_led": ("pump", ("main",)),
+        # --- Path / metadata fields --------------------------------------
+        "path": ("exp", ("exp", "viz", "main")),
+        "path_meta": ("exp", ("exp", "viz", "main")),
+        "log_path": ("main", ("exp",)),
+        "hdf5_path": ("exp", ("main",)),
+        "hdf5_data_name": ("exp", ("main",)),
+        "data": ("exp", ("exp",)),  # catch-all output dict
+        # --- Counters used by viz / exp (incremented in place) -----------
+        "index_save_image": ("viz", ("viz",)),
+        "index_plot": ("viz", ("viz",)),
+        "index_plot_save": ("viz", ("viz",)),
+        "index_wait_on_plot_start": ("viz", ("viz",)),
+        "clear_index_save_image": ("main", ("viz",)),
+        "index_warning_message": ("main", ("main",)),
+        "index_line": ("main", ("main",)),
+        "number_of_experiment_in_text_line": ("main", ("main",)),
+        "index_experiment_in_text_line": ("main", ("main",)),
+        # --- TDC list-typed fields (TDC writes per-event, exp/viz drain) -
+        # Where readership is unclear the entry is "?" - please audit
+        # before adding new dependencies.
+        "main_counter": ("exp", ("exp",)),
+        "main_raw_counter": ("exp", ("exp",)),
+        "main_temperature": ("exp", ("exp",)),
+        "main_chamber_vacuum": ("exp", ("exp",)),
+        "laser_degree": ("?", ("?",)),
+        "laser_intensity": ("exp", ("exp",)),
+        "x": ("tdc", ("exp", "viz")),
+        "y": ("tdc", ("exp", "viz")),
+        "t": ("tdc", ("exp", "viz")),
+        "dld_start_counter": ("tdc", ("exp",)),
+        "time_stamp": ("tdc", ("exp",)),
+        "main_v_dc_dld": ("tdc", ("exp",)),
+        "main_v_p_dld": ("tdc", ("exp",)),
+        "main_l_p_dld": ("tdc", ("exp",)),
+        "main_v_dc_tdc": ("tdc", ("exp",)),
+        "main_v_p_tdc": ("tdc", ("exp",)),
+        "main_l_p_tdc": ("tdc", ("exp",)),
+        "main_v_dc_hsd": ("tdc", ("exp",)),
+        "main_v_p_hsd": ("tdc", ("exp",)),
+        "main_l_p_hsd": ("tdc", ("exp",)),
+        "main_v_dc_drs": ("drs", ("exp",)),
+        "main_v_p_drs": ("drs", ("exp",)),
+        "main_l_p_drs": ("drs", ("exp",)),
+        "main_v_p": ("?", ("?",)),
+        "main_p_tdc_roentdek": ("tdc", ("exp",)),
+        "channel": ("tdc", ("viz",)),
+        "time_data": ("tdc", ("viz",)),
+        "tdc_start_counter": ("tdc", ("viz",)),
+        "ch0_time": ("tdc", ("viz",)),
+        "ch0_wave": ("tdc", ("viz",)),
+        "ch1_time": ("tdc", ("viz",)),
+        "ch1_wave": ("tdc", ("viz",)),
+        "ch2_time": ("tdc", ("viz",)),
+        "ch2_wave": ("tdc", ("viz",)),
+        "ch3_time": ("tdc", ("viz",)),
+        "ch3_wave": ("tdc", ("viz",)),
+        "ch4_time": ("tdc", ("viz",)),
+        "ch4_wave": ("tdc", ("viz",)),
+        "ch5_time": ("tdc", ("viz",)),
+        "ch5_wave": ("tdc", ("viz",)),
+        "ch0": ("tdc", ("viz",)),
+        "ch1": ("tdc", ("viz",)),
+        "ch2": ("tdc", ("viz",)),
+        "ch3": ("tdc", ("viz",)),
+        "ch4": ("tdc", ("viz",)),
+        "ch5": ("tdc", ("viz",)),
+        "ch6": ("tdc", ("viz",)),
+        "ch7": ("tdc", ("viz",)),
     }
 
     _REQUIRED_CONFIG_KEYS = (
@@ -288,9 +278,9 @@ class Variables:
         "main_v_p_drs",
         "main_l_p_drs",
         "main_v_p",
-	    # (x_plot, y_plot, t_plot, main_v_dc_plot were here as Manager
-	    # lists - replaced by SharedRingBuffer instances passed as
-	    # explicit args; see runtime.create_shared_context.)
+        # (x_plot, y_plot, t_plot, main_v_dc_plot were here as Manager
+        # lists - replaced by SharedRingBuffer instances passed as
+        # explicit args; see runtime.create_shared_context.)
         "main_p_tdc_roentdek",
         "override_disabled_devices",
         "channel",
@@ -456,12 +446,12 @@ class Variables:
         "laser_freq": 0,
         "laser_division_factor": 0,
         "laser_average_power": 0,
-	    # Set True by the laser GUI when a CLI session is open and
-	    # responsive; False (the default) means the laser is either not
-	    # configured, the COM port is unavailable, or the laser is
-	    # currently in NKTPBus mode. The main GUI reads this flag to
-	    # show a status-bar warning.
-	    "flag_laser_connected": False,
+        # Set True by the laser GUI when a CLI session is open and
+        # responsive; False (the default) means the laser is either not
+        # configured, the COM port is unavailable, or the laser is
+        # currently in NKTPBus mode. The main GUI reads this flag to
+        # show a status-bar warning.
+        "flag_laser_connected": False,
         "hit_display": 0,
         "data": {},
     }
@@ -515,12 +505,8 @@ class Variables:
                 "COM_PORT_signal_generator": conf["COM_PORT_signal_generator"],
                 "COM_PORT_thorlab_motor": conf["COM_PORT_thorlab_motor"],
                 "save_meta_interval_camera": conf["save_meta_interval_camera"],
-                "save_meta_interval_visualization": conf[
-                    "save_meta_interval_visualization"
-                ],
-                "pulse_amp_per_supply_voltage": conf[
-                    "pulse_amp_per_supply_voltage"
-                ],
+                "save_meta_interval_visualization": conf["save_meta_interval_visualization"],
+                "pulse_amp_per_supply_voltage": conf["pulse_amp_per_supply_voltage"],
                 "max_laser_power": conf["max_laser_power"],
             }
         )

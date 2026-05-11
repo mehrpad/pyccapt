@@ -18,6 +18,7 @@ import pandas as pd
 
 from pyccapt.calibration.core import calibration
 from pyccapt.calibration.core.adaptive_residual_calibration import adaptive_residual_calibration
+
 try:
     from pyccapt.calibration.core.joint_tof_mc_calibration import joint_tof_mc_calibration
 except ImportError:
@@ -72,7 +73,7 @@ def estimate_detector_diameter_mm(data: pd.DataFrame) -> float:
         return 60.0
     x_mm = data["x_det (cm)"].to_numpy(dtype=float) * 10.0
     y_mm = data["y_det (cm)"].to_numpy(dtype=float) * 10.0
-    radius = np.sqrt(x_mm ** 2 + y_mm ** 2)
+    radius = np.sqrt(x_mm**2 + y_mm**2)
     return float(np.percentile(radius[np.isfinite(radius)], 99.9) * 2.0)
 
 
@@ -91,7 +92,7 @@ def current_voltage(variables: Variables) -> np.ndarray:
 def effective_flight_path_m(variables: Variables, flight_path_mm: float) -> np.ndarray:
     x_m = np.asarray(variables.dld_x_det, dtype=float) * 1e-2
     y_m = np.asarray(variables.dld_y_det, dtype=float) * 1e-2
-    return np.sqrt(x_m ** 2 + y_m ** 2 + (float(flight_path_mm) * 1e-3) ** 2)
+    return np.sqrt(x_m**2 + y_m**2 + (float(flight_path_mm) * 1e-3) ** 2)
 
 
 def tof_to_mc_from_calibrated_tof(variables: Variables, flight_path_mm: float) -> np.ndarray:
@@ -144,8 +145,9 @@ def peaks_overlap(first_peak: dict, second_peak: dict) -> bool:
     return not (first_peak["x2"] <= second_peak["x1"] or second_peak["x2"] <= first_peak["x1"])
 
 
-def select_and_lock_peak(variables: Variables, mode: str, prominence: int = MAIN_PROMINENCE,
-                         distance: int = MAIN_DISTANCE) -> dict:
+def select_and_lock_peak(
+    variables: Variables, mode: str, prominence: int = MAIN_PROMINENCE, distance: int = MAIN_DISTANCE
+) -> dict:
     arr = current_array(variables, mode)
     hist_bin_size = 1.0 if mode == "tof" else 0.1
     peaks = calibration.auto_detect_reference_peaks(
@@ -241,13 +243,15 @@ def evaluate_peak_group(arr: np.ndarray, peaks: list[dict]) -> tuple[float, list
             continue
         weight = float(peak.get("weight", 1.0))
         weighted_scores.append((score, weight))
-        details.append({
-            "label": peak.get("label", f'{peak["position"]:.2f}'),
-            "score": float(score),
-            "weight": weight,
-            "position": float(peak["position"]),
-            "num_ions": int(peak.get("n_ions", report["num_ions"] if report is not None else 0)),
-        })
+        details.append(
+            {
+                "label": peak.get("label", f'{peak["position"]:.2f}'),
+                "score": float(score),
+                "weight": weight,
+                "position": float(peak["position"]),
+                "num_ions": int(peak.get("n_ions", report["num_ions"] if report is not None else 0)),
+            }
+        )
     if not weighted_scores:
         return float("nan"), details
     total_weight = sum(weight for _, weight in weighted_scores)
@@ -288,8 +292,9 @@ def score_not_worse(candidate: float, best: float, tolerance_ratio: float = 0.01
     return candidate >= best - max(0.1, abs(best) * tolerance_ratio)
 
 
-def optimize_sequence(variables: Variables, mode: str, action_specs: list[tuple[str, callable]],
-                      max_iterations: int, max_no_improve: int) -> dict:
+def optimize_sequence(
+    variables: Variables, mode: str, action_specs: list[tuple[str, callable]], max_iterations: int, max_no_improve: int
+) -> dict:
     reference_peaks = collect_reference_peaks(variables, mode)
     best_state = capture_state(variables, mode)
     best_selection = (float(variables.selected_x1), float(variables.selected_x2))
@@ -316,9 +321,7 @@ def optimize_sequence(variables: Variables, mode: str, action_specs: list[tuple[
                     round_log["actions"].append({"name": action_name, "accepted": False, "reason": "invalid_state"})
                     continue
                 quality = evaluate_helper_quality(variables, mode, reference_peaks)
-                has_valid_signal = (
-                    np.isfinite(quality["train_score"]) and quality["train_score"] > 0
-                ) or (
+                has_valid_signal = (np.isfinite(quality["train_score"]) and quality["train_score"] > 0) or (
                     np.isfinite(quality["selected_score"]) and quality["selected_score"] > 0
                 )
                 if not has_valid_signal:
@@ -352,7 +355,9 @@ def optimize_sequence(variables: Variables, mode: str, action_specs: list[tuple[
                 else:
                     restore_state(variables, mode, before_state)
                     variables.selected_x1, variables.selected_x2 = before_selection
-                    round_log["actions"].append({"name": action_name, "accepted": False, "reason": "no_stable_improvement", "quality": quality})
+                    round_log["actions"].append(
+                        {"name": action_name, "accepted": False, "reason": "no_stable_improvement", "quality": quality}
+                    )
             except Exception as exc:
                 restore_state(variables, mode, before_state)
                 variables.selected_x1, variables.selected_x2 = before_selection
@@ -376,9 +381,7 @@ def optimize_sequence(variables: Variables, mode: str, action_specs: list[tuple[
 
 def evaluate_spectrum(arr: np.ndarray, mode: str) -> dict:
     fallback_specs = (
-        [(50, 50, 0.05), (30, 20, 0.05), (10, 10, 0.05)]
-        if mode == "mc"
-        else [(50, 50, 1.0), (30, 20, 1.0), (10, 10, 1.0)]
+        [(50, 50, 0.05), (30, 20, 0.05), (10, 10, 0.05)] if mode == "mc" else [(50, 50, 1.0), (30, 20, 1.0), (10, 10, 1.0)]
     )
     peaks = []
     for prominence, distance, hist_bin_size in fallback_specs:
@@ -406,13 +409,15 @@ def evaluate_spectrum(arr: np.ndarray, mode: str) -> dict:
         n_ions = int(report["num_ions"])
         weight = max(1.0, math.sqrt(n_ions))
         weighted_scores.append((score, weight))
-        details.append({
-            "position": float(peak["position"]),
-            "window": [float(peak["x1"]), float(peak["x2"])],
-            "n_ions": n_ions,
-            "mrp": [float(x) if np.isfinite(x) else float("nan") for x in mrp_values],
-            "gaussian_ok": bool(report["gaussian_ok"]),
-        })
+        details.append(
+            {
+                "position": float(peak["position"]),
+                "window": [float(peak["x1"]), float(peak["x2"])],
+                "n_ions": n_ions,
+                "mrp": [float(x) if np.isfinite(x) else float("nan") for x in mrp_values],
+                "gaussian_ok": bool(report["gaussian_ok"]),
+            }
+        )
         if idx == 0 and np.isfinite(mrp_values[0]):
             dominant_mrp50 = float(mrp_values[0])
 
@@ -563,8 +568,9 @@ def run_joint_refinement(variables: Variables, mode: str, det_diam: float) -> No
     )
 
 
-def benchmark_method(data: pd.DataFrame, name: str, mode: str, flight_path_mm: float,
-                     det_diam: float, joint_t0: float) -> dict:
+def benchmark_method(
+    data: pd.DataFrame, name: str, mode: str, flight_path_mm: float, det_diam: float, joint_t0: float
+) -> dict:
     variables = fresh_variables(data)
     if mode in {"mc", "tof"}:
         select_and_lock_peak(variables, mode)
@@ -591,14 +597,16 @@ def benchmark_method(data: pd.DataFrame, name: str, mode: str, flight_path_mm: f
                 run_bowl(variables, "mc", det_diam)
         elif name == "mc_auto_bowl":
             extra = optimize_sequence(
-                variables, "mc",
+                variables,
+                "mc",
                 [("Bowl correction", lambda: run_bowl(variables, "mc", det_diam))],
                 max_iterations=10,
                 max_no_improve=3,
             )
         elif name == "mc_auto_calibration":
             extra = optimize_sequence(
-                variables, "mc",
+                variables,
+                "mc",
                 [
                     ("Voltage correction", lambda: run_voltage(variables, "mc")),
                     ("Bowl correction", lambda: run_bowl(variables, "mc", det_diam)),
@@ -609,14 +617,16 @@ def benchmark_method(data: pd.DataFrame, name: str, mode: str, flight_path_mm: f
             )
         elif name == "mc_auto_multi_peak":
             extra = optimize_sequence(
-                variables, "mc",
+                variables,
+                "mc",
                 [("Auto multi-peak calibration", lambda: run_multi_peak(variables, "mc", det_diam))],
                 max_iterations=10,
                 max_no_improve=3,
             )
         elif name == "mc_auto_optimize":
             extra = optimize_sequence(
-                variables, "mc",
+                variables,
+                "mc",
                 [
                     ("Voltage correction", lambda: run_voltage(variables, "mc")),
                     ("Bowl correction", lambda: run_bowl(variables, "mc", det_diam)),
@@ -657,14 +667,16 @@ def benchmark_method(data: pd.DataFrame, name: str, mode: str, flight_path_mm: f
                 run_bowl(variables, "tof", det_diam)
         elif name == "tof_auto_bowl":
             extra = optimize_sequence(
-                variables, "tof",
+                variables,
+                "tof",
                 [("Bowl correction", lambda: run_bowl(variables, "tof", det_diam))],
                 max_iterations=10,
                 max_no_improve=3,
             )
         elif name == "tof_auto_calibration":
             extra = optimize_sequence(
-                variables, "tof",
+                variables,
+                "tof",
                 [
                     ("Voltage correction", lambda: run_voltage(variables, "tof")),
                     ("Bowl correction", lambda: run_bowl(variables, "tof", det_diam)),
@@ -675,14 +687,16 @@ def benchmark_method(data: pd.DataFrame, name: str, mode: str, flight_path_mm: f
             )
         elif name == "tof_auto_multi_peak":
             extra = optimize_sequence(
-                variables, "tof",
+                variables,
+                "tof",
                 [("Auto multi-peak calibration", lambda: run_multi_peak(variables, "tof", det_diam))],
                 max_iterations=10,
                 max_no_improve=3,
             )
         elif name == "tof_auto_optimize":
             extra = optimize_sequence(
-                variables, "tof",
+                variables,
+                "tof",
                 [
                     ("Voltage correction", lambda: run_voltage(variables, "tof")),
                     ("Bowl correction", lambda: run_bowl(variables, "tof", det_diam)),
@@ -815,15 +829,20 @@ def main() -> None:
             joint_t0=args.joint_t0,
         )
         results["results"].append(result)
-        print(json.dumps({
-            "name": result["name"],
-            "status": result["status"],
-            "runtime_s": round(result["runtime_s"], 2),
-            "mc_score": result.get("mc_eval", {}).get("score"),
-            "tof_score": result.get("tof_eval", {}).get("score"),
-            "derived_mc_score": result.get("derived_mc_eval", {}).get("score"),
-            "error": result.get("error"),
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "name": result["name"],
+                    "status": result["status"],
+                    "runtime_s": round(result["runtime_s"], 2),
+                    "mc_score": result.get("mc_eval", {}).get("score"),
+                    "tof_score": result.get("tof_eval", {}).get("score"),
+                    "derived_mc_score": result.get("derived_mc_eval", {}).get("score"),
+                    "error": result.get("error"),
+                },
+                indent=2,
+            )
+        )
 
     if args.output_json:
         with open(args.output_json, "w", encoding="utf-8") as handle:

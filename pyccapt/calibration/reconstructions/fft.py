@@ -27,8 +27,20 @@ def _axis_index(axis_name):
     return {'x': 0, 'y': 1, 'z': 2}[axis_name]
 
 
-def fft(particles, d, variables=None, normalize=False, reference_point=None,
-        box_dimensions=None, plot=False, save=False, figure_size=(6, 6), figname='fft', fft_type='1d', axes=None):
+def fft(
+    particles,
+    d,
+    variables=None,
+    normalize=False,
+    reference_point=None,
+    box_dimensions=None,
+    plot=False,
+    save=False,
+    figure_size=(6, 6),
+    figname='fft',
+    fft_type='1d',
+    axes=None,
+):
     """Compute histogram-based FFT spectra for 1D or 2D coordinate profiles."""
     coords = _crop_particles(particles, reference_point=reference_point, box_dimensions=box_dimensions)
     if not axes:

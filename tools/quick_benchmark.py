@@ -1,4 +1,5 @@
 """Quick benchmark to validate the 3 calibration fixes."""
+
 from __future__ import annotations
 import sys, time, io, json
 from pathlib import Path
@@ -32,41 +33,77 @@ def current_voltage(variables):
 
 def run_mc_initial(variables, det_diam):
     calibration.bowl_correction_main(
-        variables.dld_x_det, variables.dld_y_det, current_voltage(variables),
-        variables, det_diam,
-        sample_size=5, fit_mode="robust_fit", maximum_cal_method="mean",
-        maximum_sample_method="histogram", fig_size=(5, 5),
-        calibration_mode="mc", index_fig=1, plot=False, save=False,
-        fast_calibration=False, bin_size=0.01, peak_maximum=0, sampling_mode="polar",
+        variables.dld_x_det,
+        variables.dld_y_det,
+        current_voltage(variables),
+        variables,
+        det_diam,
+        sample_size=5,
+        fit_mode="robust_fit",
+        maximum_cal_method="mean",
+        maximum_sample_method="histogram",
+        fig_size=(5, 5),
+        calibration_mode="mc",
+        index_fig=1,
+        plot=False,
+        save=False,
+        fast_calibration=False,
+        bin_size=0.01,
+        peak_maximum=0,
+        sampling_mode="polar",
     )
 
 
 def run_voltage(variables, mode):
     calibration.voltage_corr_main(
-        current_voltage(variables), variables,
-        sample_size=10000, mode="ion_seq", calibration_mode=mode,
-        index_fig=1, plot=False, save=False,
-        maximum_cal_method="mean", maximum_sample_method="histogram",
-        fig_size=(5, 5), fast_calibration=False,
-        model="robust_fit", bin_size=0.01, peak_maximum=0,
+        current_voltage(variables),
+        variables,
+        sample_size=10000,
+        mode="ion_seq",
+        calibration_mode=mode,
+        index_fig=1,
+        plot=False,
+        save=False,
+        maximum_cal_method="mean",
+        maximum_sample_method="histogram",
+        fig_size=(5, 5),
+        fast_calibration=False,
+        model="robust_fit",
+        bin_size=0.01,
+        peak_maximum=0,
     )
 
 
 def run_bowl(variables, mode, det_diam):
     calibration.bowl_correction_main(
-        variables.dld_x_det, variables.dld_y_det, current_voltage(variables),
-        variables, det_diam,
-        sample_size=5, fit_mode="robust_fit", maximum_cal_method="mean",
-        maximum_sample_method="histogram", fig_size=(5, 5),
-        calibration_mode=mode, index_fig=1, plot=False, save=False,
-        fast_calibration=False, bin_size=0.01, peak_maximum=0, sampling_mode="polar",
+        variables.dld_x_det,
+        variables.dld_y_det,
+        current_voltage(variables),
+        variables,
+        det_diam,
+        sample_size=5,
+        fit_mode="robust_fit",
+        maximum_cal_method="mean",
+        maximum_sample_method="histogram",
+        fig_size=(5, 5),
+        calibration_mode=mode,
+        index_fig=1,
+        plot=False,
+        save=False,
+        fast_calibration=False,
+        bin_size=0.01,
+        peak_maximum=0,
+        sampling_mode="polar",
     )
 
 
 def select_peak(variables, mode):
     arr = variables.dld_t_calib if mode == "tof" else variables.mc_calib
     peaks = calibration.auto_detect_reference_peaks(
-        arr, n_peaks=1, prominence=MAIN_PROMINENCE, distance=MAIN_DISTANCE,
+        arr,
+        n_peaks=1,
+        prominence=MAIN_PROMINENCE,
+        distance=MAIN_DISTANCE,
         hist_bin_size=1.0 if mode == "tof" else 0.1,
     )
     if peaks:
@@ -87,8 +124,10 @@ def measure_mrp(arr, label="", n_peaks=3):
         if report:
             mrp = report["recommended_mrp"]
             rec_label = report["recommended_label"]
-            print(f"  {label} Peak {p['position']:.3f}: "
-                  f"MRP(0.5)={mrp[0]:.1f}, MRP(0.1)={mrp[1]:.1f}, MRP(0.01)={mrp[2]:.1f} [{rec_label}]")
+            print(
+                f"  {label} Peak {p['position']:.3f}: "
+                f"MRP(0.5)={mrp[0]:.1f}, MRP(0.1)={mrp[1]:.1f}, MRP(0.01)={mrp[2]:.1f} [{rec_label}]"
+            )
             results.append({"position": p["position"], "mrp_50": mrp[0], "mrp_10": mrp[1], "mrp_01": mrp[2]})
         else:
             print(f"  {label} Peak {p['position']:.3f}: report=None")
@@ -135,7 +174,7 @@ def main():
 
     x_det = data["x_det (cm)"].to_numpy(float) * 10.0
     y_det = data["y_det (cm)"].to_numpy(float) * 10.0
-    radius = np.sqrt(x_det ** 2 + y_det ** 2)
+    radius = np.sqrt(x_det**2 + y_det**2)
     det_diam = float(np.percentile(radius[np.isfinite(radius)], 99.9) * 2.0)
     print(f"  Flight path: {flight_path_mm:.1f} mm, Det diam: {det_diam:.1f} mm\n")
 
@@ -150,6 +189,7 @@ def main():
             fn()
         except Exception as e:
             import traceback
+
             traceback.print_exc()
             elapsed = time.perf_counter() - t0
             print(f"  FAILED: {e}")
@@ -167,9 +207,11 @@ def main():
 
     # 2) MC Initial
     v = fresh_variables(data)
+
     def do_initial():
         with redirect_stdout(io.StringIO()):
             run_mc_initial(v, det_diam)
+
     elapsed = run_test("mc_initial", do_initial)
     if elapsed is not None:
         r = measure_mrp(v.mc_calib, "mc_init")
@@ -178,11 +220,13 @@ def main():
 
     # 3) MC Initial + Voltage
     v = fresh_variables(data)
+
     def do_init_voltage():
         with redirect_stdout(io.StringIO()):
             run_mc_initial(v, det_diam)
             select_peak(v, "mc")
             run_voltage(v, "mc")
+
     elapsed = run_test("mc_initial+voltage", do_init_voltage)
     if elapsed is not None:
         r = measure_mrp(v.mc_calib, "init+V")
@@ -191,11 +235,13 @@ def main():
 
     # 4) MC Initial + Bowl
     v = fresh_variables(data)
+
     def do_init_bowl():
         with redirect_stdout(io.StringIO()):
             run_mc_initial(v, det_diam)
             select_peak(v, "mc")
             run_bowl(v, "mc", det_diam)
+
     elapsed = run_test("mc_initial+bowl", do_init_bowl)
     if elapsed is not None:
         r = measure_mrp(v.mc_calib, "init+bowl")
@@ -204,6 +250,7 @@ def main():
 
     # 5) MC Initial + V + Bowl
     v = fresh_variables(data)
+
     def do_init_v_bowl():
         with redirect_stdout(io.StringIO()):
             run_mc_initial(v, det_diam)
@@ -211,6 +258,7 @@ def main():
             run_voltage(v, "mc")
             select_peak(v, "mc")
             run_bowl(v, "mc", det_diam)
+
     elapsed = run_test("mc_initial+V+bowl", do_init_v_bowl)
     if elapsed is not None:
         r = measure_mrp(v.mc_calib, "init+V+bowl")
@@ -219,6 +267,7 @@ def main():
 
     # 6) MC Initial + Bowl + V
     v = fresh_variables(data)
+
     def do_init_bowl_v():
         with redirect_stdout(io.StringIO()):
             run_mc_initial(v, det_diam)
@@ -226,6 +275,7 @@ def main():
             run_bowl(v, "mc", det_diam)
             select_peak(v, "mc")
             run_voltage(v, "mc")
+
     elapsed = run_test("mc_initial+bowl+V", do_init_bowl_v)
     if elapsed is not None:
         r = measure_mrp(v.mc_calib, "init+bowl+V")
@@ -234,15 +284,27 @@ def main():
 
     # 7) MC Initial + Adaptive Residual
     v = fresh_variables(data)
+
     def do_init_ar():
         with redirect_stdout(io.StringIO()):
             run_mc_initial(v, det_diam)
         adaptive_residual_calibration(
-            v, calibration_mode="mc", n_peaks=6, prominence=100, distance=10,
-            n_windows=24, overlap=0.5, template_bin_size=0.01,
-            temporal_smoothing=0.5, apply_spatial=True,
-            spatial_grid=12, min_window_ions=40, min_cell_ions=35, verbose=True,
+            v,
+            calibration_mode="mc",
+            n_peaks=6,
+            prominence=100,
+            distance=10,
+            n_windows=24,
+            overlap=0.5,
+            template_bin_size=0.01,
+            temporal_smoothing=0.5,
+            apply_spatial=True,
+            spatial_grid=12,
+            min_window_ions=40,
+            min_cell_ions=35,
+            verbose=True,
         )
+
     elapsed = run_test("mc_initial+AR", do_init_ar)
     if elapsed is not None:
         r = measure_mrp(v.mc_calib, "init+AR")
@@ -251,6 +313,7 @@ def main():
 
     # 8) Full: Initial + V + Bowl + AR
     v = fresh_variables(data)
+
     def do_full():
         with redirect_stdout(io.StringIO()):
             run_mc_initial(v, det_diam)
@@ -259,11 +322,22 @@ def main():
             select_peak(v, "mc")
             run_bowl(v, "mc", det_diam)
         adaptive_residual_calibration(
-            v, calibration_mode="mc", n_peaks=6, prominence=100, distance=10,
-            n_windows=24, overlap=0.5, template_bin_size=0.01,
-            temporal_smoothing=0.5, apply_spatial=True,
-            spatial_grid=12, min_window_ions=40, min_cell_ions=35, verbose=True,
+            v,
+            calibration_mode="mc",
+            n_peaks=6,
+            prominence=100,
+            distance=10,
+            n_windows=24,
+            overlap=0.5,
+            template_bin_size=0.01,
+            temporal_smoothing=0.5,
+            apply_spatial=True,
+            spatial_grid=12,
+            min_window_ions=40,
+            min_cell_ions=35,
+            verbose=True,
         )
+
     elapsed = run_test("mc_full_V_bowl_AR", do_full)
     if elapsed is not None:
         r = measure_mrp(v.mc_calib, "full")
@@ -272,6 +346,7 @@ def main():
 
     # 9) Full: Initial + Bowl + V + AR
     v = fresh_variables(data)
+
     def do_full2():
         with redirect_stdout(io.StringIO()):
             run_mc_initial(v, det_diam)
@@ -280,11 +355,22 @@ def main():
             select_peak(v, "mc")
             run_voltage(v, "mc")
         adaptive_residual_calibration(
-            v, calibration_mode="mc", n_peaks=6, prominence=100, distance=10,
-            n_windows=24, overlap=0.5, template_bin_size=0.01,
-            temporal_smoothing=0.5, apply_spatial=True,
-            spatial_grid=12, min_window_ions=40, min_cell_ions=35, verbose=True,
+            v,
+            calibration_mode="mc",
+            n_peaks=6,
+            prominence=100,
+            distance=10,
+            n_windows=24,
+            overlap=0.5,
+            template_bin_size=0.01,
+            temporal_smoothing=0.5,
+            apply_spatial=True,
+            spatial_grid=12,
+            min_window_ions=40,
+            min_cell_ions=35,
+            verbose=True,
         )
+
     elapsed = run_test("mc_full_bowl_V_AR", do_full2)
     if elapsed is not None:
         r = measure_mrp(v.mc_calib, "full2")
@@ -312,4 +398,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

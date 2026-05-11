@@ -420,28 +420,26 @@ def read_pos(file_path):
         y: Reconstructed y position
         z: Reconstructed z position
         Da: Mass/charge ratio of ion
+
+    Note:
+        For low-memory environments use :func:`read_pos_lazy`, which returns a
+        :class:`pyccapt.calibration.data_tools.lazy_io.LazyTable` view that
+        reads columns on demand instead of materializing the full DataFrame.
     """
-    record_size = 16
-    file_size = os.path.getsize(file_path)
-    record_count, remainder = divmod(file_size, record_size)
-    if remainder:
-        warn(
-            f"The .pos file size ({file_size} bytes) is not an exact multiple of {record_size}. "
-            f"Ignoring the final {remainder} trailing bytes.",
-            RuntimeWarning,
-        )
+    from pyccapt.calibration.data_tools import lazy_io
+    with lazy_io.open_pos(file_path) as table:
+        return table.to_dataframe()
 
-    if record_count == 0:
-        return pd.DataFrame(columns=['x (nm)', 'y (nm)', 'z (nm)', 'm/n (Da)'])
 
-    records = np.memmap(file_path, dtype='>f4', mode='r', shape=(record_count, 4))
-    pos = pd.DataFrame({
-        'x (nm)': np.asarray(records[:, 0], dtype=np.float32),
-        'y (nm)': np.asarray(records[:, 1], dtype=np.float32),
-        'z (nm)': np.asarray(records[:, 2], dtype=np.float32),
-        'm/n (Da)': np.asarray(records[:, 3], dtype=np.float32),
-    })
-    return pos
+def read_pos_lazy(file_path):
+    """Open an APT ``.pos`` file as a memory-mapped :class:`LazyTable`.
+
+    Returns a column-oriented view that reads on demand. Use this in
+    low-memory contexts; the caller is responsible for closing the table
+    (preferred: ``with read_pos_lazy(path) as table: ...``).
+    """
+    from pyccapt.calibration.data_tools import lazy_io
+    return lazy_io.open_pos(file_path)
 
 
 def read_epos(file_path):
@@ -460,62 +458,29 @@ def read_epos(file_path):
         det_y: Detector y position
         pslep: Pulses since last event pulse (i.e. ionisation rate)
         ipp: Ions per pulse (multihits)
+
+    Note:
+        For low-memory environments use :func:`read_epos_lazy`, which returns a
+        :class:`pyccapt.calibration.data_tools.lazy_io.LazyTable` view that
+        reads columns on demand. The eager :func:`read_epos` itself now reads
+        the memmap field-by-field with a single byte-order conversion per
+        column instead of the previous 11-fold ``np.asarray`` cascade.
     """
-    record_dtype = np.dtype([
-        ('x', '>f4'),
-        ('y', '>f4'),
-        ('z', '>f4'),
-        ('mc', '>f4'),
-        ('tof', '>f4'),
-        ('hv', '>f4'),
-        ('pulse', '>f4'),
-        ('det_x', '>f4'),
-        ('det_y', '>f4'),
-        ('pslep', '>u4'),
-        ('ipp', '>u4'),
-    ])
-    record_size = record_dtype.itemsize
-    file_size = os.path.getsize(file_path)
-    record_count, remainder = divmod(file_size, record_size)
-    if remainder:
-        warn(
-            f"The .epos file size ({file_size} bytes) is not an exact multiple of {record_size}. "
-            f"Ignoring the final {remainder} trailing bytes.",
-            RuntimeWarning,
-        )
+    from pyccapt.calibration.data_tools import lazy_io
+    with lazy_io.open_epos(file_path) as table:
+        return table.to_dataframe()
 
-    if record_count == 0:
-        return pd.DataFrame(
-            columns=[
-                'x (nm)',
-                'y (nm)',
-                'z (nm)',
-                'm/n (Da)',
-                'TOF (ns)',
-                'HV_DC (V)',
-                'pulse (V)',
-                'det_x (mm)',
-                'det_y (mm)',
-                'pslep',
-                'ipp',
-            ]
-        )
 
-    records = np.memmap(file_path, dtype=record_dtype, mode='r', shape=(record_count,))
-    epos = pd.DataFrame({
-        'x (nm)': np.asarray(records['x'], dtype=np.float32),
-        'y (nm)': np.asarray(records['y'], dtype=np.float32),
-        'z (nm)': np.asarray(records['z'], dtype=np.float32),
-        'm/n (Da)': np.asarray(records['mc'], dtype=np.float32),
-        'TOF (ns)': np.asarray(records['tof'], dtype=np.float32),
-        'HV_DC (V)': np.asarray(records['hv'], dtype=np.float32),
-        'pulse (V)': np.asarray(records['pulse'], dtype=np.float32),
-        'det_x (mm)': np.asarray(records['det_x'], dtype=np.float32),
-        'det_y (mm)': np.asarray(records['det_y'], dtype=np.float32),
-        'pslep': np.asarray(records['pslep'], dtype=np.uint32),
-        'ipp': np.asarray(records['ipp'], dtype=np.uint32),
-    })
-    return epos
+def read_epos_lazy(file_path):
+    """Open an APT ``.epos`` file as a memory-mapped :class:`LazyTable`.
+
+    Returns a column-oriented view that reads on demand. Suited for the
+    low-memory case (e.g. correcting a 2 GB EPOS on an 8 GB machine). Use
+    ``with read_epos_lazy(path) as table: ...`` so the memmap is released
+    promptly on Windows.
+    """
+    from pyccapt.calibration.data_tools import lazy_io
+    return lazy_io.open_epos(file_path)
 
 
 def read_rrng(file_path, return_tables: bool = False):

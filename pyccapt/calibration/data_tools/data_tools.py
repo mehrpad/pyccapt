@@ -37,14 +37,36 @@ def _resolve_variable_output_file(variables, *, filename: str, data_directory: b
     return filename
 
 
-def read_hdf5(filename: str | Path):
+def read_hdf5(filename: str | Path, *, lazy: bool = False):
     """
     Read non-pandas HDF5 content into a dictionary of dataframes.
 
+    Parameters:
+        filename: HDF5 file path.
+        lazy: When ``True``, return a
+            :class:`pyccapt.calibration.data_tools.lazy_io.LazyTable` view that
+            reads each ``/group/dataset`` on demand. Use this on small-RAM
+            machines: a 2-3 GB pyccapt-raw file opens with essentially zero
+            resident memory and downstream analyses can call
+            :meth:`LazyTable.iter_chunks` to stream the rows. The caller is
+            responsible for closing the table (preferably with a
+            ``with`` block).
+
     Returns:
-        dict[str, pd.DataFrame] | None
+        dict[str, pd.DataFrame] | LazyTable | None
     """
     file_path = _as_path(filename)
+    if lazy:
+        from pyccapt.calibration.data_tools import lazy_io
+        try:
+            return lazy_io.open_pyccapt_raw_hdf5(file_path)
+        except FileNotFoundError:
+            print("[*] HDF5 File could not be found")
+        except ValueError as exc:
+            # Group structure incompatible with the lazy reader's contract.
+            print(f"[*] Lazy HDF5 open failed: {exc}")
+        return None
+
     try:
         dataframe_storage: dict[str, pd.DataFrame] = {}
         group_dict: dict[str, list[str]] = {}
@@ -184,12 +206,23 @@ def convert_mat_to_df(hdf5_file_response: dict) -> pd.DataFrame:
     return pd_dataframe
 
 
-def store_df_to_hdf(dataframe, key, filename):
+def store_df_to_hdf(dataframe, key, filename, *, format: str = "fixed"):
     """
     Store dataframe to HDF5.
 
-    Supports both modern argument order `(dataframe, key, filename)` and the
-    legacy order `(filename, dataframe, key)` for backwards compatibility.
+    Args:
+        dataframe: Pandas DataFrame to serialize.
+        key: HDF5 key (e.g. ``"df"``).
+        filename: Destination ``.h5`` path.
+        format: Pytables format. ``"fixed"`` (default, fast full-file reads,
+            single-write) or ``"table"`` (slightly slower but supports
+            ``pd.read_hdf(..., iterator=True, chunksize=...)`` and is more
+            permissive about mixed-dtype columns). Use ``"table"`` for big raw
+            outputs you'll later want to stream back without loading the
+            whole file into RAM.
+
+    Supports both modern argument order ``(dataframe, key, filename)`` and the
+    legacy order ``(filename, dataframe, key)`` for backwards compatibility.
     """
     if isinstance(dataframe, (str, Path)):
         # Legacy order: (filename, dataframe, key)
@@ -200,7 +233,7 @@ def store_df_to_hdf(dataframe, key, filename):
 
     file_path = _as_path(filename)
     file_path.parent.mkdir(parents=True, exist_ok=True)
-    dataframe.to_hdf(file_path, key=str(key), mode="w")
+    dataframe.to_hdf(file_path, key=str(key), mode="w", format=format)
 
 
 def store_df_to_csv(data: pd.DataFrame, path: str | Path) -> None:

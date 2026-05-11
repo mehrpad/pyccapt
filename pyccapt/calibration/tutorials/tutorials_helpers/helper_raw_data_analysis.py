@@ -180,6 +180,16 @@ def call_raw_data_workflow(variables=None):
     surface_max_value = widgets.FloatText(value=1000.0, description='Max x:', layout=small_field_layout)
     surface_max_bins = widgets.IntText(value=20, description='Stats bins:', layout=small_field_layout)
     surface_drift_segments = widgets.IntText(value=20, description='Segments:', layout=small_field_layout)
+    # On small-RAM machines (8 GB), turn this on to keep raw-data analysis from
+    # materializing the full /dld or /tdc group into a DataFrame. The 3DL path
+    # below honors the toggle by opening the file via the lazy h5py-backed
+    # reader and routing the processed dataset overview through the streaming
+    # chunked stat helpers in :mod:`_raw_workflow_common`.
+    surface_low_memory = widgets.Checkbox(
+        value=False,
+        description='Low memory',
+        tooltip='Open raw HDF5 lazily and stream stats in chunks (recommended on <=8 GB RAM).',
+    )
     surface_save_processed_path = widgets.Text(value='', description='Save processed:', layout=field_layout)
     surface_analyze_button = widgets.Button(description='Analyze raw HDF5')
     surface_save_button = widgets.Button(description='Save processed')
@@ -307,7 +317,7 @@ def call_raw_data_workflow(variables=None):
     def _analyze_3dl():
         # 3 DL detectors expose 6 channels (3 delay lines x 2 ends each).
         df_tdc = data_loadcrop.fetch_dataset_from_dld_grp(
-            surface_path.value, extract_mode='tdc_ro'
+            surface_path.value, extract_mode='tdc_ro', lazy=surface_low_memory.value,
         )
         if df_tdc is None:
             raise RuntimeError(
@@ -415,7 +425,7 @@ def call_raw_data_workflow(variables=None):
             widgets.HBox([widgets.Label(value='Signal plots:', layout=label_layout), surface_signal_kind]),
             widgets.HBox([widgets.Label(value='Calibration inputs:', layout=label_layout), widgets.HBox([surface_t0, surface_flight_path, surface_detector_limit])]),
             widgets.HBox([widgets.Label(value='Pulse mode:', layout=label_layout), surface_pulse_mode]),
-            widgets.HBox([widgets.Label(value='Plot settings:', layout=label_layout), widgets.HBox([surface_bin_size, surface_max_value, surface_max_bins, surface_drift_segments])]),
+            widgets.HBox([widgets.Label(value='Plot settings:', layout=label_layout), widgets.HBox([surface_bin_size, surface_max_value, surface_max_bins, surface_drift_segments, surface_low_memory])]),
             widgets.HBox([widgets.Label(value='Peak windows:', layout=label_layout), surface_window_box]),
             widgets.HBox([widgets.Label(value='Save processed file:', layout=label_layout), surface_save_processed_path]),
             widgets.HBox([surface_analyze_button, surface_save_button, surface_load_button]),

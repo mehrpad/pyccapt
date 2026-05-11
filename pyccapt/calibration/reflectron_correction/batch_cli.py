@@ -273,21 +273,29 @@ def _correct_single_file(
             "and re-run -- already-written outputs are skipped automatically."
         )
 
-    raw = reflectron_core.load_epos_for_reflectron_correction(epos_path)
-    corrected = reflectron_core.apply_reflectron_correction_to_ccapt(raw, mesh)
-
     written: dict = {"status": "ok"}
-    if overwrite or not h5_path.exists():
-        _write_dataframe_to_hdf(corrected, h5_path)
-    written["h5"] = str(h5_path)
 
-    if save_epos and (overwrite or not epos_out_path.exists()):
-        ccapt_tools.ccapt_to_epos(
-            corrected,
-            path=str(epos_out_path.parent) + "\\",
-            name=epos_out_path.name,
-        )
-        written["epos"] = str(epos_out_path)
+    # When --save-epos is set we still need the full corrected DataFrame to
+    # write the binary EPOS, so we fall back to the eager in-memory path. When
+    # only the HDF5 output is requested (the common case), use the streaming
+    # corrector that keeps peak RAM bounded to a single chunk regardless of
+    # the EPOS size.
+    if save_epos:
+        raw = reflectron_core.load_epos_for_reflectron_correction(epos_path)
+        corrected = reflectron_core.apply_reflectron_correction_to_ccapt(raw, mesh)
+        if overwrite or not h5_path.exists():
+            _write_dataframe_to_hdf(corrected, h5_path)
+        if overwrite or not epos_out_path.exists():
+            ccapt_tools.ccapt_to_epos(
+                corrected,
+                path=str(epos_out_path.parent) + "\\",
+                name=epos_out_path.name,
+            )
+            written["epos"] = str(epos_out_path)
+    else:
+        if overwrite or not h5_path.exists():
+            reflectron_core.correct_epos_streaming(epos_path, mesh, h5_path)
+    written["h5"] = str(h5_path)
 
     if with_matlab_range:
         range_info = _write_matlab_range_for(

@@ -61,3 +61,15 @@ def gui_fname(initial_directory, file_kind="any"):
         return chosen_file
     else:
         return None
+
+
+def gui_dirname(initial_directory):
+    """Select an existing directory via a dialog and return its path."""
+
+    app = QApplication.instance() or QApplication([initial_directory])
+    chosen_dir = QFileDialog.getExistingDirectory(
+        None,
+        "Select a directory...",
+        initial_directory,
+    )
+    return chosen_dir or None

@@ -60,6 +60,13 @@ The main Jupyter widget workflows currently include:
 - `reflectron_correction.ipynb`
 - `tapsim_node_builder.ipynb`
 
+A batch CLI companion to the reflectron notebook is also available:
+`python -m pyccapt.calibration.reflectron_correction.batch_cli` scans a folder
+for `.epos` files and writes `<stem>_corrected.h5` (and optionally `.epos`)
+beside each input for a chosen instrument preset. See the
+[Reflectron Batch Correction (CLI)](tutorials/reflectron_batch_cli.rst)
+tutorial page for arguments and examples.
+
 Google Colab support is currently provided for:
 
 - `data_processing.ipynb`

@@ -39,4 +39,23 @@ def choose_file_path(initial_directory: str | None = None, file_kind: str = "any
     return selected_path
 
 
-__all__ = ["choose_file_path", "resolve_initial_directory"]
+def choose_directory_path(initial_directory: str | None = None) -> str | None:
+    """Open a Qt directory picker in a subprocess and return the chosen directory."""
+    start_directory = resolve_initial_directory(initial_directory)
+    script_path = Path(__file__).with_name("run_directory_path_qt.py")
+    result = subprocess.run(
+        [sys.executable, str(script_path), start_directory],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    selected_path = (result.stdout or "").strip()
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        raise RuntimeError(stderr or "The directory chooser exited with a non-zero status")
+    if not selected_path or selected_path == "No directory chosen":
+        return None
+    return selected_path
+
+
+__all__ = ["choose_file_path", "choose_directory_path", "resolve_initial_directory"]

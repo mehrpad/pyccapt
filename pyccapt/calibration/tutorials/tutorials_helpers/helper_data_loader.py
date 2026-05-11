@@ -258,9 +258,27 @@ def load_calibrated_h5(dataset_path, variables, *, range_path=None, show_progres
 			source = "leap_rhit"
 			progress.update(1)   # step 2: read
 			progress.update(1)   # step 3: normalize (already processed-schema)
+		elif suffix in {".str", ".hits"}:
+			# LEAP STR/HITS path: same story as RHIT — these are Cameca raw
+			# bundles, not HDF5, so pd.read_hdf would raise HDF5ExtError.
+			progress.set_postfix_str("reading LEAP STR/HITS raw data")
+			from pyccapt.calibration.leap_tools.cameca_raw import (
+				str_calculate_positions,
+				str_load,
+				str_to_ccapt,
+			)
+
+			hits, _metadata = str_load(str(dataset_path_obj))
+			hits = str_calculate_positions(hits)
+			dld_df = str_to_ccapt(hits)
+			tdc_df = None
+			source = "leap_str"
+			progress.update(1)   # step 2: read
+			progress.update(1)   # step 3: normalize (already processed-schema)
 		else:
-			# First try the calibrated bundle layout (/df). If that fails because the
-			# file only has the raw acquisition groups, fall back to raw mode.
+			# First try the calibrated bundle layout (/df). If that fails
+			# because the file only has the raw acquisition groups, fall back
+			# to raw /dld + /tdc, then to raw /dld only.
 			source = "calibrated"
 			progress.set_postfix_str("reading bundled /df and optional /tdc")
 			try:
@@ -275,17 +293,67 @@ def load_calibrated_h5(dataset_path, variables, *, range_path=None, show_progres
 				progress.set_postfix_str("falling back to raw /dld + /tdc groups")
 				try:
 					dld_df, tdc_df = data_loadcrop.fetch_dataset_with_tdc(str(dataset_path_obj))
-				except Exception as raw_error:
-					raise ValueError(
-						f"Could not load {dataset_path!r}: not a calibrated bundle "
-						f"({calibrated_error}) and not a recognizable raw acquisition file "
-						f"({raw_error})."
-					) from raw_error
-				source = "raw"
+					source = "raw"
+				except Exception as paired_error:
+					# Bundled /tdc either is missing or its start_counter does
+					# not align with /dld (e.g. our pyccapt-raw RHIT export
+					# has a single-channel tdc mirror that is just redundant
+					# with dld; pyccapt-raw STR has many tdc rows per event
+					# and that alignment may also fail on filtered exports).
+					# For the rest of the calibration workflow, /dld alone is
+					# sufficient. Try dld-only before giving up.
+					progress.set_postfix_str("falling back to /dld only (no tdc)")
+					dld_only = data_loadcrop.fetch_dataset_from_dld_grp(
+						str(dataset_path_obj), extract_mode='dld'
+					)
+					if dld_only is None:
+						# Inspect the file to give a targeted error. The most
+						# common cause is a pyccapt-raw STR export that was
+						# saved before calibration was applied: that file has
+						# a /tdc group (raw delay-line counts) but no /dld
+						# group (which only exists once VDC / tof_ns / detx /
+						# dety have been calibrated against a matching RHIT).
+						import h5py
+						has_dld = False
+						has_tdc = False
+						try:
+							with h5py.File(str(dataset_path_obj), 'r') as _hf:
+								top_keys = list(_hf.keys())
+								has_dld = 'dld' in top_keys
+								has_tdc = 'tdc' in top_keys
+						except OSError:
+							top_keys = []
+						if has_tdc and not has_dld:
+							raise ValueError(
+								f"{dataset_path!r} only has a /tdc group (raw delay-line "
+								"counts) — no /dld group, so it cannot be loaded into the "
+								"calibration workflow. This typically happens when a STR "
+								"file was exported as pyccapt-raw HDF5 *before* clicking "
+								"'Calibrate from RHIT' in the cameca raw import workflow. "
+								"Re-export it from cameca raw import after running calibration, "
+								"or load it via the raw-data-analysis workflow which uses /tdc "
+								"directly."
+							) from paired_error
+						raise ValueError(
+							f"Could not load {dataset_path!r}: not a calibrated bundle "
+							f"({calibrated_error}); /dld + /tdc paired load failed "
+							f"({paired_error}); /dld-only load also failed. "
+							f"File top-level groups: {top_keys}."
+						) from paired_error
+					dld_df = dld_only
+					tdc_df = None
+					source = "raw_dld_only"
+					print(
+						"Loaded /dld group only -- /tdc was missing or its "
+						"start_counter does not align with /dld. The rest of "
+						"the calibration workflow does not require /tdc; only "
+						"DLTS-per-pulse / combinatorial recovery diagnostics "
+						"will be unavailable."
+					)
 			progress.update(1)
 
 			progress.set_postfix_str("normalizing loaded data")
-			if source == "raw":
+			if source in ("raw", "raw_dld_only"):
 				# Apply the standard raw -> processed pipeline so downstream analyses
 				# see the same dataframe schema as a calibrated load.
 				dld_df = data_tools.remove_invalid_data(dld_df, max_tof=100000)

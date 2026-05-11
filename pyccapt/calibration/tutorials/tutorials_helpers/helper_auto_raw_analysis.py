@@ -1730,8 +1730,8 @@ def call_signal_preview(variables) -> None:
         value=initial_target,
         layout=field_layout,
     )
-    bin_size_widget = widgets.FloatText(value=0.1 if not is_tof_target else 0.5, layout=field_layout)
-    lim_widget = widgets.IntText(value=100 if not is_tof_target else 1000, layout=field_layout)
+    bin_size_widget = widgets.FloatText(value=0.1, layout=field_layout)
+    lim_widget = widgets.IntText(value=100 if not is_tof_target else 5000, layout=field_layout)
     log_widget = widgets.Dropdown(
         options=[("True", True), ("False", False)],
         value=True,
@@ -1763,8 +1763,8 @@ def call_signal_preview(variables) -> None:
             return
         new_target = change.get("new")
         new_is_tof = new_target in {"tof", "tof_c"}
-        bin_size_widget.value = 0.5 if new_is_tof else 0.1
-        lim_widget.value = 1000 if new_is_tof else 100
+        bin_size_widget.value = 0.1
+        lim_widget.value = 5000 if new_is_tof else 100
         figname_widget.value = f"preview_{new_target}"
 
     preview_controls = (

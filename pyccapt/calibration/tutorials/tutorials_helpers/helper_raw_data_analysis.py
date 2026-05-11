@@ -10,8 +10,7 @@ import ipywidgets as widgets
 from IPython.display import display
 from ipywidgets import Output
 
-from pyccapt.calibration.data_tools import file_dialog, raw_data_workflow
-from pyccapt.calibration.leap_tools.cameca_raw import rhit_tools, str_tools
+from pyccapt.calibration.data_tools import data_loadcrop, file_dialog, raw_data_workflow
 
 label_layout = widgets.Layout(width='220px')
 field_layout = widgets.Layout(width='420px')
@@ -118,35 +117,50 @@ def _print_processed_summary(dataframe: pd.DataFrame, title: str) -> None:
         )
 
 
+_PYCCAPT_RAW_EXTENSIONS = {'.h5', '.hdf', '.hdf5'}
+
+
+def _validate_pyccapt_raw_path(path: str) -> None:
+    """Reject non-pyccapt-style inputs early with a helpful message.
+
+    The raw-data analysis workflow only accepts pyccapt-style raw HDF5 files
+    (with a ``/dld`` and/or ``/tdc`` group). LEAP RHIT/STR/HITS files and old
+    RoentDek text exports must first be converted to a pyccapt-raw HDF5 via
+    the cameca raw import workflow.
+    """
+    if not path:
+        raise ValueError('Provide a raw HDF5 file path before analyzing.')
+    suffix = Path(path).suffix.lower()
+    if suffix in {'.rhit', '.str', '.hits', '.epos', '.pos', '.apt', '.ato'}:
+        raise ValueError(
+            f"{path!r} is a LEAP raw file ({suffix}). The raw-data-analysis "
+            "workflow accepts only pyccapt-raw HDF5 files. Convert your LEAP "
+            "raw data with the 'cameca raw import' workflow first (it writes a "
+            "<basename>_pyccapt-raw.h5 with the dld/ and tdc/ groups expected "
+            "here), then load that .h5 file."
+        )
+    if suffix not in _PYCCAPT_RAW_EXTENSIONS:
+        raise ValueError(
+            f"{path!r} is not a recognized HDF5 file. The raw-data-analysis "
+            "workflow accepts only pyccapt-raw HDF5 files (.h5 / .hdf / .hdf5)."
+        )
+
+
 def call_raw_data_workflow(variables=None):
     out = Output()
-    state = {'roentdek': None, 'surface': None, 'cameca': None}
-
-    roentdek_events_path = widgets.Text(value='', description='', layout=field_layout)
-    roentdek_values_path = widgets.Text(value='', description='', layout=field_layout)
-    roentdek_events_browse = widgets.Button(description='Browse')
-    roentdek_values_browse = widgets.Button(description='Browse')
-    roentdek_signal_kind = widgets.Dropdown(
-        options=[('TOF values', 'tof'), ('Mass/charge values', 'mc')],
-        value='tof',
-        description='Signal:',
-        layout=field_layout,
-    )
-    roentdek_detx_columns = widgets.Text(value='6,10,14,18', description='X cols:', layout=field_layout)
-    roentdek_dety_columns = widgets.Text(value='7,11,15,19', description='Y cols:', layout=field_layout)
-    roentdek_signal_columns = widgets.Text(value='8,12,16,20', description='Signal cols:', layout=field_layout)
-    roentdek_drop_zero = widgets.Checkbox(value=True, description='Skip zero signal rows')
-    roentdek_bin_size = widgets.FloatText(value=0.1, description='Bin size:', layout=small_field_layout)
-    roentdek_max_value = widgets.FloatText(value=1000.0, description='Max x:', layout=small_field_layout)
-    roentdek_max_bins = widgets.IntText(value=20, description='Stats bins:', layout=small_field_layout)
-    roentdek_drift_segments = widgets.IntText(value=20, description='Segments:', layout=small_field_layout)
-    roentdek_save_hits_path = widgets.Text(value='', description='Save hits:', layout=field_layout)
-    roentdek_analyze_button = widgets.Button(description='Analyze RoentDek')
-    roentdek_save_button = widgets.Button(description='Save hits')
-    roentdek_window_rows = _build_window_rows('peak ')
+    state = {'surface': None}
 
     surface_path = widgets.Text(value='', description='', layout=field_layout)
     surface_browse = widgets.Button(description='Browse')
+    surface_detector_type = widgets.Dropdown(
+        options=[
+            ('2 DL (4 channels)', '2dl'),
+            ('3 DL (6 channels)', '3dl'),
+        ],
+        value='2dl',
+        description='Detector:',
+        layout=field_layout,
+    )
     surface_signal_kind = widgets.Dropdown(
         options=[('TOF plots', 'tof'), ('Mass/charge plots', 'mc')],
         value='tof',
@@ -167,77 +181,15 @@ def call_raw_data_workflow(variables=None):
     surface_max_bins = widgets.IntText(value=20, description='Stats bins:', layout=small_field_layout)
     surface_drift_segments = widgets.IntText(value=20, description='Segments:', layout=small_field_layout)
     surface_save_processed_path = widgets.Text(value='', description='Save processed:', layout=field_layout)
-    surface_analyze_button = widgets.Button(description='Analyze Surface Concept')
+    surface_analyze_button = widgets.Button(description='Analyze raw HDF5')
     surface_save_button = widgets.Button(description='Save processed')
     surface_load_button = widgets.Button(description='Load into workflow')
     surface_window_rows = _build_window_rows('peak ')
 
-    cameca_source = widgets.Dropdown(
-        options=[('RHIT', 'rhit'), ('STR / HITS', 'str')],
-        value='rhit',
-        description='Source:',
-        layout=field_layout,
-    )
-    cameca_path = widgets.Text(value='', description='', layout=field_layout)
-    cameca_epos_path = widgets.Text(value='', description='', layout=field_layout)
-    cameca_rhit_path = widgets.Text(value='', description='', layout=field_layout)
-    cameca_browse = widgets.Button(description='Browse')
-    cameca_epos_browse = widgets.Button(description='Browse')
-    cameca_rhit_browse = widgets.Button(description='Browse')
-    cameca_bin_size = widgets.FloatText(value=0.1, description='Bin size:', layout=small_field_layout)
-    cameca_tof_max = widgets.FloatText(value=2000.0, description='Tof max:', layout=small_field_layout)
-    cameca_mc_max = widgets.FloatText(value=80.0, description='Mc max:', layout=small_field_layout)
-    cameca_drift_segments = widgets.IntText(value=20, description='Segments:', layout=small_field_layout)
-    cameca_save_path = widgets.Text(value='', description='Save processed:', layout=field_layout)
-    cameca_analyze_button = widgets.Button(description='Analyze LEAP raw')
-    cameca_save_button = widgets.Button(description='Save processed')
-    cameca_load_button = widgets.Button(description='Load into workflow')
-
-    def _print_roentdek_summary(result: dict):
-        counters = result['counters']
-        raw_summary = result['raw_summary']
-        print(f"Parsed {len(result['events']):,} RoentDek events.")
-        print(
-            f"Total timestamps: {raw_summary['total_timestamps']:,} | "
-            f"matched events: {raw_summary['matched_pattern_events']:,} | "
-            f"invalid events: {raw_summary['invalid_pattern_events']:,}"
-        )
-        print(
-            f"multi-hit events: {raw_summary['multi_hit_events']:,} | "
-            f"events with unmatched leftover timestamps: {raw_summary['unmatched_pattern_events']:,}"
-        )
-        print(
-            'Recovered DLTS patterns: '
-            f"2 DLTS={sum(counters['dld2'].values()):,}, "
-            f"4 DLTS={sum(counters['dld4'].values()):,}, "
-            f"6 DLTS={sum(counters['dld6'].values()):,}"
-        )
-        channel_totals = ', '.join(
-            f"ch{channel}={count:,}" for channel, count in raw_summary['channel_timestamp_totals'].items()
-        )
-        print(f"Channel timestamp totals: {channel_totals}")
-        missing_pairs = ', '.join(
-            f"{pair}={raw_summary['pair_missing_partner_events'].get(pair, 0):,}"
-            for pair in ('1-2', '3-4', '5-6')
-        )
-        unbalanced_pairs = ', '.join(
-            f"{pair}={raw_summary['pair_unbalanced_events'].get(pair, 0):,}"
-            for pair in ('1-2', '3-4', '5-6')
-        )
-        print(f"Events with missing pair partners: {missing_pairs}")
-        print(f"Events with unbalanced pair counts: {unbalanced_pairs}")
-        unmatched_channels = ', '.join(
-            f"ch{channel}={count:,}" for channel, count in raw_summary['unmatched_timestamps'].items() if count
-        )
-        if unmatched_channels:
-            print(f"Unmatched leftover timestamps by channel: {unmatched_channels}")
-        if not result['hit_table'].empty:
-            print(f"Flattened {len(result['hit_table']):,} detector hits from the numeric text table.")
-
-    def _print_surface_summary(result: dict, processed: pd.DataFrame):
+    def _print_2dl_summary(result: dict, processed: pd.DataFrame):
         recovery = result['recovery_stats']
         raw_summary = result['raw_summary']
-        print(f"Parsed {len(result['sequence_records']):,} Surface Concept start-counter groups.")
+        print(f"Parsed {len(result['sequence_records']):,} 2DL start-counter groups.")
         print(
             f"Raw sequence groups: valid 4ch={raw_summary['valid_four_channel_groups']:,}, "
             f"invalid 4ch={raw_summary['invalid_four_channel_groups']:,}, "
@@ -268,159 +220,136 @@ def call_raw_data_workflow(variables=None):
         )
         print(f"Processed dataset rows available for the main workflow: {len(processed):,}")
 
-    def on_analyze_roentdek(_):
-        roentdek_analyze_button.disabled = True
-        with out:
-            out.clear_output()
-            try:
-                windows = _collect_windows(roentdek_window_rows)
-                result = raw_data_workflow.analyze_roentdek_dataset(
-                    roentdek_events_path.value,
-                    numeric_values_path=roentdek_values_path.value.strip() or None,
-                    detx_columns=_parse_column_positions(roentdek_detx_columns.value, 'RoentDek x columns'),
-                    dety_columns=_parse_column_positions(roentdek_dety_columns.value, 'RoentDek y columns'),
-                    signal_columns=_parse_column_positions(roentdek_signal_columns.value, 'RoentDek signal columns'),
-                    signal_kind=roentdek_signal_kind.value,
-                    drop_zero_signal=roentdek_drop_zero.value,
-                )
-                state['roentdek'] = result
-                _print_roentdek_summary(result)
-
-                _display_figure(raw_data_workflow.plot_roentdek_statistics(result['counters'], roentdek_max_bins.value))
-
-                if not result['hit_table'].empty:
-                    _display_figure(
-                        raw_data_workflow.plot_signal_overlay_by_dlts(
-                            result['hit_table'],
-                            signal_kind=roentdek_signal_kind.value,
-                            max_value=roentdek_max_value.value if roentdek_max_value.value > 0 else None,
-                            bin_size=roentdek_bin_size.value,
-                            only_in_detector=False,
-                            title='RoentDek signal overlay by DLTS',
-                        )
-                    )
-                    _display_figure(
-                        raw_data_workflow.plot_detector_overview(
-                            result['hit_table'],
-                            only_in_detector=False,
-                            title_prefix='RoentDek detector',
-                        )
-                    )
-                    window_figure = raw_data_workflow.plot_signal_window_breakdown(
-                        result['hit_table'],
-                        windows,
-                        signal_kind=roentdek_signal_kind.value,
-                        only_in_detector=False,
-                        title='RoentDek peak-window counts',
-                    )
-                    _display_figure(window_figure)
-                    _display_figure(
-                        raw_data_workflow.plot_tof_segment_drift(
-                            result['hit_table'],
-                            windows=windows,
-                            num_segments=roentdek_drift_segments.value,
-                            max_value=roentdek_max_value.value if roentdek_signal_kind.value == 'tof' else None,
-                        )
-                    )
-                    _display_figure(raw_data_workflow.plot_detector_dead_zone_and_neighbors(result['hit_table']))
-                    display(result['hit_table'].head(20))
-                else:
-                    print('No numeric hit table was loaded, so only event-level statistics are shown.')
-            except Exception as exc:
-                print(f'RoentDek analysis failed: {exc}')
-        roentdek_analyze_button.disabled = False
-
-    def on_save_roentdek(_):
-        roentdek_save_button.disabled = True
-        with out:
-            if state['roentdek'] is None or state['roentdek']['hit_table'].empty:
-                print('Run RoentDek analysis with a numeric value table before saving hits.')
-            else:
-                try:
-                    _save_dataframe(state['roentdek']['hit_table'], roentdek_save_hits_path.value.strip())
-                    print(f"Saved RoentDek hit table to: {roentdek_save_hits_path.value.strip()}")
-                except Exception as exc:
-                    print(f'Failed to save RoentDek hits: {exc}')
-        roentdek_save_button.disabled = False
-
     def on_analyze_surface(_):
         surface_analyze_button.disabled = True
         with out:
             out.clear_output()
             try:
-                windows = _collect_windows(surface_window_rows)
-                result = raw_data_workflow.analyze_surface_concept_dataset(
-                    surface_path.value,
-                    detector_limit_cm=surface_detector_limit.value,
-                    t0=surface_t0.value,
-                    flight_path_length_mm=surface_flight_path.value,
-                    pulse_mode=surface_pulse_mode.value,
-                )
-                processed = raw_data_workflow.surface_concept_hits_to_processed_dataframe(
-                    result['hit_table'],
-                    pulse_mode=surface_pulse_mode.value,
-                )
-                state['surface'] = {'analysis': result, 'processed': processed}
-                _print_surface_summary(result, processed)
-
-                _display_figure(
-                    raw_data_workflow.plot_surface_concept_sequence_statistics(
-                        result['sequence_stats'],
-                        max_bins=surface_max_bins.value,
-                    )
-                )
-                _display_figure(raw_data_workflow.plot_surface_concept_recovery_summary(result['recovery_stats']))
-                _display_figure(
-                    raw_data_workflow.plot_signal_overlay_by_dlts(
-                        result['hit_table'],
-                        signal_kind=surface_signal_kind.value,
-                        max_value=surface_max_value.value if surface_max_value.value > 0 else None,
-                        bin_size=surface_bin_size.value,
-                        title='Surface Concept signal overlay by DLTS',
-                    )
-                )
-                _display_figure(
-                    raw_data_workflow.plot_detector_overview(
-                        result['hit_table'],
-                        detector_limit_cm=surface_detector_limit.value,
-                        only_in_detector=False,
-                        title_prefix='Surface detector',
-                    )
-                )
-                _display_figure(
-                    raw_data_workflow.plot_surface_concept_recovery_yield(
-                        result['recovery_diagnostics'],
-                        num_bins=surface_max_bins.value,
-                    )
-                )
-                _display_figure(raw_data_workflow.plot_partial_hit_efficiency_maps(result['recovery_diagnostics']))
-                _display_figure(
-                    raw_data_workflow.plot_tof_segment_drift(
-                        result['hit_table'],
-                        windows=windows,
-                        num_segments=surface_drift_segments.value,
-                        max_value=surface_max_value.value,
-                    )
-                )
-                _display_figure(raw_data_workflow.plot_detector_dead_zone_and_neighbors(result['hit_table']))
-                window_figure = raw_data_workflow.plot_signal_window_breakdown(
-                    result['hit_table'],
-                    windows,
-                    signal_kind=surface_signal_kind.value,
-                    title='Surface Concept peak-window counts',
-                )
-                _display_figure(window_figure)
-                display(result['hit_table'].head(20))
-                display(processed.head(20))
+                _validate_pyccapt_raw_path(surface_path.value)
+                detector_type = surface_detector_type.value
+                if detector_type == '2dl':
+                    _analyze_2dl()
+                elif detector_type == '3dl':
+                    _analyze_3dl()
+                else:
+                    raise ValueError(f"Unknown detector type: {detector_type!r}")
             except Exception as exc:
-                print(f'Surface Concept analysis failed: {exc}')
+                print(f'Raw HDF5 analysis failed: {exc}')
         surface_analyze_button.disabled = False
+
+    def _analyze_2dl():
+        # 2 DL detectors expose 4 channels (2 delay lines x 2 ends each).
+        windows = _collect_windows(surface_window_rows)
+        result = raw_data_workflow.analyze_surface_concept_dataset(
+            surface_path.value,
+            detector_limit_cm=surface_detector_limit.value,
+            t0=surface_t0.value,
+            flight_path_length_mm=surface_flight_path.value,
+            pulse_mode=surface_pulse_mode.value,
+        )
+        processed = raw_data_workflow.surface_concept_hits_to_processed_dataframe(
+            result['hit_table'],
+            pulse_mode=surface_pulse_mode.value,
+        )
+        state['surface'] = {'analysis': result, 'processed': processed, 'detector_type': '2dl'}
+        _print_2dl_summary(result, processed)
+
+        _display_figure(
+            raw_data_workflow.plot_surface_concept_sequence_statistics(
+                result['sequence_stats'],
+                max_bins=surface_max_bins.value,
+            )
+        )
+        _display_figure(raw_data_workflow.plot_surface_concept_recovery_summary(result['recovery_stats']))
+        _display_figure(
+            raw_data_workflow.plot_signal_overlay_by_dlts(
+                result['hit_table'],
+                signal_kind=surface_signal_kind.value,
+                max_value=surface_max_value.value if surface_max_value.value > 0 else None,
+                bin_size=surface_bin_size.value,
+                title='2DL signal overlay by DLTS',
+            )
+        )
+        _display_figure(
+            raw_data_workflow.plot_detector_overview(
+                result['hit_table'],
+                detector_limit_cm=surface_detector_limit.value,
+                only_in_detector=False,
+                title_prefix='2DL detector',
+            )
+        )
+        _display_figure(
+            raw_data_workflow.plot_surface_concept_recovery_yield(
+                result['recovery_diagnostics'],
+                num_bins=surface_max_bins.value,
+            )
+        )
+        _display_figure(raw_data_workflow.plot_partial_hit_efficiency_maps(result['recovery_diagnostics']))
+        _display_figure(
+            raw_data_workflow.plot_tof_segment_drift(
+                result['hit_table'],
+                windows=windows,
+                num_segments=surface_drift_segments.value,
+                max_value=surface_max_value.value,
+            )
+        )
+        _display_figure(raw_data_workflow.plot_detector_dead_zone_and_neighbors(result['hit_table']))
+        window_figure = raw_data_workflow.plot_signal_window_breakdown(
+            result['hit_table'],
+            windows,
+            signal_kind=surface_signal_kind.value,
+            title='2DL peak-window counts',
+        )
+        _display_figure(window_figure)
+        display(result['hit_table'].head(20))
+        display(processed.head(20))
+
+    def _analyze_3dl():
+        # 3 DL detectors expose 6 channels (3 delay lines x 2 ends each).
+        df_tdc = data_loadcrop.fetch_dataset_from_dld_grp(
+            surface_path.value, extract_mode='tdc_ro'
+        )
+        if df_tdc is None:
+            raise RuntimeError(
+                "Could not read tdc/ group from the file. "
+                "For 3DL detectors the HDF5 must contain a 6-channel tdc/ group "
+                "(channel, start_counter, high_voltage, pulse, time_data). "
+                "Re-export from the cameca raw import workflow if the source is LEAP."
+            )
+        unique_channels = sorted(int(c) for c in df_tdc['channel'].unique())
+        print(
+            f"Loaded 3DL tdc frame: {len(df_tdc):,} rows, channels={unique_channels}."
+        )
+        if len(unique_channels) > 6:
+            print(
+                f"  [WARN] {len(unique_channels)} channels seen but 3DL expects <= 6. "
+                "Verify the file matches the selected detector type."
+            )
+        result = raw_data_workflow.analyze_roentdek_tdc_frame(df_tdc)
+        state['surface'] = {'analysis': result, 'processed': None, 'detector_type': '3dl'}
+        print(
+            "Analyzed 3DL raw frame. A processed PyCCAPT dataset is not produced "
+            "directly from the tdc/ group for 3DL; for that, use the dld/ group of "
+            "the same HDF5 (load via fetch_dataset_from_dld_grp(..., extract_mode='dld'))."
+        )
+        if 'events' in result:
+            print(f"  3DL classified events: {len(result['events']):,}")
+            display(result['events'].head(20))
+        if 'counters' in result and isinstance(result['counters'], dict):
+            print("  Class counts:")
+            for label, count in result['counters'].items():
+                print(f"    {label}: {count:,}")
 
     def on_save_surface(_):
         surface_save_button.disabled = True
         with out:
             if state['surface'] is None:
-                print('Run Surface Concept analysis before saving the processed dataset.')
+                print('Run the raw HDF5 analysis before saving the processed dataset.')
+            elif state['surface'].get('processed') is None:
+                print(
+                    'No processed dataset is available — the 3DL pipeline does not '
+                    'currently produce one. Use the dld/ group of the same HDF5 directly.'
+                )
             else:
                 try:
                     raw_data_workflow.save_processed_raw_dataset(
@@ -429,152 +358,34 @@ def call_raw_data_workflow(variables=None):
                     )
                     print(f"Saved processed dataset to: {surface_save_processed_path.value.strip()}")
                 except Exception as exc:
-                    print(f'Failed to save the processed Surface Concept dataset: {exc}')
+                    print(f'Failed to save the processed dataset: {exc}')
         surface_save_button.disabled = False
 
     def on_load_surface(_):
         surface_load_button.disabled = True
         with out:
             if state['surface'] is None:
-                print('Run Surface Concept analysis before loading a processed dataset into the workflow.')
+                print('Run the raw HDF5 analysis before loading a processed dataset into the workflow.')
+            elif state['surface'].get('processed') is None:
+                print(
+                    'No processed dataset is available for the selected detector type. '
+                    '3DL analysis does not currently emit a processed dataset.'
+                )
             elif variables is None:
                 print('This workflow was opened without a shared variables object.')
             else:
                 variables.sync_from_data(state['surface']['processed'], update_backups=True)
                 if surface_path.value.strip():
                     variables.last_directory = str(Path(surface_path.value.strip()).parent)
-                print('Loaded the processed Surface Concept dataset into the active workflow variables.')
+                print('Loaded the processed dataset into the active workflow variables.')
         surface_load_button.disabled = False
 
-    def on_analyze_cameca(_):
-        cameca_analyze_button.disabled = True
-        with out:
-            out.clear_output()
-            try:
-                source = cameca_source.value
-                if source == 'rhit':
-                    hits, histograms, metadata = rhit_tools.rhit_load(cameca_path.value)
-                    calibration = None
-                    if cameca_epos_path.value.strip():
-                        hits, calibration = rhit_tools.rhit_calibrate_from_epos(hits, cameca_epos_path.value.strip())
-                    processed = rhit_tools.rhit_to_ccapt(hits)
-                    state['cameca'] = {
-                        'source': source,
-                        'hits': hits,
-                        'processed': processed,
-                        'metadata': metadata,
-                        'histograms': histograms,
-                        'calibration': calibration,
-                    }
-                    print(f"Loaded {len(hits):,} RHIT hits.")
-                    if calibration is not None:
-                        print(
-                            f"Applied EPOS calibration: matched_events={calibration['matched_events']:,}, "
-                            f"t_offset={calibration['t_offset']:.4f} ns, "
-                            f"residual_std={calibration['residual_std']:.4e}"
-                        )
-                    _print_processed_summary(processed, 'Processed RHIT dataset summary')
-                else:
-                    hits, metadata = str_tools.str_load(cameca_path.value)
-                    hits = str_tools.str_calculate_positions(hits)
-                    calibration = None
-                    if not cameca_rhit_path.value.strip():
-                        raise ValueError('STR / HITS analysis needs a matching RHIT file for calibration.')
-                    rhit_hits, rhit_histograms, rhit_metadata = rhit_tools.rhit_load(cameca_rhit_path.value.strip())
-                    if cameca_epos_path.value.strip():
-                        rhit_hits, _ = rhit_tools.rhit_calibrate_from_epos(rhit_hits, cameca_epos_path.value.strip())
-                    hits, calibration = str_tools.str_calibrate_from_rhit(hits, rhit_hits, rhit_histograms, rhit_metadata)
-                    processed = str_tools.str_to_ccapt(hits)
-                    state['cameca'] = {
-                        'source': source,
-                        'hits': hits,
-                        'processed': processed,
-                        'metadata': metadata,
-                        'histograms': {},
-                        'calibration': calibration,
-                    }
-                    print(f"Loaded {len(hits):,} STR / HITS events.")
-                    print(
-                        f"STR calibration: clock={calibration['clock_ns'] * 1000:.2f} ps, "
-                        f"t0={calibration['t0_tdc']:.1f} TDC, "
-                        f"corr={calibration['spectrum_correlation']:.4f}"
-                    )
-                    _print_processed_summary(processed, 'Processed STR / HITS dataset summary')
-
-                _display_figure(
-                    raw_data_workflow.plot_processed_dataset_overview(
-                        state['cameca']['processed'],
-                        mc_max=cameca_mc_max.value if cameca_mc_max.value > 0 else None,
-                        tof_max=cameca_tof_max.value if cameca_tof_max.value > 0 else None,
-                        bin_size=cameca_bin_size.value,
-                        title_prefix='LEAP raw',
-                    )
-                )
-                _display_figure(
-                    raw_data_workflow.plot_tof_segment_drift(
-                        state['cameca']['processed'],
-                        num_segments=cameca_drift_segments.value,
-                        max_value=cameca_tof_max.value if cameca_tof_max.value > 0 else None,
-                    )
-                )
-                _display_figure(raw_data_workflow.plot_detector_dead_zone_and_neighbors(state['cameca']['processed']))
-                display(state['cameca']['processed'].head(20))
-            except Exception as exc:
-                print(f'LEAP raw analysis failed: {exc}')
-        cameca_analyze_button.disabled = False
-
-    def on_save_cameca(_):
-        cameca_save_button.disabled = True
-        with out:
-            if state['cameca'] is None:
-                print('Run LEAP raw analysis before saving the processed dataset.')
-            else:
-                try:
-                    raw_data_workflow.save_processed_raw_dataset(
-                        state['cameca']['processed'],
-                        cameca_save_path.value.strip(),
-                    )
-                    print(f"Saved processed dataset to: {cameca_save_path.value.strip()}")
-                except Exception as exc:
-                    print(f'Failed to save the LEAP processed dataset: {exc}')
-        cameca_save_button.disabled = False
-
-    def on_load_cameca(_):
-        cameca_load_button.disabled = True
-        with out:
-            if state['cameca'] is None:
-                print('Run LEAP raw analysis before loading a processed dataset into the workflow.')
-            elif variables is None:
-                print('This workflow was opened without a shared variables object.')
-            else:
-                variables.sync_from_data(state['cameca']['processed'], update_backups=True)
-                if cameca_path.value.strip():
-                    variables.last_directory = str(Path(cameca_path.value.strip()).parent)
-                print('Loaded the LEAP processed dataset into the active workflow variables.')
-        cameca_load_button.disabled = False
-
-    roentdek_events_browse.on_click(lambda _: _browse_file(roentdek_events_path, out, variables))
-    roentdek_values_browse.on_click(lambda _: _browse_file(roentdek_values_path, out, variables))
     surface_browse.on_click(lambda _: _browse_file(surface_path, out, variables))
-    cameca_browse.on_click(lambda _: _browse_file(cameca_path, out, variables))
-    cameca_epos_browse.on_click(lambda _: _browse_file(cameca_epos_path, out, variables))
-    cameca_rhit_browse.on_click(lambda _: _browse_file(cameca_rhit_path, out, variables))
 
-    roentdek_analyze_button.on_click(on_analyze_roentdek)
-    roentdek_save_button.on_click(on_save_roentdek)
     surface_analyze_button.on_click(on_analyze_surface)
     surface_save_button.on_click(on_save_surface)
     surface_load_button.on_click(on_load_surface)
-    cameca_analyze_button.on_click(on_analyze_cameca)
-    cameca_save_button.on_click(on_save_cameca)
-    cameca_load_button.on_click(on_load_cameca)
 
-    roentdek_window_box = widgets.VBox(
-        [
-            widgets.HBox([label_widget, min_widget, max_widget])
-            for label_widget, min_widget, max_widget in roentdek_window_rows
-        ]
-    )
     surface_window_box = widgets.VBox(
         [
             widgets.HBox([label_widget, min_widget, max_widget])
@@ -582,27 +393,25 @@ def call_raw_data_workflow(variables=None):
         ]
     )
 
-    roentdek_panel = widgets.VBox(
+    panel = widgets.VBox(
         [
-            widgets.HTML('<b>RoentDek text workflow</b><br>Load the event text file and optionally the numeric value table used in the old notebook.'),
-            _path_row('Event text file:', roentdek_events_path, roentdek_events_browse),
-            _path_row('Numeric value text:', roentdek_values_path, roentdek_values_browse),
-            widgets.HBox([widgets.Label(value='Signal interpretation:', layout=label_layout), roentdek_signal_kind]),
-            widgets.HBox([widgets.Label(value='Detector x columns:', layout=label_layout), roentdek_detx_columns]),
-            widgets.HBox([widgets.Label(value='Detector y columns:', layout=label_layout), roentdek_dety_columns]),
-            widgets.HBox([widgets.Label(value='Signal columns:', layout=label_layout), roentdek_signal_columns]),
-            widgets.HBox([widgets.Label(value='Filtering:', layout=label_layout), roentdek_drop_zero]),
-            widgets.HBox([widgets.Label(value='Plot settings:', layout=label_layout), widgets.HBox([roentdek_bin_size, roentdek_max_value, roentdek_max_bins, roentdek_drift_segments])]),
-            widgets.HBox([widgets.Label(value='Peak windows:', layout=label_layout), roentdek_window_box]),
-            widgets.HBox([widgets.Label(value='Save hit table:', layout=label_layout), roentdek_save_hits_path]),
-            widgets.HBox([roentdek_analyze_button, roentdek_save_button]),
-        ]
-    )
-
-    surface_panel = widgets.VBox(
-        [
-            widgets.HTML('<b>Surface Concept raw workflow</b><br>Recover 4-DLTS and 2-DLTS hits, inspect TOF or mass/charge, then save or load the processed dataset.'),
-            _path_row('Raw HDF5 path:', surface_path, surface_browse),
+            widgets.HTML(
+                '<b>PyCCAPT raw HDF5 analysis</b><br>'
+                'Loads a pyccapt-raw HDF5 file (the format produced by the '
+                'PyCCAPT control software or by the <i>cameca raw import</i> '
+                "workflow's <i>Save raw analysis HDF5</i> button). After "
+                'loading, choose whether the detector is <b>2 DL (4 channels)</b> '
+                'or <b>3 DL (6 channels)</b> — the analysis pipeline routes '
+                'accordingly.'
+                '<br><br>'
+                '<i>For LEAP RHIT / STR / HITS files, first convert them with '
+                "the <b>cameca raw import</b> workflow (it writes a "
+                '<code>&lt;basename&gt;_pyccapt-raw.h5</code> with the '
+                'dld/ and tdc/ groups expected here), then load the resulting '
+                '.h5 file in this panel.</i>'
+            ),
+            _path_row('PyCCAPT raw HDF5 path:', surface_path, surface_browse),
+            widgets.HBox([widgets.Label(value='Detector type:', layout=label_layout), surface_detector_type]),
             widgets.HBox([widgets.Label(value='Signal plots:', layout=label_layout), surface_signal_kind]),
             widgets.HBox([widgets.Label(value='Calibration inputs:', layout=label_layout), widgets.HBox([surface_t0, surface_flight_path, surface_detector_limit])]),
             widgets.HBox([widgets.Label(value='Pulse mode:', layout=label_layout), surface_pulse_mode]),
@@ -613,23 +422,5 @@ def call_raw_data_workflow(variables=None):
         ]
     )
 
-    cameca_panel = widgets.VBox(
-        [
-            widgets.HTML('<b>LEAP / Cameca raw workflow</b><br>Analyze RHIT or STR/HITS raw files inside the same raw-data workflow and convert them to a processed dataset for the rest of PyCCAPT.'),
-            widgets.HBox([widgets.Label(value='Raw source:', layout=label_layout), cameca_source]),
-            _path_row('Primary raw file:', cameca_path, cameca_browse),
-            _path_row('Matching EPOS:', cameca_epos_path, cameca_epos_browse),
-            _path_row('Matching RHIT:', cameca_rhit_path, cameca_rhit_browse),
-            widgets.HBox([widgets.Label(value='Plot settings:', layout=label_layout), widgets.HBox([cameca_bin_size, cameca_tof_max, cameca_mc_max, cameca_drift_segments])]),
-            widgets.HBox([widgets.Label(value='Save processed file:', layout=label_layout), cameca_save_path]),
-            widgets.HBox([cameca_analyze_button, cameca_save_button, cameca_load_button]),
-        ]
-    )
-
-    tabs = widgets.Tab(children=[roentdek_panel, surface_panel, cameca_panel])
-    tabs.set_title(0, 'RoentDek')
-    tabs.set_title(1, 'Surface Concept')
-    tabs.set_title(2, 'LEAP / Cameca')
-
-    display(tabs)
+    display(panel)
     display(out)

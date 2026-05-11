@@ -175,19 +175,74 @@ def _decode_run_header(file_path: str | Path) -> dict[str, Any]:
     return params
 
 
-def _flatten_rhit_tree(tree) -> pd.DataFrame:
-    columns: dict[str, np.ndarray] = {}
+def _flatten_rhit_tree(tree, verbose: bool = True) -> pd.DataFrame:
+    """Flatten an RHIT TTree into a DataFrame.
+
+    Reads each branch with uproot's ``library="np"`` and groups columns by their
+    natural length. The largest-by-branch-count group becomes the returned
+    DataFrame, so ``pd.DataFrame`` never has to resolve a length mismatch
+    silently. With ``verbose=True`` (the default) every branch and field is
+    printed with its length and dtype, mirroring the inspection snippet
+    users typically run against the file directly.
+    """
+
+    expected_entries = int(tree.num_entries)
+    by_length: dict[int, dict[str, np.ndarray]] = {}
+    failed: list[tuple[str, str]] = []
+    branch_log: list[tuple[str, int, str]] = []
+
+    def _record(name: str, values: np.ndarray) -> None:
+        bucket = by_length.setdefault(len(values), {})
+        bucket[name] = values
+        branch_log.append((name, len(values), str(values.dtype)))
+
     for branch_name in tree.keys():
         try:
             data = tree[branch_name].array(library="np")
-        except Exception:
+        except Exception as exc:
+            failed.append((branch_name, str(exc)))
             continue
         if hasattr(data, "dtype") and data.dtype.names:
+            # Note the parent struct length/dtype too so it's visible in the log.
+            try:
+                parent_length = len(data)
+            except TypeError:
+                parent_length = -1
+            branch_log.append((f"{branch_name} (struct)", parent_length, str(data.dtype)))
             for field_name in data.dtype.names:
-                columns[f"{branch_name}_{field_name}"] = np.asarray(data[field_name])
+                _record(f"{branch_name}_{field_name}", np.asarray(data[field_name]))
         else:
-            columns[branch_name] = np.asarray(data)
-    return pd.DataFrame(columns)
+            _record(branch_name, np.asarray(data))
+
+    if verbose:
+        print(f"  Tree num_entries: {expected_entries:,}")
+        print(f"  Per-branch array lengths:")
+        for name, length, dtype in branch_log:
+            print(f"    {name}: len={length:,}, dtype={dtype}")
+        for name, reason in failed:
+            print(f"    {name}: FAILED -> {reason}")
+
+    if not by_length:
+        raise ValueError(
+            f"Could not read any branches from RHIT tree (expected {expected_entries:,} entries)"
+        )
+
+    primary_length = max(by_length.keys(), key=lambda length: len(by_length[length]))
+    primary_columns = by_length[primary_length]
+    other_lengths = {length: cols for length, cols in by_length.items() if length != primary_length}
+
+    print(f"  Building dataframe from {len(primary_columns)} columns at length {primary_length:,}")
+    if primary_length != expected_entries:
+        print(
+            f"  Note: dataframe length ({primary_length:,}) differs from tree.num_entries "
+            f"({expected_entries:,})."
+        )
+    for length, cols in other_lengths.items():
+        preview = ", ".join(sorted(cols.keys())[:6])
+        extra = " ..." if len(cols) > 6 else ""
+        print(f"  Skipping {len(cols)} columns at length {length:,}: {preview}{extra}")
+
+    return pd.DataFrame(primary_columns)
 
 
 def _read_histogram_1d(root_file, root_key: str) -> dict[str, Any] | None:
@@ -303,9 +358,13 @@ def rhit_load(file_path: str | Path) -> tuple[pd.DataFrame, dict[str, dict[str, 
 
     file_path = Path(file_path)
     root_file = uproot.open(file_path)
+    nth_keys = [key for key in root_file.keys() if str(key).startswith("nth;")]
+    if nth_keys:
+        print(f"  Available 'nth' cycles in file: {nth_keys}")
     latest_tree_key = _select_latest_key(root_file, "nth")
     if latest_tree_key is None:
         raise ValueError(f"No 'nth' tree was found in RHIT file: {file_path}")
+    print(f"  Selected RHIT tree: {latest_tree_key}")
 
     tree = root_file[latest_tree_key]
     raw_hits = _flatten_rhit_tree(tree)
@@ -326,178 +385,33 @@ def rhit_load(file_path: str | Path) -> tuple[pd.DataFrame, dict[str, dict[str, 
     return hits, histograms, metadata
 
 
-def _normalize_epos_calibration_dataframe(epos: pd.DataFrame | str | Path) -> pd.DataFrame:
-    if isinstance(epos, (str, Path)):
-        epos_df = leap_tools.read_epos(str(epos))
-    else:
-        epos_df = epos.copy()
-
-    normalized = pd.DataFrame(index=epos_df.index)
-    column_map = {
-        "mc": ["mc", "m/n (Da)"],
-        "tof": ["tof", "TOF (ns)"],
-        "VDC": ["VDC", "HV_DC (V)"],
-        "detx": ["detx", "det_x (mm)"],
-        "dety": ["dety", "det_y (mm)"],
-    }
-    for output_name, candidates in column_map.items():
-        for candidate in candidates:
-            if candidate in epos_df.columns:
-                normalized[output_name] = epos_df[candidate].to_numpy(dtype=float)
-                break
-        else:
-            raise ValueError(f"EPOS data is missing a required column for calibration: {candidates[0]}")
-    return normalized
+# Calibration helpers live in a sibling module to keep this file under the
+# 1250-line policy. They are re-exported here so existing
+# ``rhit_tools.rhit_calibrate_from_epos`` / ``rhit_tools.rhit_apply_calibration``
+# call sites keep working unchanged.
+from pyccapt.calibration.leap_tools.cameca_raw._rhit_calibration import (  # noqa: E402
+    apply_rhit_calibration,
+    rhit_apply_calibration,
+    rhit_calibrate_from_epos,
+)
 
 
-def _estimate_icf(hits: pd.DataFrame, epos: pd.DataFrame) -> float:
-    sample_size = int(min(200, len(hits), len(epos)))
-    if sample_size == 0:
-        return 1.0
-    hit_detx = hits["detx"].to_numpy(dtype=float)[:sample_size]
-    epos_detx = epos["detx"].to_numpy(dtype=float)[:sample_size]
-    ratios = np.full(sample_size, np.nan, dtype=float)
-    valid_nonzero = np.abs(hit_detx) > 1e-12
-    ratios[valid_nonzero] = epos_detx[valid_nonzero] / hit_detx[valid_nonzero]
-    valid = np.abs(hit_detx) > 1.0
-    valid &= np.isfinite(ratios) & (np.abs(ratios) < 2.0)
-    if not np.any(valid):
-        return 1.0
-    return float(np.median(ratios[valid]))
+def rhit_to_ccapt(hits: pd.DataFrame, drop_invalid: bool = True) -> pd.DataFrame:
+    """Convert RHIT hit data into a processed PyCCAPT-style dataframe.
 
+    With ``drop_invalid=True`` (default) rows missing detx, dety, mc, tof, or
+    VDC are dropped — these can never produce useful downstream analysis.
+    """
+    if drop_invalid:
+        required = ["detx", "dety", "mc", "tof", "VDC"]
+        mask = pd.Series(True, index=hits.index)
+        for column in required:
+            if column not in hits.columns:
+                continue
+            values = hits[column].to_numpy(dtype=float)
+            mask &= np.isfinite(values)
+        hits = hits.loc[mask]
 
-def _chunked_match_events(hits: pd.DataFrame, epos: pd.DataFrame, icf: float) -> tuple[np.ndarray, np.ndarray]:
-    n_rhit = len(hits)
-    n_epos = len(epos)
-    if n_rhit == 0 or n_epos == 0:
-        return np.array([], dtype=int), np.array([], dtype=int)
-
-    max_idx = min(n_rhit, n_epos)
-    chunk_size = min(2000, max_idx)
-    if max_idx <= chunk_size + 200:
-        chunk_starts = np.array([0], dtype=int)
-    else:
-        n_chunks = min(50, max(1, max_idx // chunk_size))
-        chunk_starts = np.round(np.linspace(0, max_idx - chunk_size - 1, n_chunks)).astype(int)
-
-    matched_epos: list[int] = []
-    matched_rhit: list[int] = []
-    rhit_offset = 0
-    hits_vdc = hits["VDC"].to_numpy(dtype=float)
-    hits_detx = hits["detx"].to_numpy(dtype=float)
-    hits_dety = hits["dety"].to_numpy(dtype=float)
-    epos_vdc = epos["VDC"].to_numpy(dtype=float)
-    epos_detx = epos["detx"].to_numpy(dtype=float)
-    epos_dety = epos["dety"].to_numpy(dtype=float)
-
-    for start_epos in chunk_starts:
-        start_rhit = int(np.clip(start_epos + rhit_offset, 0, n_rhit - 1))
-        sync_range = range(max(0, start_rhit - 500), min(n_rhit, start_rhit + 501))
-        best_distance = np.inf
-        for candidate in sync_range:
-            distance = abs(epos_vdc[start_epos] - hits_vdc[candidate])
-            if distance < best_distance:
-                best_distance = distance
-                start_rhit = candidate
-            if distance < 0.1:
-                break
-        rhit_offset = start_rhit - start_epos
-
-        rolling_rhit = start_rhit
-        stop_epos = min(start_epos + chunk_size, n_epos)
-        for epos_index in range(start_epos, stop_epos):
-            search_start = max(0, rolling_rhit)
-            search_stop = min(n_rhit, rolling_rhit + 16)
-            for rhit_index in range(search_start, search_stop):
-                d_vdc = abs(epos_vdc[epos_index] - hits_vdc[rhit_index])
-                d_detx = abs(epos_detx[epos_index] - hits_detx[rhit_index] * icf)
-                d_dety = abs(epos_dety[epos_index] - hits_dety[rhit_index] * icf)
-                if d_vdc < 0.1 and d_detx < 0.2 and d_dety < 0.2:
-                    matched_epos.append(epos_index)
-                    matched_rhit.append(rhit_index)
-                    rolling_rhit = rhit_index + 1
-                    break
-
-    if not matched_epos:
-        return np.array([], dtype=int), np.array([], dtype=int)
-
-    unique_pairs = list(dict.fromkeys(zip(matched_epos, matched_rhit)))
-    matched_epos = np.array([pair[0] for pair in unique_pairs], dtype=int)
-    matched_rhit = np.array([pair[1] for pair in unique_pairs], dtype=int)
-    return matched_epos, matched_rhit
-
-
-def rhit_apply_calibration(hits: pd.DataFrame, calibration: dict[str, Any]) -> pd.DataFrame:
-    """Apply a previously derived RHIT calibration to RHIT hits."""
-    calibrated = hits.copy()
-    radius_sq = calibrated["detx"].to_numpy(dtype=float) ** 2 + calibrated["dety"].to_numpy(dtype=float) ** 2
-    c_poly = np.asarray(calibration["C_poly"], dtype=float)
-    c_values = c_poly[0] + c_poly[1] * radius_sq + c_poly[2] * radius_sq**2
-    tof_corrected = calibrated["tof"].to_numpy(dtype=float) - float(calibration["t_offset"])
-    calibrated["mc"] = c_values * calibrated["VDC"].to_numpy(dtype=float) * tof_corrected**2
-    return calibrated
-
-
-def apply_rhit_calibration(hits: pd.DataFrame, calibration: dict[str, Any]) -> pd.DataFrame:
-    """Alias for :func:`rhit_apply_calibration`."""
-    return rhit_apply_calibration(hits, calibration)
-
-
-def rhit_calibrate_from_epos(
-    hits: pd.DataFrame,
-    epos: pd.DataFrame | str | Path,
-) -> tuple[pd.DataFrame, dict[str, Any]]:
-    """Calibrate RHIT mass-to-charge using a matching EPOS file."""
-    epos_df = _normalize_epos_calibration_dataframe(epos)
-    hits_df = hits.copy()
-    if len(hits_df) == 0 or len(epos_df) == 0:
-        raise ValueError("RHIT and EPOS inputs must both contain events for calibration")
-
-    icf = _estimate_icf(hits_df, epos_df)
-    matched_epos, matched_rhit = _chunked_match_events(hits_df, epos_df, icf)
-    if len(matched_epos) < 50:
-        raise ValueError(
-            "RHIT/EPOS matching found too few events for a stable calibration. "
-            "Check that the files come from the same run."
-        )
-
-    tof_rhit = hits_df.iloc[matched_rhit]["tof"].to_numpy(dtype=float)
-    tof_epos = epos_df.iloc[matched_epos]["tof"].to_numpy(dtype=float)
-    t_offset = float(np.median(tof_rhit - tof_epos))
-
-    mc_epos = epos_df.iloc[matched_epos]["mc"].to_numpy(dtype=float)
-    vdc_epos = epos_df.iloc[matched_epos]["VDC"].to_numpy(dtype=float)
-    valid = (mc_epos > 0.5) & (mc_epos < 200.0) & (tof_epos > 10.0) & np.isfinite(mc_epos) & np.isfinite(vdc_epos)
-    if np.count_nonzero(valid) < 50:
-        raise ValueError("Too few matched RHIT/EPOS events survived the mc/tof validity filter")
-
-    c_per_event = mc_epos[valid] / (vdc_epos[valid] * tof_epos[valid] ** 2)
-    detx = hits_df.iloc[matched_rhit[valid]]["detx"].to_numpy(dtype=float)
-    dety = hits_df.iloc[matched_rhit[valid]]["dety"].to_numpy(dtype=float)
-    radius_sq = detx**2 + dety**2
-
-    median_c = float(np.median(c_per_event))
-    good = np.abs(c_per_event - median_c) < 0.2 * median_c
-    if np.count_nonzero(good) < 25:
-        good = np.ones_like(c_per_event, dtype=bool)
-
-    design = np.column_stack((np.ones(np.count_nonzero(good)), radius_sq[good], radius_sq[good] ** 2))
-    c_poly, *_ = np.linalg.lstsq(design, c_per_event[good], rcond=None)
-    residuals = c_per_event[good] - design @ c_poly
-
-    calibration = {
-        "t_offset": t_offset,
-        "C_poly": [float(value) for value in c_poly],
-        "ICF": float(icf),
-        "residual_std": float(np.std(residuals)),
-        "matched_events": int(len(matched_epos)),
-    }
-    calibrated_hits = rhit_apply_calibration(hits_df, calibration)
-    return calibrated_hits, calibration
-
-
-def rhit_to_ccapt(hits: pd.DataFrame) -> pd.DataFrame:
-    """Convert RHIT hit data into a processed PyCCAPT-style dataframe."""
     length = len(hits)
     pulse = hits["pulse"].to_numpy(dtype=float) if "pulse" in hits.columns else np.zeros(length)
     start_counter = (
@@ -522,6 +436,105 @@ def rhit_to_ccapt(hits: pd.DataFrame) -> pd.DataFrame:
             "start_counter": np.asarray(start_counter).astype(int, copy=False),
         }
     )
+
+
+def rhit_to_raw_hdf5(
+    hits: pd.DataFrame,
+    output_path: str | Path,
+    *,
+    pulse_mode: str = "voltage",
+    drop_invalid: bool = True,
+) -> Path:
+    """Write `dld/` and `tdc/` group HDF5 readable by the PyCCAPT raw-data analysis workflow.
+
+    Two groups are written so the file is a complete drop-in for the raw
+    analysis tooling:
+
+    * ``dld/...`` — already-decoded events (high_voltage, pulse, laser_intensity,
+      start_counter, t, x, y). Loadable via ``fetch_dataset_from_dld_grp(..., extract_mode='dld')``.
+    * ``tdc/...`` — the same events as a single-channel TDC stream
+      (channel=0, time_data=tof in ns). RHIT files don't carry channel-level
+      delay-line counts, so this is a single-channel mirror of ``dld/`` rather
+      than true per-channel hits. Loadable via ``extract_mode='tdc_sc'``.
+
+    With ``drop_invalid=True`` (default), rows where ``detx`` / ``dety`` /
+    ``tof`` / ``VDC`` are NaN are dropped before writing.
+    """
+    h5py = _require_h5py()
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if drop_invalid:
+        valid = (
+            np.isfinite(hits["VDC"].to_numpy(dtype=float))
+            & np.isfinite(hits["tof"].to_numpy(dtype=float))
+            & np.isfinite(hits["detx"].to_numpy(dtype=float))
+            & np.isfinite(hits["dety"].to_numpy(dtype=float))
+        )
+        hits = hits.loc[valid]
+
+    n = len(hits)
+    high_voltage = hits["VDC"].to_numpy(dtype=float).reshape(-1, 1)
+    tof_ns = hits["tof"].to_numpy(dtype=float).reshape(-1, 1)
+    det_x_cm = (hits["detx"].to_numpy(dtype=float) / 10.0).reshape(-1, 1)
+    det_y_cm = (hits["dety"].to_numpy(dtype=float) / 10.0).reshape(-1, 1)
+    pulse_value = hits["pulse"].to_numpy(dtype=float) if "pulse" in hits.columns else np.zeros(n, dtype=float)
+    pulse_value = pulse_value.reshape(-1, 1)
+    laser_value = (
+        hits["laserpower"].to_numpy(dtype=float)
+        if "laserpower" in hits.columns
+        else np.zeros(n, dtype=float)
+    ).reshape(-1, 1)
+    if pulse_mode == "laser":
+        pulse_v = np.zeros_like(pulse_value)
+        pulse_l = laser_value
+    else:
+        pulse_v = pulse_value
+        pulse_l = laser_value
+    if "ionIdx" in hits.columns:
+        start_counter = hits["ionIdx"].to_numpy(dtype=np.uint32).reshape(-1, 1)
+    else:
+        start_counter = np.arange(n, dtype=np.uint32).reshape(-1, 1)
+
+    with h5py.File(output_path, "w") as handle:
+        grp = handle.create_group("dld")
+        grp.create_dataset("high_voltage", data=high_voltage, compression="gzip", compression_opts=4)
+        grp.create_dataset("pulse", data=pulse_v, compression="gzip", compression_opts=4)
+        grp.create_dataset("laser_intensity", data=pulse_l, compression="gzip", compression_opts=4)
+        grp.create_dataset("start_counter", data=start_counter, compression="gzip", compression_opts=4)
+        grp.create_dataset("t", data=tof_ns, compression="gzip", compression_opts=4)
+        grp.create_dataset("x", data=det_x_cm, compression="gzip", compression_opts=4)
+        grp.create_dataset("y", data=det_y_cm, compression="gzip", compression_opts=4)
+        grp.attrs["num_entries"] = n
+        grp.attrs["units"] = (
+            "high_voltage=V, pulse=V, laser_intensity=pJ, t=ns, x=cm, y=cm, start_counter=uint32"
+        )
+        grp.attrs["source"] = "rhit_to_raw_hdf5"
+        grp.attrs["pulse_mode"] = pulse_mode
+
+        # tdc/ group: one channel per RHIT event (the file doesn't carry
+        # per-DL-end timings; use tof as the time_data and channel=0).
+        tdc = handle.create_group("tdc")
+        tdc.create_dataset("channel", data=np.zeros((n, 1), dtype=np.uint32),
+                           compression="gzip", compression_opts=4)
+        tdc.create_dataset("start_counter", data=start_counter,
+                           compression="gzip", compression_opts=4)
+        tdc.create_dataset("high_voltage", data=high_voltage,
+                           compression="gzip", compression_opts=4)
+        tdc.create_dataset("pulse", data=pulse_v,
+                           compression="gzip", compression_opts=4)
+        tdc.create_dataset("laser_pulse", data=pulse_l,
+                           compression="gzip", compression_opts=4)
+        # time_data in raw analysis is uint32 TDC counts; we don't have those
+        # for RHIT, so write tof in ns as the placeholder time_data.
+        tdc.create_dataset("time_data", data=tof_ns.astype(np.uint32),
+                           compression="gzip", compression_opts=4)
+        tdc.attrs["num_entries"] = n
+        tdc.attrs["channel_count"] = 1
+        tdc.attrs["channel_map"] = "0=tof_ns"
+        tdc.attrs["units"] = "channel=uint32, time_data=ns (cast to uint32 to match raw analysis)"
+        tdc.attrs["source"] = "rhit_to_raw_hdf5 (single-channel mirror)"
+    return output_path
 
 
 def extract_rhit_to_hdf5(file_path: str | Path, output_path: str | Path) -> Path:

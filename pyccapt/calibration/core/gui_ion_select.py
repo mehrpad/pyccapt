@@ -36,22 +36,44 @@ class MyWindow(QMainWindow):
             header_font.setBold(True)
             header_item.setFont(header_font)
             self.tableWidget.setItem(0, col, header_item)
+        # ``QWebEngineView`` lives in the optional ``PyQt6.QtWebEngineWidgets``
+        # module (``PyQt6-WebEngine`` package). We only need it for cells
+        # that contain a ``$…$`` LaTeX formula, so we do a lazy import inside
+        # the loop and fall back to plain text when the package is missing —
+        # the rest of the dialog still renders.
+        try:
+            from PyQt6.QtWebEngineWidgets import QWebEngineView   # noqa: F401
+            webengine_available = True
+        except ImportError:
+            webengine_available = False
+
         for row, (_, row_data) in enumerate(self.data.iterrows()):
             for col, value in enumerate(row_data):
-                # Use QWebEngineView to render LaTeX formulas if needed
-                if isinstance(value, str) and value.startswith('$') and value.endswith('$'):
-                    # Remove dollar signs from the LaTeX formula
+                is_latex = (
+                    isinstance(value, str)
+                    and value.startswith('$')
+                    and value.endswith('$')
+                )
+                if is_latex and webengine_available:
+                    # Remove the surrounding ``$``s and embed the formula in a
+                    # one-liner MathJax page, then render it as a cell widget.
                     formula = value[1:-1]
-                    # Use QWebEngineView to render the LaTeX formula
                     webview = QWebEngineView(self)
-                    webview.setHtml(f'<html><head><script type="text/javascript" async '
-                                    'src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-MML-AM_CHTML"></script></head>'
-                                    f'<body>\\({formula}\\)</body></html>')
-
+                    webview.setHtml(
+                        '<html><head><script type="text/javascript" async '
+                        'src="https://cdn.mathjax.org/mathjax/latest/'
+                        'MathJax.js?config=TeX-MML-AM_CHTML"></script></head>'
+                        f'<body>\\({formula}\\)</body></html>'
+                    )
                     formula_item = QTableWidgetItem()
-                    formula_item.setFlags(formula_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    formula_item.setFlags(
+                        formula_item.flags() & ~Qt.ItemFlag.ItemIsEditable
+                    )
                     self.tableWidget.setCellWidget(row + 1, col, webview)
                 else:
+                    # Either the value isn't a LaTeX formula, or PyQt6-WebEngine
+                    # isn't installed — fall back to the raw text so the rest
+                    # of the table is still usable.
                     item = QTableWidgetItem(str(value))
                     self.tableWidget.setItem(row + 1, col, item)
         layout.addWidget(self.tableWidget)

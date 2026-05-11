@@ -398,7 +398,20 @@ def call_ion_selection(variables, colab=False, show_gaussian_controls=False):
 			display(variables.range_data)
 
 
+	def _ensure_range_plot(variables, out):
+		"""Make sure the active figure has the range-mode click handler wired up.
+
+		Why: clicks only draw the blue left/right lines when ``hist_plot`` was
+		called with ``selector='range'`` (which attaches ``line_manager``). If the
+		visible plotter came from the Peak Finder tab, clicks go to the
+		annotation finder instead and silently do nothing away from peaks.
+		"""
+		plotter = getattr(variables, 'AptHistPlotter', None)
+		if plotter is None or getattr(plotter, 'line_manager', None) is None:
+			hist_plot_r(variables, out)
+
 	def start_peak(b, variables):
+		_ensure_range_plot(variables, out)
 		variables.h_line_pos = []
 		print('=============================')
 		print('Press left click to draw a line')
@@ -419,6 +432,7 @@ def call_ion_selection(variables, colab=False, show_gaussian_controls=False):
 	next_button.on_click(lambda b: next_peak(b, variables))
 
 	def next_peak(b, variables):
+		_ensure_range_plot(variables, out)
 		variables.peaks_index += 1
 		if variables.peaks_index >= len(variables.peaks_x_selected):
 			variables.peaks_index = 0
@@ -426,19 +440,22 @@ def call_ion_selection(variables, colab=False, show_gaussian_controls=False):
 		print('peak idc:', variables.peaks_index, 'Peak location:', peak_val.value)
 		variables.AptHistPlotter.zoom_to_x_range(x_min=peak_val.value - 5, x_max=peak_val.value + 5, reset=False)
 		variables.AptHistPlotter.change_peak_color(peak_val.value, dx=0.2)
-		variables.AptHistPlotter.line_manager.remove_all_lines()
+		if variables.AptHistPlotter.line_manager is not None:
+			variables.AptHistPlotter.line_manager.remove_all_lines()
 		# reset the range data backup
 		variables.range_data_backup = pd.DataFrame()
 
 	prev_button.on_click(lambda b: prev_peak(b, variables))
 
 	def prev_peak(b, variables):
+		_ensure_range_plot(variables, out)
 		variables.peaks_index -= 1
 		peak_val.value = variables.peaks_x_selected[variables.peaks_index]
 		print('peak idc:', variables.peaks_index, 'Peak location:', peak_val.value)
 		variables.AptHistPlotter.zoom_to_x_range(x_min=peak_val.value - 5, x_max=peak_val.value + 5, reset=False)
 		variables.AptHistPlotter.change_peak_color(peak_val.value, dx=0.2)
-		variables.AptHistPlotter.line_manager.remove_all_lines()
+		if variables.AptHistPlotter.line_manager is not None:
+			variables.AptHistPlotter.line_manager.remove_all_lines()
 
 	reset_zoom_button.on_click(lambda b: rest_h_line(b, variables))
 

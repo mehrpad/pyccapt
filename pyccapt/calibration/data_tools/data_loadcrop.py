@@ -164,7 +164,7 @@ def filter_tdc_by_dld(dld_df: pd.DataFrame, tdc_df: pd.DataFrame) -> pd.DataFram
     return tdc_df.loc[keep].reset_index(drop=True).copy()
 
 
-def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld') -> pd.DataFrame:
+def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld', *, lazy: bool = False):
     """
     Fetches dataset from HDF5 file.
 
@@ -174,11 +174,22 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld') -> pd.DataFram
                     dld: Extracts data from dld group.
                     tdc_sc: Extracts data from tdc for Surface Consept.
                     tdc_ro: Extracts data from tdc for Roentdek detector.
+        lazy: When ``True``, return a
+            :class:`pyccapt.calibration.data_tools.lazy_io.LazyTable` view of
+            the requested group (``/dld`` or ``/tdc``) instead of a
+            materialized DataFrame. Use this on small-RAM machines: the
+            file is opened with h5py and downstream analyses can iterate
+            chunks via :meth:`LazyTable.iter_chunks`. The caller is
+            responsible for closing the table (preferably via a ``with``
+            block).
 
     Returns:
-        DataFrame: Contains relevant information from the dld group.
+        DataFrame | LazyTable: Contains relevant information from the
+        requested group, materialized or lazy depending on ``lazy``.
     """
     extract_mode = _normalize_extract_mode(extract_mode)
+    if lazy:
+        return _fetch_dataset_from_dld_grp_lazy(filename, extract_mode)
     flag_old_pyccpat_data = False
     if extract_mode == 'dld':
         try:
@@ -223,7 +234,7 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld') -> pd.DataFram
         except FileNotFoundError as error:
             print(error)
             print("[*] HDF5 file not found")
-    elif extract_mode == 'tdc_sc':
+    elif extract_mode in {'tdc_sc', 'tdc_ro'}:
         try:
             hdf5_data = data_tools.read_hdf5(filename)
             if hdf5_data is None:
@@ -249,7 +260,7 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld') -> pd.DataFram
                 (channel, start_counter, high_voltage, voltage_pulse, laser_pulse, time_data),
                 axis=1,
             )
-            dld_group_storage = create_pandas_dataframe(dld_group_array, mode='tdc_sc')
+            dld_group_storage = create_pandas_dataframe(dld_group_array, mode=extract_mode)
             return dld_group_storage
         except KeyError as error:
             print(error)
@@ -257,9 +268,61 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld') -> pd.DataFram
         except FileNotFoundError as error:
             print(error)
             print("[*] HDF5 file not found")
-    elif extract_mode == 'tdc_ro':
-        print('Not implemented yet')
     return None
+
+
+def _fetch_dataset_from_dld_grp_lazy(filename: str, extract_mode: str):
+    """Return a memory-mapped :class:`LazyTable` view of one group.
+
+    Opens ``filename`` once with h5py and exposes only the columns of the
+    requested group (``/dld`` or ``/tdc``), so the heavyweight conversion to a
+    PyCCAPT DataFrame is skipped entirely. The caller drives the streaming
+    analyses via :meth:`LazyTable.iter_chunks`.
+    """
+    from pyccapt.calibration.data_tools import lazy_io
+    group = 'dld' if extract_mode == 'dld' else 'tdc'
+    raw = lazy_io.open_pyccapt_raw_hdf5(filename)
+    # Filter to one group + rename to the calibration column names so callers
+    # can use the same names whether they got a DataFrame or a LazyTable.
+    rename_map = (
+        {
+            'dld/high_voltage': 'high_voltage (V)',
+            'dld/pulse': 'pulse_v (V)',
+            'dld/voltage_pulse': 'pulse_v (V)',
+            'dld/pulse_voltage': 'pulse_v (V)',
+            'dld/laser_intensity': 'pulse_l (pJ)',
+            'dld/start_counter': 'start_counter',
+            'dld/t': 't (ns)',
+            'dld/x': 'x_det (cm)',
+            'dld/y': 'y_det (cm)',
+        }
+        if group == 'dld'
+        else {
+            'tdc/channel': 'channel',
+            'tdc/start_counter': 'start_counter',
+            'tdc/high_voltage': 'high_voltage (V)',
+            'tdc/pulse': 'pulse_v (V)',
+            'tdc/voltage_pulse': 'pulse_v (V)',
+            'tdc/laser_pulse': 'pulse_l (pJ)',
+            'tdc/time_data': 'time_data',
+        }
+    )
+    selected: dict = {}
+    for raw_name, friendly in rename_map.items():
+        if raw_name in raw.columns and friendly not in selected:
+            selected[friendly] = raw[raw_name]
+
+    if not selected:
+        raw.close()
+        raise ValueError(
+            f"No /{group}/* columns found in {filename}. Is this a pyccapt-raw HDF5?"
+        )
+
+    from pyccapt.calibration.data_tools.lazy_io import LazyTable
+    return LazyTable(
+        selected, source_path=raw.source_path, close=raw.close,
+    )
+
 
 def concatenate_dataframes_of_dld_grp(dataframe_list: list) -> pd.DataFrame:
     """
@@ -786,8 +849,13 @@ def create_pandas_dataframe(data_crop, mode='dld', flag_old_pyccpat_data=False):
         hdf_dataframe['start_counter'] = hdf_dataframe['start_counter'].astype('uint32')
         hdf_dataframe['time_data'] = hdf_dataframe['time_data'].astype('uint32')
     elif mode == 'tdc_ro':
-        print('Not implemented yet')
-        hdf_dataframe = None
+        hdf_dataframe = pd.DataFrame(data=data_crop,
+                                     columns=['channel', 'start_counter', 'high_voltage (V)', 'pulse_v (V)',
+                                              'pulse_l (pJ)', 'time_data'])
+
+        hdf_dataframe['channel'] = hdf_dataframe['channel'].astype('uint32')
+        hdf_dataframe['start_counter'] = hdf_dataframe['start_counter'].astype('uint32')
+        hdf_dataframe['time_data'] = hdf_dataframe['time_data'].astype('uint32')
     else:
         raise ValueError(f"Unsupported mode: {mode!r}")
 

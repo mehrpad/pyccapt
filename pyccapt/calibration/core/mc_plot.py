@@ -292,14 +292,18 @@ class AptHistPlotter:
 
         # Get the scalar value for ymax
         ymax = float(self.y[bin_index])
-        # Plot the vertical line with the specified color and properties
-        self.ranged_line = plt.axvline(
+        # Plot the vertical line on the plotter's own axes so the marker lands
+        # on the currently displayed figure even when matplotlib's pyplot state
+        # has drifted to a different figure (common under %matplotlib ipympl).
+        self.ranged_line = self.ax.axvline(
             x=peak_loc,
             color=color,
             linestyle='dashdot',
             linewidth=2,
-            ymax=ymax
+            ymax=ymax,
         )
+        if self.fig is not None and self.fig.canvas is not None:
+            self.fig.canvas.draw_idle()
 
     def plot_peaks(self, range_data=None, mode='peaks'):
         """

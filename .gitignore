@@ -140,3 +140,9 @@ dmypy.json
 /pyccapt/files/logs/
 /pyccapt/files/baking_logging/
 
+# Email notification credentials. The real file holds an SMTP password
+# and must NEVER be committed. The .example template above (which has no
+# secrets in it) is the version we want checked in.
+/pyccapt/files/email_credentials.toml
+/pyccapt/files/email_pass.txt
+

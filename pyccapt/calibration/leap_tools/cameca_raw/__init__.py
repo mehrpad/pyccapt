@@ -7,6 +7,7 @@ from .rhit_tools import (
     rhit_calibrate_from_epos,
     rhit_load,
     rhit_to_ccapt,
+    rhit_to_raw_hdf5,
 )
 from .str_tools import (
     calibrate_str_from_rhit,
@@ -16,6 +17,7 @@ from .str_tools import (
     str_calculate_positions,
     str_load,
     str_to_ccapt,
+    str_to_raw_hdf5,
 )
 
 __all__ = [
@@ -28,8 +30,10 @@ __all__ = [
     "rhit_calibrate_from_epos",
     "rhit_load",
     "rhit_to_ccapt",
+    "rhit_to_raw_hdf5",
     "str_calculate_positions",
     "str_calibrate_from_rhit",
     "str_load",
     "str_to_ccapt",
+    "str_to_raw_hdf5",
 ]

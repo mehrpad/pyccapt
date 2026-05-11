@@ -52,6 +52,13 @@ control_deps = [
     "pyserial",
     "pyvisa",
     "simple-pid",
+    # SmarAct MCS2 stage controller SDK  (smaract.ctl).
+    # NOT on PyPI – install manually from the SmarAct SDK zip bundled with the
+    # MCS2 software installer:
+    #   pip install "C:\SmarAct\MCS2\SDK\Python\packages\smaract.ctl-<version>.zip"
+    # Tested with: smaract.ctl-1.5.2
+    # Uncomment the line below if/when SmarAct publishes the package to PyPI:
+    # "smaract.ctl",
 ]
 
 calibration_deps = [
@@ -71,6 +78,11 @@ calibration_deps = [
     "pyvista",
     "scikit-learn",
     "tqdm",
+    # uproot reads Cameca LEAP RHIT files (ROOT-format bundles) inside
+    # ``pyccapt.calibration.leap_tools.cameca_raw.rhit_load``. The helper
+    # raises an ImportError pointing here when missing, so without this
+    # dependency the raw-data analysis notebook fails on .RHIT input.
+    "uproot",
     "vispy",
 ]
 

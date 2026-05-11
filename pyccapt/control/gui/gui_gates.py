@@ -1,6 +1,4 @@
-﻿import multiprocessing
-import os
-import sys
+﻿import sys
 import time
 
 import nidaqmx
@@ -10,6 +8,7 @@ from PyQt6.QtGui import QPixmap
 
 # Local module and scripts
 from pyccapt.control.core import runtime
+from pyccapt.control.gui import tooltips
 
 
 class Ui_Gates(object):
@@ -159,6 +158,7 @@ class Ui_Gates(object):
 
         self.retranslateUi(Gates)
         QtCore.QMetaObject.connectSlotsByName(Gates)
+        tooltips.apply_tooltips(self, tooltips.GATES_TOOLTIPS)
 
         # Diagram and LEDs ##############
         self.diagram_close_all = QPixmap('./files/close_all.png')
@@ -436,6 +436,9 @@ class GatesWindow(QtWidgets.QWidget):
         Args:
             event: Close event.
         """
+        if getattr(self, "force_close", False):
+	        event.accept()
+	        return
         event.ignore()
         self.hide()
         self.closed.emit()

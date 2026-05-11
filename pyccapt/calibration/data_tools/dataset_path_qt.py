@@ -2,8 +2,10 @@ from PyQt6.QtWidgets import QApplication, QFileDialog
 
 
 DATASET_FILTER = (
-    "Dataset files (*.epos *.pos *.apt *.h5 *.ato *.csv);;"
+    "Dataset files (*.epos *.pos *.apt *.h5 *.ato *.csv *.rhit *.RHIT *.str *.STR *.hits *.HITS);;"
     "LEAP (*.epos *.pos *.apt);;"
+    "LEAP CAMECA RHIT (*.rhit *.RHIT);;"
+    "LEAP CAMECA STR / HITS (*.str *.STR *.hits *.HITS);;"
     "PyCCAPT / HDF5 (*.h5);;"
     "ATO (*.ato);;"
     "CSV (*.csv);;"
@@ -16,8 +18,16 @@ RANGE_FILTER = (
     "LEAP RNG (*.rng);;"
     "All Files (*)"
 )
+CAMECA_RAW_FILTER = (
+    "LEAP CAMECA raw (*.rhit *.RHIT *.str *.STR *.hits *.HITS *.epos *.EPOS);;"
+    "LEAP CAMECA RHIT (*.rhit *.RHIT);;"
+    "LEAP CAMECA STR / HITS (*.str *.STR *.hits *.HITS);;"
+    "LEAP EPOS (*.epos *.EPOS);;"
+    "All Files (*)"
+)
 GENERIC_FILTER = (
-    "Dataset / range files (*.epos *.pos *.apt *.h5 *.ato *.csv *.rrng *.rng);;"
+    "Dataset / range files (*.epos *.pos *.apt *.h5 *.ato *.csv "
+    "*.rhit *.RHIT *.str *.STR *.hits *.HITS *.rrng *.rng);;"
     "All Files (*)"
 )
 
@@ -37,6 +47,7 @@ def gui_fname(initial_directory, file_kind="any"):
     selected_filter = {
         "dataset": DATASET_FILTER,
         "range": RANGE_FILTER,
+        "cameca_raw": CAMECA_RAW_FILTER,
     }.get(str(file_kind).lower(), GENERIC_FILTER)
     fname = QFileDialog.getOpenFileName(
         None,
@@ -50,3 +61,15 @@ def gui_fname(initial_directory, file_kind="any"):
         return chosen_file
     else:
         return None
+
+
+def gui_dirname(initial_directory):
+    """Select an existing directory via a dialog and return its path."""
+
+    app = QApplication.instance() or QApplication([initial_directory])
+    chosen_dir = QFileDialog.getExistingDirectory(
+        None,
+        "Select a directory...",
+        initial_directory,
+    )
+    return chosen_dir or None

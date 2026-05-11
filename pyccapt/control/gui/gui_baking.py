@@ -1,5 +1,4 @@
-﻿import multiprocessing
-import os
+﻿import os
 import sys
 import threading
 import time
@@ -23,7 +22,7 @@ except Exception as e:
 
 # Local module and scripts
 from pyccapt.control.core import runtime
-from pyccapt.control.gui import gui_pumps_vacuum
+from pyccapt.control.gui import gui_pumps_vacuum, tooltips
 from pyccapt.control.devices import initialize_devices
 
 
@@ -97,6 +96,7 @@ class Ui_Baking(object):
 
 		self.retranslateUi(Baking)
 		QtCore.QMetaObject.connectSlotsByName(Baking)
+		tooltips.apply_tooltips(self, tooltips.BAKING_TOOLTIPS)
 		###
 		read_thread = threading.Thread(target=self.read)
 		read_thread.setDaemon(True)
@@ -325,11 +325,15 @@ class Ui_Baking(object):
 				if index % 20 == 0:
 					try:
 						self.data.to_csv(self.file_name, sep=';', index=False)
+						# Successful save - reset the dedup so the next
+						# failure (e.g. user re-opens the file) prints again.
+						self._warned_messages.discard('baking_csv_save')
 					except Exception as e:
 						self.data.to_csv(self.file_name_backup, sep=';', index=False)
-						print('csv File cannot be saved')
-						print('close the csv file')
-						print(e)
+						self._warn_once(
+							'baking_csv_save',
+							f'csv File cannot be saved (close the csv file): {e}',
+						)
 
 				end_time = time.perf_counter()
 				elapsed_time = end_time - start_time
@@ -392,17 +396,35 @@ class Ui_Baking(object):
 		self.presures.enableAutoRange(axis='x')
 
 	def save_data_csv(self):
-		"""
-		save_data_csv function.
-		Args:
-			None
-		Returns:
-			None
+		"""Prompt the user for a target file and save the baking log CSV.
+
+		Pops up the OS Save-As dialog pre-filled with a sensible default
+		filename (``manual_save_<timestamp>.csv``) under the existing
+		baking-log folder. Cancel leaves nothing on disk.
 		"""
 		now = datetime.now()
 		now_time = now.strftime("%d-%m-%Y_%H-%M-%S")
-		self.data.to_csv(str(self.save_path / f'manual_save_{now_time}.csv'),
-		                 sep=';', index=False)
+		default_path = str(self.save_path / f'manual_save_{now_time}.csv')
+		parent = self.parent if isinstance(self.parent, QtWidgets.QWidget) else None
+		file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+			parent,
+			"Save baking log as…",
+			default_path,
+			"CSV files (*.csv);;All files (*)",
+		)
+		if not file_path:
+			return  # user cancelled
+		# Default to .csv if the user didn't type an extension.
+		if not os.path.splitext(file_path)[1]:
+			file_path += '.csv'
+		try:
+			self.data.to_csv(file_path, sep=';', index=False)
+		except Exception as exc:
+			QtWidgets.QMessageBox.critical(
+				parent,
+				"Save failed",
+				f"Could not save baking log:\n{exc}",
+			)
 
 	def stop(self):
 		"""
@@ -438,6 +460,9 @@ class BakingWindow(QtWidgets.QWidget):
 		Args:
 			event: The close event.
 		"""
+		if getattr(self, "force_close", False):
+			event.accept()
+			return
 		event.ignore()
 		self.hide()
 		self.closed.emit()

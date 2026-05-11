@@ -240,6 +240,38 @@ Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for developmen
 - Issues and bug reports: [GitHub Issues](https://github.com/mmonajem/pyccapt/issues)
 - Contact: Mehrpad Monajem (`mehrpad.monajem@fau.de`)
 
+## Third-party hardware SDKs and libraries
+
+PyCCAPT integrates with several pieces of third-party hardware and uses
+the corresponding vendor SDKs / Python wrappers. These remain the
+intellectual property of their respective owners; the files under the
+listed paths are either thin wrappers around vendor APIs or are
+adapted from vendor-provided example code, and are used here under the
+licence terms shipped with each SDK. Where a wrapper is largely
+vendor-provided code, the source file carries an attribution header.
+
+| Component                                          | Vendor / project                         | Used by                                                                                                        |
+|----------------------------------------------------|------------------------------------------|----------------------------------------------------------------------------------------------------------------|
+| Origami XPS laser CLI                              | NKT Photonics                            | `pyccapt/control/nkt_photonics/origamiClassCLI.py`, `nktpbus_activate.py`                                      |
+| NKTPDLL (NKTPBus protocol DLL + Python wrapper)    | NKT Photonics                            | `pyccapt/control/nkt_photonics/nktpbus_switch.py` (loads the vendor's `NKTPDLL.dll` and bundled `NKTP_DLL.py`) |
+| MCS2 stage controller SDK (`smaract.ctl`)          | SmarAct GmbH                             | `pyccapt/control/smaract_mcs2/`                                                                                |
+| Surface Concept TDC SDK (`scTDC`)                  | Surface Concept GmbH                     | `pyccapt/control/tdc_surface_concept/`                                                                         |
+| RoentDek TDC8HP wrapper                            | RoentDek Handels GmbH                    | `pyccapt/control/tdc_roentdek/`                                                                                |
+| DRS digitizer library                              | Paul Scherrer Institute (PSI)            | `pyccapt/control/drs/`                                                                                         |
+| Thorlabs APT motor SDK                             | Thorlabs Inc.                            | `pyccapt/control/thorlabs_apt/`                                                                                |
+| Pfeiffer TPG362 vacuum-gauge protocol              | Pfeiffer Vacuum                          | `pyccapt/control/devices/pfeiffer_gauges.py`                                                                   |
+| Edwards TIC AGC vacuum-controller protocol         | Edwards Vacuum                           | `pyccapt/control/devices/edwards_tic.py`                                                                       |
+| CryoVac TIC 500 temperature-controller protocol    | CryoVac GmbH                             | `pyccapt/control/devices/initialize_devices.py` (`command_cryovac` and friends)                                |
+| MCC Universal Library (`mcculw`) for thermocouples | Measurement Computing                    | `pyccapt/control/core/baking_loging.py`                                                                        |
+| `simple_pid` PID controller                        | Martin Lundberg (MIT licence)            | `pyccapt/control/apt/apt_exp_control.py`                                                                       |
+| PyQt6                                              | Riverbank Computing (GPLv3 / commercial) | All GUI windows under `pyccapt/control/gui/`                                                                   |
+
+To use a given component, install the vendor's SDK or Python package per
+their documentation (see `requirements.txt` / `pyproject.toml` for pip
+packages, and the vendor's installer for the proprietary SDKs that ship
+DLLs). A missing SDK only disables the corresponding device — the rest
+of PyCCAPT continues to work.
+
 ## License
 
 PyCCAPT is licensed under the GNU General Public License v3.0. See [LICENSE](LICENSE).

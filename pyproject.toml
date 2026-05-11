@@ -36,15 +36,6 @@ extend-exclude = [
 select = ["E9", "F63", "F7", "F82"]
 ignore = []
 
-[tool.ruff.lint.per-file-ignores]
-# TODO(latent-bug): QWebEngineView is used without being imported inside the
-# LaTeX-render branch. Fix by adding `from PyQt6.QtWebEngineWidgets import
-# QWebEngineView` (see docs/CONTRIBUTING follow-up task).
-"pyccapt/calibration/core/gui_ion_select.py" = ["F821"]
-# TODO(latent-bug): the `elif i == len(ion):` branch references `ion`/`mask`
-# from outside the loop's scope. The branch appears to be dead code; revisit.
-"pyccapt/calibration/core/tools.py" = ["F821"]
-
 [tool.ruff.format]
 quote-style = "preserve"
 indent-style = "space"

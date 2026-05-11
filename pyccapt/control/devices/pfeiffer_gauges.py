@@ -1,3 +1,18 @@
+"""Driver for Pfeiffer TPG 362 (and family) vacuum-gauge controllers.
+
+Vendor / origin
+---------------
+The mnemonic command set used in this module (``PR1``, ``PR2``,
+``UNI``, ``ETX``, ``ENQ``, gauge-status codes, etc.) is defined and
+owned by **Pfeiffer Vacuum GmbH** for their TPG 26x / TPG 36x series
+single- and dual-channel vacuum measurement and control units. This
+file is a thin Python wrapper around that ASCII serial protocol.
+
+See Pfeiffer's "TPG 261 / 262 Communication Protocol" and
+"TPG 361 / 362 Operating Instructions" for the authoritative
+specification.
+"""
+
 import time
 
 import serial

@@ -10,6 +10,7 @@ from PyQt6.QtGui import QPixmap
 # Local module and scripts
 from pyccapt.control.core import runtime
 from pyccapt.control.devices import camera
+from pyccapt.control.gui import tooltips
 from pyccapt.control.usb_switch import usb_switch
 
 
@@ -367,11 +368,44 @@ class Ui_Cameras_Alignment(object):
 		self.led_light_4.setObjectName("led_light_4")
 		self.gridLayout_2.addWidget(self.led_light_4, 3, 0, 1, 1)
 		self.verticalLayout_2.addLayout(self.gridLayout_2)
+		# ----- Camera list + connect/disconnect panel ---------------------
+		# Compact box that lives right under the exposure-time controls
+		# (inside verticalLayout_2) so it stacks under the "Exposure Time
+		# Angle" row instead of widening the whole window. One row per
+		# detected Basler camera; refreshed every 1.5 s.
+		self.camera_list_box = QtWidgets.QGroupBox("Cameras detected", parent=Cameras_Alignment)
+		self.camera_list_layout = QtWidgets.QVBoxLayout(self.camera_list_box)
+		self.camera_list_layout.setContentsMargins(6, 6, 6, 6)
+		self.camera_list_layout.setSpacing(2)
+		self._camera_row_widgets = {}  # serial -> dict(widget, label, connect_btn, disconnect_btn)
+		self.camera_list_empty_label = QtWidgets.QLabel(
+			"(scanning …)", parent=self.camera_list_box
+		)
+		self.camera_list_empty_label.setStyleSheet("color: gray;")
+		self.camera_list_layout.addWidget(self.camera_list_empty_label)
+		self.camera_list_layout.addStretch(1)
+		self.verticalLayout_2.addWidget(self.camera_list_box)
+
 		self.gridLayout_4.addLayout(self.verticalLayout_2, 0, 1, 1, 1)
 		self.gridLayout_5.addLayout(self.gridLayout_4, 0, 0, 1, 1)
 
+		# ----- Bottom status banner --------------------------------------
+		# Mirrors the Error / status label used elsewhere in the GUI suite
+		# so the user sees connection / grab failures without watching the
+		# terminal.
+		self.camera_status_label = QtWidgets.QLabel(parent=Cameras_Alignment)
+		self.camera_status_label.setMinimumHeight(28)
+		self.camera_status_label.setWordWrap(True)
+		self.camera_status_label.setStyleSheet(
+			"QLabel{ color: rgb(140,0,0); padding: 4px; "
+			"border: 1px solid rgb(200,200,200); border-radius: 4px; }"
+		)
+		self.camera_status_label.setText("")
+		self.gridLayout_5.addWidget(self.camera_status_label, 1, 0, 1, 1)
+
 		self.retranslateUi(Cameras_Alignment)
 		QtCore.QMetaObject.connectSlotsByName(Cameras_Alignment)
+		tooltips.apply_tooltips(self, tooltips.CAMERAS_TOOLTIPS)
 		Cameras_Alignment.setTabOrder(self.auto_exposure_time, self.light)
 		Cameras_Alignment.setTabOrder(self.light, self.default_exposure_time)
 		Cameras_Alignment.setTabOrder(self.default_exposure_time, self.exposure_time_cam_1)
@@ -489,6 +523,14 @@ class Ui_Cameras_Alignment(object):
 		self.timer = QtCore.QTimer()
 		self.timer.timeout.connect(self.cameras_screenshot)
 		self.timer.start(2000)  # Check every 2000 milliseconds (1 second)
+
+		# Periodic refresh of the camera list / status banner.
+		self.camera_list_timer = QtCore.QTimer()
+		self.camera_list_timer.timeout.connect(self._refresh_camera_panel)
+		self.camera_list_timer.start(1500)
+		# Run once immediately so the panel is populated before the
+		# first 1.5s tick.
+		QtCore.QTimer.singleShot(200, self._refresh_camera_panel)
 
 	def set_default_exposure_time(self, exposure_time_default):
 		"""
@@ -619,26 +661,29 @@ class Ui_Cameras_Alignment(object):
 		"""
 		if self.conf['camera'] == "off":
 			print('The cameras is off')
-		else:
-			# Create cameras thread
-			# Thread for reading cameras
-			# Create a camera instance and move it to a new thread
-			self.camera_worker = camera.CameraWorker(variables=self.variables, emitter=self.emitter)
-			if not self.camera_worker.camera_available:
-				print(self.camera_worker.camera_status_message)
-				self.variables.flag_camera_grab = False
-				return
+			return
+		# Create a camera worker. The worker keeps running even when zero
+		# cameras are currently connected so that hot-plugging a camera
+		# later automatically populates the views — the GUI window itself
+		# stays open in either case.
+		self.camera_worker = camera.CameraWorker(variables=self.variables, emitter=self.emitter)
+		if self.camera_worker.camera_status_message:
+			print(self.camera_worker.camera_status_message)
+		if not self.camera_worker.camera_available:
+			# pypylon failed to load entirely — no point spinning up a thread.
+			self.variables.flag_camera_grab = False
+			return
 
-			self.camera_thread = QThread()
-			self.camera_worker.moveToThread(self.camera_thread)
+		self.camera_thread = QThread()
+		self.camera_worker.moveToThread(self.camera_thread)
 
-			self.camera_thread.started.connect(self.camera_worker.start_capturing)
-			self.camera_worker.finished.connect(self.camera_thread.quit)
-			self.camera_worker.finished.connect(self.camera_worker.deleteLater)
-			self.camera_thread.finished.connect(self.camera_thread.deleteLater)
+		self.camera_thread.started.connect(self.camera_worker.start_capturing)
+		self.camera_worker.finished.connect(self.camera_thread.quit)
+		self.camera_worker.finished.connect(self.camera_worker.deleteLater)
+		self.camera_thread.finished.connect(self.camera_thread.deleteLater)
 
-			self.camera_thread.start()
-			self.variables.flag_camera_grab = True
+		self.camera_thread.start()
+		self.variables.flag_camera_grab = True
 
 	def stop(self):
 		"""
@@ -661,6 +706,111 @@ class Ui_Cameras_Alignment(object):
 			screenshot = QtWidgets.QApplication.primaryScreen().grabWindow(self.Cameras_Alignment.winId())
 			screenshot.save(str(Path(self.variables.path_meta) / "cameras_screenshot.png"), 'png')
 
+	# -------------------------------------------------------------- list ui
+
+	def _refresh_camera_panel(self):
+		"""Sync the camera-list rows and status banner with the worker."""
+		worker = getattr(self, 'camera_worker', None)
+		if worker is None:
+			return
+
+		# Status banner
+		status = getattr(worker, 'latest_status', '') or ""
+		if status != self.camera_status_label.text():
+			self.camera_status_label.setText(status)
+
+		# Camera list
+		try:
+			cams = worker.list_cameras()
+		except Exception as e:
+			cams = []
+			print(f"camera list refresh failed: {e}")
+
+		current_serials = {c['serial'] for c in cams}
+		# Remove rows for cameras that are no longer detected.
+		for sn in list(self._camera_row_widgets):
+			if sn not in current_serials:
+				row = self._camera_row_widgets.pop(sn)
+				row['widget'].deleteLater()
+
+		if not cams:
+			self.camera_list_empty_label.setText("(no Basler cameras detected)")
+			self.camera_list_empty_label.show()
+			return
+		self.camera_list_empty_label.hide()
+
+		for cam in cams:
+			sn = cam['serial']
+			if sn in self._camera_row_widgets:
+				self._update_camera_row(self._camera_row_widgets[sn], cam)
+			else:
+				self._camera_row_widgets[sn] = self._make_camera_row(cam)
+
+	def _make_camera_row(self, cam):
+		row = QtWidgets.QWidget(parent=self.camera_list_box)
+		layout = QtWidgets.QHBoxLayout(row)
+		layout.setContentsMargins(2, 2, 2, 2)
+		layout.setSpacing(6)
+		label = QtWidgets.QLabel(parent=row)
+		label.setMinimumWidth(220)
+		layout.addWidget(label, 1)
+		connect_btn = QtWidgets.QPushButton("Connect", parent=row)
+		disconnect_btn = QtWidgets.QPushButton("Disconnect", parent=row)
+		layout.addWidget(connect_btn)
+		layout.addWidget(disconnect_btn)
+		# Insert above the trailing stretch.
+		self.camera_list_layout.insertWidget(
+			self.camera_list_layout.count() - 1, row
+		)
+		sn = cam['serial']
+		connect_btn.clicked.connect(lambda _checked=False, s=sn: self._on_connect_clicked(s))
+		disconnect_btn.clicked.connect(lambda _checked=False, s=sn: self._on_disconnect_clicked(s))
+		entry = {
+			'widget': row,
+			'label': label,
+			'connect_btn': connect_btn,
+			'disconnect_btn': disconnect_btn,
+		}
+		self._update_camera_row(entry, cam)
+		return entry
+
+	def _update_camera_row(self, entry, cam):
+		sn = cam['serial']
+		model = cam['model'] or "Basler"
+		if cam['user_disabled']:
+			state = "disabled"
+			color = "color: rgb(120,120,120);"
+		elif cam['attached']:
+			state = f"connected to slot {cam['slot']}"
+			color = "color: rgb(0,120,0);"
+		else:
+			state = "detected (not connected)"
+			color = "color: rgb(180,90,0);"
+		entry['label'].setText(f"<b>{model}</b> &nbsp; {sn} &nbsp; — {state}")
+		entry['label'].setStyleSheet(color)
+		entry['connect_btn'].setEnabled(not cam['attached'])
+		entry['disconnect_btn'].setEnabled(cam['attached'] or not cam['user_disabled'])
+
+	def _on_connect_clicked(self, serial):
+		worker = getattr(self, 'camera_worker', None)
+		if worker is None:
+			return
+		try:
+			worker.connect_serial(serial)
+		except Exception as e:
+			self.camera_status_label.setText(f"Connect failed: {e}")
+		self._refresh_camera_panel()
+
+	def _on_disconnect_clicked(self, serial):
+		worker = getattr(self, 'camera_worker', None)
+		if worker is None:
+			return
+		try:
+			worker.disconnect_serial(serial)
+		except Exception as e:
+			self.camera_status_label.setText(f"Disconnect failed: {e}")
+		self._refresh_camera_panel()
+
 
 class SignalEmitter(QObject):
 	img0_orig = pyqtSignal(np.ndarray)
@@ -678,67 +828,115 @@ class CamerasAlignmentWindow(QtWidgets.QWidget):
 	closed = QtCore.pyqtSignal()  # Define a custom closed signal
 
 	def __init__(self, variables, gui_cameras_alignment, close_event,
-	             camera_win_front, *args, **kwargs):
+	             command_queue, *args, **kwargs):
 		"""
 		Initialize the CamerasAlignmentWindow class.
 
 		Args:
-				gui_cameras_alignment: An instance of the GUI cameras alignment class.
-				*args: Variable length argument list.
-				**kwargs: Arbitrary keyword arguments.
+				gui_cameras_alignment: GUI cameras alignment instance.
+				close_event: multiprocessing.Event signalled by this window
+					when it is closed by the user.
+				command_queue: multiprocessing.Queue of typed string commands
+					sent from the main GUI ("show", "show_front", "hide").
 		"""
 		super().__init__(*args, **kwargs)
 		self.variables = variables
 		self.gui_cameras_alignment = gui_cameras_alignment
-		self.camera_win_front = camera_win_front
+		self.command_queue = command_queue
 		self.close_event = close_event
-		self.show()
-		self.showMinimized()
+		# Start hidden - check_if_should() below brings the window up the
+		# first time a "show" command arrives on the queue.
 		self.timer = QtCore.QTimer(self)
 		self.timer.timeout.connect(self.check_if_should)
-		self.timer.start(500)  # Check every 1000 milliseconds (1 second)
+		self.timer.start(500)
 
 	def closeEvent(self, event):
 		"""
-		Not close only hide the window
-
-		Args:
-				event: The close event.
+		Don't actually close - hide the window so the subprocess stays alive
+		and the next "open" from the main GUI is instant.  Using hide()
+		(not showMinimized) avoids leaving a leftover minimised stub in the
+		taskbar / desktop.
 		"""
 		event.ignore()
-		self.showMinimized()
+		self.hide()
 		self.close_event.set()
 
 	def check_if_should(self):
-		if self.camera_win_front.is_set():
-			self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowType.WindowStaysOnTopHint)
-			self.show()
-			self.setWindowFlags(self.windowFlags() & ~QtCore.Qt.WindowType.WindowStaysOnTopHint)
-			self.camera_win_front.clear()  # Reset the flag
-		if self.variables.flag_camera_win_show:
-			self.show()
-			self.variables.flag_camera_win_show = False
+		"""Drain the command queue and dispatch each message in order."""
+		raise_to_front = False
+		make_visible = False
+		hide = False
+		while True:
+			try:
+				msg = self.command_queue.get_nowait()
+			except Exception:
+				break  # queue empty
+			if msg == "show":
+				make_visible = True
+			elif msg == "show_front":
+				make_visible = True
+				raise_to_front = True
+			elif msg == "hide":
+				hide = True
+		if hide and not make_visible:
+			self.hide()
+			return
+		if not make_visible:
+			return
+		# Always call show() + showNormal() unconditionally - after a
+		# previous closeEvent->hide() a single show() call doesn't
+		# always re-display the window on every platform, and
+		# showNormal() additionally brings it out of a minimised state.
+		# We deliberately do NOT toggle setWindowFlags() - that call
+		# implicitly hides the widget (Qt docs).
+		self.show()
+		self.showNormal()
+		self.raise_()
+		if raise_to_front:
+			self.activateWindow()
 
 	def setWindowStyleFusion(self):
 		# Set the Fusion style
 		QtWidgets.QApplication.setStyle("Fusion")
 
 
-def run_camera_window(variables, conf, camera_closed_event, camera_win_front):
+def run_camera_window(variables, conf, camera_closed_event, camera_command_queue):
 	"""
 	Run the Cameras window in a separate process.
+
+	Args:
+		camera_command_queue: multiprocessing.Queue of typed string commands
+			from the main GUI ("show", "show_front", "hide").
 	"""
-	app = QtWidgets.QApplication(sys.argv)  # <-- Create a new QApplication instance
-	app.setStyle('Fusion')
-	SignalEmitter_Cameras = SignalEmitter()
+	# A startup crash in the subprocess otherwise dies silently - the
+	# parent never sees it.  Funnel any exception to a log file under
+	# files/logs/ so the user can pick it up after the fact.
+	import traceback
+	try:
+		app = QtWidgets.QApplication(sys.argv)
+		app.setStyle('Fusion')
+		# The window starts hidden and only appears when the main GUI signals -
+		# don't let Qt quit the subprocess just because no window is visible.
+		app.setQuitOnLastWindowClosed(False)
+		SignalEmitter_Cameras = SignalEmitter()
 
-	gui_cameras_alignment = Ui_Cameras_Alignment(variables, conf, SignalEmitter_Cameras)
-	Cameras_alignment = CamerasAlignmentWindow(variables, gui_cameras_alignment, camera_closed_event, camera_win_front,
-	                                           flags=QtCore.Qt.WindowType.Tool)
-	gui_cameras_alignment.setupUi(Cameras_alignment)
-	# Cameras_alignment.show()
-
-	sys.exit(app.exec())  # <-- Start the event loop for this QApplication instance
+		gui_cameras_alignment = Ui_Cameras_Alignment(variables, conf, SignalEmitter_Cameras)
+		Cameras_alignment = CamerasAlignmentWindow(variables, gui_cameras_alignment, camera_closed_event,
+		                                           camera_command_queue,
+		                                           flags=QtCore.Qt.WindowType.Tool)
+		gui_cameras_alignment.setupUi(Cameras_alignment)
+		sys.exit(app.exec())
+	except Exception:
+		try:
+			log_path = runtime.project_path("files", "logs", "camera_subprocess_crash.log")
+			log_path.parent.mkdir(parents=True, exist_ok=True)
+			with open(log_path, "a", encoding="utf-8") as fh:
+				fh.write("=" * 60 + "\n")
+				traceback.print_exc(file=fh)
+		except Exception:
+			pass
+		traceback.print_exc()
+		raise
 
 
 if __name__ == "__main__":

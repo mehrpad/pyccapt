@@ -26,6 +26,86 @@ pulse_amp_per_supply_voltage = 21.875
 max_laser_power = 5.2
 pulse_fraction_max = 20
 
+# Initial values populated into the main GUI's experiment-parameter fields
+# when the software opens. The operator can edit each field afterwards; this
+# section just controls "what shows up by default". Keys not set here fall
+# back to the hardcoded values inside the GUI source.
+#
+# Note: ``default_vdc_max`` is the *experiment-target* upper bound shown in
+# the GUI (e.g. 4000 V), separate from ``max_vdc`` above which is the
+# system *safety* cap (e.g. 14000 V) the firmware will never exceed.
+default_vdc_min = 500
+default_vdc_max = 4000
+default_max_ions = 2000000
+default_ex_time_s = 3600
+default_ex_freq_hz = 5
+default_vdc_step_up = 1
+default_vdc_step_down = 1
+default_detection_rate = 1
+default_pulse_fraction = 20
+default_pulse_frequency_khz = 200
+default_pulse_mode = "Voltage"
+default_counter_source = "TDC"
+default_control_algorithm = "Proportional"
+default_ex_user = "user"
+default_ex_name = "test"
+
+# ---------------------------------------------------------------------------
+# Live (real-time) calibration of the visualization spectrum.
+#
+# Architecture: a background QThread snapshots the most recent ~100 000
+# events every ``live_calibration_refit_interval_s`` seconds, fits a
+# voltage + bowl + initial-mass-scale correction in the worker thread,
+# and the GUI applies the cached parameters on every render tick using
+# vectorized NumPy. The GUI thread is never blocked. See
+# ``pyccapt/control/core/live_calibration.py`` for the full algorithm.
+#
+# Set the interval to 0 to disable the live calibration entirely; the
+# spectrum will then always show uncalibrated mc/tof.
+live_calibration_refit_interval_s = 15.0
+# Minimum events required before the worker bothers to fit. Below this
+# count the GUI shows uncalibrated data with a "calibrating…" status.
+live_calibration_min_events = 5000
+# Voltage-fit R² floor. Fits below this quality are rejected and the
+# previous good parameters are kept (or none, if there are no previous
+# good parameters).
+live_calibration_min_fit_quality = 0.5
+# Mass window (Da) inside which the dominant peak is searched for. Pick
+# a window where you expect a strong, well-known peak for your sample.
+live_calibration_mass_window_min = 1.0
+live_calibration_mass_window_max = 60.0
+# Optional: target mass (Da) the dominant peak should land at after the
+# initial scaling. Leave commented to use the observed peak as its own
+# target (i.e. only correct shape, not absolute scale).
+# live_calibration_target_mass = 56.0    # e.g. Fe+ at 56 Da
+# Voltage-fit window size: number of consecutive ions per bin used to
+# compute the mean (V, t/peak) sample for the polynomial fit. Mirrors
+# ``sample_size`` in the offline pipeline (mode='ion_seq').
+live_calibration_volt_sample_size = 500
+# Polar-tile size (mm) for the bowl correction. The detector is split
+# into rings of this width and each ring into 8..96 angular sectors;
+# one (x_med, y_med, t_mean/peak) sample is taken per non-empty cell
+# and a global 6-parameter polynomial is fit to the samples. Mirrors
+# ``sample_size`` in calibration.bowl_correction(sampling_mode='polar').
+live_calibration_bowl_sample_size_mm = 4.0
+# EMA smoothing window: average the last N successful parameter sets
+# before the GUI applies them. Damps jitter in the displayed spectrum
+# from event-pool noise across successive refits. Set to 1 to disable.
+live_calibration_ema_window = 3
+
+# Vacuum-pressure alert thresholds (mbar). Each gauge in the Pumps & Vacuum
+# window turns red and the main GUI shows a warning when its reading is
+# above the matching value here. Lower the number to make the warning more
+# sensitive. Set to a very large number (e.g. 1.0) to effectively disable
+# a warning for a given gauge.
+vacuum_threshold_main = 1e-9
+vacuum_threshold_buffer = 1e-9
+vacuum_threshold_buffer_back = 1e-2
+vacuum_threshold_load_lock = 1e-5
+vacuum_threshold_load_lock_back = 1e-1
+vacuum_threshold_cryo_load_lock = 1e-5
+vacuum_threshold_cryo_load_lock_back = 1e-1
+
 # Pulse frequency ranges (Hz)
 max_voltage_pulse_frequency = 200000
 min_voltage_pulse_frequency = 1
@@ -86,3 +166,145 @@ COM_PORT_gauge_ll = "COM1"
 COM_PORT_gauge_cll = "COM8"
 COM_PORT_signal_generator = "USB0::0xF4EC::0x1101::SDG6XBAD2R0601::INSTR"
 COM_PORT_thorlab_motor = "27261754"
+
+# SmarAct MCS2 stage controllers (locator string passed to ctl.Open).
+# Use "network:sn:<serial>" for an Ethernet controller, or the value returned
+# by ctl.FindDevices() for USB.  These two devices are addressed independently
+# and MUST be different physical controllers:
+#   * stage_smartact_main   -> sample / specimen stage (Stage Control window)
+#   * stage_smartact_laser  -> laser focusing stage (Laser Control window)
+# Set either one to "" (empty string) to disable that GUI's stage section
+# without showing any error - useful when only one MCS2 is plugged in.
+stage_smartact_main = "network:sn:MCS2-00017939"
+stage_smartact_laser = "network:sn:MCS2-00017944"
+
+# Default "home" position for the Home button on the stage / laser GUIs.
+# Values are in millimetres.  The Home button moves all three axes to these
+# coordinates after referencing has run (or immediately if the controller
+# already knows its reference).
+stage_home_x_mm = 1.615
+stage_home_y_mm = 1.032
+stage_home_z_mm = -3.930
+laser_stage_home_x_mm = 0.0
+laser_stage_home_y_mm = 0.0
+laser_stage_home_z_mm = 0.0
+
+# SmarAct REFERENCING_OPTIONS bitmask used by find_reference().
+#   0x01 = START_DIR    (0 = forward, 1 = backward as starting direction)
+#   0x02 = REVERSE_DIR  (auto-reverse if end stop is hit before the
+#                        reference mark is found)
+#   0x04 = AUTO_ZERO    (zero the absolute position once the mark is found)
+# Default 0x07 = START_DIR | REVERSE_DIR | AUTO_ZERO:
+#   * starts the search BACKWARD so the stage moves away from anything
+#     mounted in front (sample, load lock, optics) instead of into it,
+#   * auto-reverses if the back end stop is hit before the mark is found,
+#   * zeros the absolute position once the mark is found.
+# Drop bit 0x01 (-> 0x06) if your geometry has the obstruction behind
+# the stage instead.  Set to 0 to reproduce the old broken behaviour.
+stage_referencing_options = 0x07
+# Per-axis Reference timeout in seconds.  120 s is plenty for SLC stages
+# at typical reference-search velocity; bump for very long travels.
+stage_reference_timeout_s = 120
+# Velocity (mm/s) used during Reference.  Decoupled from the per-axis
+# sliders because Reference should be predictable regardless of what
+# slider the user moved last - using the slider's value made the laser
+# stage's reference feel painfully slow when the slider was at level 1.
+# 5 mm/s is a safe brisk pace for SLC positioners.
+stage_reference_velocity_mm_s = 5.0
+
+# ---------------------------------------------------------------------------
+# Surface Concept TDC calibration constants.  Were hard-coded in
+# tdc_surface_concept.py; moved here so different rigs can be tuned
+# without touching source.
+# ---------------------------------------------------------------------------
+# Time-of-flight conversion: ns per TDC bin.  27.432 ps / (1000 * 4)
+# = 6.858e-3 ns / bin = the value previously hard-coded as TOFFACTOR.
+sc_tof_ns_per_bin = 0.006858
+# Detector binning resolution (bins across the full detector face).
+sc_detector_bins = 4900
+# Internal binning factor applied by the controller.
+sc_detector_binning_factor = 2
+# Detector physical width (mm) used to convert bins to mm.
+sc_detector_width_mm = 80
+# Detector usable half-width (cm).  Hits with |x_det| or |y_det| beyond
+# this radius are flagged as "outside detector" and excluded from the
+# raw-data analysis peak yields.  80 mm full width → ±40 mm = ±4 cm.
+sc_detector_limit_cm = 4.0
+# Exposure time (TDC tick units, integer).  Controls how long the TDC
+# integrates between callbacks.  Lower = faster GUI updates, higher
+# CPU.  Surface Concept default 100 worked well in practice.
+sc_exposure_time = 100
+
+# ---------------------------------------------------------------------------
+# RoentDek hexanode (3-delay-line) calibration constants for the raw-data
+# analysis workflow.  Kept here so the same code can serve different rigs.
+# ---------------------------------------------------------------------------
+# Time-of-flight conversion: ns per TDC bin for the 6-DLTS sum reconstruction.
+ro_tof_ns_per_bin = 0.025
+# Number of TDC bins across the full detector face.
+ro_detector_bins = 4900
+# Internal binning factor applied by the controller.
+ro_detector_binning_factor = 2
+# Detector physical width (mm).  RoentDek hexanodes are typically 80 mm.
+ro_detector_width_mm = 80
+# Detector usable half-width (cm).  Same convention as the SC entry.
+ro_detector_limit_cm = 4.0
+
+# Speed slider range for both GUIs.  Mirrors the "Simple Mode" levels shown on
+# the SmarAct MCS2 hand-control display (1 = slowest, 11 = fastest).  Each
+# level is mapped to an actual MOVE_VELOCITY by stage_smartact_speed_mm_s
+# below (level^2 * factor in mm/s, capped at the max).
+stage_speed_level_min = 1
+stage_speed_level_max = 11
+stage_speed_level_default = 5
+# Velocity (mm/s) corresponding to slider level 11.  Only used when
+# stage_speed_table_mm_s below is empty.  Lower levels are then scaled
+# quadratically so the slider feels exponential-ish.
+stage_speed_max_mm_s = 1.0
+# Per-level velocity table (mm/s), one entry per slider level.  When set,
+# this takes precedence over stage_speed_max_mm_s and lets you make the
+# GUI levels match the MCS2 hand-control display exactly: step the
+# controller through Simple Mode levels 1..11, read off the velocity each
+# one shows, and put the values here in order.  Default below is a clean
+# power-of-2 table from 1 µm/s to ~1 mm/s, safe for atom-probe positioning.
+stage_speed_table_mm_s = [0.001, 0.002, 0.004, 0.008, 0.016, 0.032, 0.064, 0.128, 0.256, 0.512, 1.024]
+# Effective "joystick deflection time" (seconds): the per-click jog distance
+# is computed as velocity * this value, so faster slider settings produce
+# proportionally larger jogs - just like the MCS2 hand-control where only
+# speed is set and the distance follows from how long the knob is deflected.
+stage_click_duration_s = 0.2
+# Velocity (mm/s) used by the Home button.  Decoupled from the per-axis
+# sliders because Home should be fast and predictable regardless of what
+# slider the user happens to have moved last.  Default 1 mm/s = the
+# table top-end; lower if your stage is fragile.
+stage_home_velocity_mm_s = 1.0
+
+# ---------------------------------------------------------------------------
+# Closed-loop control gains for the main GUI's "Control Algorithm" dropdown
+# (Proportional / Proportional aggressive / Adaptive P / PID).
+# ---------------------------------------------------------------------------
+
+# Proportional aggressive: the upward voltage step is multiplied by this
+# factor (downward step uses the normal vdc_step_down so the loop still
+# brakes gently when rate is too high).  > 1 = ramps up faster.
+control_p_aggressive_up_factor = 3.0
+
+# Adaptive P: starts at the normal proportional step but scales itself
+# based on observed response.  If the error keeps the same sign for many
+# iterations (loop is too sluggish) the multiplier grows toward _max_.
+# If the error keeps flipping sign (loop is overshooting) it shrinks
+# toward _min_.  Both bounds are dimensionless multipliers on the
+# proportional step.
+control_adaptive_min_factor = 0.3
+control_adaptive_max_factor = 3.0
+control_adaptive_grow_threshold = 5   # consecutive same-sign errors -> grow
+control_adaptive_shrink_threshold = 3 # sign flips within window -> shrink
+
+# PID gains (Kp, Ki, Kd) - only used when "PID" is selected.  These are
+# starting points; expect to retune empirically on real hardware.
+control_pid_kp = 1.0
+control_pid_ki = 0.1
+control_pid_kd = 0.05
+# Hard cap on the per-iteration PID voltage step (V), applied symmetrically
+# (-cap .. +cap).  Mirrors the 40 V cap on the Proportional branch.
+control_pid_max_step_v = 40.0

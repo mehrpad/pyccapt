@@ -34,9 +34,60 @@ def _format_port_error(device_label, port, exc) -> str:
     )
 
 
+def _serial_port_present(port):
+    if not port:
+        return False
+    try:
+        ports = {getattr(p, "device", "") for p in serial.tools.list_ports.comports()}
+    except Exception:
+        return True
+    return port in ports
+
+
+def _open_cryovac_serial(port):
+    """Open the Cryovac serial port with a few retries for transient enumeration glitches.
+
+    On Windows the USB-to-serial bridge for the TIC 500 sometimes briefly
+    drops out of the COM port table during boot — opening it with no retry
+    fails with OSError 22 ("A device which does not exist was specified")
+    even though the device itself is fine and shows up a moment later.
+    """
+
+    last_exc = None
+    for attempt in range(3):
+        if _serial_port_present(port) or attempt > 0:
+            try:
+                return serial.Serial(
+                    port=port,
+                    baudrate=9600,
+                    bytesize=serial.EIGHTBITS,
+                    parity=serial.PARITY_NONE,
+                    stopbits=serial.STOPBITS_ONE,
+                    timeout=0.5,
+                    write_timeout=1.0,
+                )
+            except Exception as e:
+                last_exc = e
+        time.sleep(0.6)
+    if last_exc is None:
+        last_exc = OSError(f"port '{port}' not in serial enumeration")
+    raise last_exc
+
+
 def command_cryovac(cmd, com_port_cryovac):
     """
     Execute a command on Cryovac through serial communication.
+
+    Vendor / origin
+    ---------------
+    The CLI command set used here (``getOutput``, ``getOutputNames``,
+    ``Out1Cryo.PID.Setpoint``, ``Out2LL.PID.Setpoint``, ``e_mlp``-style
+    queries, etc.) is defined and owned by **CryoVac GmbH** for their
+    TIC 500 programmable temperature controller. This function and its
+    siblings (``initialize_cryovac`` etc.) are thin wrappers around
+    that ASCII serial protocol; the protocol itself is CryoVac's
+    property. Refer to the CryoVac TIC 500 manual (e.g. document
+    5984591) for the authoritative reference.
 
     Args:
         cmd: Command to be executed.
@@ -140,9 +191,34 @@ def initialize_cryovac(com_port_cryovac, variables):
     Returns:
         None
     """
-    output = command_cryovac('getOutput', com_port_cryovac)
-    time.sleep(0.1)
-    variables.temperature = float(output.split()[0].replace(',', ''))
+    # The TIC 500 firmware can fault on screen with "A system crash occurred /
+    # Diagnostic code: bpt0" if the first command we send arrives concatenated
+    # with stale bytes left in its macro parser (e.g. a partial line from a
+    # previous session, or line transitions caused by the host opening the
+    # port). Drain both directions, send a bare line terminator so any
+    # in-flight half-line is flushed as an empty macro, then drain again
+    # before issuing the real query.
+    time.sleep(0.2)
+    try:
+	    com_port_cryovac.reset_input_buffer()
+	    com_port_cryovac.reset_output_buffer()
+	    com_port_cryovac.write(b'\r\n')
+	    time.sleep(0.15)
+	    com_port_cryovac.reset_input_buffer()
+    except Exception:
+	    pass
+
+    output = ''
+    for _ in range(5):
+	    output = command_cryovac('getOutput?', com_port_cryovac)
+	    if output and output.split():
+		    break
+	    time.sleep(0.2)
+
+    try:
+	    variables.temperature = float(output.split()[0].replace(',', ''))
+    except (ValueError, IndexError):
+	    variables.temperature = -1
 
 
 def initialize_edwards_tic_load_lock(conf, variables):
@@ -289,17 +365,14 @@ def state_update(conf, variables, emitter):
         print('The cryo temperature monitoring is off')
     else:
         try:
-            com_port_cryovac = serial.Serial(
-                port=variables.COM_PORT_cryo,
-                baudrate=9600,
-                bytesize=serial.EIGHTBITS,
-                parity=serial.PARITY_NONE,
-                stopbits=serial.STOPBITS_ONE
-            )
+            com_port_cryovac = _open_cryovac_serial(variables.COM_PORT_cryo)
             initialize_cryovac(com_port_cryovac, variables)
         except Exception as e:
             com_port_cryovac = None
             print(_format_port_error('Cryovac', variables.COM_PORT_cryo, e))
+
+        cryovac_reconnect_interval = 30.0
+        last_cryovac_reconnect_attempt = time.time()
 
         start_time = time.time()
         log_time_time_interval = conf['log_time_time_interval']
@@ -313,6 +386,22 @@ def state_update(conf, variables, emitter):
         set_temperature_tmp_cryo = 0
         set_temperature_tmp_ll = 0
         while emitter.bool_flag_while_loop:
+            if conf['cryo'] == "on" and com_port_cryovac is None:
+                now = time.time()
+                if now - last_cryovac_reconnect_attempt >= cryovac_reconnect_interval:
+                    last_cryovac_reconnect_attempt = now
+                    if _serial_port_present(variables.COM_PORT_cryo):
+                        try:
+                            com_port_cryovac = _open_cryovac_serial(variables.COM_PORT_cryo)
+                            initialize_cryovac(com_port_cryovac, variables)
+                            clear_issue("cryovac_reconnect")
+                            print(f"Cryovac reconnected on {variables.COM_PORT_cryo}")
+                        except Exception as e:
+                            com_port_cryovac = None
+                            report_once(
+                                "cryovac_reconnect",
+                                _format_port_error('Cryovac', variables.COM_PORT_cryo, e),
+                            )
             if conf['cryo'] == "on" and com_port_cryovac is not None:
                 try:
                     output = command_cryovac('getOutput', com_port_cryovac)
@@ -423,6 +512,8 @@ def state_update(conf, variables, emitter):
                     E_AGC_ll = None
                     # Handle the case where response is not a valid float
                     vacuum_load_lock_backing = -1
+                variables.vacuum_load_lock = vacuum_load_lock
+                variables.vacuum_load_lock_backing = vacuum_load_lock_backing
                 emitter.vacuum_load_lock.emit(vacuum_load_lock)
                 emitter.vacuum_load_lock_back.emit(vacuum_load_lock_backing)
 
@@ -450,6 +541,8 @@ def state_update(conf, variables, emitter):
                     report_once("vacuum_cryo_load_lock_backing", f"Error reading CLL backing:{e}")
                     # Handle the case where response is not a valid float
                     vacuum_cryo_load_lock_backing = -1
+                variables.vacuum_cryo_load_lock = vacuum_cryo_load_lock
+                variables.vacuum_cryo_load_lock_backing = vacuum_cryo_load_lock_backing
                 emitter.vacuum_cryo_load_lock.emit(vacuum_cryo_load_lock)
                 emitter.vacuum_cryo_load_lock_back.emit(vacuum_cryo_load_lock_backing)
 

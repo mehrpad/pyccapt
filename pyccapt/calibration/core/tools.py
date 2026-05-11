@@ -133,21 +133,30 @@ def hist_plot(mc_tof, variables, bin, label, range_data=None, adjust_label=False
             labels = _resolve_range_display_labels(range_data)
             mask_all = np.full(len(mc_tof), False)
 
+            # Loop runs ``len(labels) + 1`` times: one pass per ranged
+            # species, then a final pass that draws the leftover (unranged)
+            # events as ``mc_tof[~mask_all]``. The previous code compared
+            # ``i`` to a non-existent ``len(ion)`` and recomputed
+            # ``mask_all`` from a stale ``mask`` — both bugs (the former
+            # raised NameError; the latter was a no-op since every per-label
+            # iteration already ORed its mask into ``mask_all``).
             for i in range(len(labels) + 1):
                 if i < len(labels):
                     mask = np.logical_and((mc_tof < mc_up[i]), mc_tof > mc_low[i])
                     mask_all = np.logical_or(mask_all, mask)
 
-                    if labels[i] == 'unranged':
-                        name_element = 'unranged'
-                    else:
-                        name_element = labels[i]
-
-                    y, x, _ = plt.hist(mc_tof[mask], bins=bins, log=log, histtype=steps, color=colors[i],
-                                       label=name_element)
-                elif i == len(ion):
-                    mask_all = np.logical_or(mask_all, mask)
-                    y, x, _ = plt.hist(mc_tof[~mask_all], bins=bins, log=log, histtype=steps, color='slategray')
+                    name_element = 'unranged' if labels[i] == 'unranged' else labels[i]
+                    y, x, _ = plt.hist(
+                        mc_tof[mask], bins=bins, log=log, histtype=steps,
+                        color=colors[i], label=name_element,
+                    )
+                else:
+                    # Final iteration: i == len(labels). Plot the events not
+                    # captured by any range as a slate-gray "unranged" baseline.
+                    y, x, _ = plt.hist(
+                        mc_tof[~mask_all], bins=bins, log=log,
+                        histtype=steps, color='slategray',
+                    )
         else:
             y, x, _ = plt.hist(mc_tof, bins=bins, log=log, histtype=steps, color='slategray')
         # calculate the background

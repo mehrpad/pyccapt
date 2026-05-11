@@ -98,7 +98,8 @@ def pos_to_ccapt(file_path):
                           'mc (Da)': pos['m/n (Da)'].to_numpy(dtype=np.float32, copy=False),
                           'mc_uc (Da)': np.zeros(length, dtype=np.float32),
                           'high_voltage (V)': np.zeros(length, dtype=np.float32),
-                          'pulse': np.zeros(length, dtype=np.float32),
+                          'pulse_v (V)': np.zeros(length, dtype=np.float32),
+                          'pulse_l (pJ)': np.zeros(length, dtype=np.float32),
                           't (ns)': np.zeros(length, dtype=np.float32),
                           't_c (ns)': np.zeros(length, dtype=np.float32),
                           'x_det (cm)': np.zeros(length, dtype=np.float32),
@@ -140,6 +141,64 @@ def epos_to_ccapt(file_path):
                           'start_counter': np.zeros(length, dtype=np.int32),
                           })
     return ccapt
+
+
+def epos_lazy_to_ccapt_chunks(epos_table, chunk_size: int = 1 << 20):
+    """Stream a memory-mapped EPOS table as PyCCAPT-format DataFrame chunks.
+
+    Args:
+        epos_table: ``LazyTable`` from
+            :func:`pyccapt.calibration.leap_tools.leap_tools.read_epos_lazy`.
+        chunk_size: Number of rows per yielded DataFrame.
+
+    Yields:
+        pandas.DataFrame: A PyCCAPT-format chunk with the standard 15 columns.
+
+    The conversion is the same as :func:`epos_to_ccapt` but never holds the
+    whole file in RAM; peak resident memory is bounded by ``chunk_size`` rows
+    (about 60 bytes/row).
+    """
+    n_rows = epos_table.n_rows
+    if n_rows == 0:
+        # Yield one empty frame so downstream writers see the right schema.
+        yield pd.DataFrame({
+            'x (nm)': np.empty(0, dtype=np.float32),
+            'y (nm)': np.empty(0, dtype=np.float32),
+            'z (nm)': np.empty(0, dtype=np.float32),
+            'mc (Da)': np.empty(0, dtype=np.float32),
+            'mc_uc (Da)': np.empty(0, dtype=np.float32),
+            'high_voltage (V)': np.empty(0, dtype=np.float32),
+            'pulse_v (V)': np.empty(0, dtype=np.float32),
+            'pulse_l (pJ)': np.empty(0, dtype=np.float32),
+            't (ns)': np.empty(0, dtype=np.float32),
+            't_c (ns)': np.empty(0, dtype=np.float32),
+            'x_det (cm)': np.empty(0, dtype=np.float32),
+            'y_det (cm)': np.empty(0, dtype=np.float32),
+            'delta_p': np.empty(0, dtype=np.int32),
+            'multi': np.empty(0, dtype=np.int32),
+            'start_counter': np.empty(0, dtype=np.int32),
+        })
+        return
+    for start in range(0, n_rows, chunk_size):
+        stop = min(start + chunk_size, n_rows)
+        length = stop - start
+        yield pd.DataFrame({
+            'x (nm)': epos_table['x (nm)'][start:stop].astype(np.float32, copy=False),
+            'y (nm)': epos_table['y (nm)'][start:stop].astype(np.float32, copy=False),
+            'z (nm)': epos_table['z (nm)'][start:stop].astype(np.float32, copy=False),
+            'mc (Da)': epos_table['m/n (Da)'][start:stop].astype(np.float32, copy=False),
+            'mc_uc (Da)': np.zeros(length, dtype=np.float32),
+            'high_voltage (V)': epos_table['HV_DC (V)'][start:stop].astype(np.float32, copy=False),
+            'pulse_v (V)': epos_table['pulse (V)'][start:stop].astype(np.float32, copy=False),
+            'pulse_l (pJ)': np.zeros(length, dtype=np.float32),
+            't (ns)': epos_table['TOF (ns)'][start:stop].astype(np.float32, copy=False),
+            't_c (ns)': np.zeros(length, dtype=np.float32),
+            'x_det (cm)': epos_table['det_x (mm)'][start:stop].astype(np.float32, copy=False) / 10.0,
+            'y_det (cm)': epos_table['det_y (mm)'][start:stop].astype(np.float32, copy=False) / 10.0,
+            'delta_p': epos_table['pslep'][start:stop].astype(np.int32, copy=False),
+            'multi': epos_table['ipp'][start:stop].astype(np.int32, copy=False),
+            'start_counter': np.zeros(length, dtype=np.int32),
+        })
 
 
 def apt_to_ccapt(file_path):

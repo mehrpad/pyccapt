@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import multiprocessing
 import os
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from pyccapt.control.core import read_files, share_variables
+from pyccapt.control.core.shared_ring_buffer import SharedRingBuffer
+
+# Each plot ring buffer holds 1 M float32 samples = 4 MB.  At 1 kHz ion
+# rate that's ~17 minutes of buffered history, far more than the
+# visualization process ever falls behind.  Bump if needed.
+_PLOT_BUFFER_CAPACITY = 1 << 20  # 1 048 576
 
 
 @dataclass
@@ -18,10 +25,13 @@ class SharedContext:
     manager: Any
     namespace: Any
     variables: share_variables.Variables
-    x_plot: Any
-    y_plot: Any
-    t_plot: Any
-    main_v_dc_plot: Any
+    # Plot data: SPSC ring buffers in shared memory.  Producer is the TDC
+    # subprocess (one writer per buffer); consumer is the visualization
+    # subprocess (one reader per buffer).
+    x_plot: SharedRingBuffer
+    y_plot: SharedRingBuffer
+    t_plot: SharedRingBuffer
+    main_v_dc_plot: SharedRingBuffer
 
 
 def find_project_root(start: Path | None = None) -> Path:
@@ -92,20 +102,52 @@ def load_project_config(
 
 
 def create_shared_context(conf: dict[str, Any]) -> SharedContext:
-    """Create manager namespace, shared variables, and plot queues."""
+	"""Create manager namespace, shared variables, and plot ring buffers.
+
+	The ring buffers replace the old multiprocessing.Queue plot pipeline:
+	bounded memory (4 MB / signal), zero-copy reads, no pickling per
+	chunk.  Owner is the parent process; child processes attach to the
+	same shared blocks by name.
+	"""
     manager = multiprocessing.Manager()
     namespace = manager.Namespace()
     variables = share_variables.Variables(conf, namespace)
+
+	# Unique per-launch suffix so we never collide with a stale block
+	# left behind by a crashed previous run.
+	suffix = uuid.uuid4().hex[:8]
+	x_plot = SharedRingBuffer.create(f"pyccapt_xplot_{suffix}",
+	                                 _PLOT_BUFFER_CAPACITY, "float32")
+	y_plot = SharedRingBuffer.create(f"pyccapt_yplot_{suffix}",
+	                                 _PLOT_BUFFER_CAPACITY, "float32")
+	t_plot = SharedRingBuffer.create(f"pyccapt_tplot_{suffix}",
+	                                 _PLOT_BUFFER_CAPACITY, "float32")
+	main_v_dc_plot = SharedRingBuffer.create(f"pyccapt_vplot_{suffix}",
+	                                         _PLOT_BUFFER_CAPACITY, "float32")
 
     return SharedContext(
         manager=manager,
         namespace=namespace,
         variables=variables,
-        x_plot=multiprocessing.Queue(),
-        y_plot=multiprocessing.Queue(),
-        t_plot=multiprocessing.Queue(),
-        main_v_dc_plot=multiprocessing.Queue(),
+	    x_plot=x_plot,
+	    y_plot=y_plot,
+	    t_plot=t_plot,
+	    main_v_dc_plot=main_v_dc_plot,
     )
+
+
+def release_shared_context(context: SharedContext) -> None:
+	"""Tear down ring buffers and the manager.  Call on full shutdown."""
+	for buf in (context.x_plot, context.y_plot, context.t_plot,
+	            context.main_v_dc_plot):
+		try:
+			buf.unlink()
+		except Exception:
+			pass
+	try:
+		context.manager.shutdown()
+	except Exception:
+		pass
 
 
 def ensure_counter_file(root: Path | None = None) -> Path:

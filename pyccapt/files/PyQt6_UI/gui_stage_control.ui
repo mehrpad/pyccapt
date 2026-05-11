@@ -6,19 +6,67 @@
             <rect>
                 <x>0</x>
                 <y>0</y>
-                <width>636</width>
-                <height>161</height>
+                <width>820</width>
+                <height>200</height>
             </rect>
         </property>
         <property name="windowTitle">
-            <string>Form</string>
+            <string>PyCCAPT Stage Control</string>
         </property>
         <layout class="QGridLayout" name="gridLayout_5">
             <item row="0" column="0">
                 <layout class="QGridLayout" name="gridLayout_3">
+                    <!-- Position display: 3 LCDs (mm/um/nm) per axis ============ -->
                     <item row="0" column="0">
                         <layout class="QGridLayout" name="gridLayout_4">
-                            <item row="0" column="0">
+                            <!-- Header row -->
+                            <item row="0" column="1">
+                                <widget class="QLabel" name="hdr_mm">
+                                    <property name="text">
+                                        <string>mm</string>
+                                    </property>
+                                    <property name="font">
+                                        <font>
+                                            <bold>true</bold>
+                                        </font>
+                                    </property>
+                                    <property name="alignment">
+                                        <set>Qt::AlignCenter</set>
+                                    </property>
+                                </widget>
+                            </item>
+                            <item row="0" column="2">
+                                <widget class="QLabel" name="hdr_um">
+                                    <property name="text">
+                                        <string>µm</string>
+                                    </property>
+                                    <property name="font">
+                                        <font>
+                                            <bold>true</bold>
+                                        </font>
+                                    </property>
+                                    <property name="alignment">
+                                        <set>Qt::AlignCenter</set>
+                                    </property>
+                                </widget>
+                            </item>
+                            <item row="0" column="3">
+                                <widget class="QLabel" name="hdr_nm">
+                                    <property name="text">
+                                        <string>nm</string>
+                                    </property>
+                                    <property name="font">
+                                        <font>
+                                            <bold>true</bold>
+                                        </font>
+                                    </property>
+                                    <property name="alignment">
+                                        <set>Qt::AlignCenter</set>
+                                    </property>
+                                </widget>
+                            </item>
+                            <!-- X row -->
+                            <item row="1" column="0">
                                 <widget class="QLabel" name="label_19">
                                     <property name="font">
                                         <font>
@@ -30,10 +78,17 @@
                                     </property>
                                 </widget>
                             </item>
-                            <item row="0" column="1">
-                                <widget class="QLCDNumber" name="stage_x_cord"/>
+                            <item row="1" column="1">
+                                <widget class="QLCDNumber" name="stage_x_mm"/>
                             </item>
-                            <item row="1" column="0">
+                            <item row="1" column="2">
+                                <widget class="QLCDNumber" name="stage_x_um"/>
+                            </item>
+                            <item row="1" column="3">
+                                <widget class="QLCDNumber" name="stage_x_nm"/>
+                            </item>
+                            <!-- Y row -->
+                            <item row="2" column="0">
                                 <widget class="QLabel" name="label_17">
                                     <property name="font">
                                         <font>
@@ -45,10 +100,17 @@
                                     </property>
                                 </widget>
                             </item>
-                            <item row="1" column="1">
-                                <widget class="QLCDNumber" name="stage_y_cord"/>
+                            <item row="2" column="1">
+                                <widget class="QLCDNumber" name="stage_y_mm"/>
                             </item>
-                            <item row="2" column="0">
+                            <item row="2" column="2">
+                                <widget class="QLCDNumber" name="stage_y_um"/>
+                            </item>
+                            <item row="2" column="3">
+                                <widget class="QLCDNumber" name="stage_y_nm"/>
+                            </item>
+                            <!-- Z row -->
+                            <item row="3" column="0">
                                 <widget class="QLabel" name="label_18">
                                     <property name="font">
                                         <font>
@@ -60,85 +122,185 @@
                                     </property>
                                 </widget>
                             </item>
-                            <item row="2" column="1">
-                                <widget class="QLCDNumber" name="stage_z_cord"/>
+                            <item row="3" column="1">
+                                <widget class="QLCDNumber" name="stage_z_mm"/>
+                            </item>
+                            <item row="3" column="2">
+                                <widget class="QLCDNumber" name="stage_z_um"/>
+                            </item>
+                            <item row="3" column="3">
+                                <widget class="QLCDNumber" name="stage_z_nm"/>
                             </item>
                         </layout>
                     </item>
+
+                    <!-- Per-axis speed sliders ================================= -->
                     <item row="0" column="1">
                         <layout class="QGridLayout" name="gridLayout_2">
-                            <item row="0" column="0">
-                                <widget class="QLabel" name="label_14">
+                            <item row="0" column="1">
+                                <widget class="QLabel" name="label_speed_header">
                                     <property name="font">
                                         <font>
                                             <bold>true</bold>
                                         </font>
                                     </property>
                                     <property name="text">
-                                        <string>Speed L/R</string>
+                                        <string>Speed</string>
                                     </property>
-                                </widget>
-                            </item>
-                            <item row="0" column="1">
-                                <widget class="QDoubleSpinBox" name="stage_speed_lr">
-                                    <property name="styleSheet">
-                                        <string notr="true">QDoubleSpinBox{
-                                            background: rgb(223,223,233)
-                                            }
-                                        </string>
+                                    <property name="alignment">
+                                        <set>Qt::AlignCenter</set>
                                     </property>
                                 </widget>
                             </item>
                             <item row="1" column="0">
-                                <widget class="QLabel" name="label_15">
+                                <widget class="QLabel" name="label_speed_x">
                                     <property name="font">
                                         <font>
                                             <bold>true</bold>
                                         </font>
                                     </property>
                                     <property name="text">
-                                        <string>Speed U/D</string>
+                                        <string>X</string>
                                     </property>
                                 </widget>
                             </item>
                             <item row="1" column="1">
-                                <widget class="QDoubleSpinBox" name="stage_speed_ud">
-                                    <property name="styleSheet">
-                                        <string notr="true">QDoubleSpinBox{
-                                            background: rgb(223,223,233)
-                                            }
-                                        </string>
+                                <widget class="QSlider" name="stage_speed_x">
+                                    <property name="orientation">
+                                        <enum>Qt::Horizontal</enum>
+                                    </property>
+                                    <property name="minimum">
+                                        <number>1</number>
+                                    </property>
+                                    <property name="maximum">
+                                        <number>11</number>
+                                    </property>
+                                    <property name="value">
+                                        <number>5</number>
+                                    </property>
+                                    <property name="tickPosition">
+                                        <enum>QSlider::TicksBelow</enum>
+                                    </property>
+                                    <property name="tickInterval">
+                                        <number>1</number>
+                                    </property>
+                                    <property name="minimumSize">
+                                        <size>
+                                            <width>160</width>
+                                            <height>0</height>
+                                        </size>
+                                    </property>
+                                </widget>
+                            </item>
+                            <item row="1" column="2">
+                                <widget class="QLabel" name="stage_speed_x_label">
+                                    <property name="text">
+                                        <string>level 5</string>
                                     </property>
                                 </widget>
                             </item>
                             <item row="2" column="0">
-                                <widget class="QLabel" name="label_16">
+                                <widget class="QLabel" name="label_speed_y">
                                     <property name="font">
                                         <font>
                                             <bold>true</bold>
                                         </font>
                                     </property>
                                     <property name="text">
-                                        <string>Speed F/B</string>
+                                        <string>Y</string>
                                     </property>
                                 </widget>
                             </item>
                             <item row="2" column="1">
-                                <widget class="QDoubleSpinBox" name="stage_speed_fb">
-                                    <property name="styleSheet">
-                                        <string notr="true">QDoubleSpinBox{
-                                            background: rgb(223,223,233)
-                                            }
-                                        </string>
+                                <widget class="QSlider" name="stage_speed_y">
+                                    <property name="orientation">
+                                        <enum>Qt::Horizontal</enum>
+                                    </property>
+                                    <property name="minimum">
+                                        <number>1</number>
+                                    </property>
+                                    <property name="maximum">
+                                        <number>11</number>
+                                    </property>
+                                    <property name="value">
+                                        <number>5</number>
+                                    </property>
+                                    <property name="tickPosition">
+                                        <enum>QSlider::TicksBelow</enum>
+                                    </property>
+                                    <property name="tickInterval">
+                                        <number>1</number>
+                                    </property>
+                                    <property name="minimumSize">
+                                        <size>
+                                            <width>160</width>
+                                            <height>0</height>
+                                        </size>
+                                    </property>
+                                </widget>
+                            </item>
+                            <item row="2" column="2">
+                                <widget class="QLabel" name="stage_speed_y_label">
+                                    <property name="text">
+                                        <string>level 5</string>
+                                    </property>
+                                </widget>
+                            </item>
+                            <item row="3" column="0">
+                                <widget class="QLabel" name="label_speed_z">
+                                    <property name="font">
+                                        <font>
+                                            <bold>true</bold>
+                                        </font>
+                                    </property>
+                                    <property name="text">
+                                        <string>Z</string>
+                                    </property>
+                                </widget>
+                            </item>
+                            <item row="3" column="1">
+                                <widget class="QSlider" name="stage_speed_z">
+                                    <property name="orientation">
+                                        <enum>Qt::Horizontal</enum>
+                                    </property>
+                                    <property name="minimum">
+                                        <number>1</number>
+                                    </property>
+                                    <property name="maximum">
+                                        <number>11</number>
+                                    </property>
+                                    <property name="value">
+                                        <number>5</number>
+                                    </property>
+                                    <property name="tickPosition">
+                                        <enum>QSlider::TicksBelow</enum>
+                                    </property>
+                                    <property name="tickInterval">
+                                        <number>1</number>
+                                    </property>
+                                    <property name="minimumSize">
+                                        <size>
+                                            <width>160</width>
+                                            <height>0</height>
+                                        </size>
+                                    </property>
+                                </widget>
+                            </item>
+                            <item row="3" column="2">
+                                <widget class="QLabel" name="stage_speed_z_label">
+                                    <property name="text">
+                                        <string>level 5</string>
                                     </property>
                                 </widget>
                             </item>
                         </layout>
                     </item>
+
+                    <!-- Direction buttons (X/Y plane) ========================== -->
                     <item row="0" column="2">
                         <layout class="QGridLayout" name="gridLayout">
                             <item row="0" column="0">
-                                <spacer name="horizontalSpacer_2">
+                                <spacer name="hsp_2">
                                     <property name="orientation">
                                         <enum>Qt::Horizontal</enum>
                                     </property>
@@ -158,22 +320,13 @@
                                             <height>25</height>
                                         </size>
                                     </property>
-                                    <property name="maximumSize">
-                                        <size>
-                                            <width>16777215</width>
-                                            <height>16777215</height>
-                                        </size>
-                                    </property>
-                                    <property name="styleSheet">
-                                        <string notr="true"/>
-                                    </property>
                                     <property name="text">
                                         <string>up</string>
                                     </property>
                                 </widget>
                             </item>
                             <item row="0" column="2">
-                                <spacer name="horizontalSpacer">
+                                <spacer name="hsp_1">
                                     <property name="orientation">
                                         <enum>Qt::Horizontal</enum>
                                     </property>
@@ -193,22 +346,13 @@
                                             <height>25</height>
                                         </size>
                                     </property>
-                                    <property name="maximumSize">
-                                        <size>
-                                            <width>16777215</width>
-                                            <height>16777215</height>
-                                        </size>
-                                    </property>
-                                    <property name="styleSheet">
-                                        <string notr="true"/>
-                                    </property>
                                     <property name="text">
                                         <string>Left</string>
                                     </property>
                                 </widget>
                             </item>
                             <item row="1" column="1">
-                                <spacer name="horizontalSpacer_5">
+                                <spacer name="hsp_5">
                                     <property name="orientation">
                                         <enum>Qt::Horizontal</enum>
                                     </property>
@@ -228,22 +372,13 @@
                                             <height>25</height>
                                         </size>
                                     </property>
-                                    <property name="maximumSize">
-                                        <size>
-                                            <width>16777215</width>
-                                            <height>16777215</height>
-                                        </size>
-                                    </property>
-                                    <property name="styleSheet">
-                                        <string notr="true"/>
-                                    </property>
                                     <property name="text">
                                         <string>Right</string>
                                     </property>
                                 </widget>
                             </item>
                             <item row="2" column="0">
-                                <spacer name="horizontalSpacer_3">
+                                <spacer name="hsp_3">
                                     <property name="orientation">
                                         <enum>Qt::Horizontal</enum>
                                     </property>
@@ -263,22 +398,13 @@
                                             <height>25</height>
                                         </size>
                                     </property>
-                                    <property name="maximumSize">
-                                        <size>
-                                            <width>16777215</width>
-                                            <height>16777215</height>
-                                        </size>
-                                    </property>
-                                    <property name="styleSheet">
-                                        <string notr="true"/>
-                                    </property>
                                     <property name="text">
                                         <string>Down</string>
                                     </property>
                                 </widget>
                             </item>
                             <item row="2" column="2">
-                                <spacer name="horizontalSpacer_4">
+                                <spacer name="hsp_4">
                                     <property name="orientation">
                                         <enum>Qt::Horizontal</enum>
                                     </property>
@@ -292,20 +418,19 @@
                             </item>
                         </layout>
                     </item>
+
+                    <!-- Forward / backward (Z) ================================= -->
                     <item row="0" column="3">
                         <layout class="QVBoxLayout" name="verticalLayout">
                             <item>
                                 <widget class="QPushButton" name="stage_forward">
-                                    <property name="styleSheet">
-                                        <string notr="true"/>
-                                    </property>
                                     <property name="text">
                                         <string>Forward</string>
                                     </property>
                                 </widget>
                             </item>
                             <item>
-                                <spacer name="verticalSpacer">
+                                <spacer name="vsp">
                                     <property name="orientation">
                                         <enum>Qt::Vertical</enum>
                                     </property>
@@ -319,9 +444,6 @@
                             </item>
                             <item>
                                 <widget class="QPushButton" name="stage_backward">
-                                    <property name="styleSheet">
-                                        <string notr="true"/>
-                                    </property>
                                     <property name="text">
                                         <string>Backward</string>
                                     </property>
@@ -329,17 +451,54 @@
                             </item>
                         </layout>
                     </item>
+
+                    <!-- Home / Reference / Stop / Override ===================== -->
                     <item row="0" column="4">
-                        <widget class="QPushButton" name="stage_home">
-                            <property name="styleSheet">
-                                <string notr="true"/>
-                            </property>
-                            <property name="text">
-                                <string>Home</string>
-                            </property>
-                        </widget>
+                        <layout class="QVBoxLayout" name="homeLayout">
+                            <item>
+                                <widget class="QPushButton" name="stage_home">
+                                    <property name="text">
+                                        <string>Home</string>
+                                    </property>
+                                </widget>
+                            </item>
+                            <item>
+                                <widget class="QPushButton" name="stage_reference">
+                                    <property name="enabled">
+                                        <bool>false</bool>
+                                    </property>
+                                    <property name="text">
+                                        <string>Reference</string>
+                                    </property>
+                                </widget>
+                            </item>
+                            <item>
+                                <widget class="QPushButton" name="stage_stop">
+                                    <property name="styleSheet">
+                                        <string notr="true">QPushButton{background: rgb(220,80,80); color: white;
+                                            font-weight: bold;}
+                                        </string>
+                                    </property>
+                                    <property name="text">
+                                        <string>STOP</string>
+                                    </property>
+                                </widget>
+                            </item>
+                            <item>
+                                <widget class="QPushButton" name="superuser">
+                                    <property name="styleSheet">
+                                        <string notr="true">QPushButton{background: rgb(193, 193, 193)}</string>
+                                    </property>
+                                    <property name="text">
+                                        <string>Override Access</string>
+                                    </property>
+                                </widget>
+                            </item>
+                        </layout>
                     </item>
-                    <item row="1" column="0" colspan="4">
+
+                    <!-- Status / error label =================================== -->
+                    <item row="1" column="0" colspan="5">
                         <widget class="QLabel" name="Error">
                             <property name="minimumSize">
                                 <size>
@@ -349,9 +508,8 @@
                             </property>
                             <property name="font">
                                 <font>
-                                    <pointsize>13</pointsize>
+                                    <pointsize>10</pointsize>
                                     <bold>true</bold>
-                                    <strikeout>false</strikeout>
                                 </font>
                             </property>
                             <property name="text">
@@ -370,9 +528,9 @@
         </layout>
     </widget>
     <tabstops>
-        <tabstop>stage_speed_lr</tabstop>
-        <tabstop>stage_speed_ud</tabstop>
-        <tabstop>stage_speed_fb</tabstop>
+        <tabstop>stage_speed_x</tabstop>
+        <tabstop>stage_speed_y</tabstop>
+        <tabstop>stage_speed_z</tabstop>
         <tabstop>stage_left</tabstop>
         <tabstop>stage_right</tabstop>
         <tabstop>stage_up</tabstop>
@@ -380,6 +538,8 @@
         <tabstop>stage_forward</tabstop>
         <tabstop>stage_backward</tabstop>
         <tabstop>stage_home</tabstop>
+        <tabstop>stage_reference</tabstop>
+        <tabstop>stage_stop</tabstop>
     </tabstops>
     <resources/>
     <connections/>

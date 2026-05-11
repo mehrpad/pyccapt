@@ -176,13 +176,34 @@ def _first_triangle_per_vertex(triangles: np.ndarray, n_vertices: int) -> np.nda
     return mapping
 
 
+# Cache the matplotlib trifinder per mesh identity. The trifinder depends only
+# on the mesh; reusing it across chunks shaves the per-chunk setup cost when
+# streaming a multi-million-row EPOS through correct_epos_streaming.
+_TRIFINDER_CACHE: dict[int, object] = {}
+_KDTREE_CACHE: dict[int, object] = {}
+
+
 def _triangle_finder(mesh: ReflectronMesh):
+    cached = _TRIFINDER_CACHE.get(id(mesh))
+    if cached is not None:
+        return cached
     triangulation = mtri.Triangulation(
         mesh.intersections["detectorY"].to_numpy(dtype=float, copy=False),
         mesh.intersections["detectorX"].to_numpy(dtype=float, copy=False),
         triangles=mesh.triangles,
     )
-    return triangulation.get_trifinder()
+    trifinder = triangulation.get_trifinder()
+    _TRIFINDER_CACHE[id(mesh)] = trifinder
+    return trifinder
+
+
+def _nearest_vertex_tree(mesh: ReflectronMesh) -> cKDTree:
+    cached = _KDTREE_CACHE.get(id(mesh))
+    if cached is not None:
+        return cached
+    tree = cKDTree(mesh.detector_vertices)
+    _KDTREE_CACHE[id(mesh)] = tree
+    return tree
 
 
 def _barycentric_coordinates(triangle_vertices: np.ndarray, query_points: np.ndarray) -> np.ndarray:
@@ -223,7 +244,7 @@ def correct_detector_coordinates(
     triangle_number = np.asarray(tri_finder(detx, dety), dtype=int)
     outside_mask = triangle_number < 0
     if np.any(outside_mask):
-        nearest_tree = cKDTree(detector_vertices)
+        nearest_tree = _nearest_vertex_tree(mesh)
         closest_vertex = nearest_tree.query(query_points[outside_mask], k=1)[1]
         fallback_triangles = _first_triangle_per_vertex(triangles, len(detector_vertices))[closest_vertex]
         unresolved = fallback_triangles < 0
@@ -370,6 +391,67 @@ def load_epos_for_reflectron_correction(epos_path: str | Path) -> pd.DataFrame:
     return ccapt_tools.epos_to_ccapt(str(Path(epos_path).expanduser()))
 
 
+def correct_epos_streaming(
+    epos_path: str | Path,
+    mesh: ReflectronMesh,
+    h5_output_path: str | Path,
+    *,
+    chunk_size: int = 1 << 20,
+    progress_callback=None,
+) -> dict:
+    """Stream-correct an EPOS file and write the result as a chunked HDF5.
+
+    Uses :func:`pyccapt.calibration.leap_tools.leap_tools.read_epos_lazy` to
+    memory-map the input and applies the reflectron mesh correction one chunk
+    at a time. The output is written through ``pandas.HDFStore.append`` with
+    ``format='table'`` so peak RAM stays bounded by ``chunk_size`` instead of
+    the full file size.
+
+    Args:
+        epos_path: Path to the ``.epos`` input.
+        mesh: Loaded :class:`ReflectronMesh` (e.g. from
+            :func:`load_builtin_preset`).
+        h5_output_path: Destination ``.h5`` path. Written with key ``"df"``.
+        chunk_size: Number of rows per chunk (default 1<<20 ≈ 1M rows ≈ 60 MB).
+        progress_callback: Optional ``callable(rows_done, total_rows)`` that
+            fires after each chunk is written.
+
+    Returns:
+        dict with ``'h5'`` (output path) and ``'rows'`` (total rows written).
+    """
+    from pyccapt.calibration.leap_tools import leap_tools
+
+    epos_path = Path(epos_path).expanduser()
+    h5_output_path = Path(h5_output_path).expanduser()
+    h5_output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    rows_written = 0
+    with leap_tools.read_epos_lazy(epos_path) as epos_table:
+        total_rows = epos_table.n_rows
+        # Warm the trifinder once so we don't pay the matplotlib build cost
+        # inside the first-chunk hot path (the cache then serves all chunks).
+        _triangle_finder(mesh)
+        with pd.HDFStore(str(h5_output_path), mode="w") as store:
+            for chunk in ccapt_tools.epos_lazy_to_ccapt_chunks(epos_table, chunk_size=chunk_size):
+                if len(chunk) == 0:
+                    continue
+                corrected_chunk = apply_reflectron_correction_to_ccapt(chunk, mesh)
+                # ``format='table'`` lets pandas append along the row axis and
+                # produces a file that ``pd.read_hdf(..., iterator=True,
+                # chunksize=...)`` can stream back later.
+                store.append(
+                    "df",
+                    corrected_chunk,
+                    format="table",
+                    index=False,
+                )
+                rows_written += len(chunk)
+                if progress_callback is not None:
+                    progress_callback(rows_written, total_rows)
+
+    return {"h5": str(h5_output_path), "rows": rows_written}
+
+
 __all__ = [
     "BUILTIN_REFLECTRON_PRESETS",
     "ReflectronMesh",
@@ -378,6 +460,7 @@ __all__ = [
     "apply_reflectron_correction_to_epos",
     "correct_detector_coordinates",
     "correct_epos_file",
+    "correct_epos_streaming",
     "list_builtin_presets",
     "load_builtin_preset",
     "load_epos_for_reflectron_correction",

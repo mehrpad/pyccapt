@@ -1,22 +1,17 @@
-﻿import multiprocessing
+﻿import logging
+import multiprocessing
 import sys
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-from importlib.metadata import PackageNotFoundError, version
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import Qt
 
 # Local module and scripts
-from pyccapt.control.core import device_checks, runtime
+from pyccapt.control.core import device_checks, loggi, runtime
 from pyccapt.control.devices import camera as camera_device
-from pyccapt.control.gui import main_parameters, process_coordinator
-from pyccapt.control.gui import (
-    gui_baking,
-    gui_gates,
-    gui_laser_control,
-    gui_pumps_vacuum,
-    gui_stage_control,
-)
+from pyccapt.control.gui import main_parameters, process_coordinator, gui_baking, gui_gates, gui_laser_control, \
+    gui_pumps_vacuum, gui_stage_control, tooltips
 
 
 class Ui_PyCCAPT(object):
@@ -46,8 +41,12 @@ class Ui_PyCCAPT(object):
         self.experimetn_finished_event = multiprocessing.Event()
         self.camera_closed_event = multiprocessing.Event()
         self.visualization_closed_event = multiprocessing.Event()
-        self.camera_win_front = multiprocessing.Event()
-        self.visualization_win_front = multiprocessing.Event()
+        # Typed command channels to the camera/visualization subprocesses.
+        # Replaces the previous (Event + flag_*) pair which was racy:
+        # main puts a string command (e.g. "show", "show_front", "hide");
+        # the subprocess drains the queue every poll tick and dispatches.
+        self.camera_command_queue = multiprocessing.Queue()
+        self.visualization_command_queue = multiprocessing.Queue()
         self.process_coordinator = process_coordinator.ProcessCoordinator()
         self.camera_process = None
         self.camera_available = False
@@ -567,9 +566,10 @@ class Ui_PyCCAPT(object):
                                              "                                                }\n"
                                              "                                            ")
         self.control_algorithm.setObjectName("control_algorithm")
-        self.control_algorithm.addItem("")
-        self.control_algorithm.addItem("")
-        self.control_algorithm.addItem("")
+        self.control_algorithm.addItem("")  # Proportional
+        self.control_algorithm.addItem("")  # Proportional aggressive
+        self.control_algorithm.addItem("")  # Adaptive P
+        self.control_algorithm.addItem("")  # PID
         self.gridLayout.addWidget(self.control_algorithm, 1, 1, 1, 1)
         self.label_178 = QtWidgets.QLabel(parent=self.centralwidget)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Minimum)
@@ -891,9 +891,70 @@ class Ui_PyCCAPT(object):
         self.actiontake_sceernshot.setObjectName("actiontake_sceernshot")
         self.actionAbout = QtGui.QAction(parent=PyCCAPT)
         self.actionAbout.setObjectName("actionAbout")
+
+        # File menu
+        self.actionOpenDataFolder = QtGui.QAction("Open Data Folder", parent=PyCCAPT)
+        self.actionOpenDataFolder.setShortcut("Ctrl+D")
+        self.actionOpenProjectFolder = QtGui.QAction("Open Project Folder", parent=PyCCAPT)
+        self.actiontake_sceernshot.setShortcut("Ctrl+Shift+S")
+        self.actionExit.setShortcut("Ctrl+Q")
+        self.menuFile.addAction(self.actionOpenDataFolder)
+        self.menuFile.addAction(self.actionOpenProjectFolder)
+        self.menuFile.addAction(self.actiontake_sceernshot)
+        self.menuFile.addSeparator()
         self.menuFile.addAction(self.actionExit)
-        self.menuEdit.addAction(self.actiontake_sceernshot)
+
+        # Edit menu
+        self.actionEditConfig = QtGui.QAction("Edit config.toml…", parent=PyCCAPT)
+        self.actionEditConfig.setShortcut("Ctrl+,")
+        self.actionShowConfigPath = QtGui.QAction("Show Config Location", parent=PyCCAPT)
+        self.menuEdit.addAction(self.actionEditConfig)
+        self.menuEdit.addAction(self.actionShowConfigPath)
+
+        # View menu (shortcuts to the sub-windows already in the toolbar)
+        self.actionShowCameras = QtGui.QAction("Cameras Window", parent=PyCCAPT)
+        self.actionShowCameras.setShortcut("Ctrl+1")
+        self.actionShowPumps = QtGui.QAction("Pumps && Vacuum Window", parent=PyCCAPT)
+        self.actionShowPumps.setShortcut("Ctrl+2")
+        self.actionShowGates = QtGui.QAction("Gates Window", parent=PyCCAPT)
+        self.actionShowGates.setShortcut("Ctrl+3")
+        self.actionShowLaser = QtGui.QAction("Laser Control Window", parent=PyCCAPT)
+        self.actionShowLaser.setShortcut("Ctrl+4")
+        self.actionShowStage = QtGui.QAction("Stage Control Window", parent=PyCCAPT)
+        self.actionShowStage.setShortcut("Ctrl+5")
+        self.actionShowVisualization = QtGui.QAction("Visualization Window", parent=PyCCAPT)
+        self.actionShowVisualization.setShortcut("Ctrl+6")
+        self.actionShowBaking = QtGui.QAction("Baking Window", parent=PyCCAPT)
+        self.actionShowBaking.setShortcut("Ctrl+7")
+        self.menuView.addAction(self.actionShowCameras)
+        self.menuView.addAction(self.actionShowPumps)
+        self.menuView.addAction(self.actionShowGates)
+        self.menuView.addAction(self.actionShowLaser)
+        self.menuView.addAction(self.actionShowStage)
+        self.menuView.addAction(self.actionShowVisualization)
+        self.menuView.addAction(self.actionShowBaking)
+
+        # Settings menu
+        self.actionOpenConfigSettings = QtGui.QAction("Open config.toml…", parent=PyCCAPT)
+        self.actionShowDeviceStatus = QtGui.QAction("Show Device Status", parent=PyCCAPT)
+        self.actionShowSerialPorts = QtGui.QAction("Show Available Serial Ports", parent=PyCCAPT)
+        self.menuSettings.addAction(self.actionOpenConfigSettings)
+        self.menuSettings.addAction(self.actionShowDeviceStatus)
+        self.menuSettings.addAction(self.actionShowSerialPorts)
+
+        # Help menu
+        self.actionDocumentation = QtGui.QAction("Online Documentation", parent=PyCCAPT)
+        self.actionDocumentation.setShortcut("F1")
+        self.actionGitHub = QtGui.QAction("GitHub Repository", parent=PyCCAPT)
+        self.actionReportIssue = QtGui.QAction("Report an Issue…", parent=PyCCAPT)
+        self.actionShortcuts = QtGui.QAction("Keyboard Shortcuts", parent=PyCCAPT)
+        self.menuHelp.addAction(self.actionDocumentation)
+        self.menuHelp.addAction(self.actionGitHub)
+        self.menuHelp.addAction(self.actionReportIssue)
+        self.menuHelp.addSeparator()
+        self.menuHelp.addAction(self.actionShortcuts)
         self.menuHelp.addAction(self.actionAbout)
+
         self.menubar.addAction(self.menuFile.menuAction())
         self.menubar.addAction(self.menuEdit.menuAction())
         self.menubar.addAction(self.menuView.menuAction())
@@ -902,6 +963,13 @@ class Ui_PyCCAPT(object):
 
         self.retranslateUi(PyCCAPT)
         QtCore.QMetaObject.connectSlotsByName(PyCCAPT)
+        tooltips.apply_tooltips(self, tooltips.MAIN_TOOLTIPS)
+        # Override the literal defaults baked into retranslateUi with the
+        # values from config.toml so that editing config.toml is the single
+        # source of truth for "what the GUI looks like when the operator
+        # opens the software". Operators can still freely edit the fields
+        # afterwards; this only changes the *initial* values.
+        self._apply_config_defaults_to_inputs()
         PyCCAPT.setTabOrder(self.gates_control, self.pumps_vaccum)
         PyCCAPT.setTabOrder(self.pumps_vaccum, self.camears)
         PyCCAPT.setTabOrder(self.camears, self.laser_control)
@@ -947,6 +1015,30 @@ class Ui_PyCCAPT(object):
         self.actionAbout.triggered.connect(self.about)
         self.actionExit.triggered.connect(PyCCAPT.close)
         self.actiontake_sceernshot.triggered.connect(self.take_screenshot)
+        self.actionOpenDataFolder.triggered.connect(self.open_data_folder)
+        self.actionOpenProjectFolder.triggered.connect(self.open_project_folder)
+        self.actionEditConfig.triggered.connect(self.open_config_in_editor)
+        self.actionShowConfigPath.triggered.connect(self.show_config_path)
+        self.actionOpenConfigSettings.triggered.connect(self.open_config_in_editor)
+        self.actionShowDeviceStatus.triggered.connect(self.show_device_status)
+        self.actionShowSerialPorts.triggered.connect(self.show_serial_ports)
+        self.actionShowCameras.triggered.connect(self.open_cameras_win)
+        self.actionShowPumps.triggered.connect(self.open_pumps_vacuum_win)
+        self.actionShowGates.triggered.connect(self.open_gates_win)
+        self.actionShowLaser.triggered.connect(self.open_laser_control_win)
+        self.actionShowStage.triggered.connect(self.open_stage_control_win)
+        self.actionShowVisualization.triggered.connect(self.open_visualization_win)
+        self.actionShowBaking.triggered.connect(self.open_baking_win)
+        self.actionDocumentation.triggered.connect(
+            lambda: self._open_external_url("https://pyccapt.readthedocs.io/en/latest/")
+        )
+        self.actionGitHub.triggered.connect(
+            lambda: self._open_external_url("https://github.com/mmonajem/pyccapt")
+        )
+        self.actionReportIssue.triggered.connect(
+            lambda: self._open_external_url("https://github.com/mmonajem/pyccapt/issues/new")
+        )
+        self.actionShortcuts.triggered.connect(self.show_keyboard_shortcuts)
         self.camears.clicked.connect(self.open_cameras_win)
         self.gates_control.clicked.connect(self.open_gates_win)
         self.laser_control.clicked.connect(self.open_laser_control_win)
@@ -1061,12 +1153,12 @@ class Ui_PyCCAPT(object):
         self.label_190.setText(_translate("PyCCAPT", "Email"))
         self.label_200.setText(_translate("PyCCAPT", "Electrode"))
         self.label.setText(_translate("PyCCAPT", "Stop at"))
-        self.max_ions.setText(_translate("PyCCAPT", "40000"))
+        self.max_ions.setText(_translate("PyCCAPT", "2000000"))
         self.label_2.setText(_translate("PyCCAPT", "Stop at"))
         self.label_3.setText(_translate("PyCCAPT", "Stop at"))
         self.label_176.setText(_translate("PyCCAPT", "Max. Experiment Time (s)"))
         self.set_min_voltage.setText(_translate("PyCCAPT", "Set"))
-        self.ex_time.setText(_translate("PyCCAPT", "900"))
+        self.ex_time.setText(_translate("PyCCAPT", "3600"))
         self.label_179.setText(_translate("PyCCAPT", "DC Min. Voltage (V)"))
         self.vdc_max.setText(_translate("PyCCAPT", "4000"))
         self.label_180.setText(_translate("PyCCAPT", "DC Max. Voltage (V)"))
@@ -1087,8 +1179,9 @@ class Ui_PyCCAPT(object):
         self.counter_source.setItemText(1, _translate("PyCCAPT", "Digitizer"))
         self.label_191.setText(_translate("PyCCAPT", "Control Algorithm"))
         self.control_algorithm.setItemText(0, _translate("PyCCAPT", "Proportional"))
-        self.control_algorithm.setItemText(1, _translate("PyCCAPT", "PID"))
-        self.control_algorithm.setItemText(2, _translate("PyCCAPT", "PID aggressive"))
+        self.control_algorithm.setItemText(1, _translate("PyCCAPT", "Proportional aggressive"))
+        self.control_algorithm.setItemText(2, _translate("PyCCAPT", "Adaptive P"))
+        self.control_algorithm.setItemText(3, _translate("PyCCAPT", "PID"))
         self.label_178.setText(_translate("PyCCAPT", "Control Refresh Freq.(Hz)"))
         self.ex_freq.setText(_translate("PyCCAPT", "5"))
         self.label_184.setText(_translate("PyCCAPT", "Pulse Min. Voltage (V)"))
@@ -1135,8 +1228,90 @@ class Ui_PyCCAPT(object):
         self.menuSettings.setTitle(_translate("PyCCAPT", "Settings"))
         self.menuView.setTitle(_translate("PyCCAPT", "View"))
         self.actionExit.setText(_translate("PyCCAPT", "Exit"))
-        self.actiontake_sceernshot.setText(_translate("PyCCAPT", "take sceernshot"))
+        self.actiontake_sceernshot.setText(_translate("PyCCAPT", "Take Screenshot"))
         self.actionAbout.setText(_translate("PyCCAPT", "About PyCCAPT"))
+
+    def _apply_config_defaults_to_inputs(self):
+        """Populate the experiment-parameter input fields from config.toml.
+
+        For each editable field on the main GUI, if a corresponding key is
+        set in ``config.toml`` we use that value as the field's initial
+        contents; otherwise the literal default already written by
+        ``retranslateUi`` stays in place (so the GUI is still usable on a
+        minimal config).
+
+        Operators can still freely edit any field after the GUI opens --
+        this method only sets the *initial* values shown when the
+        software starts.
+
+        Recognised config keys:
+
+        * ``min_vp``                  -> Pulse Min. Voltage (V)
+        * ``max_vp``                  -> Pulse Max. Voltage (V)
+        * ``default_vdc_min``         -> DC Min. Voltage (V)
+        * ``default_vdc_max``         -> DC Max. Voltage (V)
+          (separate from ``max_vdc``, which is the *safety* upper bound)
+        * ``default_max_ions``        -> Max. Number of Ions
+        * ``default_ex_time_s``       -> Max. Experiment Time (s)
+        * ``default_ex_freq_hz``      -> Control Refresh Freq. (Hz)
+        * ``default_vdc_step_up``     -> K_p Upwards
+        * ``default_vdc_step_down``   -> K_p Downwards
+        * ``default_detection_rate``  -> Detection Rate (%)
+        * ``default_pulse_fraction``  -> Pulse Fraction (%)
+        * ``default_pulse_frequency_khz`` -> Pulse Frequency (kHz)
+        * ``default_pulse_mode``      -> Pulse Mode dropdown text
+        * ``default_counter_source``  -> Detection Mode dropdown text
+        * ``default_control_algorithm`` -> Control Algorithm dropdown text
+        * ``default_ex_user``         -> Experiment User
+        * ``default_ex_name``         -> Experiment Name
+        """
+        conf = self.conf
+
+        def _set_text(widget, key):
+            value = conf.get(key)
+            if value is None or value == "":
+                return
+            widget.setText(str(value))
+
+        def _set_combo(widget, key):
+            value = conf.get(key)
+            if value is None or value == "":
+                return
+            text = str(value).strip()
+            idx = widget.findText(text)
+            if idx >= 0:
+                widget.setCurrentIndex(idx)
+
+        # Voltage limits. The pulse-voltage system limits (`min_vp` /
+        # `max_vp`) double as the experiment-default values because in
+        # this rig the experiment usually starts and ends at those
+        # extremes. The DC voltage GUI defaults are *not* the same as
+        # `max_vdc` (which is the safety hard cap, e.g. 14000) -- so we
+        # use dedicated `default_vdc_*` keys.
+        _set_text(self.vp_min, 'min_vp')
+        _set_text(self.vp_max, 'max_vp')
+        _set_text(self.vdc_min, 'default_vdc_min')
+        _set_text(self.vdc_max, 'default_vdc_max')
+
+        _set_text(self.max_ions, 'default_max_ions')
+        _set_text(self.ex_time, 'default_ex_time_s')
+        _set_text(self.ex_freq, 'default_ex_freq_hz')
+        _set_text(self.vdc_steps_up, 'default_vdc_step_up')
+        _set_text(self.vdc_steps_down, 'default_vdc_step_down')
+        _set_text(self.detection_rate_init, 'default_detection_rate')
+        _set_text(self.pulse_fraction, 'default_pulse_fraction')
+        _set_text(self.pulse_frequency, 'default_pulse_frequency_khz')
+
+        # Free-text identity fields.
+        _set_text(self.ex_user, 'default_ex_user')
+        _set_text(self.ex_name, 'default_ex_name')
+
+        # Dropdowns. We match by visible text (case-sensitive) so the
+        # operator can write 'Voltage' / 'Laser' / 'VoltageLaser' etc.
+        # in config.toml without having to know the index.
+        _set_combo(self.pulse_mode, 'default_pulse_mode')
+        _set_combo(self.counter_source, 'default_counter_source')
+        _set_combo(self.control_algorithm, 'default_control_algorithm')
 
     def super_user_access(self):
         """
@@ -1346,12 +1521,94 @@ class Ui_PyCCAPT(object):
         self.emitter.pulse_voltage.emit(self.variables.pulse_voltage)
         self.emitter.detection_rate.emit(self.variables.detection_rate_current)
 
+        self._update_vacuum_warning()
+        self._update_laser_warning()
+
         if not self.variables.start_flag and self.variables.stop_flag:
             self.stop_experiment_clicked()
 
         if self.variables.vdc_hold != self.vdc_hold_old:
             self.dc_hold_clicked()
             self.vdc_hold_old = self.variables.vdc_hold
+
+    def _update_vacuum_warning(self):
+        """Show a status-bar warning when any vacuum reading is above its
+        configured threshold.
+
+        Thresholds live in config.toml under the ``vacuum_threshold_*``
+        keys. ``-1`` (gauge read error) and missing values are ignored so
+        we don't spam warnings for disabled / disconnected gauges.
+        """
+        gauges = (
+            ("Main", "vacuum_main", "vacuum_threshold_main"),
+            ("Buffer", "vacuum_buffer", "vacuum_threshold_buffer"),
+            ("Buffer pre", "vacuum_buffer_backing", "vacuum_threshold_buffer_back"),
+            ("Load lock", "vacuum_load_lock", "vacuum_threshold_load_lock"),
+            ("Load lock pre", "vacuum_load_lock_backing", "vacuum_threshold_load_lock_back"),
+            ("Cryo load lock", "vacuum_cryo_load_lock", "vacuum_threshold_cryo_load_lock"),
+            ("Cryo load lock pre", "vacuum_cryo_load_lock_backing", "vacuum_threshold_cryo_load_lock_back"),
+        )
+        warnings = []
+        for label, var_name, conf_key in gauges:
+            value = getattr(self.variables, var_name, None)
+            if value is None or value == -1 or value == 0:
+                continue
+            threshold = self.conf.get(conf_key)
+            if threshold is None:
+                continue
+            try:
+                threshold = float(threshold)
+            except (TypeError, ValueError):
+                continue
+            if value > threshold:
+                warnings.append(f"{label} {value:.2e} > {threshold:.2e} mbar")
+        statusbar = getattr(self, "statusbar", None)
+        if statusbar is None:
+            return
+        if warnings:
+            statusbar.setStyleSheet("color: red; font-weight: bold;")
+            statusbar.showMessage("Vacuum warning: " + "; ".join(warnings))
+        elif statusbar.currentMessage().startswith("Vacuum warning"):
+            statusbar.clearMessage()
+            statusbar.setStyleSheet("")
+
+    def _update_laser_warning(self):
+        """Show a status-bar warning when the laser is enabled in
+        ``config.toml`` but the laser GUI cannot reach it on CLI.
+
+        The flag ``variables.flag_laser_connected`` is set by the laser
+        GUI (True on healthy CLI session, False on disconnect / NKTPBus
+        mode / COM-port error). We only complain if the laser is
+        actually expected to be connected -- if ``laser = "off"`` in
+        config.toml the warning is suppressed.
+
+        Vacuum warnings take priority on the status bar; this only
+        writes when no vacuum warning is currently shown.
+        """
+        statusbar = getattr(self, "statusbar", None)
+        if statusbar is None:
+            return
+        if str(self.conf.get("laser", "off")).strip().lower() != "on":
+            # Laser deliberately disabled -- nothing to warn about.
+            if statusbar.currentMessage().startswith("Laser warning"):
+                statusbar.clearMessage()
+                statusbar.setStyleSheet("")
+            return
+        connected = bool(getattr(self.variables, "flag_laser_connected", False))
+        if not connected:
+            current = statusbar.currentMessage()
+            if current.startswith("Vacuum warning"):
+                # Don't clobber an active vacuum warning.
+                return
+            statusbar.setStyleSheet("color: red; font-weight: bold;")
+            statusbar.showMessage(
+                "Laser warning: not connected on CLI (open Laser Control "
+                "and use Override Access -> Switch to CLI, or check the "
+                "COM port)."
+            )
+        elif statusbar.currentMessage().startswith("Laser warning"):
+            statusbar.clearMessage()
+            statusbar.setStyleSheet("")
 
     def stop_experiment_clicked(self):
         """
@@ -1385,6 +1642,13 @@ class Ui_PyCCAPT(object):
         self.variables.clear_index_save_image = True
         self.variables.access_override_enabled = self.flag_super_user
 
+        gui_logger = logging.getLogger("pyccapt.gui")
+        gui_logger.info(
+            "Start requested. pulse_mode=%s super_user=%s",
+            self.variables.pulse_mode,
+            self.flag_super_user,
+        )
+
         issues = device_checks.collect_startup_device_issues(
             self.conf,
             self.variables,
@@ -1398,14 +1662,15 @@ class Ui_PyCCAPT(object):
                     "Override active. Experiment is starting with unavailable enabled devices. "
                     "Review the terminal log for the full device list."
                 )
-                print(
+                gui_logger.warning(
                     "Override active. Device check found unavailable enabled devices: "
-                    f"{details}. Experiment will continue and skip unavailable hardware where possible."
+                    "%s. Experiment will continue and skip unavailable hardware where possible.",
+                    details,
                 )
                 self.error_message(warning_message)
             else:
                 message = device_checks.format_startup_device_issue_message(issues)
-                print(message)
+                gui_logger.error("Experiment start blocked: %s", message)
                 self.error_message(message)
                 self.variables.start_flag = False
                 self.variables.stop_flag = False
@@ -1426,11 +1691,16 @@ class Ui_PyCCAPT(object):
                 "Experiment process could not start: "
                 f"{exc.__class__.__name__}: {exc}"
             )
-            print(message)
+            gui_logger.exception("Experiment process could not start")
             self.error_message(message)
             self.variables.start_flag = False
             self.variables.stop_flag = False
             return
+
+        gui_logger.info(
+            "Experiment process started. pid=%s",
+            getattr(self.experiment_process, "pid", "?"),
+        )
 
         self.start_button.setEnabled(False)
         self.counter_source.setEnabled(False)
@@ -1440,7 +1710,9 @@ class Ui_PyCCAPT(object):
         self.ex_freq.setEnabled(False)
         self.ex_name.setEnabled(False)
         self.electrode.setEnabled(False)
-        self.control_algorithm.setEnabled(False)
+        # control_algorithm intentionally stays enabled during the run so
+        # the user can switch between Proportional / Aggressive / Adaptive /
+        # PID on the fly.
 
         self.variables.elapsed_time = 0.0
         self.variables.total_ions = 0
@@ -1514,6 +1786,136 @@ class Ui_PyCCAPT(object):
         except Exception:
             pass
 
+    # ------------------------------------------------------------------ menus
+
+    def _open_local_path(self, path):
+        """Reveal *path* (file or folder) in the OS file manager / default app."""
+        url = QtCore.QUrl.fromLocalFile(str(path))
+        if not QtGui.QDesktopServices.openUrl(url):
+            self.error_message(f"Could not open: {path}")
+
+    def _open_external_url(self, url):
+        if not QtGui.QDesktopServices.openUrl(QtCore.QUrl(url)):
+            self.error_message(f"Could not open URL: {url}")
+
+    def open_data_folder(self):
+        """Open the experiment data folder (where HDF5 / metadata is written)."""
+        target = getattr(self.variables, "path", None)
+        if not target:
+            self.error_message("No data path is set yet — start an experiment first.")
+            return
+        path = Path(target)
+        if not path.exists():
+            try:
+                path.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                self.error_message(f"Cannot create {path}: {e}")
+                return
+        self._open_local_path(path)
+
+    def open_project_folder(self):
+        """Open the pyccapt project root folder."""
+        try:
+            self._open_local_path(runtime.find_project_root())
+        except Exception as e:
+            self.error_message(f"Cannot locate project root: {e}")
+
+    def open_config_in_editor(self):
+        """Open config.toml in the system default editor."""
+        try:
+            cfg = runtime.project_path("config.toml")
+        except Exception as e:
+            self.error_message(f"Cannot locate config.toml: {e}")
+            return
+        if not cfg.exists():
+            self.error_message(f"config.toml not found at {cfg}")
+            return
+        self._open_local_path(cfg)
+
+    def show_config_path(self):
+        try:
+            cfg = runtime.project_path("config.toml")
+        except Exception as e:
+            self.error_message(f"Cannot locate config.toml: {e}")
+            return
+        QtWidgets.QMessageBox.information(
+            self.centralwidget,
+            "PyCCAPT — config location",
+            f"config.toml is at:\n{cfg}\n\nEdit it in any text editor and restart "
+            "PyCCAPT for changes to take effect.",
+        )
+
+    def show_device_status(self):
+        """Pop up a quick view of which configured devices are reachable now."""
+        try:
+            issues = device_checks.collect_startup_device_issues(
+                self.conf,
+                self.variables,
+                pulse_mode=getattr(self.variables, "pulse_mode", None),
+            )
+            available = device_checks.list_available_serial_ports()
+            serial_issues = device_checks.collect_configured_serial_port_issues(
+                self.conf, available_ports=available
+            )
+        except Exception as e:
+            self.error_message(f"Could not run device check: {e}")
+            return
+
+        lines = []
+        if issues:
+            lines.append("Startup issues:")
+            lines.extend(f"  - {i.device}: {i.reason}" for i in issues)
+        else:
+            lines.append("Startup checks: all enabled experiment devices reachable.")
+        if serial_issues:
+            lines.append("")
+            lines.append("Configured serial ports unavailable:")
+            lines.extend(f"  - {i.device}: {i.reason}" for i in serial_issues)
+        lines.append("")
+        lines.append(f"Detected serial ports: {', '.join(available) if available else 'none'}")
+        try:
+            backend_ok, backend_msg = camera_device.check_camera_backend()
+        except Exception as e:
+            backend_ok, backend_msg = False, f"camera check failed: {e}"
+        lines.append(f"Camera backend: {'OK' if backend_ok else 'unavailable'} — {backend_msg}")
+
+        QtWidgets.QMessageBox.information(
+            self.centralwidget, "PyCCAPT — device status", "\n".join(lines)
+        )
+
+    def show_serial_ports(self):
+        try:
+            ports = device_checks.list_available_serial_ports()
+        except Exception as e:
+            self.error_message(f"Could not enumerate serial ports: {e}")
+            return
+        text = "\n".join(ports) if ports else "(none detected)"
+        QtWidgets.QMessageBox.information(
+            self.centralwidget, "Available serial ports", text
+        )
+
+    def show_keyboard_shortcuts(self):
+        QtWidgets.QMessageBox.information(
+            self.centralwidget,
+            "PyCCAPT — keyboard shortcuts",
+            "File\n"
+            "  Ctrl+D       Open data folder\n"
+            "  Ctrl+Shift+S Take screenshot\n"
+            "  Ctrl+Q       Exit\n\n"
+            "Edit\n"
+            "  Ctrl+,       Edit config.toml\n\n"
+            "View\n"
+            "  Ctrl+1       Cameras\n"
+            "  Ctrl+2       Pumps & Vacuum\n"
+            "  Ctrl+3       Gates\n"
+            "  Ctrl+4       Laser control\n"
+            "  Ctrl+5       Stage control\n"
+            "  Ctrl+6       Visualization\n"
+            "  Ctrl+7       Baking\n\n"
+            "Help\n"
+            "  F1           Online documentation",
+        )
+
     def on_stop_experiment_worker(self):
         """
                                             Enable the start and stop buttons after experiment is finished
@@ -1535,7 +1937,8 @@ class Ui_PyCCAPT(object):
             self.ex_freq.setEnabled(True)
             self.ex_name.setEnabled(True)
             self.electrode.setEnabled(True)
-            self.control_algorithm.setEnabled(True)
+            # control_algorithm was never disabled during the run; nothing
+            # to re-enable here.
 
             self.ex_number.setText(str(self.variables.counter))
             self.experiment_process.join(1)
@@ -1622,18 +2025,23 @@ class Ui_PyCCAPT(object):
             self.error_message(message)
 
         if str(self.conf.get("camera", "off")).strip().lower() == "on":
-            self.camera_available, self.camera_status_message = camera_device.check_camera_availability()
+	        self.camera_available, self.camera_status_message = camera_device.check_camera_backend()
         else:
             self.camera_available = False
             self.camera_status_message = "Camera support is disabled in config.toml."
 
         if self.camera_available:
+            # Always start the camera process when the backend is present —
+            # the worker handles 0/1/2 cameras dynamically and reconnects
+            # hot-plugged devices, so the button stays usable either way.
             self.camera_process = self.process_coordinator.start_camera(
                 self.variables,
                 self.conf,
                 self.camera_closed_event,
-                self.camera_win_front,
+                self.camera_command_queue,
             )
+            if self.camera_status_message:
+                self.camears.setToolTip(self.camera_status_message)
         else:
             self.camears.setEnabled(False)
             self.camears.setToolTip(self.camera_status_message)
@@ -1680,7 +2088,7 @@ class Ui_PyCCAPT(object):
             self.variables,
             self.conf,
             self.visualization_closed_event,
-            self.visualization_win_front,
+            self.visualization_command_queue,
             self.x_plot,
             self.y_plot,
             self.t_plot,
@@ -1697,6 +2105,30 @@ class Ui_PyCCAPT(object):
             window.activateWindow()
         button.setStyleSheet("background-color: green")
 
+    def _grant_foreground_to(self, process):
+        """Allow *process* to bring its own windows to the foreground.
+
+        Windows blocks cross-process ``SetForegroundWindow`` calls by
+        default, which is why the camera and visualization sub-windows
+        (running in their own ``multiprocessing.Process``) ignored
+        ``raise_()`` / ``activateWindow()`` requests. Calling
+        ``AllowSetForegroundWindow(target_pid)`` from this process lifts
+        that block for the next focus-grab the target tries. No-op on
+        non-Windows platforms.
+        """
+        if sys.platform != "win32":
+            return
+        if process is None:
+            return
+        pid = getattr(process, "pid", None)
+        if not pid:
+            return
+        try:
+            import ctypes
+            ctypes.windll.user32.AllowSetForegroundWindow(int(pid))
+        except Exception:
+            pass
+
     def open_cameras_win(self):
         """
                                     Open the Cameras window
@@ -1711,8 +2143,10 @@ class Ui_PyCCAPT(object):
             self.error_message(self.camera_status_message or "No cameras are available on this system.")
             return
 
-        self.variables.flag_camera_win_show = True
-        self.camera_win_front.set()
+        # Send a single typed "show + front" command instead of toggling
+        # two separate handshakes (was: flag_camera_win_show + Event).
+        self._grant_foreground_to(self.camera_process)
+        self.camera_command_queue.put("show_front")
         self.camears.setStyleSheet("background-color: green")
 
     def check_closed_events(self):
@@ -1807,8 +2241,10 @@ class Ui_PyCCAPT(object):
                                     Return:
                                             None
                                     """
-        self.variables.flag_visualization_win_show = True
-        self.visualization_win_front.set()
+        # Send a single typed "show + front" command instead of toggling
+        # two separate handshakes.
+        self._grant_foreground_to(getattr(self, "visualization_process", None))
+        self.visualization_command_queue.put("show_front")
         self.visualization.setStyleSheet("background-color: green")
 
     def open_baking_win(self):
@@ -1881,29 +2317,84 @@ class Ui_PyCCAPT(object):
         self.timer.stop()
 
     def cleanup(self, ):
+        """Tear down every long-lived resource so the Python process can exit.
+
+        The order matters:
+          1. Stop QThreads / QTimers / device handles inside each Ui_*
+             instance.  Without this the laser Worker QThread keeps
+             looping forever (msleep(1000)) and the SmarAct poll timers
+             keep firing on already-closed windows.
+          2. Force-close the sub-windows so their accept-paths run.
+          3. Terminate worker subprocesses and *wait briefly* for them
+             to die - terminate() is async, and unjoined zombie
+             subprocesses keep the multiprocessing Manager alive,
+             which is what makes "close" appear to do nothing.
+          4. Quit the Qt event loop so app.exec() returns and __main__
+             can release the shared context + os._exit.
         """
-                                    Cleanup function to terminate the camera process
+        # --- 1. Stop in-process QThreads / timers / device handles ------
+        for ui_attr in ("gui_baking", "gui_pumps_vacuum", "gui_gates",
+                        "gui_laser_control", "gui_stage_control"):
+            ui = getattr(self, ui_attr, None)
+            if ui is None or not hasattr(ui, "stop"):
+                continue
+            try:
+                ui.stop()
+            except Exception as exc:
+                print(f"cleanup: {ui_attr}.stop() failed (non-fatal): {exc}")
 
-                                    Args:
-                                            None
-
-                                    Return:
-                                            None
-                                    """
-        if hasattr(self, "gui_baking"):
-            self.gui_baking.stop()
-        if hasattr(self, "gui_pumps_vacuum"):
-            self.gui_pumps_vacuum.stop()
         if hasattr(self, "SignalEmitter_Pumps_Vacuum"):
-            self.SignalEmitter_Pumps_Vacuum.bool_flag_while_loop.emit(False)
-        if hasattr(self, "experiment_process") and self.experiment_process.is_alive():
-            self.experiment_process.terminate()
-        if self.camera_process is not None and self.camera_process.is_alive():
-            self.camera_process.terminate()
-        if hasattr(self, 'visualization_process') and self.visualization_process.is_alive():
-            self.visualization_process.terminate()
+            try:
+                self.SignalEmitter_Pumps_Vacuum.bool_flag_while_loop.emit(False)
+            except Exception:
+                pass
+
+        # Daemon thread - join briefly so it gets a chance to honour the
+        # stop signal, but don't hang if it's wedged on a serial read.
         if hasattr(self, 'gui_pumps_vacuum') and hasattr(self.gui_pumps_vacuum, 'gauges_thread'):
-            self.gui_pumps_vacuum.gauges_thread.join(2)
+            try:
+                self.gui_pumps_vacuum.gauges_thread.join(0.5)
+            except Exception:
+                pass
+
+        # --- 2. Force-close the Qt sub-windows --------------------------
+        for attr in ("Gates", "Pumps_vacuum", "Laser_control", "Stage_control", "Baking"):
+            window = getattr(self, attr, None)
+            if window is None:
+                continue
+            try:
+                window.force_close = True
+                window.close()
+                window.deleteLater()
+            except Exception:
+                pass
+
+        # --- 3. Terminate worker subprocesses, wait briefly -------------
+        subs = []
+        if hasattr(self, "experiment_process") and self.experiment_process is not None:
+            subs.append(("experiment", self.experiment_process))
+        if self.camera_process is not None:
+            subs.append(("camera", self.camera_process))
+        if hasattr(self, 'visualization_process') and self.visualization_process is not None:
+            subs.append(("visualization", self.visualization_process))
+        for name, proc in subs:
+            try:
+                if proc.is_alive():
+                    proc.terminate()
+            except Exception:
+                pass
+        for name, proc in subs:
+            try:
+                proc.join(timeout=2.0)
+                if proc.is_alive():
+                    print(f"cleanup: {name} subprocess did not exit within 2 s; killing")
+                    proc.kill()
+                    proc.join(timeout=1.0)
+            except Exception as exc:
+                print(f"cleanup: {name} join failed (non-fatal): {exc}")
+
+        # --- 4. Quit the Qt event loop ----------------------------------
+        QtWidgets.QApplication.quit()
 
     def closeEvent(self, event):
         reply = QtWidgets.QMessageBox.question(self, 'Close Confirmation',
@@ -1948,7 +2439,27 @@ class MyPyCCAPT(QtWidgets.QMainWindow):
         )
 
         if reply == QtWidgets.QMessageBox.StandardButton.Yes:
-            self.ui.cleanup()
+            # Hard watchdog: fire os._exit after 5 s no matter what.
+            # cleanup() can hang indefinitely if a SmarAct ctl.Close
+            # call collides with an in-flight Reference (the SDK is
+            # not thread-safe) or if a serial port refuses to release.
+            # We can't fix every possible blocker individually, so a
+            # daemon thread that calls os._exit is the only guarantee
+            # the user's "X" click actually closes the program.
+            import os as _os
+            import threading as _threading
+            def _force_exit():
+                import time as _time
+                _time.sleep(5.0)
+                print("Close watchdog: forcing os._exit after 5 s")
+                _os._exit(0)
+
+            t = _threading.Thread(target=_force_exit, daemon=True)
+            t.start()
+            try:
+                self.ui.cleanup()
+            except Exception as exc:
+                print(f"Cleanup raised (non-fatal): {exc}")
             event.accept()
         else:
             event.ignore()
@@ -1961,6 +2472,12 @@ if __name__ == "__main__":
         print('Can not load the configuration file')
         print(exc)
         sys.exit()
+
+    # Configure application-wide logging as early as possible so that any
+    # subsequent device probing, configuration parsing, or process startup
+    # is captured to disk under <project_root>/files/logs/gui/.
+    gui_logger = loggi.setup_application_logging(project_root)
+    loggi.log_configuration_snapshot(gui_logger, conf)
 
     shared = runtime.create_shared_context(conf)
     shared.variables.log_path = str(project_root)
@@ -1976,6 +2493,21 @@ if __name__ == "__main__":
         shared.main_v_dc_plot,
     )
     window.show()
-    sys.exit(app.exec())
+    exit_code = app.exec()
+    # Tear down the multiprocessing Manager and unlink the shared-memory
+    # ring buffers - without this the parent Python interpreter waits
+    # forever for the Manager subprocess and the close button appears to
+    # do nothing.
+    try:
+        runtime.release_shared_context(shared)
+    except Exception as exc:
+        print(f"Shared-context teardown failed (non-fatal): {exc}")
+    # Safety net: even after cleanup() and release_shared_context, a
+    # rogue daemon thread or unjoinable subprocess can keep the Python
+    # interpreter alive so the user sees a "frozen" main window long
+    # after they hit close.  os._exit is a hard exit that bypasses all
+    # of that machinery - on Windows the OS reclaims any leftover
+    # shared memory automatically, so this is safe.
+    import os
 
-
+    os._exit(exit_code)

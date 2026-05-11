@@ -101,8 +101,13 @@ def _extract_hits_v3(tag_vec: np.ndarray, value_vec: np.ndarray) -> tuple[pd.Dat
     return hits, metadata
 
 
-def str_load(file_path: str | Path) -> tuple[pd.DataFrame, dict[str, Any]]:
-    """Load a Cameca STR or HITS file into a dataframe of raw delay-line timings."""
+def str_load(file_path: str | Path, verbose: bool = True) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Load a Cameca STR or HITS file into a dataframe of raw delay-line timings.
+
+    With ``verbose=True`` (default), prints the file's TLV-tag inventory, the
+    detected version, and per-channel raw event counts so users can see what
+    the binary parser found before any downstream calibration.
+    """
     file_path = Path(file_path)
     raw = np.fromfile(file_path, dtype=np.uint8)
     n_fields = len(raw) // 4
@@ -117,9 +122,38 @@ def str_load(file_path: str | Path) -> tuple[pd.DataFrame, dict[str, Any]]:
     metadata["fileName"] = str(file_path)
     metadata["nFields"] = int(n_fields)
 
+    if verbose:
+        print(f"  STR/HITS file: {file_path}")
+        print(f"  File size: {file_path.stat().st_size:,} bytes; TLV records: {n_fields:,}")
+        print(f"  Header version byte: 0x{int(metadata.get('version', 0)):02x} "
+              f"({'STR v2' if metadata.get('version') == 2 else 'HITS v3' if metadata.get('version') == 3 else 'unknown'})")
+        labels = metadata.get("detectorLabels", "").replace("\x00", "?")
+        print(f"  Detector channel labels: {labels!r}")
+        print(f"  Thresholds: {metadata.get('thresholds')}")
+        print(f"  Walk corrections: {metadata.get('walkCorrections')}")
+        if "voltage" in metadata:
+            print(f"  Initial specimen voltage: {metadata['voltage']:.1f} V")
+        unique_tags, tag_counts = np.unique(tag_vec, return_counts=True)
+        order = np.argsort(-tag_counts)
+        print("  Per-tag occurrence counts (top 25 by frequency):")
+        named = {
+            0x01: "detxt1", 0x02: "detxt2", 0x03: "detyt1", 0x04: "detyt2",
+            0x21: "detwt1", 0x22: "detwt2", 0x18: "quality/event-end",
+            0x05: "pulse-counter-A", 0x0B: "pulse-counter-B",
+            0xA0: "version", 0x1B: "voltage",
+        }
+        for slot in order[:25]:
+            tag_value = int(unique_tags[slot])
+            count = int(tag_counts[slot])
+            label = named.get(tag_value, "")
+            label_part = f" ({label})" if label else ""
+            print(f"    tag 0x{tag_value:02x}{label_part}: {count:,}")
+
     if metadata.get("version") == 3:
         hits, extra_metadata = _extract_hits_v3(tag_vec, value_vec)
         metadata.update(extra_metadata)
+        if verbose:
+            print(f"  HITS v3: extracted {len(hits):,} initial events from header region only.")
         return hits, metadata
 
     is_end = tag_vec == 0x18
@@ -159,6 +193,19 @@ def str_load(file_path: str | Path) -> tuple[pd.DataFrame, dict[str, Any]]:
     )
     metadata["nEvents"] = int(len(hits))
     metadata["nFull6Channels"] = int(np.sum(np.all(np.isfinite(channel_data), axis=1)))
+    if verbose:
+        per_channel_counts = {
+            "detxt1": int(np.sum(np.isfinite(channel_data[:, 0]))),
+            "detxt2": int(np.sum(np.isfinite(channel_data[:, 1]))),
+            "detyt1": int(np.sum(np.isfinite(channel_data[:, 2]))),
+            "detyt2": int(np.sum(np.isfinite(channel_data[:, 3]))),
+            "detwt1": int(np.sum(np.isfinite(channel_data[:, 4]))),
+            "detwt2": int(np.sum(np.isfinite(channel_data[:, 5]))),
+        }
+        print(f"  Real events kept (>=1 channel): {len(hits):,} of {n_events:,} 0x18 markers")
+        print(f"  Events with all 6 channels: {metadata['nFull6Channels']:,}")
+        print(f"  Per-channel finite counts: {per_channel_counts}")
+        print(f"  Output dataframe columns: {list(hits.columns)}")
     return hits, metadata
 
 
@@ -171,7 +218,7 @@ def _safe_geometry_fit(detx_raw: np.ndarray, dety_raw: np.ndarray, detw_raw: np.
     return float(1.0 / np.sqrt(2.0)), float(1.0 / np.sqrt(2.0)), c
 
 
-def str_calculate_positions(hits: pd.DataFrame) -> pd.DataFrame:
+def str_calculate_positions(hits: pd.DataFrame, verbose: bool = True) -> pd.DataFrame:
     """Compute raw detector positions and TDC TOF from STR/HITS delay-line timings."""
     result = hits.copy()
 
@@ -255,6 +302,17 @@ def str_calculate_positions(hits: pd.DataFrame) -> pd.DataFrame:
     result["tof_offset_x"] = off_x
     result["tof_offset_y"] = off_y
     result["tof_offset_w"] = off_w
+    if verbose:
+        hit_type_counts = dict(pd.Series(result["hitType"].to_numpy()).value_counts().sort_index().items())
+        print(
+            f"  STR positions: hitType counts={hit_type_counts}, "
+            f"geometry w = {a:.4f}*x + {b:.4f}*y + {c:.1f}, "
+            f"TOF DL offsets x={off_x:+.1f}, y={off_y:+.1f}, w={off_w:+.1f}"
+        )
+        print(
+            f"  Rows with detx/dety: {int(np.sum(np.isfinite(detx_raw) & np.isfinite(dety_raw))):,}; "
+            f"with TOF: {int(np.sum(np.isfinite(tof))):,}"
+        )
     return result
 
 
@@ -412,8 +470,13 @@ def calibrate_str_from_rhit(
     return str_calibrate_from_rhit(hits, rhit_hits, rhit_histograms, rhit_metadata)
 
 
-def str_to_ccapt(hits: pd.DataFrame) -> pd.DataFrame:
-    """Convert STR/HITS data into a processed PyCCAPT-style dataframe."""
+def str_to_ccapt(hits: pd.DataFrame, drop_invalid: bool = True) -> pd.DataFrame:
+    """Convert STR/HITS data into a processed PyCCAPT-style dataframe.
+
+    With ``drop_invalid=True`` (default), rows with NaN ``detx`` / ``dety`` /
+    ``mc`` / ``tof_ns`` / ``VDC`` are dropped — these can never produce useful
+    downstream analysis.
+    """
     required = {"mc", "tof_ns", "VDC", "detx", "dety"}
     missing = required.difference(hits.columns)
     if missing:
@@ -421,6 +484,12 @@ def str_to_ccapt(hits: pd.DataFrame) -> pd.DataFrame:
             "STR data must be calibrated before conversion to a PyCCAPT dataset. "
             f"Missing columns: {sorted(missing)}"
         )
+
+    if drop_invalid:
+        valid = pd.Series(True, index=hits.index)
+        for column in ("detx", "dety", "mc", "tof_ns", "VDC"):
+            valid &= np.isfinite(hits[column].to_numpy(dtype=float))
+        hits = hits.loc[valid]
 
     length = len(hits)
     start_counter = hits["ionIdx"].to_numpy(dtype=int) - 1 if "ionIdx" in hits.columns else np.arange(length, dtype=int)
@@ -443,3 +512,208 @@ def str_to_ccapt(hits: pd.DataFrame) -> pd.DataFrame:
             "start_counter": start_counter,
         }
     )
+
+
+def _require_h5py():
+    try:
+        import h5py  # type: ignore
+    except ImportError as exc:  # pragma: no cover - depends on optional runtime package
+        raise ImportError(
+            "STR raw-HDF5 export requires the optional 'h5py' package. "
+            "Install it with 'pip install h5py'."
+        ) from exc
+    return h5py
+
+
+# Channel-tag mapping for the STR delay-line ends.
+# Order chosen so the raw-analysis Roentdek pipeline reads
+# x-pair, then y-pair, then w-pair — matching its DLD convention.
+_STR_CHANNEL_COLUMNS: tuple[tuple[int, str], ...] = (
+    (0, "detxt1"),
+    (1, "detxt2"),
+    (2, "detyt1"),
+    (3, "detyt2"),
+    (4, "detwt1"),
+    (5, "detwt2"),
+)
+
+
+def _build_str_tdc_table(
+    hits: pd.DataFrame,
+    *,
+    pulse_mode: str,
+) -> dict[str, np.ndarray]:
+    """Flatten STR per-channel TDC counts into a single tdc-style hit table.
+
+    For each event with a finite value in ``detxt1..detwt2``, emit a row with
+    ``channel`` = 0..5, ``time_data`` = TDC count, ``start_counter`` = event
+    index, ``high_voltage`` / ``pulse`` / ``laser_pulse`` = that event's value.
+
+    Rows are returned in **event-major order** (all channel hits for event
+    ``ionIdx=k`` are consecutive in the table, then all hits for ``k+1``, ...).
+    This is the layout expected by
+    :func:`pyccapt.calibration.data_tools.data_loadcrop.build_event_group_mapping`,
+    which pairs each tdc run of equal ``start_counter`` with one dld row.
+    """
+    n = len(hits)
+    if "ionIdx" in hits.columns:
+        event_index = hits["ionIdx"].to_numpy(dtype=np.uint32)
+    else:
+        event_index = np.arange(n, dtype=np.uint32)
+    high_voltage_per_event = (
+        hits["VDC"].to_numpy(dtype=float)
+        if "VDC" in hits.columns
+        else np.zeros(n, dtype=float)
+    )
+    if pulse_mode == "laser":
+        pulse_v_per_event = np.zeros(n, dtype=float)
+        laser_per_event = (
+            hits["laserpower"].to_numpy(dtype=float)
+            if "laserpower" in hits.columns
+            else np.zeros(n, dtype=float)
+        )
+    else:
+        pulse_v_per_event = (
+            hits["pulse"].to_numpy(dtype=float)
+            if "pulse" in hits.columns
+            else np.zeros(n, dtype=float)
+        )
+        laser_per_event = np.zeros(n, dtype=float)
+
+    # Stack per-channel arrays as columns so we can iterate "down events, across
+    # channels" without materializing six separate Python loops.
+    channel_columns_present: list[tuple[int, str]] = [
+        (idx, col) for idx, col in _STR_CHANNEL_COLUMNS if col in hits.columns
+    ]
+    if not channel_columns_present:
+        return {}
+
+    n_channels = len(channel_columns_present)
+    values_matrix = np.full((n, n_channels), np.nan, dtype=float)
+    channel_ids = np.empty(n_channels, dtype=np.uint32)
+    for column_position, (channel_index, column) in enumerate(channel_columns_present):
+        values_matrix[:, column_position] = hits[column].to_numpy(dtype=float)
+        channel_ids[column_position] = channel_index
+    finite_mask = np.isfinite(values_matrix)  # (n_events, n_channels)
+    n_per_event = finite_mask.sum(axis=1)     # (n_events,) hits per event
+    total_rows = int(n_per_event.sum())
+    if total_rows == 0:
+        return {}
+
+    # Order of finite cells when scanned event-by-event, channel-by-channel.
+    # np.where on a 2D array returns the row indices first, in row-major order,
+    # which is exactly the event-major flattening we need.
+    event_pos, channel_pos = np.where(finite_mask)
+    return {
+        "channel": channel_ids[channel_pos].reshape(-1, 1),
+        "start_counter": event_index[event_pos].reshape(-1, 1).astype(np.uint32),
+        "high_voltage": high_voltage_per_event[event_pos].reshape(-1, 1).astype(float),
+        "pulse": pulse_v_per_event[event_pos].reshape(-1, 1).astype(float),
+        "laser_pulse": laser_per_event[event_pos].reshape(-1, 1).astype(float),
+        "time_data": values_matrix[event_pos, channel_pos].reshape(-1, 1).astype(np.uint32),
+    }
+
+
+def str_to_raw_hdf5(
+    hits: pd.DataFrame,
+    output_path: str | Path,
+    *,
+    pulse_mode: str = "voltage",
+    drop_invalid: bool = True,
+) -> Path:
+    """Write `dld/` and `tdc/` groups to an HDF5 readable by the PyCCAPT raw-data workflow.
+
+    * ``dld/...`` — already-decoded events (high_voltage, pulse, laser_intensity,
+      start_counter, t, x, y). Requires calibrated columns
+      (``VDC`` / ``tof_ns`` / ``detx`` / ``dety``) — produced by
+      :func:`str_calibrate_from_rhit`. Loadable via
+      ``fetch_dataset_from_dld_grp(..., extract_mode='dld')``.
+    * ``tdc/...`` — per-DL-end TDC counts as a flat 6-channel hit stream
+      (``channel`` 0=detxt1, 1=detxt2, 2=detyt1, 3=detyt2, 4=detwt1, 5=detwt2;
+      ``time_data`` = TDC counts). Always written if the channel columns are
+      present. Loadable via ``extract_mode='tdc_ro'`` or ``'tdc_sc'`` for
+      Roentdek/Surface-Concept-style raw analysis.
+
+    With ``drop_invalid=True`` (default), the ``dld/`` rows where ``detx`` /
+    ``dety`` / ``tof_ns`` / ``VDC`` are NaN are dropped. The ``tdc/`` table
+    naturally drops NaN per-channel since each row is one finite hit.
+    """
+    h5py = _require_h5py()
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    has_calibrated = {"VDC", "tof_ns", "detx", "dety"}.issubset(hits.columns)
+
+    if has_calibrated:
+        if drop_invalid:
+            valid = (
+                np.isfinite(hits["VDC"].to_numpy(dtype=float))
+                & np.isfinite(hits["tof_ns"].to_numpy(dtype=float))
+                & np.isfinite(hits["detx"].to_numpy(dtype=float))
+                & np.isfinite(hits["dety"].to_numpy(dtype=float))
+            )
+            keep = hits.loc[valid].reset_index(drop=True)
+        else:
+            keep = hits.reset_index(drop=True)
+        n_valid = len(keep)
+        n_dropped = len(hits) - n_valid
+    else:
+        keep = hits.reset_index(drop=True)
+        n_valid = 0
+        n_dropped = 0
+
+    tdc_table = _build_str_tdc_table(hits.reset_index(drop=True), pulse_mode=pulse_mode)
+
+    if not has_calibrated and not tdc_table:
+        raise ValueError(
+            "STR hits dataframe has neither calibrated columns "
+            "(VDC, tof_ns, detx, dety) nor channel columns "
+            "(detxt1..detwt2). Nothing to export."
+        )
+
+    with h5py.File(output_path, "w") as handle:
+        if has_calibrated and n_valid > 0:
+            high_voltage = keep["VDC"].to_numpy(dtype=float).reshape(-1, 1)
+            tof_ns = keep["tof_ns"].to_numpy(dtype=float).reshape(-1, 1)
+            det_x_cm = (keep["detx"].to_numpy(dtype=float) / 10.0).reshape(-1, 1)
+            det_y_cm = (keep["dety"].to_numpy(dtype=float) / 10.0).reshape(-1, 1)
+            pulse_v = np.zeros((n_valid, 1), dtype=float)
+            pulse_l = np.zeros((n_valid, 1), dtype=float)
+            if "ionIdx" in keep.columns:
+                start_counter = keep["ionIdx"].to_numpy(dtype=np.uint32).reshape(-1, 1)
+            else:
+                start_counter = np.arange(n_valid, dtype=np.uint32).reshape(-1, 1)
+
+            grp = handle.create_group("dld")
+            grp.create_dataset("high_voltage", data=high_voltage, compression="gzip", compression_opts=4)
+            grp.create_dataset("pulse", data=pulse_v, compression="gzip", compression_opts=4)
+            grp.create_dataset("laser_intensity", data=pulse_l, compression="gzip", compression_opts=4)
+            grp.create_dataset("start_counter", data=start_counter, compression="gzip", compression_opts=4)
+            grp.create_dataset("t", data=tof_ns, compression="gzip", compression_opts=4)
+            grp.create_dataset("x", data=det_x_cm, compression="gzip", compression_opts=4)
+            grp.create_dataset("y", data=det_y_cm, compression="gzip", compression_opts=4)
+            grp.attrs["num_entries"] = n_valid
+            grp.attrs["num_dropped_nan"] = int(n_dropped)
+            grp.attrs["units"] = (
+                "high_voltage=V, pulse=V, laser_intensity=pJ, t=ns, x=cm, y=cm, start_counter=uint32"
+            )
+            grp.attrs["source"] = "str_to_raw_hdf5"
+            grp.attrs["pulse_mode"] = pulse_mode
+
+        if tdc_table:
+            tdc = handle.create_group("tdc")
+            for name, array in tdc_table.items():
+                tdc.create_dataset(name, data=array, compression="gzip", compression_opts=4)
+            tdc.attrs["num_entries"] = int(tdc_table["channel"].shape[0])
+            tdc.attrs["channel_count"] = 6
+            tdc.attrs["channel_map"] = (
+                "0=detxt1, 1=detxt2, 2=detyt1, 3=detyt2, 4=detwt1, 5=detwt2"
+            )
+            tdc.attrs["units"] = (
+                "channel=uint32, time_data=TDC counts (uint32), high_voltage=V, "
+                "pulse=V, laser_pulse=pJ, start_counter=uint32"
+            )
+            tdc.attrs["source"] = "str_to_raw_hdf5"
+            tdc.attrs["pulse_mode"] = pulse_mode
+
+    return output_path

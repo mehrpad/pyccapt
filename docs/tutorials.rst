@@ -35,3 +35,6 @@ Tutorial Guides
    tutorials/propagation_delay_calculation
    tutorials/visualization
    tutorials/3d_reconstruction
+   tutorials/reflectron_batch_cli
+   tutorials/matlab_fig_range_import
+   tutorials/low_memory_mode

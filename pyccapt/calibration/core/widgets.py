@@ -47,13 +47,7 @@ def buttonWidget(buttonText):
     Returns:
         button (object): Button widget object.
     """
-    button = widgets.Button(
-        description=buttonText,
-        disabled=False,
-        button_style='',
-        tooltip=buttonText,
-        icon='check'
-    )
+    button = widgets.Button(description=buttonText, disabled=False, button_style='', tooltip=buttonText, icon='check')
     return button
 
 
@@ -217,32 +211,14 @@ def dataset_instrument_specification_selection():
         det_diam (object): FloatText widget for detector diameter.
     """
     flightPathLength = widgets.FloatText(
-        value='110',
-        placeholder='Flight path length',
-        description='Flight path length:',
-        disabled=False
+        value='110', placeholder='Flight path length', description='Flight path length:', disabled=False
     )
 
-    det_diam = widgets.FloatText(
-        value='80',
-        placeholder='Detector diameter',
-        description='Detector diameter:',
-        disabled=False
-    )
+    det_diam = widgets.FloatText(value='80', placeholder='Detector diameter', description='Detector diameter:', disabled=False)
 
-    t0 = widgets.FloatText(
-        value='38',
-        placeholder='T_0 of the instrument',
-        description='t0:',
-        disabled=False
-    )
+    t0 = widgets.FloatText(value='38', placeholder='T_0 of the instrument', description='t0:', disabled=False)
 
-    max_mc = widgets.FloatText(
-        value='400',
-        placeholder='Maximum possible mc',
-        description='Max mc:',
-        disabled=False
-    )
+    max_mc = widgets.FloatText(value='400', placeholder='Maximum possible mc', description='Max mc:', disabled=False)
 
     tdc = widgets.Dropdown(
         options=['pyccapt', 'leap_epos', 'leap_pos', 'leap_apt', 'ato_v6'],
@@ -291,7 +267,7 @@ def density_field_selection():
             dataframe = pd.read_hdf(TableFile, mode='r')
         except Exception as e:
             print("Error: ", e)
-            
+
     elementsAtomicNumber = dataframe['atomic_number']
     elementsList = dataframe['element']
     elementDensityList = dataframe['atom_density']
@@ -301,13 +277,8 @@ def density_field_selection():
     elements = list(zip(elementsAtomicNumber, elementsList, elementDensityList, elementFieldList))
     dropdownList = []
     for index, element in enumerate(elements):
-        tupleElement = (
-            "{} - {} - Density({}) - FieldEva({})".format(element[0], element[1], element[2], element[3]),
-        )
+        tupleElement = ("{} - {} - Density({}) - FieldEva({})".format(element[0], element[1], element[2], element[3]),)
         dropdownList.append(tupleElement)
 
-    element = widgets.Dropdown(
-        options=elements,
-        description='Element'
-    )
+    element = widgets.Dropdown(options=elements, description='Element')
     return element

@@ -1,4 +1,4 @@
-﻿import logging
+import logging
 import multiprocessing
 import sys
 from importlib.metadata import PackageNotFoundError, version
@@ -10,12 +10,19 @@ from PyQt6.QtCore import Qt
 # Local module and scripts
 from pyccapt.control.core import device_checks, loggi, runtime
 from pyccapt.control.devices import camera as camera_device
-from pyccapt.control.gui import main_parameters, process_coordinator, gui_baking, gui_gates, gui_laser_control, \
-    gui_pumps_vacuum, gui_stage_control, tooltips
+from pyccapt.control.gui import (
+    main_parameters,
+    process_coordinator,
+    gui_baking,
+    gui_gates,
+    gui_laser_control,
+    gui_pumps_vacuum,
+    gui_stage_control,
+    tooltips,
+)
 
 
 class Ui_PyCCAPT(object):
-
     def __init__(self, variables, conf, x_plot, y_plot, t_plot, main_v_dc_plot):
         """
         Constructor for the PyCCAPT UI class.
@@ -65,62 +72,76 @@ class Ui_PyCCAPT(object):
         self.horizontalLayout.setObjectName("horizontalLayout")
         self.gates_control = QtWidgets.QPushButton(parent=self.centralwidget)
         self.gates_control.setMinimumSize(QtCore.QSize(0, 40))
-        self.gates_control.setStyleSheet("QPushButton{\n"
-                                         "                                                background: rgb(85, 170, 255)\n"
-                                         "                                                }\n"
-                                         "                                            ")
+        self.gates_control.setStyleSheet(
+            "QPushButton{\n"
+            "                                                background: rgb(85, 170, 255)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.gates_control.setObjectName("gates_control")
         self.horizontalLayout.addWidget(self.gates_control)
         self.pumps_vaccum = QtWidgets.QPushButton(parent=self.centralwidget)
         self.pumps_vaccum.setMinimumSize(QtCore.QSize(0, 40))
-        self.pumps_vaccum.setStyleSheet("QPushButton{\n"
-                                        "                                                background: rgb(85, 170, 255)\n"
-                                        "                                                }\n"
-                                        "                                            ")
+        self.pumps_vaccum.setStyleSheet(
+            "QPushButton{\n"
+            "                                                background: rgb(85, 170, 255)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.pumps_vaccum.setObjectName("pumps_vaccum")
         self.horizontalLayout.addWidget(self.pumps_vaccum)
         self.camears = QtWidgets.QPushButton(parent=self.centralwidget)
         self.camears.setMinimumSize(QtCore.QSize(0, 40))
-        self.camears.setStyleSheet("QPushButton{\n"
-                                   "                                                background: rgb(85, 170, 255)\n"
-                                   "                                                }\n"
-                                   "                                            ")
+        self.camears.setStyleSheet(
+            "QPushButton{\n"
+            "                                                background: rgb(85, 170, 255)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.camears.setObjectName("camears")
         self.horizontalLayout.addWidget(self.camears)
         self.laser_control = QtWidgets.QPushButton(parent=self.centralwidget)
         self.laser_control.setMinimumSize(QtCore.QSize(0, 40))
         self.laser_control.setSizeIncrement(QtCore.QSize(0, 0))
-        self.laser_control.setStyleSheet("QPushButton{\n"
-                                         "                                                background: rgb(85, 170, 255)\n"
-                                         "                                                }\n"
-                                         "                                            ")
+        self.laser_control.setStyleSheet(
+            "QPushButton{\n"
+            "                                                background: rgb(85, 170, 255)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.laser_control.setObjectName("laser_control")
         self.horizontalLayout.addWidget(self.laser_control)
         self.stage_control = QtWidgets.QPushButton(parent=self.centralwidget)
         self.stage_control.setMinimumSize(QtCore.QSize(0, 40))
         self.stage_control.setSizeIncrement(QtCore.QSize(0, 0))
-        self.stage_control.setStyleSheet("QPushButton{\n"
-                                         "                                                background: rgb(85, 170, 255)\n"
-                                         "                                                }\n"
-                                         "                                            ")
+        self.stage_control.setStyleSheet(
+            "QPushButton{\n"
+            "                                                background: rgb(85, 170, 255)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.stage_control.setObjectName("stage_control")
         self.horizontalLayout.addWidget(self.stage_control)
         self.visualization = QtWidgets.QPushButton(parent=self.centralwidget)
         self.visualization.setMinimumSize(QtCore.QSize(0, 40))
         self.visualization.setSizeIncrement(QtCore.QSize(0, 0))
-        self.visualization.setStyleSheet("QPushButton{\n"
-                                         "                                                background: rgb(85, 170, 255)\n"
-                                         "                                                }\n"
-                                         "                                            ")
+        self.visualization.setStyleSheet(
+            "QPushButton{\n"
+            "                                                background: rgb(85, 170, 255)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.visualization.setObjectName("visualization")
         self.horizontalLayout.addWidget(self.visualization)
         self.baking = QtWidgets.QPushButton(parent=self.centralwidget)
         self.baking.setMinimumSize(QtCore.QSize(0, 40))
         self.baking.setSizeIncrement(QtCore.QSize(0, 0))
-        self.baking.setStyleSheet("QPushButton{\n"
-                                  "                                                background: rgb(85, 170, 255)\n"
-                                  "                                                }\n"
-                                  "                                            ")
+        self.baking.setStyleSheet(
+            "QPushButton{\n"
+            "                                                background: rgb(85, 170, 255)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.baking.setObjectName("baking")
         self.horizontalLayout.addWidget(self.baking)
         self.gridLayout_6.addLayout(self.horizontalLayout, 0, 0, 1, 2)
@@ -146,10 +167,12 @@ class Ui_PyCCAPT(object):
         sizePolicy.setHeightForWidth(self.parameters_source.sizePolicy().hasHeightForWidth())
         self.parameters_source.setSizePolicy(sizePolicy)
         self.parameters_source.setMinimumSize(QtCore.QSize(0, 20))
-        self.parameters_source.setStyleSheet("QComboBox{\n"
-                                             "                                                background: rgb(223,223,233)\n"
-                                             "                                                }\n"
-                                             "                                            ")
+        self.parameters_source.setStyleSheet(
+            "QComboBox{\n"
+            "                                                background: rgb(223,223,233)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.parameters_source.setObjectName("parameters_source")
         self.parameters_source.addItem("")
         self.parameters_source.addItem("")
@@ -169,10 +192,12 @@ class Ui_PyCCAPT(object):
         sizePolicy.setHeightForWidth(self.ex_number.sizePolicy().hasHeightForWidth())
         self.ex_number.setSizePolicy(sizePolicy)
         self.ex_number.setMinimumSize(QtCore.QSize(0, 20))
-        self.ex_number.setStyleSheet("QLineEdit{\n"
-                                     "                                                background: rgb(223,223,233)\n"
-                                     "                                                }\n"
-                                     "                                            ")
+        self.ex_number.setStyleSheet(
+            "QLineEdit{\n"
+            "                                                background: rgb(223,223,233)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.ex_number.setObjectName("ex_number")
         self.gridLayout_4.addWidget(self.ex_number, 1, 1, 1, 1)
         self.label_174 = QtWidgets.QLabel(parent=self.centralwidget)
@@ -190,10 +215,12 @@ class Ui_PyCCAPT(object):
         sizePolicy.setHeightForWidth(self.ex_user.sizePolicy().hasHeightForWidth())
         self.ex_user.setSizePolicy(sizePolicy)
         self.ex_user.setMinimumSize(QtCore.QSize(0, 20))
-        self.ex_user.setStyleSheet("QLineEdit{\n"
-                                   "                                                background: rgb(223,223,233)\n"
-                                   "                                                }\n"
-                                   "                                            ")
+        self.ex_user.setStyleSheet(
+            "QLineEdit{\n"
+            "                                                background: rgb(223,223,233)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.ex_user.setObjectName("ex_user")
         self.gridLayout_4.addWidget(self.ex_user, 2, 1, 1, 1)
         self.label_175 = QtWidgets.QLabel(parent=self.centralwidget)
@@ -212,10 +239,12 @@ class Ui_PyCCAPT(object):
         self.ex_name.setSizePolicy(sizePolicy)
         self.ex_name.setMinimumSize(QtCore.QSize(0, 20))
         self.ex_name.setMaximumSize(QtCore.QSize(16777215, 100))
-        self.ex_name.setStyleSheet("QLineEdit{\n"
-                                   "                                                background: rgb(223,223,233)\n"
-                                   "                                                }\n"
-                                   "                                            ")
+        self.ex_name.setStyleSheet(
+            "QLineEdit{\n"
+            "                                                background: rgb(223,223,233)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.ex_name.setObjectName("ex_name")
         self.gridLayout_4.addWidget(self.ex_name, 3, 1, 1, 1)
         self.label_190 = QtWidgets.QLabel(parent=self.centralwidget)
@@ -233,10 +262,12 @@ class Ui_PyCCAPT(object):
         sizePolicy.setHeightForWidth(self.email.sizePolicy().hasHeightForWidth())
         self.email.setSizePolicy(sizePolicy)
         self.email.setMinimumSize(QtCore.QSize(0, 20))
-        self.email.setStyleSheet("QLineEdit{\n"
-                                 "                                                background: rgb(223,223,233)\n"
-                                 "                                                }\n"
-                                 "                                            ")
+        self.email.setStyleSheet(
+            "QLineEdit{\n"
+            "                                                background: rgb(223,223,233)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.email.setText("")
         self.email.setObjectName("email")
         self.gridLayout_4.addWidget(self.email, 4, 1, 1, 1)
@@ -255,10 +286,12 @@ class Ui_PyCCAPT(object):
         sizePolicy.setHeightForWidth(self.electrode.sizePolicy().hasHeightForWidth())
         self.electrode.setSizePolicy(sizePolicy)
         self.electrode.setMinimumSize(QtCore.QSize(0, 20))
-        self.electrode.setStyleSheet("QComboBox{\n"
-                                     "                                                background: rgb(223,223,233)\n"
-                                     "                                                }\n"
-                                     "                                            ")
+        self.electrode.setStyleSheet(
+            "QComboBox{\n"
+            "                                                background: rgb(223,223,233)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.electrode.setObjectName("electrode")
         self.electrode.addItem("")
         self.electrode.setItemText(0, "")
@@ -283,10 +316,12 @@ class Ui_PyCCAPT(object):
         sizePolicy.setHeightForWidth(self.max_ions.sizePolicy().hasHeightForWidth())
         self.max_ions.setSizePolicy(sizePolicy)
         self.max_ions.setMinimumSize(QtCore.QSize(0, 20))
-        self.max_ions.setStyleSheet("QLineEdit{\n"
-                                    "                                                background: rgb(223,223,233)\n"
-                                    "                                                }\n"
-                                    "                                            ")
+        self.max_ions.setStyleSheet(
+            "QLineEdit{\n"
+            "                                                background: rgb(223,223,233)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.max_ions.setObjectName("max_ions")
         self.gridLayout_3.addWidget(self.max_ions, 1, 3, 1, 1)
         self.criteria_ions = QtWidgets.QCheckBox(parent=self.centralwidget)
@@ -329,10 +364,12 @@ class Ui_PyCCAPT(object):
         sizePolicy.setHeightForWidth(self.ex_time.sizePolicy().hasHeightForWidth())
         self.ex_time.setSizePolicy(sizePolicy)
         self.ex_time.setMinimumSize(QtCore.QSize(0, 20))
-        self.ex_time.setStyleSheet("QLineEdit{\n"
-                                   "                                                background: rgb(223,223,233)\n"
-                                   "                                                }\n"
-                                   "                                            ")
+        self.ex_time.setStyleSheet(
+            "QLineEdit{\n"
+            "                                                background: rgb(223,223,233)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.ex_time.setObjectName("ex_time")
         self.gridLayout_3.addWidget(self.ex_time, 0, 3, 1, 1)
         self.label_179 = QtWidgets.QLabel(parent=self.centralwidget)
@@ -350,10 +387,12 @@ class Ui_PyCCAPT(object):
         sizePolicy.setHeightForWidth(self.vdc_max.sizePolicy().hasHeightForWidth())
         self.vdc_max.setSizePolicy(sizePolicy)
         self.vdc_max.setMinimumSize(QtCore.QSize(0, 20))
-        self.vdc_max.setStyleSheet("QLineEdit{\n"
-                                   "                                                background: rgb(223,223,233)\n"
-                                   "                                                }\n"
-                                   "                                            ")
+        self.vdc_max.setStyleSheet(
+            "QLineEdit{\n"
+            "                                                background: rgb(223,223,233)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.vdc_max.setObjectName("vdc_max")
         self.gridLayout_3.addWidget(self.vdc_max, 2, 3, 1, 1)
         self.label_180 = QtWidgets.QLabel(parent=self.centralwidget)
@@ -409,10 +448,12 @@ class Ui_PyCCAPT(object):
         sizePolicy.setHeightForWidth(self.vdc_min.sizePolicy().hasHeightForWidth())
         self.vdc_min.setSizePolicy(sizePolicy)
         self.vdc_min.setMinimumSize(QtCore.QSize(0, 20))
-        self.vdc_min.setStyleSheet("QLineEdit{\n"
-                                   "                                                background: rgb(223,223,233)\n"
-                                   "                                                }\n"
-                                   "                                            ")
+        self.vdc_min.setStyleSheet(
+            "QLineEdit{\n"
+            "                                                background: rgb(223,223,233)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.vdc_min.setObjectName("vdc_min")
         self.gridLayout_3.addWidget(self.vdc_min, 3, 3, 1, 1)
         self.verticalLayout.addLayout(self.gridLayout_3)
@@ -438,10 +479,12 @@ class Ui_PyCCAPT(object):
         sizePolicy.setHeightForWidth(self.pulse_mode.sizePolicy().hasHeightForWidth())
         self.pulse_mode.setSizePolicy(sizePolicy)
         self.pulse_mode.setMinimumSize(QtCore.QSize(0, 20))
-        self.pulse_mode.setStyleSheet("QComboBox{\n"
-                                      "                                                background: rgb(223,223,233)\n"
-                                      "                                                }\n"
-                                      "                                            ")
+        self.pulse_mode.setStyleSheet(
+            "QComboBox{\n"
+            "                                                background: rgb(223,223,233)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.pulse_mode.setObjectName("pulse_mode")
         self.pulse_mode.addItem("")
         self.pulse_mode.addItem("")
@@ -462,10 +505,12 @@ class Ui_PyCCAPT(object):
         sizePolicy.setHeightForWidth(self.pulse_fraction.sizePolicy().hasHeightForWidth())
         self.pulse_fraction.setSizePolicy(sizePolicy)
         self.pulse_fraction.setMinimumSize(QtCore.QSize(0, 20))
-        self.pulse_fraction.setStyleSheet("QLineEdit{\n"
-                                          "                                                background: rgb(223,223,233)\n"
-                                          "                                                }\n"
-                                          "                                            ")
+        self.pulse_fraction.setStyleSheet(
+            "QLineEdit{\n"
+            "                                                background: rgb(223,223,233)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.pulse_fraction.setObjectName("pulse_fraction")
         self.gridLayout_2.addWidget(self.pulse_fraction, 1, 1, 1, 1)
         self.label_187 = QtWidgets.QLabel(parent=self.centralwidget)
@@ -483,10 +528,12 @@ class Ui_PyCCAPT(object):
         sizePolicy.setHeightForWidth(self.pulse_frequency.sizePolicy().hasHeightForWidth())
         self.pulse_frequency.setSizePolicy(sizePolicy)
         self.pulse_frequency.setMinimumSize(QtCore.QSize(0, 20))
-        self.pulse_frequency.setStyleSheet("QLineEdit{\n"
-                                           "                                                background: rgb(223,223,233)\n"
-                                           "                                                }\n"
-                                           "                                            ")
+        self.pulse_frequency.setStyleSheet(
+            "QLineEdit{\n"
+            "                                                background: rgb(223,223,233)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.pulse_frequency.setObjectName("pulse_frequency")
         self.gridLayout_2.addWidget(self.pulse_frequency, 2, 1, 1, 1)
         self.label_188 = QtWidgets.QLabel(parent=self.centralwidget)
@@ -504,10 +551,12 @@ class Ui_PyCCAPT(object):
         sizePolicy.setHeightForWidth(self.detection_rate_init.sizePolicy().hasHeightForWidth())
         self.detection_rate_init.setSizePolicy(sizePolicy)
         self.detection_rate_init.setMinimumSize(QtCore.QSize(0, 20))
-        self.detection_rate_init.setStyleSheet("QLineEdit{\n"
-                                               "                                                background: rgb(223,223,233)\n"
-                                               "                                                }\n"
-                                               "                                            ")
+        self.detection_rate_init.setStyleSheet(
+            "QLineEdit{\n"
+            "                                                background: rgb(223,223,233)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.detection_rate_init.setObjectName("detection_rate_init")
         self.gridLayout_2.addWidget(self.detection_rate_init, 3, 1, 1, 1)
         self.verticalLayout.addLayout(self.gridLayout_2)
@@ -538,10 +587,12 @@ class Ui_PyCCAPT(object):
         sizePolicy.setHeightForWidth(self.counter_source.sizePolicy().hasHeightForWidth())
         self.counter_source.setSizePolicy(sizePolicy)
         self.counter_source.setMinimumSize(QtCore.QSize(0, 20))
-        self.counter_source.setStyleSheet("QComboBox{\n"
-                                          "                                                background: rgb(223,223,233)\n"
-                                          "                                                }\n"
-                                          "                                            ")
+        self.counter_source.setStyleSheet(
+            "QComboBox{\n"
+            "                                                background: rgb(223,223,233)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.counter_source.setObjectName("counter_source")
         self.counter_source.addItem("")
         self.counter_source.addItem("")
@@ -561,10 +612,12 @@ class Ui_PyCCAPT(object):
         sizePolicy.setHeightForWidth(self.control_algorithm.sizePolicy().hasHeightForWidth())
         self.control_algorithm.setSizePolicy(sizePolicy)
         self.control_algorithm.setMinimumSize(QtCore.QSize(0, 20))
-        self.control_algorithm.setStyleSheet("QComboBox{\n"
-                                             "                                                background: rgb(223,223,233)\n"
-                                             "                                                }\n"
-                                             "                                            ")
+        self.control_algorithm.setStyleSheet(
+            "QComboBox{\n"
+            "                                                background: rgb(223,223,233)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.control_algorithm.setObjectName("control_algorithm")
         self.control_algorithm.addItem("")  # Proportional
         self.control_algorithm.addItem("")  # Proportional aggressive
@@ -586,10 +639,12 @@ class Ui_PyCCAPT(object):
         sizePolicy.setHeightForWidth(self.ex_freq.sizePolicy().hasHeightForWidth())
         self.ex_freq.setSizePolicy(sizePolicy)
         self.ex_freq.setMinimumSize(QtCore.QSize(0, 20))
-        self.ex_freq.setStyleSheet("QLineEdit{\n"
-                                   "                                                background: rgb(223,223,233)\n"
-                                   "                                                }\n"
-                                   "                                            ")
+        self.ex_freq.setStyleSheet(
+            "QLineEdit{\n"
+            "                                                background: rgb(223,223,233)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.ex_freq.setObjectName("ex_freq")
         self.gridLayout.addWidget(self.ex_freq, 2, 1, 1, 1)
         self.label_184 = QtWidgets.QLabel(parent=self.centralwidget)
@@ -607,10 +662,12 @@ class Ui_PyCCAPT(object):
         sizePolicy.setHeightForWidth(self.vp_min.sizePolicy().hasHeightForWidth())
         self.vp_min.setSizePolicy(sizePolicy)
         self.vp_min.setMinimumSize(QtCore.QSize(0, 20))
-        self.vp_min.setStyleSheet("QLineEdit{\n"
-                                  "                                                background: rgb(223,223,233)\n"
-                                  "                                                }\n"
-                                  "                                            ")
+        self.vp_min.setStyleSheet(
+            "QLineEdit{\n"
+            "                                                background: rgb(223,223,233)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.vp_min.setObjectName("vp_min")
         self.gridLayout.addWidget(self.vp_min, 3, 1, 1, 1)
         self.label_185 = QtWidgets.QLabel(parent=self.centralwidget)
@@ -623,10 +680,12 @@ class Ui_PyCCAPT(object):
         sizePolicy.setHeightForWidth(self.vp_max.sizePolicy().hasHeightForWidth())
         self.vp_max.setSizePolicy(sizePolicy)
         self.vp_max.setMinimumSize(QtCore.QSize(0, 20))
-        self.vp_max.setStyleSheet("QLineEdit{\n"
-                                  "                                                background: rgb(223,223,233)\n"
-                                  "                                                }\n"
-                                  "                                            ")
+        self.vp_max.setStyleSheet(
+            "QLineEdit{\n"
+            "                                                background: rgb(223,223,233)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.vp_max.setObjectName("vp_max")
         self.gridLayout.addWidget(self.vp_max, 4, 1, 1, 1)
         self.label_181 = QtWidgets.QLabel(parent=self.centralwidget)
@@ -639,10 +698,12 @@ class Ui_PyCCAPT(object):
         sizePolicy.setHeightForWidth(self.vdc_steps_up.sizePolicy().hasHeightForWidth())
         self.vdc_steps_up.setSizePolicy(sizePolicy)
         self.vdc_steps_up.setMinimumSize(QtCore.QSize(0, 20))
-        self.vdc_steps_up.setStyleSheet("QLineEdit{\n"
-                                        "                                                background: rgb(223,223,233)\n"
-                                        "                                                }\n"
-                                        "                                            ")
+        self.vdc_steps_up.setStyleSheet(
+            "QLineEdit{\n"
+            "                                                background: rgb(223,223,233)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.vdc_steps_up.setObjectName("vdc_steps_up")
         self.gridLayout.addWidget(self.vdc_steps_up, 5, 1, 1, 1)
         self.label_182 = QtWidgets.QLabel(parent=self.centralwidget)
@@ -660,10 +721,12 @@ class Ui_PyCCAPT(object):
         sizePolicy.setHeightForWidth(self.vdc_steps_down.sizePolicy().hasHeightForWidth())
         self.vdc_steps_down.setSizePolicy(sizePolicy)
         self.vdc_steps_down.setMinimumSize(QtCore.QSize(0, 20))
-        self.vdc_steps_down.setStyleSheet("QLineEdit{\n"
-                                          "                                                background: rgb(223,223,233)\n"
-                                          "                                                }\n"
-                                          "                                            ")
+        self.vdc_steps_down.setStyleSheet(
+            "QLineEdit{\n"
+            "                                                background: rgb(223,223,233)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.vdc_steps_down.setObjectName("vdc_steps_down")
         self.gridLayout.addWidget(self.vdc_steps_down, 6, 1, 1, 1)
         self.verticalLayout.addLayout(self.gridLayout)
@@ -690,10 +753,12 @@ class Ui_PyCCAPT(object):
         sizePolicy.setHeightForWidth(self.superuser.sizePolicy().hasHeightForWidth())
         self.superuser.setSizePolicy(sizePolicy)
         self.superuser.setMinimumSize(QtCore.QSize(0, 25))
-        self.superuser.setStyleSheet("QPushButton{\n"
-                                     "                                                background: rgb(193, 193, 193)\n"
-                                     "                                                }\n"
-                                     "                                            ")
+        self.superuser.setStyleSheet(
+            "QPushButton{\n"
+            "                                                background: rgb(193, 193, 193)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.superuser.setObjectName("superuser")
         self.gridLayout_5.addWidget(self.superuser, 0, 1, 1, 1)
         self.label_194 = QtWidgets.QLabel(parent=self.centralwidget)
@@ -711,10 +776,12 @@ class Ui_PyCCAPT(object):
         sizePolicy.setHeightForWidth(self.elapsed_time.sizePolicy().hasHeightForWidth())
         self.elapsed_time.setSizePolicy(sizePolicy)
         self.elapsed_time.setMinimumSize(QtCore.QSize(0, 20))
-        self.elapsed_time.setStyleSheet("QLineEdit{\n"
-                                        "                                                background: rgb(223,223,233)\n"
-                                        "                                                }\n"
-                                        "                                            ")
+        self.elapsed_time.setStyleSheet(
+            "QLineEdit{\n"
+            "                                                background: rgb(223,223,233)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.elapsed_time.setText("")
         self.elapsed_time.setObjectName("elapsed_time")
         self.gridLayout_5.addWidget(self.elapsed_time, 1, 1, 1, 1)
@@ -733,10 +800,12 @@ class Ui_PyCCAPT(object):
         sizePolicy.setHeightForWidth(self.total_ions.sizePolicy().hasHeightForWidth())
         self.total_ions.setSizePolicy(sizePolicy)
         self.total_ions.setMinimumSize(QtCore.QSize(0, 20))
-        self.total_ions.setStyleSheet("QLineEdit{\n"
-                                      "                                                background: rgb(223,223,233)\n"
-                                      "                                                }\n"
-                                      "                                            ")
+        self.total_ions.setStyleSheet(
+            "QLineEdit{\n"
+            "                                                background: rgb(223,223,233)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.total_ions.setText("")
         self.total_ions.setObjectName("total_ions")
         self.gridLayout_5.addWidget(self.total_ions, 2, 1, 1, 1)
@@ -755,10 +824,12 @@ class Ui_PyCCAPT(object):
         sizePolicy.setHeightForWidth(self.speciemen_voltage.sizePolicy().hasHeightForWidth())
         self.speciemen_voltage.setSizePolicy(sizePolicy)
         self.speciemen_voltage.setMinimumSize(QtCore.QSize(0, 20))
-        self.speciemen_voltage.setStyleSheet("QLineEdit{\n"
-                                             "                                                background: rgb(223,223,233)\n"
-                                             "                                                }\n"
-                                             "                                            ")
+        self.speciemen_voltage.setStyleSheet(
+            "QLineEdit{\n"
+            "                                                background: rgb(223,223,233)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.speciemen_voltage.setText("")
         self.speciemen_voltage.setObjectName("speciemen_voltage")
         self.gridLayout_5.addWidget(self.speciemen_voltage, 3, 1, 1, 1)
@@ -777,10 +848,12 @@ class Ui_PyCCAPT(object):
         sizePolicy.setHeightForWidth(self.pulse_voltage.sizePolicy().hasHeightForWidth())
         self.pulse_voltage.setSizePolicy(sizePolicy)
         self.pulse_voltage.setMinimumSize(QtCore.QSize(0, 20))
-        self.pulse_voltage.setStyleSheet("QLineEdit{\n"
-                                         "                                                background: rgb(223,223,233)\n"
-                                         "                                                }\n"
-                                         "                                            ")
+        self.pulse_voltage.setStyleSheet(
+            "QLineEdit{\n"
+            "                                                background: rgb(223,223,233)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.pulse_voltage.setText("")
         self.pulse_voltage.setObjectName("pulse_voltage")
         self.gridLayout_5.addWidget(self.pulse_voltage, 4, 1, 1, 1)
@@ -799,32 +872,36 @@ class Ui_PyCCAPT(object):
         sizePolicy.setHeightForWidth(self.detection_rate.sizePolicy().hasHeightForWidth())
         self.detection_rate.setSizePolicy(sizePolicy)
         self.detection_rate.setMinimumSize(QtCore.QSize(0, 20))
-        self.detection_rate.setStyleSheet("QLineEdit{\n"
-                                          "                                                background: rgb(223,223,233)\n"
-                                          "                                                }\n"
-                                          "                                            ")
+        self.detection_rate.setStyleSheet(
+            "QLineEdit{\n"
+            "                                                background: rgb(223,223,233)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.detection_rate.setText("")
         self.detection_rate.setObjectName("detection_rate")
         self.gridLayout_5.addWidget(self.detection_rate, 5, 1, 1, 1)
         self.verticalLayout_2.addLayout(self.gridLayout_5)
-        spacerItem = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum,
-                                           QtWidgets.QSizePolicy.Policy.Expanding)
+        spacerItem = QtWidgets.QSpacerItem(
+            20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding
+        )
         self.verticalLayout_2.addItem(spacerItem)
         self.text_line = QtWidgets.QTextEdit(parent=self.centralwidget)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred,
-                                           QtWidgets.QSizePolicy.Policy.Preferred)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.text_line.sizePolicy().hasHeightForWidth())
         self.text_line.setSizePolicy(sizePolicy)
         self.text_line.setMinimumSize(QtCore.QSize(0, 400))
-        self.text_line.setStyleSheet("QWidget{\n"
-                                     "                                        border: 2px solid gray;\n"
-                                     "                                        border-radius: 10px;\n"
-                                     "                                        padding: 0 8px;\n"
-                                     "                                        background: rgb(223,223,233)\n"
-                                     "                                        }\n"
-                                     "                                    ")
+        self.text_line.setStyleSheet(
+            "QWidget{\n"
+            "                                        border: 2px solid gray;\n"
+            "                                        border-radius: 10px;\n"
+            "                                        padding: 0 8px;\n"
+            "                                        background: rgb(223,223,233)\n"
+            "                                        }\n"
+            "                                    "
+        )
         self.text_line.setObjectName("text_line")
         self.verticalLayout_2.addWidget(self.text_line)
         self.gridLayout_6.addLayout(self.verticalLayout_2, 1, 1, 1, 1)
@@ -835,10 +912,12 @@ class Ui_PyCCAPT(object):
         sizePolicy.setHeightForWidth(self.start_button.sizePolicy().hasHeightForWidth())
         self.start_button.setSizePolicy(sizePolicy)
         self.start_button.setMinimumSize(QtCore.QSize(0, 25))
-        self.start_button.setStyleSheet("QPushButton{\n"
-                                        "                                                background: rgb(193, 193, 193)\n"
-                                        "                                                }\n"
-                                        "                                            ")
+        self.start_button.setStyleSheet(
+            "QPushButton{\n"
+            "                                                background: rgb(193, 193, 193)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.start_button.setObjectName("start_button")
         self.gridLayout_6.addWidget(self.start_button, 2, 2, 2, 1)
         self.Error = QtWidgets.QLabel(parent=self.centralwidget)
@@ -860,10 +939,12 @@ class Ui_PyCCAPT(object):
         sizePolicy.setHeightForWidth(self.stop_button.sizePolicy().hasHeightForWidth())
         self.stop_button.setSizePolicy(sizePolicy)
         self.stop_button.setMinimumSize(QtCore.QSize(0, 25))
-        self.stop_button.setStyleSheet("QPushButton{\n"
-                                       "                                                background: rgb(193, 193, 193)\n"
-                                       "                                                }\n"
-                                       "                                            ")
+        self.stop_button.setStyleSheet(
+            "QPushButton{\n"
+            "                                                background: rgb(193, 193, 193)\n"
+            "                                                }\n"
+            "                                            "
+        )
         self.stop_button.setObjectName("stop_button")
         self.gridLayout_6.addWidget(self.stop_button, 4, 2, 1, 1)
         self.gridLayout_7.addLayout(self.gridLayout_6, 0, 0, 1, 1)
@@ -1032,9 +1113,7 @@ class Ui_PyCCAPT(object):
         self.actionDocumentation.triggered.connect(
             lambda: self._open_external_url("https://pyccapt.readthedocs.io/en/latest/")
         )
-        self.actionGitHub.triggered.connect(
-            lambda: self._open_external_url("https://github.com/mmonajem/pyccapt")
-        )
+        self.actionGitHub.triggered.connect(lambda: self._open_external_url("https://github.com/mmonajem/pyccapt"))
         self.actionReportIssue.triggered.connect(
             lambda: self._open_external_url("https://github.com/mmonajem/pyccapt/issues/new")
         )
@@ -1199,26 +1278,30 @@ class Ui_PyCCAPT(object):
         self.label_196.setText(_translate("PyCCAPT", "DC Voltage (V)"))
         self.label_197.setText(_translate("PyCCAPT", "Pulse Voltage (V)"))
         self.label_198.setText(_translate("PyCCAPT", "Detection Rate (%)"))
-        self.text_line.setHtml(_translate("PyCCAPT",
-                                          "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
-                                          "<html><head><meta name=\"qrichtext\" content=\"1\" /><meta charset=\"utf-8\" /><style type=\"text/css\">\n"
-                                          "p, li { white-space: pre-wrap; }\n"
-                                          "</style></head><body style=\" font-family:\'Segoe UI\'; font-size:9pt; font-weight:400; font-style:normal;\">\n"
-                                          "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'JetBrains Mono,monospace\'; font-size:8pt; color:#000000;\">{ex_user=user1;</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:7.875pt;\">ex_name=test1;</span>                                                                                </p>\n"
-                                          "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:7.875pt;\">ex_time=90;max_ions=2000;ex_freq=10;</span>                                                                                </p>\n"
-                                          "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:7.875pt;\">vdc_min=500;vdc_max=4000;vdc_steps_up=1;</span>                                                                                </p>\n"
-                                          "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:7.875pt;\">vdc_steps_down=1;</span><span style=\" font-family:\'JetBrains Mono,monospace\'; font-size:8pt; color:#000000;\">control_algorithm=PID;</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:7.875pt;\">vp_min=328;</span>                                                                                </p>\n"
-                                          "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:7.875pt;\">vp_max=3281;pulse_fraction=20;pulse_frequency=200;</span>                                                                                </p>\n"
-                                          "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:7.875pt;\">detection_rate_init=1;hit_displayed=20000;email=;counter_source=TDC</span><span style=\" font-family:\'JetBrains Mono,monospace\'; font-size:8pt; color:#000000;\">;</span>                                         </p>\n"
-                                          "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'JetBrains Mono,monospace\'; font-size:8pt; color:#000000;\">criteria_time=True;criteria_ions=False;</span>                                                                                </p>\n"
-                                          "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'JetBrains Mono,monospace\'; font-size:8pt; color:#000000;\">criteria_vdc=False}</span>                                                                                </p>\n"
-                                          "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'JetBrains Mono,monospace\'; font-size:8pt; color:#000000;\">{ex_user=user2;ex_name=test2;ex_time=100;</span>                                                                                </p>\n"
-                                          "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'JetBrains Mono,monospace\'; font-size:8pt; color:#000000;\">max_ions=3000;ex_freq=5;vdc_min=1000;</span>                                                                                </p>\n"
-                                          "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'JetBrains Mono,monospace\'; font-size:8pt; color:#000000;\">vdc_max=3000;vdc_steps_up=0.5;vdc_steps_down=0.5;</span>                                                                                </p>\n"
-                                          "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'JetBrains Mono,monospace\'; font-size:8pt; color:#000000;\">control_algorithm=proportional;vp_min=400;vp_max=2000;</span>                                                                                </p>\n"
-                                          "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'JetBrains Mono,monospace\'; font-size:8pt; color:#000000;\">pulse_fraction=15;pulse_frequency=200;detection_rate_init=2;</span>                                                                                </p>\n"
-                                          "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'JetBrains Mono,monospace\'; font-size:8pt; color:#000000;\">hit_displayed=40000;email=;counter_source=DRS;</span>                                                                                </p>\n"
-                                          "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'JetBrains Mono,monospace\'; font-size:8pt; color:#000000;\">criteria_time=False;criteria_ions=False;criteria_vdc=True}</span>                                                                            </p></body></html>"))
+        self.text_line.setHtml(
+            _translate(
+                "PyCCAPT",
+                "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+                "<html><head><meta name=\"qrichtext\" content=\"1\" /><meta charset=\"utf-8\" /><style type=\"text/css\">\n"
+                "p, li { white-space: pre-wrap; }\n"
+                "</style></head><body style=\" font-family:'Segoe UI'; font-size:9pt; font-weight:400; font-style:normal;\">\n"
+                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'JetBrains Mono,monospace'; font-size:8pt; color:#000000;\">{ex_user=user1;</span><span style=\" font-family:'MS Shell Dlg 2'; font-size:7.875pt;\">ex_name=test1;</span>                                                                                </p>\n"
+                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'MS Shell Dlg 2'; font-size:7.875pt;\">ex_time=90;max_ions=2000;ex_freq=10;</span>                                                                                </p>\n"
+                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'MS Shell Dlg 2'; font-size:7.875pt;\">vdc_min=500;vdc_max=4000;vdc_steps_up=1;</span>                                                                                </p>\n"
+                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'MS Shell Dlg 2'; font-size:7.875pt;\">vdc_steps_down=1;</span><span style=\" font-family:'JetBrains Mono,monospace'; font-size:8pt; color:#000000;\">control_algorithm=PID;</span><span style=\" font-family:'MS Shell Dlg 2'; font-size:7.875pt;\">vp_min=328;</span>                                                                                </p>\n"
+                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'MS Shell Dlg 2'; font-size:7.875pt;\">vp_max=3281;pulse_fraction=20;pulse_frequency=200;</span>                                                                                </p>\n"
+                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'MS Shell Dlg 2'; font-size:7.875pt;\">detection_rate_init=1;hit_displayed=20000;email=;counter_source=TDC</span><span style=\" font-family:'JetBrains Mono,monospace'; font-size:8pt; color:#000000;\">;</span>                                         </p>\n"
+                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'JetBrains Mono,monospace'; font-size:8pt; color:#000000;\">criteria_time=True;criteria_ions=False;</span>                                                                                </p>\n"
+                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'JetBrains Mono,monospace'; font-size:8pt; color:#000000;\">criteria_vdc=False}</span>                                                                                </p>\n"
+                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'JetBrains Mono,monospace'; font-size:8pt; color:#000000;\">{ex_user=user2;ex_name=test2;ex_time=100;</span>                                                                                </p>\n"
+                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'JetBrains Mono,monospace'; font-size:8pt; color:#000000;\">max_ions=3000;ex_freq=5;vdc_min=1000;</span>                                                                                </p>\n"
+                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'JetBrains Mono,monospace'; font-size:8pt; color:#000000;\">vdc_max=3000;vdc_steps_up=0.5;vdc_steps_down=0.5;</span>                                                                                </p>\n"
+                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'JetBrains Mono,monospace'; font-size:8pt; color:#000000;\">control_algorithm=proportional;vp_min=400;vp_max=2000;</span>                                                                                </p>\n"
+                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'JetBrains Mono,monospace'; font-size:8pt; color:#000000;\">pulse_fraction=15;pulse_frequency=200;detection_rate_init=2;</span>                                                                                </p>\n"
+                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'JetBrains Mono,monospace'; font-size:8pt; color:#000000;\">hit_displayed=40000;email=;counter_source=DRS;</span>                                                                                </p>\n"
+                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'JetBrains Mono,monospace'; font-size:8pt; color:#000000;\">criteria_time=False;criteria_ions=False;criteria_vdc=True}</span>                                                                            </p></body></html>",
+            )
+        )
         self.start_button.setText(_translate("PyCCAPT", "Start"))
         self.Error.setText(_translate("PyCCAPT", "<html><head/><body><p><br/></p></body></html>"))
         self.stop_button.setText(_translate("PyCCAPT", "Stop"))
@@ -1329,18 +1412,14 @@ class Ui_PyCCAPT(object):
             warning.setWindowTitle("Confirm Access Override")
             warning.setText("Access Override can bypass device and gate safety checks.")
             warning.setInformativeText("Only continue if you understand the risk of running with missing hardware.")
-            warning.setStandardButtons(
-                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
-            )
+            warning.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No)
             warning.setDefaultButton(QtWidgets.QMessageBox.StandardButton.No)
             if warning.exec() != QtWidgets.QMessageBox.StandardButton.Yes:
                 self.error_message("Access Override was canceled.")
                 self.timer.start(8000)
                 return
             self.flag_super_user = True
-            self.superuser.setStyleSheet("QPushButton{\n"
-                                         "background: rgb(0, 255, 26)\n"
-                                         "}")
+            self.superuser.setStyleSheet("QPushButton{\nbackground: rgb(0, 255, 26)\n}")
             self.error_message("!!! Override Access Granted !!!")
         elif self.flag_super_user:
             self.flag_super_user = False
@@ -1391,29 +1470,31 @@ class Ui_PyCCAPT(object):
 
     def update_pulse_voltage(self, value):
         """
-            Update the pulse voltage
+        Update the pulse voltage
 
-            Args:
-                value (float): The pulse voltage
+        Args:
+            value (float): The pulse voltage
 
-            Return:
-                None
-            """
+        Return:
+            None
+        """
         self.pulse_voltage.setText(str("{:.3f}".format(value)))
 
     def update_detection_rate(self, value):
         """
-            Update the detection rate
+        Update the detection rate
 
-            Args:
-                value (float): The detection rate
+        Args:
+            value (float): The detection rate
 
-            Return:
-                None
-            """
+        Return:
+            None
+        """
         self.detection_rate.setText(str("{:.3f}".format(value)))
 
-    def read_text_lines(self, ):
+    def read_text_lines(
+        self,
+    ):
         """
         Read the text lines and convert them to a dictionary
 
@@ -1492,14 +1573,14 @@ class Ui_PyCCAPT(object):
 
     def start_experiment_clicked(self):
         """
-                    Start the experiment worker thread
+        Start the experiment worker thread
 
-                    Args:
-                            None
+        Args:
+                None
 
-                    Return:
-                            None
-                    """
+        Return:
+                None
+        """
         if not self.variables.flag_main_gate or self.flag_super_user:
             self.start_experiment_worker()
         else:
@@ -1507,14 +1588,14 @@ class Ui_PyCCAPT(object):
 
     def statistics_update(self):
         """
-                                            Update the statistics
+        Update the statistics
 
-                                            Args:
-                                                    None
+        Args:
+                None
 
-                                            Return:
-                                                    None
-                                    """
+        Return:
+                None
+        """
         self.emitter.elapsed_time.emit(self.variables.elapsed_time)
         self.emitter.total_ions.emit(self.variables.total_ions)
         self.emitter.speciemen_voltage.emit(self.variables.specimen_voltage)
@@ -1612,14 +1693,14 @@ class Ui_PyCCAPT(object):
 
     def stop_experiment_clicked(self):
         """
-                                            Stop the experiment worker thread
+        Stop the experiment worker thread
 
-                                            Args:
-                                                    None
+        Args:
+                None
 
-                                            Return:
-                                                    None
-                                    """
+        Return:
+                None
+        """
         if not self.start_button.isEnabled():
             self.statistics_timer.stop()
             self.variables.stop_flag = True  # Set the STOP flag
@@ -1628,14 +1709,14 @@ class Ui_PyCCAPT(object):
 
     def start_experiment_worker(self):
         """
-                                            Start the experiment worker thread
+        Start the experiment worker thread
 
-                                            Args:
-                                                    None
+        Args:
+                None
 
-                                            Return:
-                                                    None
-                                    """
+        Return:
+                None
+        """
         self.variables.start_flag = True
         self.variables.stop_flag = False
         self.variables.plot_clear_flag = True
@@ -1687,10 +1768,7 @@ class Ui_PyCCAPT(object):
                 self.main_v_dc_plot,
             )
         except Exception as exc:
-            message = (
-                "Experiment process could not start: "
-                f"{exc.__class__.__name__}: {exc}"
-            )
+            message = f"Experiment process could not start: {exc.__class__.__name__}: {exc}"
             gui_logger.exception("Experiment process could not start")
             self.error_message(message)
             self.variables.start_flag = False
@@ -1747,8 +1825,9 @@ class Ui_PyCCAPT(object):
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # Add link to documentation
-        documentation_label = QtWidgets.QLabel('For documentation, please visit: <a '
-                                               'href="https://pyccapt.readthedocs.io/en/latest">Documentation</a>')
+        documentation_label = QtWidgets.QLabel(
+            'For documentation, please visit: <a href="https://pyccapt.readthedocs.io/en/latest">Documentation</a>'
+        )
         documentation_label.setOpenExternalLinks(True)
         documentation_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -1770,14 +1849,14 @@ class Ui_PyCCAPT(object):
 
     def take_screenshot(self):
         """
-                                            Take a screenshot of the GUI
+        Take a screenshot of the GUI
 
-                                            Args:
-                                                    None
+        Args:
+                None
 
-                                            Return:
-                                                    None
-                                    """
+        Return:
+                None
+        """
         screen = QtWidgets.QApplication.primaryScreen()
         w = self.centralwidget
         screenshot = screen.grabWindow(w.winId())
@@ -1841,8 +1920,7 @@ class Ui_PyCCAPT(object):
         QtWidgets.QMessageBox.information(
             self.centralwidget,
             "PyCCAPT — config location",
-            f"config.toml is at:\n{cfg}\n\nEdit it in any text editor and restart "
-            "PyCCAPT for changes to take effect.",
+            f"config.toml is at:\n{cfg}\n\nEdit it in any text editor and restart PyCCAPT for changes to take effect.",
         )
 
     def show_device_status(self):
@@ -1854,9 +1932,7 @@ class Ui_PyCCAPT(object):
                 pulse_mode=getattr(self.variables, "pulse_mode", None),
             )
             available = device_checks.list_available_serial_ports()
-            serial_issues = device_checks.collect_configured_serial_port_issues(
-                self.conf, available_ports=available
-            )
+            serial_issues = device_checks.collect_configured_serial_port_issues(self.conf, available_ports=available)
         except Exception as e:
             self.error_message(f"Could not run device check: {e}")
             return
@@ -1879,9 +1955,7 @@ class Ui_PyCCAPT(object):
             backend_ok, backend_msg = False, f"camera check failed: {e}"
         lines.append(f"Camera backend: {'OK' if backend_ok else 'unavailable'} — {backend_msg}")
 
-        QtWidgets.QMessageBox.information(
-            self.centralwidget, "PyCCAPT — device status", "\n".join(lines)
-        )
+        QtWidgets.QMessageBox.information(self.centralwidget, "PyCCAPT — device status", "\n".join(lines))
 
     def show_serial_ports(self):
         try:
@@ -1890,9 +1964,7 @@ class Ui_PyCCAPT(object):
             self.error_message(f"Could not enumerate serial ports: {e}")
             return
         text = "\n".join(ports) if ports else "(none detected)"
-        QtWidgets.QMessageBox.information(
-            self.centralwidget, "Available serial ports", text
-        )
+        QtWidgets.QMessageBox.information(self.centralwidget, "Available serial ports", text)
 
     def show_keyboard_shortcuts(self):
         QtWidgets.QMessageBox.information(
@@ -1918,14 +1990,14 @@ class Ui_PyCCAPT(object):
 
     def on_stop_experiment_worker(self):
         """
-                                            Enable the start and stop buttons after experiment is finished
+        Enable the start and stop buttons after experiment is finished
 
-                                            Args:
-                                                    None
+        Args:
+                None
 
-                                            Return:
-                                                    None
-                                    """
+        Return:
+                None
+        """
         self.emitter.total_ions.emit(self.variables.total_ions)  # Update the total ions
         if self.variables.flag_end_experiment:
             self.start_button.setEnabled(True)
@@ -1954,8 +2026,7 @@ class Ui_PyCCAPT(object):
             self.variables.flag_cameras_take_screenshot = True
 
             # with self.variables.lock_statistics:
-            if self.variables.index_experiment_in_text_line < len(
-                    self.result_list):  # Do next experiment in case of TextLine
+            if self.variables.index_experiment_in_text_line < len(self.result_list):  # Do next experiment in case of TextLine
                 self.variables.index_experiment_in_text_line += 1
                 self.start_experiment_worker()
             else:
@@ -1967,26 +2038,26 @@ class Ui_PyCCAPT(object):
 
     def reset_heatmap_clicked(self):
         """
-                                            Reset the heatmap
-                                            Args:
-                                                    None
+        Reset the heatmap
+        Args:
+                None
 
-                                            Return:
-                                                    None
-                                    """
+        Return:
+                None
+        """
         # with self.variables.lock_setup_parameters:
         if not self.variables.reset_heatmap:
             self.variables.reset_heatmap = True
 
     def dc_hold_clicked(self):
         """
-                Hold the DC voltage
+        Hold the DC voltage
 
-                Args:
-                        None
+        Args:
+                None
 
-                Return:
-                        None
+        Return:
+                None
         """
         if self.variables.vdc_hold:
             self.pulse_mode.setEnabled(True)  # Disable the pulse mode
@@ -1996,14 +2067,14 @@ class Ui_PyCCAPT(object):
 
     def set_min_voltage_clicked(self):
         """
-                                            Set the minimum voltage
+        Set the minimum voltage
 
-                                            Args:
-                                                    None
+        Args:
+                None
 
-                                            Return:
-                                                    None
-                                    """
+        Return:
+                None
+        """
 
         if self.variables.vdc_hold:
             self.variables.flag_new_min_voltage = True
@@ -2025,7 +2096,7 @@ class Ui_PyCCAPT(object):
             self.error_message(message)
 
         if str(self.conf.get("camera", "off")).strip().lower() == "on":
-	        self.camera_available, self.camera_status_message = camera_device.check_camera_backend()
+            self.camera_available, self.camera_status_message = camera_device.check_camera_backend()
         else:
             self.camera_available = False
             self.camera_status_message = "Camera support is disabled in config.toml."
@@ -2058,11 +2129,10 @@ class Ui_PyCCAPT(object):
         self.Gates.closed.connect(lambda: self.reset_button_color(self.gates_control))
         # GUI Pumps and Vacuum
         self.SignalEmitter_Pumps_Vacuum = gui_pumps_vacuum.SignalEmitter()
-        self.gui_pumps_vacuum = gui_pumps_vacuum.Ui_Pumps_Vacuum(self.variables, self.conf,
-                                                                 self.SignalEmitter_Pumps_Vacuum)
-        self.Pumps_vacuum = gui_pumps_vacuum.PumpsVacuumWindow(self.gui_pumps_vacuum,
-                                                               self.SignalEmitter_Pumps_Vacuum,
-                                                               flags=Qt.WindowType.Tool)
+        self.gui_pumps_vacuum = gui_pumps_vacuum.Ui_Pumps_Vacuum(self.variables, self.conf, self.SignalEmitter_Pumps_Vacuum)
+        self.Pumps_vacuum = gui_pumps_vacuum.PumpsVacuumWindow(
+            self.gui_pumps_vacuum, self.SignalEmitter_Pumps_Vacuum, flags=Qt.WindowType.Tool
+        )
         self.Pumps_vacuum.setWindowStyleFusion()
         self.gui_pumps_vacuum.setupUi(self.Pumps_vacuum)
         self.Pumps_vacuum.closed.connect(lambda: self.reset_button_color(self.pumps_vaccum))
@@ -2070,15 +2140,13 @@ class Ui_PyCCAPT(object):
 
         # GUI Laser Control
         self.gui_laser_control = gui_laser_control.Ui_Laser_Control(self.variables, self.conf)
-        self.Laser_control = gui_laser_control.LaserControlWindow(self.gui_laser_control,
-                                                                  flags=Qt.WindowType.Tool)
+        self.Laser_control = gui_laser_control.LaserControlWindow(self.gui_laser_control, flags=Qt.WindowType.Tool)
         self.gui_laser_control.setupUi(self.Laser_control)
         self.Laser_control.closed.connect(lambda: self.reset_button_color(self.laser_control))
 
         # GUI Stage Control
         self.gui_stage_control = gui_stage_control.Ui_Stage_Control(self.variables, self.conf)
-        self.Stage_control = gui_stage_control.StageControlWindow(self.gui_stage_control,
-                                                                  flags=Qt.WindowType.Tool)
+        self.Stage_control = gui_stage_control.StageControlWindow(self.gui_stage_control, flags=Qt.WindowType.Tool)
         self.Stage_control.setWindowStyleFusion()
         self.gui_stage_control.setupUi(self.Stage_control)
         self.Stage_control.closed.connect(lambda: self.reset_button_color(self.stage_control))
@@ -2125,20 +2193,21 @@ class Ui_PyCCAPT(object):
             return
         try:
             import ctypes
+
             ctypes.windll.user32.AllowSetForegroundWindow(int(pid))
         except Exception:
             pass
 
     def open_cameras_win(self):
         """
-                                    Open the Cameras window
+        Open the Cameras window
 
-                                    Args:
-                                            None
+        Args:
+                None
 
-                                    Return:
-                                            None
-                                    """
+        Return:
+                None
+        """
         if not self.camera_available:
             self.error_message(self.camera_status_message or "No cameras are available on this system.")
             return
@@ -2151,14 +2220,14 @@ class Ui_PyCCAPT(object):
 
     def check_closed_events(self):
         """
-                                    Check if the camera window is closed
+        Check if the camera window is closed
 
-                                    Args:
-                                            None
+        Args:
+                None
 
-                                    Return:
-                                            None
-                                    """
+        Return:
+                None
+        """
         if self.camera_closed_event.is_set():
             # Change the color of the push button when the camera window is closed
             self.reset_button_color(self.camears)
@@ -2173,29 +2242,31 @@ class Ui_PyCCAPT(object):
 
     def open_gates_win(self):
         """
-                                    Open the Gates window
+        Open the Gates window
 
-                                    Args:
-                                            None
+        Args:
+                None
 
-                                    Return:
-                                            None
-                                    """
+        Return:
+                None
+        """
         if hasattr(self, 'Gates') and self.Gates.isVisible():
             self._show_sub_window(self.Gates, self.gates_control)
         else:
             self._show_sub_window(self.Gates, self.gates_control)
 
-    def open_pumps_vacuum_win(self, ):
+    def open_pumps_vacuum_win(
+        self,
+    ):
         """
-            Open the Pumps and Vacuum window
+        Open the Pumps and Vacuum window
 
-            Args:
-                    None
+        Args:
+                None
 
-            Return:
-                    None
-            """
+        Return:
+                None
+        """
         if hasattr(self, 'Pumps_vacuum') and self.Pumps_vacuum.isVisible():
             self._show_sub_window(self.Pumps_vacuum, self.pumps_vaccum)
         else:
@@ -2203,14 +2274,14 @@ class Ui_PyCCAPT(object):
 
     def open_laser_control_win(self):
         """
-                                    Open laser control window
+        Open laser control window
 
-                                    Args:
-                                            None
+        Args:
+                None
 
-                                    Return:
-                                            None
-                                    """
+        Return:
+                None
+        """
         if hasattr(self, 'Laser_control') and self.Laser_control.isVisible():
             self._show_sub_window(self.Laser_control, self.laser_control)
         else:
@@ -2218,29 +2289,31 @@ class Ui_PyCCAPT(object):
 
     def open_stage_control_win(self):
         """
-                                    Open stage control window
+        Open stage control window
 
-                                    Args:
-                                            None
+        Args:
+                None
 
-                                    Return:
-                                            None
-                                    """
+        Return:
+                None
+        """
         if hasattr(self, 'Stage_control') and self.Stage_control.isVisible():
             self._show_sub_window(self.Stage_control, self.stage_control)
         else:
             self._show_sub_window(self.Stage_control, self.stage_control)
 
-    def open_visualization_win(self, ):
+    def open_visualization_win(
+        self,
+    ):
         """
-                                    Open visualization window
+        Open visualization window
 
-                                    Args:
-                                            None
+        Args:
+                None
 
-                                    Return:
-                                            None
-                                    """
+        Return:
+                None
+        """
         # Send a single typed "show + front" command instead of toggling
         # two separate handshakes.
         self._grant_foreground_to(getattr(self, "visualization_process", None))
@@ -2249,14 +2322,14 @@ class Ui_PyCCAPT(object):
 
     def open_baking_win(self):
         """
-                                    Open baking window
+        Open baking window
 
-                                    Args:
-                                            None
+        Args:
+                None
 
-                                    Return:
-                                            None
-                                    """
+        Return:
+                None
+        """
 
         if not hasattr(self, 'Baking'):
             self.gui_baking = gui_baking.Ui_Baking(self.variables, self.conf, self.SignalEmitter_Pumps_Vacuum)
@@ -2272,51 +2345,57 @@ class Ui_PyCCAPT(object):
 
     def reset_button_color(self, button):
         """
-                                    Reset the button color to the original color
+        Reset the button color to the original color
 
-                                    Args:
-                                            button (QPushButton): The button to reset the color
+        Args:
+                button (QPushButton): The button to reset the color
 
-                                    Return:
-                                            None
-                                    """
+        Return:
+                None
+        """
         button.setStyleSheet("QPushButton{ background: rgb(85, 170, 255) }")
 
     def error_message(self, message):
         """
-                                    Display an error message and start a timer to hide it after 8 seconds
+        Display an error message and start a timer to hide it after 8 seconds
 
-                                    Args:
-                                            message (str): Error message to display
+        Args:
+                message (str): Error message to display
 
-                                    Return:
-                                            None
-                                    """
+        Return:
+                None
+        """
         _translate = QtCore.QCoreApplication.translate
-        self.Error.setText(_translate("OXCART",
-                                      "<html><head/><body><p><span style=\" color:#ff0000;\">"
-                                      + message + "</span></p></body></html>"))
+        self.Error.setText(
+            _translate(
+                "OXCART", "<html><head/><body><p><span style=\" color:#ff0000;\">" + message + "</span></p></body></html>"
+            )
+        )
 
         self.timer.start(8000)
 
-    def hideMessage(self, ):
+    def hideMessage(
+        self,
+    ):
         """
-                                    Hide the message and stop the timer
-                                    Args:
-                                            None
+        Hide the message and stop the timer
+        Args:
+                None
 
-                                    Return:
-                                            None
-                                    """
+        Return:
+                None
+        """
         # Hide the message and stop the timer
         _translate = QtCore.QCoreApplication.translate
-        self.Error.setText(_translate("OXCART",
-                                      "<html><head/><body><p><span style=\" "
-                                      "color:#ff0000;\"></span></p></body></html>"))
+        self.Error.setText(
+            _translate("OXCART", "<html><head/><body><p><span style=\" color:#ff0000;\"></span></p></body></html>")
+        )
 
         self.timer.stop()
 
-    def cleanup(self, ):
+    def cleanup(
+        self,
+    ):
         """Tear down every long-lived resource so the Python process can exit.
 
         The order matters:
@@ -2333,8 +2412,7 @@ class Ui_PyCCAPT(object):
              can release the shared context + os._exit.
         """
         # --- 1. Stop in-process QThreads / timers / device handles ------
-        for ui_attr in ("gui_baking", "gui_pumps_vacuum", "gui_gates",
-                        "gui_laser_control", "gui_stage_control"):
+        for ui_attr in ("gui_baking", "gui_pumps_vacuum", "gui_gates", "gui_laser_control", "gui_stage_control"):
             ui = getattr(self, ui_attr, None)
             if ui is None or not hasattr(ui, "stop"):
                 continue
@@ -2397,10 +2475,13 @@ class Ui_PyCCAPT(object):
         QtWidgets.QApplication.quit()
 
     def closeEvent(self, event):
-        reply = QtWidgets.QMessageBox.question(self, 'Close Confirmation',
-                                               "Are you sure you want to close the PyCCAPT?",
-                                               QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
-                                               QtWidgets.QMessageBox.StandardButton.No)
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            'Close Confirmation',
+            "Are you sure you want to close the PyCCAPT?",
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+            QtWidgets.QMessageBox.StandardButton.No,
+        )
 
         if reply == QtWidgets.QMessageBox.StandardButton.Yes:
             event.accept()
@@ -2435,7 +2516,7 @@ class MyPyCCAPT(QtWidgets.QMainWindow):
             'Close Confirmation',
             "Are you sure you want to close the PyCCAPT?",
             QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
-            QtWidgets.QMessageBox.StandardButton.No
+            QtWidgets.QMessageBox.StandardButton.No,
         )
 
         if reply == QtWidgets.QMessageBox.StandardButton.Yes:
@@ -2448,8 +2529,10 @@ class MyPyCCAPT(QtWidgets.QMainWindow):
             # the user's "X" click actually closes the program.
             import os as _os
             import threading as _threading
+
             def _force_exit():
                 import time as _time
+
                 _time.sleep(5.0)
                 print("Close watchdog: forcing os._exit after 5 s")
                 _os._exit(0)

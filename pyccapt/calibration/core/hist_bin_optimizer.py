@@ -50,14 +50,14 @@ def bin_width_optimizer_1d(data, plot=False):
             binindex = np.digitize(data, edges)
 
             # Count the number of points in each bin
-            ki = np.bincount(binindex)[1:N[i] + 1]
+            ki = np.bincount(binindex)[1 : N[i] + 1]
 
             # Calculate the mean and variance of the counts
             k = np.mean(ki)
             v = np.sum((ki - k) ** 2) / N[i]
 
             # Calculate the cost function
-            Cs[i, j] += (2 * k - v) / (d ** 2)
+            Cs[i, j] += (2 * k - v) / (d**2)
 
     # Calculate the mean cost values
     C = np.mean(Cs, axis=1)
@@ -156,8 +156,14 @@ def bin_width_optimizer_2d(x, y, plot=False):
         fig, ax = plt.subplots()
         H, xedges, yedges = np.histogram2d(x, y, bins=[Nx[idx_min_Cxy[0]], Ny[idx_min_Cxy[1]]])
         Hmasked = np.ma.masked_where(H == 0, H)
-        im = ax.imshow(Hmasked.T, extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]], interpolation='nearest',
-                       origin='lower', aspect='auto', cmap=plt.cm.Spectral)
+        im = ax.imshow(
+            Hmasked.T,
+            extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]],
+            interpolation='nearest',
+            origin='lower',
+            aspect='auto',
+            cmap=plt.cm.Spectral,
+        )
         ax.set_ylabel("y")
         ax.set_xlabel("x")
         plt.colorbar(im).set_label('z')

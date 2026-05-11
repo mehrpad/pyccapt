@@ -1,4 +1,4 @@
-﻿import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 import numpy as np
 import pybaselines
 import re
@@ -50,10 +50,31 @@ def _resolve_range_display_labels(range_data):
     return [_plain_range_label(value) for value in range(len(range_data))]
 
 
-def hist_plot(mc_tof, variables, bin, label, range_data=None, adjust_label=False, ranging=False, hist_color_range=False,
-              log=True, mode='count', percent=50, peaks_find=True, peaks_find_plot=False, plot=False, prominence=50,
-              distance=None, h_line=False, selector='None', fast_hist=True, fig_name=None, text_loc='right',
-              fig_size=(9, 5), background={'calculation': False}):
+def hist_plot(
+    mc_tof,
+    variables,
+    bin,
+    label,
+    range_data=None,
+    adjust_label=False,
+    ranging=False,
+    hist_color_range=False,
+    log=True,
+    mode='count',
+    percent=50,
+    peaks_find=True,
+    peaks_find_plot=False,
+    plot=False,
+    prominence=50,
+    distance=None,
+    h_line=False,
+    selector='None',
+    fast_hist=True,
+    fig_name=None,
+    text_loc='right',
+    fig_size=(9, 5),
+    background={'calculation': False},
+):
     """
     Generate a histogram plot with optional peak_x finding and background calculation.
 
@@ -147,15 +168,22 @@ def hist_plot(mc_tof, variables, bin, label, range_data=None, adjust_label=False
 
                     name_element = 'unranged' if labels[i] == 'unranged' else labels[i]
                     y, x, _ = plt.hist(
-                        mc_tof[mask], bins=bins, log=log, histtype=steps,
-                        color=colors[i], label=name_element,
+                        mc_tof[mask],
+                        bins=bins,
+                        log=log,
+                        histtype=steps,
+                        color=colors[i],
+                        label=name_element,
                     )
                 else:
                     # Final iteration: i == len(labels). Plot the events not
                     # captured by any range as a slate-gray "unranged" baseline.
                     y, x, _ = plt.hist(
-                        mc_tof[~mask_all], bins=bins, log=log,
-                        histtype=steps, color='slategray',
+                        mc_tof[~mask_all],
+                        bins=bins,
+                        log=log,
+                        histtype=steps,
+                        color='slategray',
                     )
         else:
             y, x, _ = plt.hist(mc_tof, bins=bins, log=log, histtype=steps, color='slategray')
@@ -166,15 +194,15 @@ def hist_plot(mc_tof, variables, bin, label, range_data=None, adjust_label=False
                 fit_1, params_1 = baseline_fitter.aspls(y, lam=5e10, tol=1e-1, max_iter=100)
 
             if background['mode'] == 'fabc':
-                fit_2, params_2 = pybaselines.classification.fabc(y, lam=background['lam'],
-                                                                  num_std=background['num_std'],
-                                                                  pad_kwargs='edges')
+                fit_2, params_2 = pybaselines.classification.fabc(
+                    y, lam=background['lam'], num_std=background['num_std'], pad_kwargs='edges'
+                )
             if background['mode'] == 'dietrich':
                 fit_2, params_2 = pybaselines.classification.dietrich(y, num_std=background['num_std'])
             if background['mode'] == 'cwt_br':
-                fit_2, params_2 = pybaselines.classification.cwt_br(y, poly_order=background['poly_order'],
-                                                                    num_std=background['num_std'],
-                                                                    tol=background['tol'])
+                fit_2, params_2 = pybaselines.classification.cwt_br(
+                    y, poly_order=background['poly_order'], num_std=background['num_std'], tol=background['tol']
+                )
             if background['mode'] == 'selective_mask_t':
                 p = np.poly1d(np.polyfit(background['non_mask'][:, 0], background['non_mask'][:, 1], 5))
                 baseline_handle = ax1.plot(x, p(x), '--')
@@ -211,49 +239,90 @@ def hist_plot(mc_tof, variables, bin, label, range_data=None, adjust_label=False
                 ax1.set_xlabel("Time of Flight [ns]", fontsize=14)
             print("The peak_x index for MRP calculation is:", index_peak_max)
             if label == 'mc':
-                mrp = '{:.2f}'.format(x[peaks[index_peak_max]] / (x[int(peak_widths_p[3][index_peak_max])] -
-                                                                  x[int(peak_widths_p[2][index_peak_max])]))
+                mrp = '{:.2f}'.format(
+                    x[peaks[index_peak_max]]
+                    / (x[int(peak_widths_p[3][index_peak_max])] - x[int(peak_widths_p[2][index_peak_max])])
+                )
                 if background['calculation'] and background['plot_no_back']:
-                    txt = 'bin width: %s Da\nnum atoms: %.2f$e^6$\nbackG: %s ppm/Da\nMRP(FWHM): %s' \
-                          % (bin, len(mc_tof) / 1000000, int(background_ppm), mrp)
+                    txt = 'bin width: %s Da\nnum atoms: %.2f$e^6$\nbackG: %s ppm/Da\nMRP(FWHM): %s' % (
+                        bin,
+                        len(mc_tof) / 1000000,
+                        int(background_ppm),
+                        mrp,
+                    )
                 else:
                     # annotation with range stats
                     upperLim = 4.5  # Da
                     lowerLim = 3.5  # Da
                     mask = np.logical_and((x >= lowerLim), (x <= upperLim))
                     BG4 = np.sum(y[np.array(mask[:-1])]) / (upperLim - lowerLim)
-                    BG4 = BG4 / len(mc_tof) * 1E6
+                    BG4 = BG4 / len(mc_tof) * 1e6
 
-                    txt = 'bin width: %s Da\nnum atoms: %.2f$e^6$\nBG@4: %s ppm/Da\nMRP(FWHM): %s' \
-                          % (bin, (len(mc_tof)/1000000), int(BG4), mrp)
+                    txt = 'bin width: %s Da\nnum atoms: %.2f$e^6$\nBG@4: %s ppm/Da\nMRP(FWHM): %s' % (
+                        bin,
+                        (len(mc_tof) / 1000000),
+                        int(BG4),
+                        mrp,
+                    )
 
             elif label == 'tof':
-                mrp = '{:.2f}'.format(x[peaks[index_peak_max]] / (x[int(peak_widths_p[3][index_peak_max])] -
-                                                            x[int(peak_widths_p[2][index_peak_max])]))
+                mrp = '{:.2f}'.format(
+                    x[peaks[index_peak_max]]
+                    / (x[int(peak_widths_p[3][index_peak_max])] - x[int(peak_widths_p[2][index_peak_max])])
+                )
                 if background['calculation'] and background['plot_no_back']:
-                        txt = 'bin width: %s ns\nnum atoms: %.2f$e^6$\nbackG: %s ppm/ns\nMRP(FWHM): %s' \
-                              % (bin, len(mc_tof)/1000000, int(background_ppm), mrp)
+                    txt = 'bin width: %s ns\nnum atoms: %.2f$e^6$\nbackG: %s ppm/ns\nMRP(FWHM): %s' % (
+                        bin,
+                        len(mc_tof) / 1000000,
+                        int(background_ppm),
+                        mrp,
+                    )
                 else:
                     # annotation with range stats
                     upperLim = 50.5  # ns
                     lowerLim = 49.5  # ns
                     mask = np.logical_and((x >= lowerLim), (x <= upperLim))
                     BG50 = np.sum(y[np.array(mask[:-1])]) / (upperLim - lowerLim)
-                    BG50 = BG50 / len(mc_tof) * 1E6
-                    txt = 'bin width: %s ns\nnum atoms: %.2f$e^6$ \nBG@50: %s ppm/ns\nMRP(FWHM): %s' \
-                          % (bin, len(mc_tof)/1000000, int(BG50), mrp)
+                    BG50 = BG50 / len(mc_tof) * 1e6
+                    txt = 'bin width: %s ns\nnum atoms: %.2f$e^6$ \nBG@50: %s ppm/ns\nMRP(FWHM): %s' % (
+                        bin,
+                        len(mc_tof) / 1000000,
+                        int(BG50),
+                        mrp,
+                    )
 
             props = dict(boxstyle='round', facecolor='wheat', alpha=1)
             if text_loc == 'left':
-                ax1.text(.01, .95, txt, va='top', ma='left', transform=ax1.transAxes, bbox=props, fontsize=10, alpha=1,
-                         horizontalalignment='left', verticalalignment='top')
+                ax1.text(
+                    0.01,
+                    0.95,
+                    txt,
+                    va='top',
+                    ma='left',
+                    transform=ax1.transAxes,
+                    bbox=props,
+                    fontsize=10,
+                    alpha=1,
+                    horizontalalignment='left',
+                    verticalalignment='top',
+                )
             elif text_loc == 'right':
-                ax1.text(.98, .95, txt, va='top', ma='left', transform=ax1.transAxes, bbox=props, fontsize=10, alpha=1,
-                         horizontalalignment='right', verticalalignment='top')
+                ax1.text(
+                    0.98,
+                    0.95,
+                    txt,
+                    va='top',
+                    ma='left',
+                    transform=ax1.transAxes,
+                    bbox=props,
+                    fontsize=10,
+                    alpha=1,
+                    horizontalalignment='right',
+                    verticalalignment='top',
+                )
 
             ax1.tick_params(axis='both', which='major', labelsize=10)
             ax1.tick_params(axis='both', which='minor', labelsize=10)
-
 
             annotes = []
             texts = []
@@ -263,25 +332,40 @@ def hist_plot(mc_tof, variables, bin, label, range_data=None, adjust_label=False
                     x_peak_loc = range_data['mc'].tolist()
                     y_peak_loc = range_data['peak_count'].tolist()
                     for i in range(len(ion)):
-                        texts.append(plt.text(x_peak_loc[i], y_peak_loc[i], r'%s' % ion[i], color='black', size=10,
-                                              alpha=1))
+                        texts.append(plt.text(x_peak_loc[i], y_peak_loc[i], r'%s' % ion[i], color='black', size=10, alpha=1))
                         annotes.append(str(i + 1))
                 else:
                     for i in range(len(peaks)):
                         if selector == 'range':
                             if i in variables.peaks_x_selected:
-                                texts.append(plt.text(x[peaks][i], y[peaks][i], '%s' % '{:.2f}'.format(x[peaks][i]),
-                                                      color='black',
-                                                      size=10, alpha=1))
+                                texts.append(
+                                    plt.text(
+                                        x[peaks][i],
+                                        y[peaks][i],
+                                        '%s' % '{:.2f}'.format(x[peaks][i]),
+                                        color='black',
+                                        size=10,
+                                        alpha=1,
+                                    )
+                                )
                         else:
                             texts.append(
-                                plt.text(x[peaks][i], y[peaks][i], '%s' % '{:.2f}'.format(x[peaks][i]), color='black',
-                                         size=10, alpha=1))
+                                plt.text(
+                                    x[peaks][i],
+                                    y[peaks][i],
+                                    '%s' % '{:.2f}'.format(x[peaks][i]),
+                                    color='black',
+                                    size=10,
+                                    alpha=1,
+                                )
+                            )
 
                         if h_line:
                             for i in range(len(variables.h_line_pos)):
-                                if variables.h_line_pos[i] < np.max(mc_tof) + 10 and variables.h_line_pos[i] > np.max(
-                                        mc_tof) - 10:
+                                if (
+                                    variables.h_line_pos[i] < np.max(mc_tof) + 10
+                                    and variables.h_line_pos[i] > np.max(mc_tof) - 10
+                                ):
                                     plt.axvline(x=variables.h_line_pos[i], color='b', linestyle='--', linewidth=2)
                         annotes.append(str(i + 1))
             if adjust_label:
@@ -301,17 +385,12 @@ def hist_plot(mc_tof, variables, bin, label, range_data=None, adjust_label=False
             elif selector == 'range':
                 # connect range selector
                 line_manager = plot_vline_draw.VerticalLineManager(variables, ax1, fig1, [], [])
-                fig1.canvas.mpl_connect('button_press_event',
-                                        lambda event: line_manager.on_press(event))
-                fig1.canvas.mpl_connect('button_release_event',
-                                        lambda event: line_manager.on_release(event))
-                fig1.canvas.mpl_connect('motion_notify_event',
-                                        lambda event: line_manager.on_motion(event))
-                fig1.canvas.mpl_connect('key_press_event',
-                                        lambda event: line_manager.on_key_press(event))
+                fig1.canvas.mpl_connect('button_press_event', lambda event: line_manager.on_press(event))
+                fig1.canvas.mpl_connect('button_release_event', lambda event: line_manager.on_release(event))
+                fig1.canvas.mpl_connect('motion_notify_event', lambda event: line_manager.on_motion(event))
+                fig1.canvas.mpl_connect('key_press_event', lambda event: line_manager.on_key_press(event))
                 fig1.canvas.mpl_connect('scroll_event', lambda event: line_manager.on_scroll(event))
-                fig1.canvas.mpl_connect('key_release_event',
-                                        lambda event: line_manager.on_key_release(event))
+                fig1.canvas.mpl_connect('key_release_event', lambda event: line_manager.on_key_release(event))
 
         else:
             if selector == 'range':
@@ -321,10 +400,15 @@ def hist_plot(mc_tof, variables, bin, label, range_data=None, adjust_label=False
                 for i in range(len(variables.peak_x)):
                     if i in variables.peaks_x_selected:
                         texts.append(
-                            plt.text(variables.peak_x[i], variables.peak_y[i],
-                                     '%s' % '{:.2f}'.format(variables.peak_x[i]),
-                                     color='black',
-                                     size=10, alpha=1))
+                            plt.text(
+                                variables.peak_x[i],
+                                variables.peak_y[i],
+                                '%s' % '{:.2f}'.format(variables.peak_x[i]),
+                                color='black',
+                                size=10,
+                                alpha=1,
+                            )
+                        )
         plt.tight_layout()
         if fig_name is not None:
             if label == 'mc':
@@ -347,8 +431,7 @@ def hist_plot(mc_tof, variables, bin, label, range_data=None, adjust_label=False
     if peaks_find:
         peak_widths_f = []
         for i in range(len(peaks)):
-            peak_widths_f.append(
-                [y[int(peak_widths_p[2][i])], x[int(peak_widths_p[2][i])], x[int(peak_widths_p[3][i])]])
+            peak_widths_f.append([y[int(peak_widths_p[2][i])], x[int(peak_widths_p[2][i])], x[int(peak_widths_p[3][i])]])
 
         if background['calculation'] and background['plot_no_back']:
             x_peaks = x[peaks]
@@ -372,9 +455,7 @@ def hist_plot(mc_tof, variables, bin, label, range_data=None, adjust_label=False
     return x_peaks, y_peaks, peaks_widths, mask
 
 
-
-def mc_hist_plot(variables, bin_size, mode, prominence, distance, percent, selector, plot, figname, lim,
-                 peaks_find_plot):
+def mc_hist_plot(variables, bin_size, mode, prominence, distance, percent, selector, plot, figname, lim, peaks_find_plot):
     """
     Plot the mass spectrum or tof spectrum. It is helper function for tutorials.
     Args:
@@ -404,21 +485,30 @@ def mc_hist_plot(variables, bin_size, mode, prominence, distance, percent, selec
     hist, label = mode_map[mode]
     if selector == 'peak_x':
         variables.peaks_x_selected = []
-    peaks_ini, peaks_y_ini, peak_widths_p_ini, _ = hist_plot(hist[hist < lim], variables, bin_size,
-                                                                        label=label,
-                                                                        distance=distance, percent=percent,
-                                                                        prominence=prominence,
-                                                                        selector=selector, plot=plot, fig_name=figname,
-                                                                        peaks_find_plot=peaks_find_plot)
+    peaks_ini, peaks_y_ini, peak_widths_p_ini, _ = hist_plot(
+        hist[hist < lim],
+        variables,
+        bin_size,
+        label=label,
+        distance=distance,
+        percent=percent,
+        prominence=prominence,
+        selector=selector,
+        plot=plot,
+        fig_name=figname,
+        peaks_find_plot=peaks_find_plot,
+    )
     if peaks_ini is not None:
         index_max_ini = np.argmax(peaks_y_ini)
-        mrp = (peaks_ini[index_max_ini] / (peak_widths_p_ini[index_max_ini][2] - peak_widths_p_ini[index_max_ini][1]))
-        print('Mass resolving power for the highest peak_x at peak_x index %a (MRP --> m/m_2-m_1):' % index_max_ini,
-              mrp)
+        mrp = peaks_ini[index_max_ini] / (peak_widths_p_ini[index_max_ini][2] - peak_widths_p_ini[index_max_ini][1])
+        print('Mass resolving power for the highest peak_x at peak_x index %a (MRP --> m/m_2-m_1):' % index_max_ini, mrp)
         for i in range(len(peaks_ini)):
-            print('Peaks ', i, 'is at location and height: ({:.2f}, {:.2f})'.format(peaks_ini[i], peaks_y_ini[i]),
-                  'peak_x window sides ({:.1f}-maximum) are: ({:.2f}, {:.2f})'.format(percent, peak_widths_p_ini[i][1],
-                                                                                      peak_widths_p_ini[i][2]),
-                  '-> {:.2f}'.format(peak_widths_p_ini[i][2] - peak_widths_p_ini[i][1]))
-
-
+            print(
+                'Peaks ',
+                i,
+                'is at location and height: ({:.2f}, {:.2f})'.format(peaks_ini[i], peaks_y_ini[i]),
+                'peak_x window sides ({:.1f}-maximum) are: ({:.2f}, {:.2f})'.format(
+                    percent, peak_widths_p_ini[i][1], peak_widths_p_ini[i][2]
+                ),
+                '-> {:.2f}'.format(peak_widths_p_ini[i][2] - peak_widths_p_ini[i][1]),
+            )

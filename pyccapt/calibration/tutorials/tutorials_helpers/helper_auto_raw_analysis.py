@@ -107,12 +107,14 @@ def species_from_range(range_df: pd.DataFrame | None) -> list[dict]:
             continue
         if mc_up <= mc_low:
             continue
-        species.append({
-            "label": name,
-            "mc_low": mc_low,
-            "mc_up": mc_up,
-            "color": str(row.get("color", "#1f77b4")),
-        })
+        species.append(
+            {
+                "label": name,
+                "mc_low": mc_low,
+                "mc_up": mc_up,
+                "color": str(row.get("color", "#1f77b4")),
+            }
+        )
     return species
 
 
@@ -151,13 +153,7 @@ def _close_after(fig):
     close in that case and let ipympl manage the lifecycle.
     """
     backend = plt.get_backend().lower()
-    if (
-        'ipympl' in backend
-        or 'nbagg' in backend
-        or 'widget' in backend
-        or 'qt' in backend
-        or 'tk' in backend
-    ):
+    if 'ipympl' in backend or 'nbagg' in backend or 'widget' in backend or 'qt' in backend or 'tk' in backend:
         return
     plt.close(fig)
 
@@ -251,9 +247,9 @@ def _classify_pulse_chunks(df: pd.DataFrame, group_col: str, detector_kind: str)
     pairs = _delay_line_pairs(detector_kind)
     empty = {
         "frequency": np.array([], dtype=int),
-        "complete":  np.array([], dtype=int),
-        "midtier":   np.array([], dtype=int),
-        "partial":   np.array([], dtype=int),
+        "complete": np.array([], dtype=int),
+        "midtier": np.array([], dtype=int),
+        "partial": np.array([], dtype=int),
     }
     if not pairs or len(df) == 0:
         return empty
@@ -297,9 +293,9 @@ def _classify_pulse_chunks(df: pd.DataFrame, group_col: str, detector_kind: str)
 
     return {
         "frequency": np.array(freq_lengths, dtype=int),
-        "complete":  np.array(complete_lengths, dtype=int),
-        "midtier":   np.array(midtier_lengths, dtype=int),
-        "partial":   np.array(partial_lengths, dtype=int),
+        "complete": np.array(complete_lengths, dtype=int),
+        "midtier": np.array(midtier_lengths, dtype=int),
+        "partial": np.array(partial_lengths, dtype=int),
     }
 
 
@@ -334,10 +330,7 @@ def plot_dlts_per_pulse(
         return
     pairs = _delay_line_pairs(detector_kind)
     if not pairs:
-        _md(
-            f"_Detector kind `{detector_kind}` is not supported for DLTS "
-            "classification — skipping the per-pulse breakdown._"
-        )
+        _md(f"_Detector kind `{detector_kind}` is not supported for DLTS classification — skipping the per-pulse breakdown._")
         return
 
     matched = tdc_df[tdc_df["has_dld_match"]]
@@ -352,22 +345,22 @@ def plot_dlts_per_pulse(
             return np.concatenate([a, b])
         return a if a.size else b
 
-    freq_arr     = _join(m["frequency"], o["frequency"])
-    complete_arr = _join(m["complete"],  o["complete"])
-    midtier_arr  = _join(m["midtier"],   o["midtier"])
-    partial_arr  = _join(m["partial"],   o["partial"])
+    freq_arr = _join(m["frequency"], o["frequency"])
+    complete_arr = _join(m["complete"], o["complete"])
+    midtier_arr = _join(m["midtier"], o["midtier"])
+    partial_arr = _join(m["partial"], o["partial"])
 
     if freq_arr.size == 0:
         return
 
     max_n = int(freq_arr.max())
-    bins    = np.arange(0.5, max_n + 1.5)
+    bins = np.arange(0.5, max_n + 1.5)
     centers = np.arange(1, max_n + 1)
 
-    freq_hist     = np.histogram(freq_arr,     bins=bins)[0]
+    freq_hist = np.histogram(freq_arr, bins=bins)[0]
     complete_hist = np.histogram(complete_arr, bins=bins)[0]
-    midtier_hist  = np.histogram(midtier_arr,  bins=bins)[0]
-    partial_hist  = np.histogram(partial_arr,  bins=bins)[0]
+    midtier_hist = np.histogram(midtier_arr, bins=bins)[0]
+    partial_hist = np.histogram(partial_arr, bins=bins)[0]
 
     fig, ax = plt.subplots(figsize=(9, 4))
     w = 0.2
@@ -375,12 +368,12 @@ def plot_dlts_per_pulse(
 
     if detector_kind == "roentdek":
         # 3 narrow bars centred on x, offset by -w / 0 / +w (Figure 9B style).
-        ax.bar(centers - w, partial_hist,  width=w, label="2 DLTS", color="orange")
-        ax.bar(centers,     midtier_hist,  width=w, label="4 DLTS", color="blue")
+        ax.bar(centers - w, partial_hist, width=w, label="2 DLTS", color="orange")
+        ax.bar(centers, midtier_hist, width=w, label="4 DLTS", color="blue")
         ax.bar(centers + w, complete_hist, width=w, label="6 DLTS", color="green")
     elif detector_kind == "surface_concept":
         # 2 narrow bars (Figure 9A style).
-        ax.bar(centers - 0.5 * w, partial_hist,  width=w, label="2 DLTS", color="orange")
+        ax.bar(centers - 0.5 * w, partial_hist, width=w, label="2 DLTS", color="orange")
         ax.bar(centers + 0.5 * w, complete_hist, width=w, label="4 DLTS", color="blue")
     else:  # single_delay_line: a "complete" event is a 2-DLTS hit.
         ax.bar(centers, complete_hist, width=w, label="2 DLTS", color="blue")
@@ -396,33 +389,36 @@ def plot_dlts_per_pulse(
     fig.tight_layout()
     _show_figure(fig, save_dir=save_dir, stem=save_stem)
 
-    n_full         = expected_dlts_full(detector_kind)
-    total_pulses   = int(freq_arr.size)
-    matched_total  = int(m["frequency"].size)
+    n_full = expected_dlts_full(detector_kind)
+    total_pulses = int(freq_arr.size)
+    matched_total = int(m["frequency"].size)
     n_complete_tot = int(complete_arr.size)
-    n_midtier_tot  = int(midtier_arr.size)
-    n_partial_tot  = int(partial_arr.size)
+    n_midtier_tot = int(midtier_arr.size)
+    n_partial_tot = int(partial_arr.size)
 
     lines = [
         "**DLTS-per-pulse breakdown**",
         "",
-        f"- Detector kind: `{detector_kind}`"
-        + (f" (complete event = {n_full} DLTS)" if n_full else ""),
+        f"- Detector kind: `{detector_kind}`" + (f" (complete event = {n_full} DLTS)" if n_full else ""),
         f"- Total pulse triggers: {total_pulses:,}",
         f"- Linked to a dld row (has position): {_format_pct(matched_total, total_pulses)}",
         f"- Orphan (no dld counterpart):        {_format_pct(total_pulses - matched_total, total_pulses)}",
     ]
     if detector_kind == "roentdek":
-        lines.extend([
-            f"- **6 DLTS** — complete (all 3 delay lines fired): {_format_pct(n_complete_tot, total_pulses)}",
-            f"- **4 DLTS** — two of three delay lines fired:    {_format_pct(n_midtier_tot,  total_pulses)}",
-            f"- **2 DLTS** — one delay line fired:              {_format_pct(n_partial_tot,  total_pulses)}",
-        ])
+        lines.extend(
+            [
+                f"- **6 DLTS** — complete (all 3 delay lines fired): {_format_pct(n_complete_tot, total_pulses)}",
+                f"- **4 DLTS** — two of three delay lines fired:    {_format_pct(n_midtier_tot, total_pulses)}",
+                f"- **2 DLTS** — one delay line fired:              {_format_pct(n_partial_tot, total_pulses)}",
+            ]
+        )
     elif detector_kind == "surface_concept":
-        lines.extend([
-            f"- **4 DLTS** — complete (both delay lines fired): {_format_pct(n_complete_tot, total_pulses)}",
-            f"- **2 DLTS** — one delay line fired:              {_format_pct(n_partial_tot,  total_pulses)}",
-        ])
+        lines.extend(
+            [
+                f"- **4 DLTS** — complete (both delay lines fired): {_format_pct(n_complete_tot, total_pulses)}",
+                f"- **2 DLTS** — one delay line fired:              {_format_pct(n_partial_tot, total_pulses)}",
+            ]
+        )
     else:  # single_delay_line
         lines.append(
             f"- **2 DLTS** — complete (single delay line):      {_format_pct(n_complete_tot, total_pulses)}",
@@ -466,8 +462,7 @@ def plot_tof_with_peaks(
     ax.hist(tof, bins=400, color="#1f77b4", log=True)
     if peak_units == "tof":
         for sp in species:
-            ax.axvspan(sp["mc_low"], sp["mc_up"], color=sp.get("color", "#1f77b4"),
-                       alpha=0.25, label=sp["label"])
+            ax.axvspan(sp["mc_low"], sp["mc_up"], color=sp.get("color", "#1f77b4"), alpha=0.25, label=sp["label"])
         if species:
             ax.legend(loc="upper right", fontsize=8)
     ax.set_xlabel(tof_col)
@@ -528,18 +523,13 @@ def plot_signal_overview(
         available.append((col, arr))
 
     if not available:
-        _md(
-            "_None of `t (ns)`, `t_c (ns)`, `mc (Da)`, `mc_uc (Da)` carry usable "
-            "values — cannot render the preview._"
-        )
+        _md("_None of `t (ns)`, `t_c (ns)`, `mc (Da)`, `mc_uc (Da)` carry usable values — cannot render the preview._")
         return
 
     n = len(available)
     cols_layout = min(2, n)
     rows_layout = (n + cols_layout - 1) // cols_layout
-    fig, axes = plt.subplots(
-        rows_layout, cols_layout, figsize=(6.0 * cols_layout, 3.2 * rows_layout), squeeze=False
-    )
+    fig, axes = plt.subplots(rows_layout, cols_layout, figsize=(6.0 * cols_layout, 3.2 * rows_layout), squeeze=False)
     for index, (col, arr) in enumerate(available):
         ax = axes[index // cols_layout][index % cols_layout]
         if col.endswith("(ns)"):
@@ -592,7 +582,7 @@ def plot_full_spectrum(
         _md("_No dld data is loaded — skipping full-spectrum plot._")
         return
     tof_col = _pick_tof_col(dld_df)
-    mc_col  = _pick_mc_col(dld_df)
+    mc_col = _pick_mc_col(dld_df)
     if tof_col is None and mc_col is None:
         _md("_No usable TOF or mass/charge column — skipping full-spectrum plot._")
         return
@@ -604,7 +594,8 @@ def plot_full_spectrum(
     # "Image size too large" on user input with many peaks.
     height_inches = min(max(3.4 * n_panels, 3.6), 20.0)
     fig, axes = plt.subplots(
-        n_panels, 1,
+        n_panels,
+        1,
         figsize=(10.0, height_inches),
         squeeze=False,
     )
@@ -615,8 +606,7 @@ def plot_full_spectrum(
         tof = dld_df[tof_col].to_numpy()
         positive = tof[np.isfinite(tof) & (tof > 0)]
         upper = float(np.percentile(positive, 99.5)) if positive.size else 1000.0
-        ax.hist(tof, bins=600, range=(0, max(upper, 1.0)),
-                color="#1f77b4", log=True, histtype="stepfilled")
+        ax.hist(tof, bins=600, range=(0, max(upper, 1.0)), color="#1f77b4", log=True, histtype="stepfilled")
         ax.set_xlabel(tof_col)
         ax.set_ylabel("Count (log)")
         ax.set_title(f"Full time-of-flight spectrum ({tof_col})")
@@ -627,8 +617,7 @@ def plot_full_spectrum(
         mc = dld_df[mc_col].to_numpy()
         positive = mc[np.isfinite(mc) & (mc > 0)]
         upper = float(np.percentile(positive, 99.5)) if positive.size else 50.0
-        ax.hist(mc, bins=600, range=(0, max(upper, 50.0)),
-                color="#444444", log=True, histtype="stepfilled")
+        ax.hist(mc, bins=600, range=(0, max(upper, 50.0)), color="#444444", log=True, histtype="stepfilled")
         ax.set_xlabel(mc_col)
         ax.set_ylabel("Count (log)")
         ax.set_title(f"Full mass spectrum ({mc_col})")
@@ -665,8 +654,7 @@ def plot_mc_with_peaks(
     ax.hist(mc, bins=400, range=(0, max(upper, 50.0)), color="#555", log=True)
     if peak_units == "mc":
         for sp in species:
-            ax.axvspan(sp["mc_low"], sp["mc_up"], color=sp.get("color", "#1f77b4"),
-                       alpha=0.25, label=sp["label"])
+            ax.axvspan(sp["mc_low"], sp["mc_up"], color=sp.get("color", "#1f77b4"), alpha=0.25, label=sp["label"])
         if species:
             ax.legend(loc="upper right", fontsize=8)
     ax.set_xlabel(mc_col)
@@ -696,7 +684,12 @@ def plot_mc_with_peaks(
             mrp = float("nan")
         rows.append((sp["label"], sp["mc_low"], sp["mc_up"], count, count / total * 100 if total else 0.0, mrp))
 
-    md = ["**Per-peak counts and MRP(0.5)**", "", "| Peak | mc_low | mc_up | Count | % of all | MRP(0.5) |", "| --- | --- | --- | --- | --- | --- |"]
+    md = [
+        "**Per-peak counts and MRP(0.5)**",
+        "",
+        "| Peak | mc_low | mc_up | Count | % of all | MRP(0.5) |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
     for label, lo, hi, count, pct, mrp in rows:
         mrp_str = f"{mrp:.0f}" if np.isfinite(mrp) else "n/a"
         md.append(f"| {label} | {lo:.3f} | {hi:.3f} | {count:,} | {pct:.2f}% | {mrp_str} |")
@@ -793,9 +786,7 @@ def _surface_concept_peak_ratio_markdown(ratio_table: pd.DataFrame) -> str:
 
 def _roentdek_raw_summary_markdown(raw_summary: dict[str, object]) -> str:
     channel_totals = raw_summary.get('channel_timestamp_totals', {})
-    channel_text = ", ".join(
-        f"ch{channel}={int(channel_totals.get(channel, 0)):,}" for channel in range(1, 7)
-    )
+    channel_text = ", ".join(f"ch{channel}={int(channel_totals.get(channel, 0)):,}" for channel in range(1, 7))
     return "\n".join(
         [
             "**RoentDek raw summary**",
@@ -910,7 +901,7 @@ def plot_multihit_and_deadzone(
     if "multi" not in dld_df.columns or "delta_p" not in dld_df.columns:
         _md("_`multi` / `delta_p` columns not present — skipping multi-hit diagnostics._")
         return
-    multi   = dld_df["multi"].to_numpy()
+    multi = dld_df["multi"].to_numpy()
     delta_p = dld_df["delta_p"].to_numpy()
 
     # ── Validate multi column ──────────────────────────────────────────────
@@ -923,14 +914,14 @@ def plot_multihit_and_deadzone(
     # • Convention A (processed files): single hit = 1, two ions = 2, …
     # • Convention B (some raw files) : single hit = 0, two ions = 1, …
     if multi_is_valid:
-        multi_min    = int(multi.min())
-        single_val   = multi_min       # 0 (conv B) or 1 (conv A)
+        multi_min = int(multi.min())
+        single_val = multi_min  # 0 (conv B) or 1 (conv A)
         multi_for_plot = multi[multi >= single_val]
-        multi_max    = int(multi_for_plot.max()) if multi_for_plot.size else single_val
+        multi_max = int(multi_for_plot.max()) if multi_for_plot.size else single_val
     else:
-        single_val   = 0
+        single_val = 0
         multi_for_plot = np.array([], dtype=int)
-        multi_max    = 0
+        multi_max = 0
 
     fig, axes = plt.subplots(1, 2, figsize=(10, 3.5))
 
@@ -939,9 +930,15 @@ def plot_multihit_and_deadzone(
         bins = np.arange(single_val - 0.5, multi_max + 1.5)
         axes[0].hist(multi_for_plot, bins=bins)
     else:
-        axes[0].text(0.5, 0.5,
-                     "multi column is all-zero\n(not populated in this file)",
-                     ha="center", va="center", transform=axes[0].transAxes, color="gray")
+        axes[0].text(
+            0.5,
+            0.5,
+            "multi column is all-zero\n(not populated in this file)",
+            ha="center",
+            va="center",
+            transform=axes[0].transAxes,
+            color="gray",
+        )
     axes[0].set_yscale("log")
     axes[0].set_xlabel("multi (ions per pulse)")
     axes[0].set_ylabel("Count (log)")
@@ -956,8 +953,9 @@ def plot_multihit_and_deadzone(
         upper = int(np.percentile(delta_p_pos, 95))
         axes[1].hist(delta_p_pos, bins=80, range=(0, max(upper, 10)))
     else:
-        axes[1].text(0.5, 0.5, "delta_p is all-zero\nin this file",
-                     ha="center", va="center", transform=axes[1].transAxes, color="gray")
+        axes[1].text(
+            0.5, 0.5, "delta_p is all-zero\nin this file", ha="center", va="center", transform=axes[1].transAxes, color="gray"
+        )
     axes[1].set_yscale("log")
     axes[1].set_xlabel("delta_p (pulses since previous event)")
     axes[1].set_ylabel("Count (log)")
@@ -967,7 +965,7 @@ def plot_multihit_and_deadzone(
 
     n_total = int(multi.size)
     if multi_is_valid:
-        n_multi   = int((multi > single_val).sum())
+        n_multi = int((multi > single_val).sum())
         conv_note = f"(encoding: single-hit = {single_val})"
         multi_line = f"- Events with multi > {single_val}: {_format_pct(n_multi, n_total)} {conv_note}"
     else:
@@ -1085,9 +1083,7 @@ def run_analysis(
         # Resolve detector geometry from config (with fallback to historical
         # SC defaults). The detector_limit_cm gate is applied to *every* hit
         # — full and partial — inside build_surface_concept_recovery_diagnostics.
-        detector_constants = load_detector_constants(
-            "surface_concept", getattr(variables, "conf", None)
-        )
+        detector_constants = load_detector_constants("surface_concept", getattr(variables, "conf", None))
         detector_limit_cm = float(detector_constants["detector_limit_cm"])
         windows_for_recovery = _species_to_windows(species)
 
@@ -1219,9 +1215,7 @@ def run_analysis(
             )
 
             if windows:
-                _md(
-                    f"## Peak-window recovery breakdown ({peak_units.upper()} windows)"
-                )
+                _md(f"## Peak-window recovery breakdown ({peak_units.upper()} windows)")
                 peak_summary = summarize_surface_concept_peak_windows(
                     analysis["hit_table"],
                     analysis["recovery_diagnostics"],
@@ -1320,9 +1314,7 @@ def run_analysis(
 
         # Resolve RoentDek detector geometry from config (with fallback to
         # the historical 80 mm / 4 cm hardcoded defaults).
-        detector_constants_ro = load_detector_constants(
-            "roentdek", getattr(variables, "conf", None)
-        )
+        detector_constants_ro = load_detector_constants("roentdek", getattr(variables, "conf", None))
         detector_limit_cm_ro = float(detector_constants_ro["detector_limit_cm"])
 
         windows = _species_to_windows(species)
@@ -1331,9 +1323,8 @@ def run_analysis(
         # Drop hits whose pre-computed detector coordinates are outside the
         # physical detector — same gate that's enforced for SC.
         if not roentdek_hit_table.empty:
-            in_det_mask = (
-                (roentdek_hit_table["x_det (cm)"].abs() <= detector_limit_cm_ro)
-                & (roentdek_hit_table["y_det (cm)"].abs() <= detector_limit_cm_ro)
+            in_det_mask = (roentdek_hit_table["x_det (cm)"].abs() <= detector_limit_cm_ro) & (
+                roentdek_hit_table["y_det (cm)"].abs() <= detector_limit_cm_ro
             )
             roentdek_hit_table = roentdek_hit_table[in_det_mask].reset_index(drop=True)
 
@@ -1386,9 +1377,7 @@ def run_analysis(
             )
 
             if windows:
-                _md(
-                    f"## Peak-window recovery breakdown ({peak_units.upper()} windows)"
-                )
+                _md(f"## Peak-window recovery breakdown ({peak_units.upper()} windows)")
                 _show_figure(
                     plot_signal_window_breakdown(
                         roentdek_hit_table,
@@ -1401,10 +1390,7 @@ def run_analysis(
                     stem="roentdek_peak_window_breakdown",
                 )
             else:
-                _md(
-                    "_Skipping the RoentDek per-peak window breakdown — no peak "
-                    "windows were supplied._"
-                )
+                _md("_Skipping the RoentDek per-peak window breakdown — no peak windows were supplied._")
 
             _md("## TOF drift by segment")
             _show_figure(
@@ -1457,14 +1443,20 @@ def run_analysis(
     if species:
         _md("## Time-of-flight (with peak windows)")
         plot_tof_with_peaks(
-            plot_df, species, peak_units=peak_units,
-            save_dir=save_dir, save_stem="tof_histogram",
+            plot_df,
+            species,
+            peak_units=peak_units,
+            save_dir=save_dir,
+            save_stem="tof_histogram",
         )
 
         _md("## Mass/charge (with peak windows)")
         plot_mc_with_peaks(
-            plot_df, species, peak_units=peak_units,
-            save_dir=save_dir, save_stem="mc_histogram",
+            plot_df,
+            species,
+            peak_units=peak_units,
+            save_dir=save_dir,
+            save_stem="mc_histogram",
         )
     else:
         _md(
@@ -1544,10 +1536,7 @@ def call_auto_raw_data_analysis(variables) -> None:
                     "Switch to <b>Manual peak windows</b> or load a range table first.</span>"
                 )
         else:
-            summary.value = (
-                f"<i>Type peak windows below in <b>{unit_label}</b>. Rows left "
-                f"at 0/0 are skipped.</i>"
-            )
+            summary.value = f"<i>Type peak windows below in <b>{unit_label}</b>. Rows left at 0/0 are skipped.</i>"
 
     peak_source = widgets.Dropdown(
         options=[("Manual peak windows", "manual"), ("From range file", "range")],
@@ -1584,9 +1573,7 @@ def call_auto_raw_data_analysis(variables) -> None:
     )
 
     manual_rows = _build_manual_rows()
-    manual_grid = widgets.VBox([
-        widgets.HBox([label, low, high]) for label, low, high in manual_rows
-    ])
+    manual_grid = widgets.VBox([widgets.HBox([label, low, high]) for label, low, high in manual_rows])
 
     run_button = widgets.Button(description="Run analysis", button_style="primary")
 
@@ -1595,7 +1582,11 @@ def call_auto_raw_data_analysis(variables) -> None:
         the user can't change inputs / re-trigger the run mid-flight, and
         flips the run button label to give a visible busy indication."""
         for control in (
-            peak_source, peak_units, save_plots, recovery_mode, pair_sum_tol,
+            peak_source,
+            peak_units,
+            save_plots,
+            recovery_mode,
+            pair_sum_tol,
         ):
             control.disabled = busy
         # Manual rows: while busy, force-disabled. Otherwise, restore the
@@ -1659,17 +1650,19 @@ def call_auto_raw_data_analysis(variables) -> None:
     _set_rows_disabled(manual_rows, peak_source.value == "range")
     _refresh_summary()
 
-    panel = widgets.VBox([
-        peak_source,
-        peak_units,
-        save_plots,
-        recovery_mode,
-        pair_sum_tol,
-        summary,
-        manual_grid,
-        run_button,
-        out,
-    ])
+    panel = widgets.VBox(
+        [
+            peak_source,
+            peak_units,
+            save_plots,
+            recovery_mode,
+            pair_sum_tol,
+            summary,
+            manual_grid,
+            run_button,
+            out,
+        ]
+    )
     display(panel)
 
 
@@ -1699,10 +1692,10 @@ def call_signal_preview(variables) -> None:
     field_layout = widgets.Layout(width="220px")
 
     target_columns = {
-        "tof":    "t (ns)",
-        "tof_c":  "t_c (ns)",
-        "mc":     "mc (Da)",
-        "mc_uc":  "mc_uc (Da)",
+        "tof": "t (ns)",
+        "tof_c": "t_c (ns)",
+        "mc": "mc (Da)",
+        "mc_uc": "mc_uc (Da)",
     }
 
     def _has_signal(col_name: str) -> bool:
@@ -1716,10 +1709,7 @@ def call_signal_preview(variables) -> None:
         if _has_signal(col):
             target_options.append((f"{tgt}  ({col})", tgt))
     if not target_options:
-        _md(
-            "_None of `t (ns)`, `t_c (ns)`, `mc (Da)`, `mc_uc (Da)` carry usable "
-            "values — cannot render the preview._"
-        )
+        _md("_None of `t (ns)`, `t_c (ns)`, `mc (Da)`, `mc_uc (Da)` carry usable values — cannot render the preview._")
         return
 
     initial_target = target_options[0][1]
@@ -1768,9 +1758,17 @@ def call_signal_preview(variables) -> None:
         figname_widget.value = f"preview_{new_target}"
 
     preview_controls = (
-        target_mode, bin_size_widget, lim_widget, log_widget,
-        peaks_find, prominence, distance,
-        figname_widget, save_widget, fig_size_x, fig_size_y,
+        target_mode,
+        bin_size_widget,
+        lim_widget,
+        log_widget,
+        peaks_find,
+        prominence,
+        distance,
+        figname_widget,
+        save_widget,
+        fig_size_x,
+        fig_size_y,
         clear_button,
     )
 
@@ -1820,7 +1818,7 @@ def call_signal_preview(variables) -> None:
                         print_info=find_peaks,
                         figure_size=(fig_size_x.value, fig_size_y.value),
                     )
-                except Exception as exc:   # pragma: no cover - widget runtime path
+                except Exception as exc:  # pragma: no cover - widget runtime path
                     _md(f"**Plot failed:** `{type(exc).__name__}: {exc}`")
         finally:
             _set_preview_busy(False)
@@ -1835,21 +1833,25 @@ def call_signal_preview(variables) -> None:
     def _row(label_text: str, w) -> widgets.HBox:
         return widgets.HBox([widgets.Label(value=label_text, layout=label_layout), w])
 
-    panel = widgets.VBox([
-        _row("Target:", target_mode),
-        _row("Bin size:", bin_size_widget),
-        _row("Max TOF / m/c:", lim_widget),
-        _row("Log:", log_widget),
-        _row("Peak find:", peaks_find),
-        _row("Peak prominence:", prominence),
-        _row("Peak distance:", distance),
-        _row("Fig name:", figname_widget),
-        _row("Save fig:", save_widget),
-        widgets.HBox([
-            widgets.Label(value="Fig size:", layout=label_layout),
-            widgets.HBox([fig_size_x, fig_size_y]),
-        ]),
-        widgets.HBox([plot_button, clear_button]),
-        out,
-    ])
+    panel = widgets.VBox(
+        [
+            _row("Target:", target_mode),
+            _row("Bin size:", bin_size_widget),
+            _row("Max TOF / m/c:", lim_widget),
+            _row("Log:", log_widget),
+            _row("Peak find:", peaks_find),
+            _row("Peak prominence:", prominence),
+            _row("Peak distance:", distance),
+            _row("Fig name:", figname_widget),
+            _row("Save fig:", save_widget),
+            widgets.HBox(
+                [
+                    widgets.Label(value="Fig size:", layout=label_layout),
+                    widgets.HBox([fig_size_x, fig_size_y]),
+                ]
+            ),
+            widgets.HBox([plot_button, clear_button]),
+            out,
+        ]
+    )
     display(panel)

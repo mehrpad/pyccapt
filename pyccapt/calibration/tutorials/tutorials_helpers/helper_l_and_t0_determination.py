@@ -127,8 +127,9 @@ def call_l_and_t0_determination_workflow(variables=None):
             )
             suggest_button = widgets.Button(description="Nearest isotope")
 
-            def _update_ideal(_=None, *, isotope_control=isotope_widget, charge_control=charge_widget,
-                              ideal_control=ideal_widget):
+            def _update_ideal(
+                _=None, *, isotope_control=isotope_widget, charge_control=charge_widget, ideal_control=ideal_widget
+            ):
                 ideal_mass = flight_path_t0.reference_mass_from_selection(
                     isotope_control.value.strip(),
                     charge_control.value,
@@ -137,13 +138,19 @@ def call_l_and_t0_determination_workflow(variables=None):
                 if ideal_mass is not None:
                     ideal_control.value = round(float(ideal_mass), 6)
 
-            def _suggest(_=None, *, isotope_control=isotope_widget, charge_control=charge_widget, measured=peak["measured_mc"]):
+            def _suggest(
+                _=None, *, isotope_control=isotope_widget, charge_control=charge_widget, measured=peak["measured_mc"]
+            ):
                 suggestion = flight_path_t0.suggest_isotope_option(float(measured), charge_control.value, isotope_table)
                 isotope_control.value = suggestion
                 _update_ideal()
 
-            isotope_widget.observe(lambda change, updater=_update_ideal: updater() if change["name"] == "value" else None, names="value")
-            charge_widget.observe(lambda change, updater=_update_ideal: updater() if change["name"] == "value" else None, names="value")
+            isotope_widget.observe(
+                lambda change, updater=_update_ideal: updater() if change["name"] == "value" else None, names="value"
+            )
+            charge_widget.observe(
+                lambda change, updater=_update_ideal: updater() if change["name"] == "value" else None, names="value"
+            )
             suggest_button.on_click(_suggest)
             _suggest()
 
@@ -355,10 +362,7 @@ def call_l_and_t0_determination_workflow(variables=None):
                     f"Fitted t0: {regression_result['t0_ns']:.4f} ns | "
                     f"Fitted flight path: {regression_result['flight_path_length_mm']:.4f} mm"
                 )
-                print(
-                    f"Regression RMSE: {regression_result['rmse_ns']:.4f} ns | "
-                    f"R^2: {regression_result['r_squared']:.6f}"
-                )
+                print(f"Regression RMSE: {regression_result['rmse_ns']:.4f} ns | R^2: {regression_result['r_squared']:.6f}")
                 print("=" * 60)
                 display(merged_summary)
 
@@ -420,11 +424,28 @@ def call_l_and_t0_determination_workflow(variables=None):
                 "Load a processed dataset, check the experiment history, fine tune a rough t0, "
                 "select several known peaks, assign their ideal masses, and fit the instrument t0."
             ),
-            widgets.HBox([widgets.Label(value="Dataset file:", layout=label_layout), dataset_path, browse_button, load_button]),
+            widgets.HBox(
+                [widgets.Label(value="Dataset file:", layout=label_layout), dataset_path, browse_button, load_button]
+            ),
             widgets.HBox([widgets.Label(value="Instrument mode:", layout=label_layout), widgets.HBox([tdc, pulse_mode])]),
-            widgets.HBox([widgets.Label(value="Geometry and limits:", layout=label_layout), widgets.HBox([flight_path_length, t0_guess, max_mc, det_diam])]),
-            widgets.HBox([widgets.Label(value="Fit filtering:", layout=label_layout), widgets.HBox([detector_center_radius, voltage_tolerance, max_ions_per_peak, random_seed])]),
-            widgets.HBox([widgets.Label(value="Peak plot settings:", layout=label_layout), widgets.HBox([hist_bin_size, hist_prominence, hist_distance, hist_percent, hist_limit, preview_mc_limit])]),
+            widgets.HBox(
+                [
+                    widgets.Label(value="Geometry and limits:", layout=label_layout),
+                    widgets.HBox([flight_path_length, t0_guess, max_mc, det_diam]),
+                ]
+            ),
+            widgets.HBox(
+                [
+                    widgets.Label(value="Fit filtering:", layout=label_layout),
+                    widgets.HBox([detector_center_radius, voltage_tolerance, max_ions_per_peak, random_seed]),
+                ]
+            ),
+            widgets.HBox(
+                [
+                    widgets.Label(value="Peak plot settings:", layout=label_layout),
+                    widgets.HBox([hist_bin_size, hist_prominence, hist_distance, hist_percent, hist_limit, preview_mc_limit]),
+                ]
+            ),
             widgets.HBox([crop_button, tune_button, plot_peaks_button, sync_peaks_button, estimate_button, apply_button]),
             widgets.HTML("<b>Selected peak assignments</b>"),
             peak_rows_box,

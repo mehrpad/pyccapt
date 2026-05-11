@@ -31,19 +31,21 @@ CALIBRATION_FOLDERS = (
 # `_auto_raw_analysis_pure.py`; the UI closures (call_auto_raw_data_analysis,
 # call_signal_preview, run_analysis) stay here. Schedule that split next time
 # this file gets a substantive change.
-KNOWN_OFFENDERS_TO_REFACTOR = frozenset({
-    Path("tutorials/tutorials_helpers/helper_visualization.py").as_posix(),
-    Path("tutorials/tutorials_helpers/helper_calibration.py").as_posix(),
-    Path("tutorials/tutorials_helpers/helper_auto_raw_analysis.py").as_posix(),
-    # TODO(_raw_workflow_surface_concept): currently 1565 lines after the
-    # combinatorial per-pulse hit recovery (greedy + exhaustive) + per-peak
-    # diagnostics + length-tracking landed. The pure pieces (candidate
-    # generation, validity scoring, selection algorithms) are easy to
-    # extract into a sibling `_raw_workflow_sc_combinatorial.py`; the
-    # legacy chunked recovery + plotting helpers stay here. Schedule that
-    # split next time this file gets a substantive change.
-    Path("data_tools/_raw_workflow_surface_concept.py").as_posix(),
-})
+KNOWN_OFFENDERS_TO_REFACTOR = frozenset(
+    {
+        Path("tutorials/tutorials_helpers/helper_visualization.py").as_posix(),
+        Path("tutorials/tutorials_helpers/helper_calibration.py").as_posix(),
+        Path("tutorials/tutorials_helpers/helper_auto_raw_analysis.py").as_posix(),
+        # TODO(_raw_workflow_surface_concept): currently 1565 lines after the
+        # combinatorial per-pulse hit recovery (greedy + exhaustive) + per-peak
+        # diagnostics + length-tracking landed. The pure pieces (candidate
+        # generation, validity scoring, selection algorithms) are easy to
+        # extract into a sibling `_raw_workflow_sc_combinatorial.py`; the
+        # legacy chunked recovery + plotting helpers stay here. Schedule that
+        # split next time this file gets a substantive change.
+        Path("data_tools/_raw_workflow_surface_concept.py").as_posix(),
+    }
+)
 
 
 def test_calibration_python_module_lengths_are_bounded():
@@ -70,14 +72,8 @@ def test_known_offender_list_does_not_outlive_the_files():
     """Catch entries in the offender list that no longer exist on disk."""
     project_root = Path(__file__).resolve().parents[2]
     calibration_root = project_root / "pyccapt" / "calibration"
-    missing = [
-        relative for relative in KNOWN_OFFENDERS_TO_REFACTOR
-        if not (calibration_root / relative).is_file()
-    ]
-    assert not missing, (
-        f"KNOWN_OFFENDERS_TO_REFACTOR references files that no longer exist: "
-        f"{missing}. Remove these entries."
-    )
+    missing = [relative for relative in KNOWN_OFFENDERS_TO_REFACTOR if not (calibration_root / relative).is_file()]
+    assert not missing, f"KNOWN_OFFENDERS_TO_REFACTOR references files that no longer exist: {missing}. Remove these entries."
 
 
 def test_known_offender_list_only_holds_actual_offenders():

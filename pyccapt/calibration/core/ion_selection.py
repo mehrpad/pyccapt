@@ -28,7 +28,7 @@ def fix_parentheses(c):
     index = list(chunks(index, 3))
     list_parentheses = []
     for i in range(len(index)):
-        tmp = c[index[i][0]:index[i][1]]
+        tmp = c[index[i][0] : index[i][1]]
         tmp = re.findall('[A-Z][^A-Z]*', tmp)
         for j in range(len(tmp)):
             if tmp[j].isalpha():
@@ -41,7 +41,7 @@ def fix_parentheses(c):
     for i in range(len(list_parentheses)):
         gg = list_parentheses[i]
         c = list(c)
-        c[index[i][0] - 1 - (2 * i):index[i][1] + 2] = list_parentheses[i]
+        c[index[i][0] - 1 - (2 * i) : index[i][1] + 2] = list_parentheses[i]
 
     return ''.join(c)
 
@@ -99,7 +99,7 @@ def chunks(lst, n):
 
     """
     for i in range(0, len(lst), n):
-        yield lst[i:i + n]
+        yield lst[i : i + n]
 
 
 def _sequence_key(values):
@@ -219,7 +219,7 @@ def find_closest_elements(target_elem, num_elements, abundance_threshold=0.0, ch
 
     # Filter elements by abundance threshold
     abundance_threshold *= 100
-    mask_abundanc = (abundance > abundance_threshold)
+    mask_abundanc = abundance > abundance_threshold
     elements = elements[mask_abundanc]
     isotope_number = isotope_number[mask_abundanc]
     weights = weights[mask_abundanc]
@@ -248,27 +248,27 @@ def find_closest_elements(target_elem, num_elements, abundance_threshold=0.0, ch
             formula = r'$' + formula + '^{+}$'
         element_symbols.append(formula)
 
-
     selected_elements = [[item] for item in selected_elements]
     complex = np.ones(len(idxs), dtype=int)
     complex = [[item] for item in complex]
     selected_isotope_number = [[item] for item in selected_isotope_number]
-
 
     selected_isotope_number = [[np.uint32(float(value[0]))] for value in selected_isotope_number]
     complex = [[np.uint32(float(value[0]))] for value in complex]
     selected_charge_list = [np.uint32(value) for value in selected_charge_list]
 
     # Create DataFrame
-    df = pd.DataFrame({
-        'ion': element_symbols,
-        'mass': selected_weights,
-        'element': selected_elements,
-        'complex': complex,
-        'isotope': selected_isotope_number,
-        'charge': selected_charge_list,
-        'abundance': selected_abundance,
-    })
+    df = pd.DataFrame(
+        {
+            'ion': element_symbols,
+            'mass': selected_weights,
+            'element': selected_elements,
+            'complex': complex,
+            'isotope': selected_isotope_number,
+            'charge': selected_charge_list,
+            'abundance': selected_abundance,
+        }
+    )
 
     # Sort DataFrame
     # Round the abundance column to 4 decimal places
@@ -278,6 +278,7 @@ def find_closest_elements(target_elem, num_elements, abundance_threshold=0.0, ch
     df['mass'] = df['mass'].round(4)
     df = rank_candidate_assignments(df, target_mass=target_elem, variables=variables)
     return df.head(int(num_elements)).reset_index(drop=True)
+
 
 def load_elements(target_elements, abundance_threshold=0.0, charge=4, variables=None):
     """
@@ -309,7 +310,6 @@ def load_elements(target_elements, abundance_threshold=0.0, charge=4, variables=
     weight = dataframe['weight'].to_numpy()
     abundance = dataframe['abundance'].to_numpy()
 
-
     elements = np.repeat(elements, charge)
     isotope_number = np.repeat(isotope_number, charge)
     weights = np.repeat(weight, charge)
@@ -320,7 +320,7 @@ def load_elements(target_elements, abundance_threshold=0.0, charge=4, variables=
 
     # Filter elements by abundance threshold
     abundance_threshold *= 100
-    mask_abundanc = (abundance > abundance_threshold)
+    mask_abundanc = abundance > abundance_threshold
     elements = elements[mask_abundanc]
     isotope_number = isotope_number[mask_abundanc]
     weights = weights[mask_abundanc]
@@ -363,15 +363,17 @@ def load_elements(target_elements, abundance_threshold=0.0, charge=4, variables=
     selected_charge_list = [np.uint32(value) for value in selected_charge_list]
 
     # Create DataFrame
-    df = pd.DataFrame({
-        'ion': element_symbols,
-        'mass': selected_weights,
-        'element': selected_elements,
-        'complex': complex,
-        'isotope': selected_isotope_number,
-        'charge': selected_charge_list,
-        'abundance': selected_abundance,
-    })
+    df = pd.DataFrame(
+        {
+            'ion': element_symbols,
+            'mass': selected_weights,
+            'element': selected_elements,
+            'complex': complex,
+            'isotope': selected_isotope_number,
+            'charge': selected_charge_list,
+            'abundance': selected_abundance,
+        }
+    )
 
     # Round the abundance column to 4 decimal places
     df['abundance'] = df['abundance'].round(4)
@@ -379,6 +381,8 @@ def load_elements(target_elements, abundance_threshold=0.0, charge=4, variables=
     df['abundance'] = df['abundance'] / 100
     df['mass'] = df['mass'].round(4)
     return rank_candidate_assignments(df, variables=variables)
+
+
 def molecule_manual(target_element, charge, latex=True, variables=None):
     """
     Generate a list of isotopes for a given target element.
@@ -453,10 +457,17 @@ def molecule_manual(target_element, charge, latex=True, variables=None):
     isotope_list = [isotope_list]
     charge = [charge]
 
-    df = pd.DataFrame({'ion': formula, 'mass': total_weight, 'element': element_list,
-                       'complex': complexity_list, 'isotope': isotope_list, 'charge': charge,
-                       'abundance': abundance_c, })
-
+    df = pd.DataFrame(
+        {
+            'ion': formula,
+            'mass': total_weight,
+            'element': element_list,
+            'complex': complexity_list,
+            'isotope': isotope_list,
+            'charge': charge,
+            'abundance': abundance_c,
+        }
+    )
 
     # Round the abundance column to 4 decimal places
     df['abundance'] = df['abundance'].round(4)
@@ -533,9 +544,10 @@ def molecule_create(element_list, max_complexity, charge, abundance_threshold, v
     selected_abundance = abundance[indices_elements[0]]
 
     # Create a list of elements with their respective isotope numbers, weights, and abundances
-    element_data = [{'element': elem, 'isotope': iso, 'weight': w, 'abundance': ab}
-                    for elem, iso, w, ab in zip(selected_elements, selected_isotope_number, selected_weights,
-                                                selected_abundance)]
+    element_data = [
+        {'element': elem, 'isotope': iso, 'weight': w, 'abundance': ab}
+        for elem, iso, w, ab in zip(selected_elements, selected_isotope_number, selected_weights, selected_abundance)
+    ]
     # Initialize lists to store results
     combinations = []
     combinations_list = []
@@ -566,8 +578,9 @@ def molecule_create(element_list, max_complexity, charge, abundance_threshold, v
                 combination_charge.append(i + 1)
 
     for i in range(len(combinations)):
-        new_combination, new_isotopes, complexity = transform_combination_and_isotopes(combinations[i],
-                                                                                       combination_isotopes[i])
+        new_combination, new_isotopes, complexity = transform_combination_and_isotopes(
+            combinations[i], combination_isotopes[i]
+        )
         combinations[i] = new_combination
         combination_isotopes[i] = new_isotopes
         combination_complexity.append(complexity)
@@ -611,15 +624,17 @@ def molecule_create(element_list, max_complexity, charge, abundance_threshold, v
     combination_charge = [np.uint32(value) for value in combination_charge]
 
     # Create DataFrame
-    df = pd.DataFrame({
-        'ion': combination_formula,
-        'mass': combination_weights,
-        'element': combinations,
-        'complex': combination_complexity,
-        'isotope': combination_isotopes,
-        'charge': combination_charge,
-        'abundance': combination_abundances,
-    })
+    df = pd.DataFrame(
+        {
+            'ion': combination_formula,
+            'mass': combination_weights,
+            'element': combinations,
+            'complex': combination_complexity,
+            'isotope': combination_isotopes,
+            'charge': combination_charge,
+            'abundance': combination_abundances,
+        }
+    )
 
     df = df[df['abundance'] > abundance_threshold]
 
@@ -709,6 +724,7 @@ def ranging_dataset_create(variables, row_index, mass_ion):
             selected_row[9] = np.uint32(selected_row[9])
             print(f"Selected row: {selected_row}")
             variables.range_data.loc[len(variables.range_data)] = selected_row
+
 
 def display_color(color):
     """

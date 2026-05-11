@@ -1,4 +1,4 @@
-﻿"""Diagnostic plotting helpers for calibration workflows."""
+"""Diagnostic plotting helpers for calibration workflows."""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ def initial_calibration(data, flight_path_length):
     t_values = data["t (ns)"].to_numpy()
     x_det = data["x_det (cm)"].to_numpy() * 10
     y_det = data["y_det (cm)"].to_numpy() * 10
-    d_values = x_det ** 2 + y_det ** 2 + flight_path_length ** 2
+    d_values = x_det**2 + y_det**2 + flight_path_length**2
 
     init_flight_path_factor = np.mean(d_values) / d_values
     init_voltage_factor = np.sqrt(v_dc / np.mean(v_dc))
@@ -128,4 +128,3 @@ def plot_selected_statistic(variables, bin_fdm, index_fig, calibration_mode, sav
 
 
 __all__ = ["plot_fdm", "initial_calibration", "plot_selected_statistic"]
-

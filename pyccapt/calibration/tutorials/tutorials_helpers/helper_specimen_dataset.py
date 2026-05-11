@@ -63,21 +63,28 @@ def call_specimen_dataset_workflow(variables=None):
 
     build_button.on_click(on_build)
 
-    controls = widgets.VBox([
-        widgets.HBox([widgets.Label(value='Preset:', layout=label_layout), preset]),
-        widgets.HBox([widgets.Label(value='Supercell (x, y, z):', layout=label_layout),
-                      widgets.HBox([supercell_x, supercell_y, supercell_z])]),
-        widgets.HBox([widgets.Label(value='Cone diameter (A):', layout=label_layout), cone_diameter]),
-        widgets.HBox([widgets.Label(value='Cone length (A):', layout=label_layout), cone_length]),
-        widgets.HBox([widgets.Label(value='Hemisphere base (A):', layout=label_layout), hemisphere_base]),
-        widgets.HBox([widgets.Label(value='Noise (x, y, z) A:', layout=label_layout),
-                      widgets.HBox([noise_x, noise_y, noise_z])]),
-        widgets.HBox([widgets.Label(value='Noise type:', layout=label_layout), noise_type]),
-        widgets.HBox([widgets.Label(value='Random seed:', layout=label_layout), seed]),
-        widgets.HBox([widgets.Label(value='Save path (.h5):', layout=label_layout), save_path]),
-        widgets.HBox([widgets.Label(value='Load into variables:', layout=label_layout), load_into_variables]),
-        widgets.HBox([build_button]),
-    ])
+    controls = widgets.VBox(
+        [
+            widgets.HBox([widgets.Label(value='Preset:', layout=label_layout), preset]),
+            widgets.HBox(
+                [
+                    widgets.Label(value='Supercell (x, y, z):', layout=label_layout),
+                    widgets.HBox([supercell_x, supercell_y, supercell_z]),
+                ]
+            ),
+            widgets.HBox([widgets.Label(value='Cone diameter (A):', layout=label_layout), cone_diameter]),
+            widgets.HBox([widgets.Label(value='Cone length (A):', layout=label_layout), cone_length]),
+            widgets.HBox([widgets.Label(value='Hemisphere base (A):', layout=label_layout), hemisphere_base]),
+            widgets.HBox(
+                [widgets.Label(value='Noise (x, y, z) A:', layout=label_layout), widgets.HBox([noise_x, noise_y, noise_z])]
+            ),
+            widgets.HBox([widgets.Label(value='Noise type:', layout=label_layout), noise_type]),
+            widgets.HBox([widgets.Label(value='Random seed:', layout=label_layout), seed]),
+            widgets.HBox([widgets.Label(value='Save path (.h5):', layout=label_layout), save_path]),
+            widgets.HBox([widgets.Label(value='Load into variables:', layout=label_layout), load_into_variables]),
+            widgets.HBox([build_button]),
+        ]
+    )
 
     display(controls)
     display(out)

@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 
 import pandas as pd
 
@@ -154,9 +154,7 @@ def test_voigt_mrp_finite_at_one_percent_for_lorentzian_with_long_tail():
     assert np.isfinite(voigt[0]), "Voigt MRP(0.5) should be finite"
     assert np.isfinite(voigt[1]), "Voigt MRP(0.1) should be finite (was NaN before fix)"
     assert np.isfinite(voigt[2]), "Voigt MRP(0.01) should be finite (was NaN before fix)"
-    assert voigt[0] >= voigt[1] >= voigt[2], (
-        f"MRP must fall as fraction drops: {voigt[0]} >= {voigt[1]} >= {voigt[2]}"
-    )
+    assert voigt[0] >= voigt[1] >= voigt[2], f"MRP must fall as fraction drops: {voigt[0]} >= {voigt[1]} >= {voigt[2]}"
 
 
 def test_voigt_mrp_returns_finite_values_at_10_and_1_percent():
@@ -177,9 +175,7 @@ def test_voigt_mrp_returns_finite_values_at_10_and_1_percent():
     assert np.isfinite(voigt[0]), "Voigt MRP(0.5) should be finite"
     assert np.isfinite(voigt[1]), "Voigt MRP(0.1) should be finite (was NaN before fix)"
     # MRP must decrease monotonically as we measure at lower fractions of max.
-    assert voigt[0] >= voigt[1], (
-        f"Voigt MRP should fall as fraction drops: {voigt[0]} (50%) >= {voigt[1]} (10%)"
-    )
+    assert voigt[0] >= voigt[1], f"Voigt MRP should fall as fraction drops: {voigt[0]} (50%) >= {voigt[1]} (10%)"
 
 
 def test_histogram_mrp_is_not_absurdly_large_at_fine_bin_sizes():
@@ -233,10 +229,12 @@ def test_mrp_calculation_is_independent_of_display_bin_width():
 
 def test_mrp_calculation_uses_voigt_report_only_for_dominant_peak(monkeypatch):
     rng = np.random.default_rng(321)
-    data = np.concatenate([
-        rng.normal(27.0, 0.018, 25000),
-        rng.normal(52.0, 0.025, 12000),
-    ])
+    data = np.concatenate(
+        [
+            rng.normal(27.0, 0.018, 25000),
+            rng.normal(52.0, 0.025, 12000),
+        ]
+    )
     variables = Variables()
     plotter = mc_plot.AptHistPlotter(data, variables)
     plotter.plot_histogram(bin_width=0.01, plot_show=False, fast=True)
@@ -268,4 +266,3 @@ def test_mrp_calculation_uses_voigt_report_only_for_dominant_peak(monkeypatch):
     assert mrp_peak == [800.0, 450.0, 320.0]
     assert 800.0 in mrp_all["MRP(0.5)"]
     assert mrp_all["MRP(0.5)"].count(100.0) == len(plotter.peaks) - 1
-

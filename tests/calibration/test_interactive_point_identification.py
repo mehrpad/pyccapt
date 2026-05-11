@@ -1,4 +1,4 @@
-﻿from types import SimpleNamespace
+from types import SimpleNamespace
 
 import matplotlib
 
@@ -46,4 +46,3 @@ def test_canonical_module_exposes_expected_aliases():
     assert AnnotationFinder is not None
     assert AnnoteFinder is not None
     assert distances(0, 3, 0, 4) == 5.0
-

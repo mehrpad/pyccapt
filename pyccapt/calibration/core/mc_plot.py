@@ -1,4 +1,4 @@
-﻿import math
+import math
 import re
 
 import matplotlib.pyplot as plt
@@ -115,8 +115,18 @@ class AptHistPlotter:
         self.plot_show = True
         self.legend_colors = []
 
-    def plot_histogram(self, bin_width=0.1, normalize=False, label='mc', log=True, grid=False, steps='stepfilled',
-                       fig_size=(9, 5), plot_show=True, fast=False):
+    def plot_histogram(
+        self,
+        bin_width=0.1,
+        normalize=False,
+        label='mc',
+        log=True,
+        grid=False,
+        steps='stepfilled',
+        fig_size=(9, 5),
+        plot_show=True,
+        fast=False,
+    ):
         """
         Plot the histogram of the mc or tof data.
 
@@ -159,12 +169,19 @@ class AptHistPlotter:
                 alpha = 0.9
 
             if normalize:
-                self.y, self.x, self.patches = self.ax.hist(self.mc_tof, bins=self.bins, alpha=alpha,
-                                                            color='slategray', edgecolor=edgecolor, histtype=steps,
-                                                            density=True)
+                self.y, self.x, self.patches = self.ax.hist(
+                    self.mc_tof,
+                    bins=self.bins,
+                    alpha=alpha,
+                    color='slategray',
+                    edgecolor=edgecolor,
+                    histtype=steps,
+                    density=True,
+                )
             else:
-                self.y, self.x, self.patches = self.ax.hist(self.mc_tof, bins=self.bins, alpha=alpha, color='slategray',
-                                                            edgecolor=edgecolor, histtype=steps)
+                self.y, self.x, self.patches = self.ax.hist(
+                    self.mc_tof, bins=self.bins, alpha=alpha, color='slategray', edgecolor=edgecolor, histtype=steps
+                )
             self.x_centers = (self.x[:-1] + self.x[1:]) * 0.5
 
         self.ax.set_xlabel('Mass/Charge [Da]' if label == 'mc' else 'Time of Flight [ns]')
@@ -241,7 +258,7 @@ class AptHistPlotter:
                     # Define a small range around the bin to search for the local maximum
                     search_range = slice(max(0, bin_index - 1), min(len(self.y), bin_index + 2))
                     local_bins = self.y[search_range]
-                    local_x = self.x[search_range.start:search_range.stop]
+                    local_x = self.x[search_range.start : search_range.stop]
 
                     # Find the local maximum and its position
                     max_idx = np.argmax(local_bins)
@@ -253,15 +270,17 @@ class AptHistPlotter:
                     if self.ax.get_yscale() == 'log':
                         y_offset = 10 ** (np.log10(peak_height) + 0.1) - peak_height
 
-                    self.peak_annotates.append(plt.text(
-                        peak_position + x_offset,
-                        peak_height + y_offset,
-                        peak_labels[i],
-                        color='black',
-                        size=10,
-                        alpha=1,
-                        rotation=90
-                    ))
+                    self.peak_annotates.append(
+                        plt.text(
+                            peak_position + x_offset,
+                            peak_height + y_offset,
+                            peak_labels[i],
+                            color='black',
+                            size=10,
+                            alpha=1,
+                            rotation=90,
+                        )
+                    )
                     self.annotates.append(str(i + 1))
 
             if legend:
@@ -330,7 +349,7 @@ class AptHistPlotter:
                     # Define a small range around the bin to search for the local maximum
                     search_range = slice(max(0, bin_index - 1), min(len(self.y), bin_index + 2))
                     local_bins = self.y[search_range]
-                    local_x = self.x[search_range.start:search_range.stop]
+                    local_x = self.x[search_range.start : search_range.stop]
 
                     # Find the local maximum and its position
                     max_idx = np.argmax(local_bins)
@@ -348,9 +367,17 @@ class AptHistPlotter:
                     if self.ax.get_yscale() == 'log' and peak_height > 0:
                         y_offset = 10 ** (np.log10(peak_height) + 0.1) - peak_height
                 if self.plot_show:
-                    self.peak_annotates.append(plt.text(peak_position + x_offset, peak_height + y_offset,
-                                                        labels[i], color='black', size=10, alpha=1,
-                                                        rotation=90))
+                    self.peak_annotates.append(
+                        plt.text(
+                            peak_position + x_offset,
+                            peak_height + y_offset,
+                            labels[i],
+                            color='black',
+                            size=10,
+                            alpha=1,
+                            rotation=90,
+                        )
+                    )
                     self.annotates.append(str(i + 1))
         else:
             y_offset = 0.0  # Adjust this value as needed
@@ -364,9 +391,16 @@ class AptHistPlotter:
                             y_offset = 10 ** (np.log10(peak_height) + 0.1) - peak_height
 
                         self.peak_annotates.append(
-                            plt.text(self.x[self.peaks][i] + x_offset, peak_height + y_offset,
-                                     '%s' % '{:.2f}'.format(self.x[self.peaks][i]), color='black', size=10, alpha=1,
-                                     rotation=90))
+                            plt.text(
+                                self.x[self.peaks][i] + x_offset,
+                                peak_height + y_offset,
+                                '%s' % '{:.2f}'.format(self.x[self.peaks][i]),
+                                color='black',
+                                size=10,
+                                alpha=1,
+                                rotation=90,
+                            )
+                        )
 
                         self.annotates.append(str(i + 1))
 
@@ -375,13 +409,21 @@ class AptHistPlotter:
                 for i in range(len(self.variables.peaks_x_selected)):
                     # Find the bin that contains the mc[i]
                     bin_index = np.searchsorted(self.x, self.variables.peaks_x_selected[i])
-                    peak_height = self.y[bin_index] * ((self.variables.peaks_x_selected[i] -
-                                                        self.x[bin_index - 1]) / self.bin_width)
+                    peak_height = self.y[bin_index] * (
+                        (self.variables.peaks_x_selected[i] - self.x[bin_index - 1]) / self.bin_width
+                    )
                     if self.plot_show:
                         self.peak_annotates.append(
-                            plt.text(self.variables.peaks_x_selected[i] + x_offset, peak_height + y_offset,
-                                     '%s' % '{:.2f}'.format(self.variables.peaks_x_selected[i]), color='black', size=10,
-                                     alpha=1, rotation=90))
+                            plt.text(
+                                self.variables.peaks_x_selected[i] + x_offset,
+                                peak_height + y_offset,
+                                '%s' % '{:.2f}'.format(self.variables.peaks_x_selected[i]),
+                                color='black',
+                                size=10,
+                                alpha=1,
+                                rotation=90,
+                            )
+                        )
 
                         self.annotates.append(str(i + 1))
 
@@ -412,7 +454,7 @@ class AptHistPlotter:
             legend_colors_edited = list(unique_tuples.items())
         if not detailed_charge:
             # Regular expression pattern to remove isotope notation
-            pattern_1 =  r"\^{\d+\}|\{\+|\{-\}|\{\d+[+-]?\}"
+            pattern_1 = r"\^{\d+\}|\{\+|\{-\}|\{\d+[+-]?\}"
             # Regular expression pattern to remove the isotope notation, charge, and caret ^
             pattern_2 = r"\{\d+\}|[\^{}+-]"
             for i in range(len(legend_colors_edited)):
@@ -433,13 +475,15 @@ class AptHistPlotter:
             ncol = max(1, math.ceil(len(legend_colors_edited) / 8))
         else:
             ncol = 1
-        self.ax.legend([label[1] for label in legend_colors_edited], [label[0] for label in legend_colors_edited],
-                       loc=loc, ncol=ncol)
+        self.ax.legend(
+            [label[1] for label in legend_colors_edited], [label[0] for label in legend_colors_edited], loc=loc, ncol=ncol
+        )
 
-    def plot_hist_info_legend(self, label='mc', mrp_all=False, background=None, legend_mode='long',
-                              loc='left'):
+    def plot_hist_info_legend(self, label='mc', mrp_all=False, background=None, legend_mode='long', loc='left'):
         """Plot summary legend info for histogram quality metrics."""
-        return _apply_hist_info_legend(self, label=label, mrp_all=mrp_all, background=background, legend_mode=legend_mode, loc=loc)
+        return _apply_hist_info_legend(
+            self, label=label, mrp_all=mrp_all, background=background, legend_mode=legend_mode, loc=loc
+        )
 
     def mrp_calculation(self):
         """Calculate MRP metrics for current histogram peaks."""
@@ -459,17 +503,19 @@ class AptHistPlotter:
             if np.max(self.mc_tof) + 10 > self.variables.h_line_pos[i] > np.max(self.mc_tof) - 10:
                 plt.axvline(x=self.variables.h_line_pos[i], color='b', linestyle='--', linewidth=2)
 
-    def plot_background(self, mode, non_peaks=None, lam=1e6, tol=1e-1, max_iter=100, num_std=3.0, plot=True,
-                        patch=True):
+    def plot_background(self, mode, non_peaks=None, lam=1e6, tol=1e-1, max_iter=100, num_std=3.0, plot=True, patch=True):
         """Fit and plot histogram background."""
-        return _plot_background(self, mode, non_peaks=non_peaks, lam=lam, tol=tol, max_iter=max_iter,
-                                num_std=num_std, plot=plot, patch=patch)
+        return _plot_background(
+            self, mode, non_peaks=non_peaks, lam=lam, tol=tol, max_iter=max_iter, num_std=num_std, plot=plot, patch=patch
+        )
 
     def exponential_decay_with_linear_and_dc(self, x, a, b, c, d):
         """Exponential decay helper retained for compatibility."""
         return _exp_decay(x, a, b, c, d)
 
-    def manual_background_fit(self, ):
+    def manual_background_fit(
+        self,
+    ):
         """Interactive manual background fitting."""
         return _manual_background_fit(self)
 
@@ -519,9 +565,16 @@ class AptHistPlotter:
                 circle = ax1.plot(m, line_height, marker='o', markersize=6, color='white', markeredgecolor='red')
 
                 # Annotate the ion label (LaTeX formula) near the circle
-                label = ax1.annotate(ion, xy=(m, line_height), xytext=(m, line_height), fontsize=10,
-                                     color='blue', annotation_clip='clip_on', textcoords="offset points",
-                                     xycoords="data")
+                label = ax1.annotate(
+                    ion,
+                    xy=(m, line_height),
+                    xytext=(m, line_height),
+                    fontsize=10,
+                    color='blue',
+                    annotation_clip='clip_on',
+                    textcoords="offset points",
+                    xycoords="data",
+                )
 
                 self.plotted_lines.append(line)  # Keep track of the plotted lines
                 self.plotted_circles.append(circle)  # Keep track of the plotted circles
@@ -589,12 +642,45 @@ class AptHistPlotter:
             )
 
 
-def hist_plot(variables, bin_size, log, target, normalize, prominence, distance, percent, selector, figname, lim,
-              peaks_find=True, peaks_find_plot=False, plot_ranged_peak=False, plot_ranged_colors=False, mrp_all=False,
-              background=None, grid=False, ranging_mode=False, range_sequence=[], range_mc=[], range_detx=[],
-              range_dety=[], range_x=[], range_y=[], range_z=[], range_vol=[], save_fig=True, print_info=True,
-              legend_mode='long', draw_calib_rect=False, figure_size=(9, 5), plot_show=True, fast_calibration=False,
-              fast_histogram=True, initial_peak_selection=False, compute_mrp=True):
+def hist_plot(
+    variables,
+    bin_size,
+    log,
+    target,
+    normalize,
+    prominence,
+    distance,
+    percent,
+    selector,
+    figname,
+    lim,
+    peaks_find=True,
+    peaks_find_plot=False,
+    plot_ranged_peak=False,
+    plot_ranged_colors=False,
+    mrp_all=False,
+    background=None,
+    grid=False,
+    ranging_mode=False,
+    range_sequence=[],
+    range_mc=[],
+    range_detx=[],
+    range_dety=[],
+    range_x=[],
+    range_y=[],
+    range_z=[],
+    range_vol=[],
+    save_fig=True,
+    print_info=True,
+    legend_mode='long',
+    draw_calib_rect=False,
+    figure_size=(9, 5),
+    plot_show=True,
+    fast_calibration=False,
+    fast_histogram=True,
+    initial_peak_selection=False,
+    compute_mrp=True,
+):
     """Backward-compatible wrapper delegating to :mod:`mc_plot_api`."""
     from pyccapt.calibration.core.mc_plot_api import hist_plot as _hist_plot
 
@@ -637,7 +723,3 @@ def hist_plot(variables, bin_size, log, target, normalize, prominence, distance,
         initial_peak_selection=initial_peak_selection,
         compute_mrp=compute_mrp,
     )
-
-
-
-

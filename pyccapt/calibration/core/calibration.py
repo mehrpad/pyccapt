@@ -1,4 +1,4 @@
-﻿from copy import copy
+from copy import copy
 
 import fast_histogram
 import matplotlib.pyplot as plt
@@ -9,6 +9,7 @@ from scipy.optimize import curve_fit
 from scipy.signal import find_peaks, peak_prominences, peak_widths
 
 from pyccapt.calibration.core.exceptions import CalibrationInputError
+from pyccapt.calibration.core.parallel import parallel_map
 from pyccapt.calibration.core.validation import (
     BOWL_FIT_MODES,
     BOWL_SAMPLE_METHODS,
@@ -95,13 +96,27 @@ def _radial_bowl_corr(data_xy, a, b, c, d, e):
     """Radial-dominant bowl model where r^2 drives the primary curvature."""
     x = np.asarray(data_xy[0], dtype=float)
     y = np.asarray(data_xy[1], dtype=float)
-    r2 = x ** 2 + y ** 2
-    return a + b * r2 + c * (r2 ** 2) + d * x + e * y
+    r2 = x**2 + y**2
+    return a + b * r2 + c * (r2**2) + d * x + e * y
 
 
-def voltage_correction(dld_highVoltage_peak, dld_t_peak, variables, maximum_location, index_fig, figname, sample_size,
-                       mode, calibration_mode, sample_range_max, bin_size, plot=True, save=False,
-                       fig_size=(5, 5), model='curve_fit'):
+def voltage_correction(
+    dld_highVoltage_peak,
+    dld_t_peak,
+    variables,
+    maximum_location,
+    index_fig,
+    figname,
+    sample_size,
+    mode,
+    calibration_mode,
+    sample_range_max,
+    bin_size,
+    plot=True,
+    save=False,
+    fig_size=(5, 5),
+    model='curve_fit',
+):
     """
     Performs voltage correction and plots the graph based on the passed arguments.
 
@@ -141,89 +156,80 @@ def voltage_correction(dld_highVoltage_peak, dld_t_peak, variables, maximum_loca
         field_names=("dld_highVoltage_peak", "dld_t_peak"),
     )
 
-    dld_t_peak_list = []
-    high_voltage_mean_list = []
+    # Each segment below is independent of every other and the inner work is
+    # NumPy + scipy.signal.find_peaks -- both release the GIL, so we run the
+    # per-segment evaluation through parallel_map(gil_releasing=True) and let
+    # the auto-serial fallback kick in for tiny datasets.
     if mode == 'ion_seq':
-        for i in range(int(len(dld_highVoltage_peak) / sample_size) + 1):
-            dld_highVoltage_peak_selected = dld_highVoltage_peak[i * sample_size:(i + 1) * sample_size]
-            dld_t_peak_selected = dld_t_peak[i * sample_size:(i + 1) * sample_size]
-            if sample_range_max == 'histogram':
-                try:
-                    bins, _ = _build_histogram_bins(dld_t_peak_selected, bin_size)
-                    y, x = np.histogram(dld_t_peak_selected, bins=bins)
-                    peaks, properties = find_peaks(y, height=0)
-                    index_peak_max_ini = np.argmax(properties['peak_heights'])
-                    max_peak = peaks[index_peak_max_ini]
-                    dld_t_peak_list.append(x[max_peak] / maximum_location)
-                    # dld_t_peak_list.append(maximum_location / x[max_peak])
-                    mask_v = np.logical_and((dld_t_peak_selected >= x[max_peak] - bin_size)
-                                            , (dld_t_peak_selected <= x[max_peak] + bin_size))
-                    if len(dld_highVoltage_peak_selected[mask_v]) == 0:
-                        mask_v = np.logical_and((dld_t_peak_selected >= x[max_peak] - 2 * bin_size)
-                                                , (dld_t_peak_selected <= x[max_peak] + 2 * bin_size))
-                        if len(dld_highVoltage_peak_selected[mask_v]) == 0:
-                            print('length of mask voltage', len(dld_highVoltage_peak_selected[mask_v]))
-                            mask_v = np.logical_and((dld_t_peak_selected >= x[max_peak] - 4 * bin_size)
-                                                    , (dld_t_peak_selected <= x[max_peak] + 4 * bin_size))
-                            print('length of mask voltage after increase the window',
-                                  len(dld_highVoltage_peak_selected[mask_v]))
-                    high_voltage_mean_list.append(np.mean(dld_highVoltage_peak_selected[mask_v]))
-                except ValueError:
-                    # print('cannot find the maximum')
-                    dld_t_mean = np.mean(dld_t_peak_selected)
-                    dld_t_peak_list.append(dld_t_mean / maximum_location)
-                    # dld_t_peak_list.append(maximum_location / dld_t_mean)
-                    high_voltage_mean = np.mean(dld_highVoltage_peak_selected)
-                    high_voltage_mean_list.append(high_voltage_mean)
-            elif sample_range_max == 'mean':
-                dld_t_mean = np.mean(dld_t_peak_selected)
-                dld_t_peak_list.append(dld_t_mean / maximum_location)
-                # dld_t_peak_list.append(maximum_location / dld_t_mean)
-                high_voltage_mean = np.mean(dld_highVoltage_peak_selected)
-                high_voltage_mean_list.append(high_voltage_mean)
-            elif sample_range_max == 'median':
-                dld_t_mean = np.median(dld_t_peak_selected)
-                dld_t_peak_list.append(dld_t_mean / maximum_location)
-                high_voltage_mean = np.median(dld_highVoltage_peak_selected)
-                high_voltage_mean_list.append(high_voltage_mean)
+        num_segments = int(len(dld_highVoltage_peak) / sample_size) + 1
 
+        def _segment_indices(i: int):
+            start = i * sample_size
+            stop = start + sample_size
+            return dld_highVoltage_peak[start:stop], dld_t_peak[start:stop]
+
+        segments = [_segment_indices(i) for i in range(num_segments)]
     elif mode == 'voltage':
-        for i in range(int((np.max(dld_highVoltage_peak) - np.min(dld_highVoltage_peak)) / sample_size) + 1):
-            mask = np.logical_and((dld_highVoltage_peak >= (np.min(dld_highVoltage_peak) + (i) * sample_size)),
-                                  (dld_highVoltage_peak < (np.min(dld_highVoltage_peak) + (i + 1) * sample_size)))
-            dld_highVoltage_peak_selected = dld_highVoltage_peak[mask]
-            dld_t_peak_selected = dld_t_peak[mask]
+        v_min = np.min(dld_highVoltage_peak)
+        v_max = np.max(dld_highVoltage_peak)
+        num_segments = int((v_max - v_min) / sample_size) + 1
 
-            if sample_range_max == 'histogram':
-                try:
-                    bins, _ = _build_histogram_bins(dld_t_peak_selected, bin_size)
-                    y, x = np.histogram(dld_t_peak_selected, bins=bins)
-                    peaks, properties = find_peaks(y, height=0)
-                    index_peak_max_ini = np.argmax(properties['peak_heights'])
-                    max_peak = peaks[index_peak_max_ini]
-                    dld_t_peak_list.append(x[max_peak] / maximum_location)
-                    # dld_t_peak_list.append(maximum_location / x[max_peak])
-                    mask_v = np.logical_and((dld_t_peak_selected >= x[max_peak] - bin_size)
-                                            , (dld_t_peak_selected <= x[max_peak] + bin_size))
-                    high_voltage_mean_list.append(np.mean(dld_highVoltage_peak_selected[mask_v]))
-                except ValueError:
-                    dld_t_mean = np.mean(dld_t_peak_selected)
-                    dld_t_peak_list.append(dld_t_mean / maximum_location)
-                    high_voltage_mean = np.mean(dld_highVoltage_peak_selected)
-                    high_voltage_mean_list.append(high_voltage_mean)
-            elif sample_range_max == 'mean':
-                dld_t_mean = np.mean(dld_t_peak_selected)
-                dld_t_peak_list.append(dld_t_mean / maximum_location)
-                # dld_t_peak_list.append(maximum_location / dld_t_mean)
-                high_voltage_mean = np.mean(dld_highVoltage_peak_selected)
-                high_voltage_mean_list.append(high_voltage_mean)
-            elif sample_range_max == 'median':
-                dld_t_mean = np.median(dld_t_peak_selected)
-                dld_t_peak_list.append(dld_t_mean / maximum_location)
-                # dld_t_peak_list.append(maximum_location / dld_t_mean)
-                high_voltage_mean = np.median(dld_highVoltage_peak_selected)
-                high_voltage_mean_list.append(high_voltage_mean)
+        def _segment_by_voltage(i: int):
+            lo = v_min + i * sample_size
+            hi = v_min + (i + 1) * sample_size
+            mask = np.logical_and(dld_highVoltage_peak >= lo, dld_highVoltage_peak < hi)
+            return dld_highVoltage_peak[mask], dld_t_peak[mask]
 
+        segments = [_segment_by_voltage(i) for i in range(num_segments)]
+    else:
+        segments = []
+
+    def _evaluate_segment(segment):
+        v_selected, t_selected = segment
+        # Empty trailing segments are common when sample_size doesn't divide
+        # the row count evenly; the original code returned NaN here, which
+        # then broke curve_fit downstream. Drop them.
+        if v_selected.size == 0 or t_selected.size == 0:
+            return None
+        if sample_range_max == 'histogram':
+            try:
+                bins, _ = _build_histogram_bins(t_selected, bin_size)
+                y, x = np.histogram(t_selected, bins=bins)
+                peaks, properties = find_peaks(y, height=0)
+                index_peak_max_ini = np.argmax(properties['peak_heights'])
+                max_peak = peaks[index_peak_max_ini]
+                t_value = x[max_peak] / maximum_location
+                mask_v = np.logical_and(
+                    t_selected >= x[max_peak] - bin_size,
+                    t_selected <= x[max_peak] + bin_size,
+                )
+                if mode == 'ion_seq' and v_selected[mask_v].size == 0:
+                    mask_v = np.logical_and(
+                        t_selected >= x[max_peak] - 2 * bin_size,
+                        t_selected <= x[max_peak] + 2 * bin_size,
+                    )
+                    if v_selected[mask_v].size == 0:
+                        mask_v = np.logical_and(
+                            t_selected >= x[max_peak] - 4 * bin_size,
+                            t_selected <= x[max_peak] + 4 * bin_size,
+                        )
+                v_value = float(np.mean(v_selected[mask_v]))
+            except ValueError:
+                t_value = float(np.mean(t_selected)) / maximum_location
+                v_value = float(np.mean(v_selected))
+        elif sample_range_max == 'mean':
+            t_value = float(np.mean(t_selected)) / maximum_location
+            v_value = float(np.mean(v_selected))
+        elif sample_range_max == 'median':
+            t_value = float(np.median(t_selected)) / maximum_location
+            v_value = float(np.median(v_selected))
+        else:
+            return None
+        return t_value, v_value
+
+    pairs = parallel_map(_evaluate_segment, segments, gil_releasing=True)
+    dld_t_peak_list = [pair[0] for pair in pairs if pair is not None]
+    high_voltage_mean_list = [pair[1] for pair in pairs if pair is not None]
 
     if model == 'curve_fit':
         fitresult, _ = curve_fit(voltage_corr, np.array(high_voltage_mean_list), np.array(dld_t_peak_list))
@@ -239,8 +245,13 @@ def voltage_correction(dld_highVoltage_peak, dld_t_peak, variables, maximum_loca
             ax1.set_ylabel("mc (Da)", fontsize=10)
             label = 'mc'
 
-        x = plt.scatter(np.array(high_voltage_mean_list) / 1000, np.array(dld_t_peak_list) * maximum_location,
-                        color="forestgreen", label=r"$%s_{wp}$" % label, s=5)
+        x = plt.scatter(
+            np.array(high_voltage_mean_list) / 1000,
+            np.array(dld_t_peak_list) * maximum_location,
+            color="forestgreen",
+            label=r"$%s_{wp}$" % label,
+            s=5,
+        )
         # x = plt.scatter(np.array(high_voltage_mean_list) / 1000, maximum_location / np.array(dld_t_peak_list),
         #                 color="forestgreen", label=r"$%s_{wp}$" % label, s=5)
         ax1.set_xlabel("Voltage (kV)", fontsize=10)
@@ -253,7 +264,7 @@ def voltage_correction(dld_highVoltage_peak, dld_t_peak, variables, maximum_loca
         ax2.set_ylabel(r"$C_V$", color="red", fontsize=10)  # Get the current axis
         ax2.tick_params(axis='y', colors='red')  # Change color and thickness of tick labels on y-axis
         ax2.spines['right'].set_color('red')  # Change color of right border
-        plt.legend(handles=[x, y[0]], loc='lower left', markerscale=5., prop={'size': 10})
+        plt.legend(handles=[x, y[0]], loc='lower left', markerscale=5.0, prop={'size': 10})
 
         if save:
             # Enable rendering for text elements
@@ -272,9 +283,24 @@ def voltage_correction(dld_highVoltage_peak, dld_t_peak, variables, maximum_loca
     return fitresult
 
 
-def voltage_corr_main(dld_highVoltage, variables, sample_size, mode, calibration_mode, index_fig, plot, save,
-                      maximum_cal_method='mean', maximum_sample_method='mean', fig_size=(5, 5), fast_calibration=False,
-                      bin_size=0.01, model='curve_fit', peak_maximum=0, calibration_apply=True):
+def voltage_corr_main(
+    dld_highVoltage,
+    variables,
+    sample_size,
+    mode,
+    calibration_mode,
+    index_fig,
+    plot,
+    save,
+    maximum_cal_method='mean',
+    maximum_sample_method='mean',
+    fig_size=(5, 5),
+    fast_calibration=False,
+    bin_size=0.01,
+    model='curve_fit',
+    peak_maximum=0,
+    calibration_apply=True,
+):
     """
     Perform voltage correction on the given data.
 
@@ -331,12 +357,23 @@ def voltage_corr_main(dld_highVoltage, variables, sample_size, mode, calibration
     print('The high voltage ranges are:', np.min(dld_highVoltage_peak_v), np.max(dld_highVoltage_peak_v))
     mean_before = np.mean(dld_peak_b)
     print('The mean of tof/mc  before voltage calibration is:', mean_before)
-    fitresult = voltage_correction(dld_highVoltage_peak_v, dld_peak_b, variables,
-                                   maximum_location, index_fig=index_fig,
-                                   figname='voltage_corr',
-                                   sample_size=sample_size, mode=mode, calibration_mode=calibration_mode,
-                                   sample_range_max=maximum_sample_method, bin_size=bin_size,
-                                   plot=plot, save=save, fig_size=fig_size, model=model)
+    fitresult = voltage_correction(
+        dld_highVoltage_peak_v,
+        dld_peak_b,
+        variables,
+        maximum_location,
+        index_fig=index_fig,
+        figname='voltage_corr',
+        sample_size=sample_size,
+        mode=mode,
+        calibration_mode=calibration_mode,
+        sample_range_max=maximum_sample_method,
+        bin_size=bin_size,
+        plot=plot,
+        save=save,
+        fig_size=fig_size,
+        model=model,
+    )
 
     calibration_mc_tof = np.copy(variables.dld_t_calib) if calibration_mode == 'tof' else np.copy(variables.mc_calib)
     print('The fit result is:', fitresult)
@@ -378,7 +415,7 @@ def voltage_corr_main(dld_highVoltage, variables, sample_size, mode, calibration
         ax2.set_ylabel(r"$C_{V}^{-1}$", color="red", fontsize=10)
         ax2.tick_params(axis='y', colors='red')  # Change color and thickness of tick labels on y-axis
         ax2.spines['right'].set_color('red')  # Change color of right border
-        plt.legend(handles=[x, y[0]], loc='upper left', markerscale=5., prop={'size': 10})
+        plt.legend(handles=[x, y[0]], loc='upper left', markerscale=5.0, prop={'size': 10})
 
         if save:
             # Enable rendering for text elements
@@ -405,10 +442,9 @@ def voltage_corr_main(dld_highVoltage, variables, sample_size, mode, calibration
         dld_t_plot = dld_peak_b * correction_plot
         # dld_t_plot = dld_peak_b * f_v_plot
 
-        y = plt.scatter(dld_highVoltage_peak_v[mask] / 1000, dld_t_plot[mask], color="red", label=r"$t_{C_{V}}$",
-                        s=1)
+        y = plt.scatter(dld_highVoltage_peak_v[mask] / 1000, dld_t_plot[mask], color="red", label=r"$t_{C_{V}}$", s=1)
 
-        plt.legend(handles=[x, y], loc='upper right', markerscale=5., prop={'size': 10})
+        plt.legend(handles=[x, y], loc='upper right', markerscale=5.0, prop={'size': 10})
 
         if save:
             # Enable rendering for text elements
@@ -424,8 +460,7 @@ def voltage_corr_main(dld_highVoltage, variables, sample_size, mode, calibration
             plt.show()
     mean_after = np.mean(calibration_mc_tof[mask_temporal])
     print('The mean of tof/mc  after voltage calibration is:', mean_after)
-    print('The difference between the mean of tof/mc before and after voltage calibration is:',
-          mean_after - mean_before)
+    print('The difference between the mean of tof/mc before and after voltage calibration is:', mean_after - mean_before)
     if calibration_apply:
         if calibration_mode == 'tof':
             variables.dld_t_calib = calibration_mc_tof
@@ -499,15 +534,19 @@ def _collect_spatial_samples(
     det_diam,
     dld_v=None,
 ):
-    x_samples = []
-    y_samples = []
-    t_samples = []
-    v_samples = []
-
+    # The inner work for each cell is a histogram + peak find + mean / median
+    # call on a small subarray. Every cell is independent of every other, and
+    # the inner kernel is NumPy/SciPy (GIL-releasing), so this is the textbook
+    # case for parallel_map(gil_releasing=True). On a 80 mm detector at 2 mm
+    # sampling we get O(2000) cells per call -- typically 4-8x speedup with
+    # threads, automatic serial fallback for tiny inputs.
     if sampling_mode == 'polar':
         radial_distance = np.hypot(dld_x, dld_y)
         polar_angle = np.mod(np.arctan2(dld_y, dld_x), 2.0 * np.pi)
-        for r_min_i, r_max_i, theta_min, theta_max in _iter_polar_cells(radial_distance, sample_size, det_diam):
+        cells = list(_iter_polar_cells(radial_distance, sample_size, det_diam))
+
+        def _eval_polar_cell(bounds):
+            r_min_i, r_max_i, theta_min, theta_max = bounds
             mask = (
                 (radial_distance >= r_min_i)
                 & (radial_distance < r_max_i)
@@ -515,16 +554,20 @@ def _collect_spatial_samples(
                 & (polar_angle < theta_max)
             )
             if not np.any(mask):
-                continue
+                return None
             cell_t = dld_t[mask]
             normalized_value = _cell_peak_value(cell_t, maximum_location, sample_range_max, bin_size)
             if not np.isfinite(normalized_value) or normalized_value <= 0:
-                continue
-            x_samples.append(float(np.median(dld_x[mask])))
-            y_samples.append(float(np.median(dld_y[mask])))
-            t_samples.append(normalized_value)
-            if dld_v is not None:
-                v_samples.append(float(np.mean(dld_v[mask])))
+                return None
+            row = (
+                float(np.median(dld_x[mask])),
+                float(np.median(dld_y[mask])),
+                normalized_value,
+                float(np.mean(dld_v[mask])) if dld_v is not None else None,
+            )
+            return row
+
+        results = parallel_map(_eval_polar_cell, cells, gil_releasing=True)
     else:
         cell_size = float(sample_size)
         x_min = float(np.floor(np.min(dld_x)))
@@ -536,7 +579,9 @@ def _collect_spatial_samples(
         x_bin = np.floor((dld_x - x_min) / cell_size).astype(int)
         y_bin = np.floor((dld_y - y_min) / cell_size).astype(int)
         valid = (x_bin >= 0) & (x_bin < n_cols) & (y_bin >= 0) & (y_bin < n_rows)
-        if np.any(valid):
+        if not np.any(valid):
+            results: list = []
+        else:
             cell_id = y_bin[valid] * n_cols + x_bin[valid]
             order = np.argsort(cell_id, kind='mergesort')
             x_sorted = dld_x[valid][order]
@@ -545,17 +590,39 @@ def _collect_spatial_samples(
             v_sorted = dld_v[valid][order] if dld_v is not None else None
             cell_sorted = cell_id[order]
             _, starts, counts = np.unique(cell_sorted, return_index=True, return_counts=True)
+            # Stays serial: cartesian cells operate on pre-sorted contiguous
+            # slices so each cell is sub-millisecond. Thread dispatch overhead
+            # exceeds the per-cell work, so parallelism here regresses
+            # wall-clock time on every realistic dataset.
+            results = []
             for start, count in zip(starts, counts):
                 stop = start + count
                 cell_t = t_sorted[start:stop]
                 normalized_value = _cell_peak_value(cell_t, maximum_location, sample_range_max, bin_size)
                 if not np.isfinite(normalized_value) or normalized_value <= 0:
+                    results.append(None)
                     continue
-                x_samples.append(float(np.median(x_sorted[start:stop])))
-                y_samples.append(float(np.median(y_sorted[start:stop])))
-                t_samples.append(normalized_value)
-                if v_sorted is not None:
-                    v_samples.append(float(np.mean(v_sorted[start:stop])))
+                results.append(
+                    (
+                        float(np.median(x_sorted[start:stop])),
+                        float(np.median(y_sorted[start:stop])),
+                        normalized_value,
+                        float(np.mean(v_sorted[start:stop])) if v_sorted is not None else None,
+                    )
+                )
+
+    x_samples: list = []
+    y_samples: list = []
+    t_samples: list = []
+    v_samples: list = []
+    for row in results:
+        if row is None:
+            continue
+        x_samples.append(row[0])
+        y_samples.append(row[1])
+        t_samples.append(row[2])
+        if dld_v is not None:
+            v_samples.append(row[3])
 
     result = {
         'x': np.asarray(x_samples, dtype=float),
@@ -567,9 +634,24 @@ def _collect_spatial_samples(
     return result
 
 
-def bowl_correction(dld_x_bowl, dld_y_bowl, dld_t_bowl, variables, det_diam, maximum_location, sample_range_max,
-                    sample_size, calibration_mode, fit_mode, index_fig, plot, save, fig_size=(7, 5), bin_size=0.01,
-                    sampling_mode='polar'):
+def bowl_correction(
+    dld_x_bowl,
+    dld_y_bowl,
+    dld_t_bowl,
+    variables,
+    det_diam,
+    maximum_location,
+    sample_range_max,
+    sample_size,
+    calibration_mode,
+    fit_mode,
+    index_fig,
+    plot,
+    save,
+    fig_size=(7, 5),
+    bin_size=0.01,
+    sampling_mode='polar',
+):
     """
     Perform bowl correction on the input data.
 
@@ -630,12 +712,12 @@ def bowl_correction(dld_x_bowl, dld_y_bowl, dld_t_bowl, variables, det_diam, max
     print('x_sample_list max and min:', np.max(x_samples), np.min(x_samples))
     print('y_sample_list max and min:', np.max(y_samples), np.min(y_samples))
     print('dld_t_peak_list max and min:', np.max(t_samples), np.min(t_samples))
-    r2_samples = x_samples ** 2 + y_samples ** 2
+    r2_samples = x_samples**2 + y_samples**2
     radial_design = np.column_stack(
         [
             np.ones(len(x_samples), dtype=float),
             r2_samples,
-            r2_samples ** 2,
+            r2_samples**2,
             x_samples,
             y_samples,
         ]
@@ -681,8 +763,9 @@ def bowl_correction(dld_x_bowl, dld_y_bowl, dld_t_bowl, variables, det_diam, max
         fig, ax = plt.subplots(figsize=fig_size, subplot_kw=dict(projection="3d"), constrained_layout=True)
         box = ax.get_position()
         ax.set_position([box.x0 + 0.1, box.y0 + 0.1, box.width * 0.75, box.height * 0.75])
-        scat = ax.scatter(model_x_data, model_y_data, zs=1 / np.array(t_samples), color="forestgreen",
-                          label=r"$%s_{wp}$" % label, s=3)
+        scat = ax.scatter(
+            model_x_data, model_y_data, zs=1 / np.array(t_samples), color="forestgreen", label=r"$%s_{wp}$" % label, s=3
+        )
         fig.add_axes(ax)
         cmap = copy(plt.cm.plasma)
         cmap.set_bad(cmap(0))
@@ -691,9 +774,7 @@ def bowl_correction(dld_x_bowl, dld_y_bowl, dld_t_bowl, variables, det_diam, max
         z_flat = Z.flatten()
         triangles = Triangulation(x_flat, y_flat)
         # surf = ax.plot_surface(X, Y, 1 / Z, color='red', alpha=0.05, label='bowl')
-        surf = ax.plot_trisurf(
-            x_flat, y_flat, 1 / z_flat, triangles=triangles.triangles, cmap=cmap, alpha=0.6
-        )
+        surf = ax.plot_trisurf(x_flat, y_flat, 1 / z_flat, triangles=triangles.triangles, cmap=cmap, alpha=0.6)
         ax.set_xlabel(r'$X_{det}$ (mm)', fontsize=10, labelpad=10)
         ax.set_ylabel(r'$Y_{det}$ (mm)', fontsize=10, labelpad=10)
         ax.set_zlabel(r"${C_B}$", fontsize=10, labelpad=5, color='red')
@@ -721,10 +802,27 @@ def bowl_correction(dld_x_bowl, dld_y_bowl, dld_t_bowl, variables, det_diam, max
     return parameters
 
 
-def bowl_correction_main(dld_x, dld_y, dld_highVoltage, variables, det_diam, sample_size, fit_mode, calibration_mode,
-                         index_fig, plot, save, maximum_cal_method='mean', maximum_sample_method='mean',
-                         fig_size=(5, 5), fast_calibration=False, bin_size=0.01, peak_maximum=0, calibration_apply=True,
-                         sampling_mode='polar'):
+def bowl_correction_main(
+    dld_x,
+    dld_y,
+    dld_highVoltage,
+    variables,
+    det_diam,
+    sample_size,
+    fit_mode,
+    calibration_mode,
+    index_fig,
+    plot,
+    save,
+    maximum_cal_method='mean',
+    maximum_sample_method='mean',
+    fig_size=(5, 5),
+    fast_calibration=False,
+    bin_size=0.01,
+    peak_maximum=0,
+    calibration_apply=True,
+    sampling_mode='polar',
+):
     """
     Perform bowl correction on the input data and plot the results.
 
@@ -791,10 +889,24 @@ def bowl_correction_main(dld_x, dld_y, dld_highVoltage, variables, det_diam, sam
 
     mean_before = np.mean(dld_peak)
     print('The mean of tof  before bowl calibration is:', mean_before)
-    parameters = bowl_correction(dld_x_peak, dld_y_peak, dld_peak, variables, det_diam, maximum_location,
-                                 maximum_sample_method, sample_size=sample_size, calibration_mode=calibration_mode,
-                                 fit_mode=fit_mode, index_fig=index_fig, plot=plot, save=save, fig_size=fig_size,
-                                 bin_size=bin_size, sampling_mode=sampling_mode)
+    parameters = bowl_correction(
+        dld_x_peak,
+        dld_y_peak,
+        dld_peak,
+        variables,
+        det_diam,
+        maximum_location,
+        maximum_sample_method,
+        sample_size=sample_size,
+        calibration_mode=calibration_mode,
+        fit_mode=fit_mode,
+        index_fig=index_fig,
+        plot=plot,
+        save=save,
+        fig_size=fig_size,
+        bin_size=bin_size,
+        sampling_mode=sampling_mode,
+    )
     print('The fit result is:', parameters)
 
     mask_fv = np.ones_like(dld_x, dtype=bool)
@@ -810,8 +922,7 @@ def bowl_correction_main(dld_x, dld_y, dld_highVoltage, variables, det_diam, sam
 
     mean_after = np.mean(calibration_mc_tof[mask_temporal])
     print('The mean of tof/mc after bowl calibration is:', mean_after)
-    print('The difference between the mean of tof before and after bowl calibration is:',
-          mean_after - mean_before)
+    print('The difference between the mean of tof before and after bowl calibration is:', mean_after - mean_before)
 
     if plot or save:
         # Plot how bowl correct tof/mc vs high voltage
@@ -833,7 +944,7 @@ def bowl_correction_main(dld_x, dld_y, dld_highVoltage, variables, det_diam, sam
 
         y = plt.scatter(dld_highVoltage_peak[mask] / 1000, dld_t_plot, color="red", label=r"$t_{C_{B}}$", s=1)
 
-        plt.legend(handles=[x, y], loc='upper right', markerscale=5., prop={'size': 10})
+        plt.legend(handles=[x, y], loc='upper right', markerscale=5.0, prop={'size': 10})
 
         if save:
             # Enable rendering for text elements
@@ -864,7 +975,7 @@ def bowl_correction_main(dld_x, dld_y, dld_highVoltage, variables, det_diam, sam
 
         ax1.set_xlabel(r"$X_{det}$ (mm)", fontsize=10)
         plt.grid(color='aqua', alpha=0.3, linestyle='-.', linewidth=0.4)
-        plt.legend(handles=[x, y], loc='upper right', markerscale=5., prop={'size': 10})
+        plt.legend(handles=[x, y], loc='upper right', markerscale=5.0, prop={'size': 10})
 
         if save:
             # Enable rendering for text elements
@@ -894,7 +1005,7 @@ def bowl_correction_main(dld_x, dld_y, dld_highVoltage, variables, det_diam, sam
 
         ax1.set_xlabel(r"$y_{det}$ (mm)", fontsize=10)
         plt.grid(color='aqua', alpha=0.3, linestyle='-.', linewidth=0.4)
-        plt.legend(handles=[x, y], loc='upper right', markerscale=5., prop={'size': 10})
+        plt.legend(handles=[x, y], loc='upper right', markerscale=5.0, prop={'size': 10})
 
         if save:
             # Enable rendering for text elements
@@ -917,11 +1028,9 @@ def bowl_correction_main(dld_x, dld_y, dld_highVoltage, variables, det_diam, sam
         f_bowl_plot = _predict_bowl_model(fit_mode, parameters, dld_x_peak[mask], dld_y_peak[mask])
         dld_t_plot = dld_peak[mask] / f_bowl_plot
 
-        scat_1 = ax.scatter(dld_x_peak[mask], dld_y_peak[mask], zs=dld_peak[mask], color="blue",
-                            label=r"$t$", s=1)
-        scat_2 = ax.scatter(dld_x_peak[mask], dld_y_peak[mask], zs=dld_t_plot, color="red",
-                            label=r"$t_{C_{B}}$", s=1)
-        plt.legend(handles=[scat_1, scat_2], loc='upper left', markerscale=5., prop={'size': 10})
+        scat_1 = ax.scatter(dld_x_peak[mask], dld_y_peak[mask], zs=dld_peak[mask], color="blue", label=r"$t$", s=1)
+        scat_2 = ax.scatter(dld_x_peak[mask], dld_y_peak[mask], zs=dld_t_plot, color="red", label=r"$t_{C_{B}}$", s=1)
+        plt.legend(handles=[scat_1, scat_2], loc='upper left', markerscale=5.0, prop={'size': 10})
 
         ax.set_xlabel(r'$X_{det}$ (mm)', fontsize=10, labelpad=10)
         ax.set_ylabel(r'$Y_{det}$ (mm)', fontsize=10, labelpad=10)
@@ -1081,8 +1190,8 @@ def multi_peak_voltage_corr_main(
 
         sample_size = max(1, int(len(voltage_ions) / 100))
         for i in range(0, len(voltage_ions), sample_size):
-            chunk_v = voltage_ions[i:i + sample_size]
-            chunk_t = peak_ions[i:i + sample_size]
+            chunk_v = voltage_ions[i : i + sample_size]
+            chunk_t = peak_ions[i : i + sample_size]
             if len(chunk_t) < 5:
                 continue
             mean_voltage = float(np.mean(chunk_v))
@@ -1092,17 +1201,17 @@ def multi_peak_voltage_corr_main(
             all_v_means.append(mean_voltage)
             all_t_normalized.append(normalized_value)
 
-        peak_info.append({
-            'position': peak_pos,
-            'x1': x1,
-            'x2': x2,
-            'n_ions': int(np.sum(mask)),
-        })
+        peak_info.append(
+            {
+                'position': peak_pos,
+                'x1': x1,
+                'x2': x2,
+                'n_ions': int(np.sum(mask)),
+            }
+        )
 
     if len(all_v_means) < 3:
-        raise CalibrationInputError(
-            "Not enough data points from multi-peak detection for voltage correction"
-        )
+        raise CalibrationInputError("Not enough data points from multi-peak detection for voltage correction")
 
     v_arr = np.asarray(all_v_means)
     t_arr = np.asarray(all_t_normalized)
@@ -1202,9 +1311,7 @@ def multi_peak_bowl_corr_main(
         n_used += 1
 
     if len(all_x_samples) < 5:
-        raise CalibrationInputError(
-            "Not enough spatial data from multi-peak detection for bowl correction"
-        )
+        raise CalibrationInputError("Not enough spatial data from multi-peak detection for bowl correction")
 
     x_arr = np.array(all_x_samples)
     y_arr = np.array(all_y_samples)
@@ -1224,14 +1331,16 @@ def multi_peak_bowl_corr_main(
         parameters = hybrid_calibration_model(x_arr, y_arr, t_arr)
     elif fit_mode == 'robust_fit':
         if sampling_mode == 'polar':
-            r2_arr = x_arr ** 2 + y_arr ** 2
-            radial_design = np.column_stack([
-                np.ones(len(x_arr), dtype=float),
-                r2_arr,
-                r2_arr ** 2,
-                x_arr,
-                y_arr,
-            ])
+            r2_arr = x_arr**2 + y_arr**2
+            radial_design = np.column_stack(
+                [
+                    np.ones(len(x_arr), dtype=float),
+                    r2_arr,
+                    r2_arr**2,
+                    x_arr,
+                    y_arr,
+                ]
+            )
             radial_parameters = _robust_joint_linear_fit(radial_design, t_arr)
             parameters = {
                 'model': 'radial_linear',
@@ -1273,21 +1382,23 @@ def _joint_feature_matrix(voltage_values, x_values, y_values, voltage_center, vo
     v = (np.asarray(voltage_values, dtype=float) - float(voltage_center)) / float(voltage_scale)
     x = np.asarray(x_values, dtype=float) / float(spatial_scale)
     y = np.asarray(y_values, dtype=float) / float(spatial_scale)
-    r2 = x ** 2 + y ** 2
-    return np.column_stack([
-        np.ones(len(v), dtype=float),
-        v,
-        v ** 2,
-        x,
-        y,
-        x ** 2,
-        y ** 2,
-        x * y,
-        r2,
-        v * r2,
-        v * x,
-        v * y,
-    ])
+    r2 = x**2 + y**2
+    return np.column_stack(
+        [
+            np.ones(len(v), dtype=float),
+            v,
+            v**2,
+            x,
+            y,
+            x**2,
+            y**2,
+            x * y,
+            r2,
+            v * r2,
+            v * x,
+            v * y,
+        ]
+    )
 
 
 def _robust_joint_linear_fit(feature_matrix, target):
@@ -1388,18 +1499,18 @@ def joint_voltage_bowl_corr_main(
         all_t_normalized.extend(peak_samples['t'].tolist())
 
         if n_cells > 0:
-            peak_info.append({
-                'position': peak['position'],
-                'x1': peak['x1'],
-                'x2': peak['x2'],
-                'n_ions': int(np.sum(mask)),
-                'n_cells': int(n_cells),
-            })
+            peak_info.append(
+                {
+                    'position': peak['position'],
+                    'x1': peak['x1'],
+                    'x2': peak['x2'],
+                    'n_ions': int(np.sum(mask)),
+                    'n_cells': int(n_cells),
+                }
+            )
 
     if len(all_t_normalized) < 20:
-        raise CalibrationInputError(
-            "Not enough samples from multi-peak detection for joint voltage/bowl refinement"
-        )
+        raise CalibrationInputError("Not enough samples from multi-peak detection for joint voltage/bowl refinement")
 
     v_arr = np.asarray(all_v_samples, dtype=float)
     x_arr = np.asarray(all_x_samples, dtype=float)
@@ -1408,7 +1519,7 @@ def joint_voltage_bowl_corr_main(
     voltage_center = float(np.median(v_arr))
     voltage_scale = max(float(np.std(v_arr)), np.finfo(float).eps)
     spatial_scale = max(
-        float(np.nanmax(np.sqrt(x_arr ** 2 + y_arr ** 2))) if len(x_arr) else 0.0,
+        float(np.nanmax(np.sqrt(x_arr**2 + y_arr**2))) if len(x_arr) else 0.0,
         float(det_diam) / 2.0,
         1.0,
     )
@@ -1444,6 +1555,3 @@ def joint_voltage_bowl_corr_main(
         'peaks_used': len(peak_info),
     }
     return model, peak_info
-
-
-

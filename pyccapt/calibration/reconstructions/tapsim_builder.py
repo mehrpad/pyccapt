@@ -248,7 +248,7 @@ def assign_a_sublattice_species(structure: Structure, a_site_ratio: dict[str, fl
     shuffled_indices = rng.permutation(a_site_indices)
     cursor = 0
     for element, count in counts.items():
-        for local_index in shuffled_indices[cursor:cursor + count]:
+        for local_index in shuffled_indices[cursor : cursor + count]:
             result[int(local_index)] = element
         cursor += count
     return result
@@ -454,7 +454,9 @@ def shape_tip_with_surface_labels(
         if cylinder:
             hemisphere_radius = base_radius
         else:
-            hemisphere_radius = (float(cone_length_angstrom) - float(hemisphere_base_angstrom)) / float(cone_length_angstrom) * base_radius
+            hemisphere_radius = (
+                (float(cone_length_angstrom) - float(hemisphere_base_angstrom)) / float(cone_length_angstrom) * base_radius
+            )
     else:
         hemisphere_radius = 0.0
 
@@ -463,7 +465,9 @@ def shape_tip_with_surface_labels(
     inside_or_below_hemisphere = (z <= hemisphere_center_z + 1e-12) | (d_sphere <= hemisphere_radius + 1e-12)
     inside_shape = inside_cone & inside_or_below_hemisphere
     on_cone_surface = inside_shape & (np.abs(radial - radius_at_z) <= float(surf_tol_angstrom))
-    on_sphere_surface = inside_shape & (np.abs(d_sphere - hemisphere_radius) <= float(surf_tol_angstrom)) & (z >= hemisphere_center_z)
+    on_sphere_surface = (
+        inside_shape & (np.abs(d_sphere - hemisphere_radius) <= float(surf_tol_angstrom)) & (z >= hemisphere_center_z)
+    )
     on_bottom = inside_shape & (z <= float(bottom_tol_angstrom)) & (radial <= base_radius + float(surf_tol_angstrom))
 
     shaped = Structure(structure.lattice, [], [])
@@ -668,7 +672,11 @@ def write_datapart_text_with_potential(
         raise ValueError(f"atoms_df is missing required columns: {sorted(missing)}")
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    potentials = np.linspace(float(potential_start), float(potential_end), len(atoms_df)) if len(atoms_df) > 1 else np.asarray([float(potential_start)])
+    potentials = (
+        np.linspace(float(potential_start), float(potential_end), len(atoms_df))
+        if len(atoms_df) > 1
+        else np.asarray([float(potential_start)])
+    )
     coord_fmt = f"{{:.{int(coord_precision)}e}}\t{{:.{int(coord_precision)}e}}\t{{:.{int(coord_precision)}e}}"
     pot_fmt = f"{{:.{int(potential_precision)}e}}"
     row_fmt = coord_fmt + "\t{:d}\t" + pot_fmt + "\n"

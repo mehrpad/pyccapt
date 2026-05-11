@@ -61,9 +61,7 @@ def parse_roentdek_events(file_path: str) -> list[dict]:
                     num_values = int(channel_match.group(2))
                     values_str = channel_match.group(3).strip()
                     values = [float(values_str)] if num_values == 1 else [float(val) for val in values_str.split()]
-                    current_event['channels'].append(
-                        {'channel': channel_num, 'num_values': num_values, 'values': values}
-                    )
+                    current_event['channels'].append({'channel': channel_num, 'num_values': num_values, 'values': values})
 
     if current_event is not None:
         events.append(current_event)
@@ -348,8 +346,7 @@ def analyze_roentdek_tdc_frame(
         run_frame = df_tdc.iloc[start:stop]
         counts = run_frame['channel'].value_counts().to_dict()
         normalized_counts = {
-            (int(channel) + 1 if zero_based_channels else int(channel)): int(count)
-            for channel, count in counts.items()
+            (int(channel) + 1 if zero_based_channels else int(channel)): int(count) for channel, count in counts.items()
         }
         event = {
             'event_number': event_number,

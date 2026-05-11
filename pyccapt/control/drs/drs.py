@@ -138,4 +138,3 @@ def experiment_measure(variables):
         variables.extend_to('t_plot', ch0_time.tolist())
 
     drs_ox.delete_drs_ox()
-

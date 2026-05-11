@@ -94,8 +94,10 @@ def list_builtin_presets() -> dict[str, str]:
 
 def _normalize_preset_key(preset_key: str) -> str:
     key = str(preset_key).strip().lower().replace(" ", "_").replace("-", "_")
-    aliases = {preset.display_name.lower().replace(" ", "_").replace("-", "_"): name
-               for name, preset in BUILTIN_REFLECTRON_PRESETS.items()}
+    aliases = {
+        preset.display_name.lower().replace(" ", "_").replace("-", "_"): name
+        for name, preset in BUILTIN_REFLECTRON_PRESETS.items()
+    }
     aliases.update({name: name for name in BUILTIN_REFLECTRON_PRESETS})
     if key not in aliases:
         supported = ", ".join(sorted(BUILTIN_REFLECTRON_PRESETS))

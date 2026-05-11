@@ -67,6 +67,16 @@ beside each input for a chosen instrument preset. See the
 [Reflectron Batch Correction (CLI)](tutorials/reflectron_batch_cli.rst)
 tutorial page for arguments and examples.
 
+### Speeding up calibration with multiple workers
+
+A handful of calibration hot paths (bowl correction polar sampling, voltage
+correction segment loop, Surface Concept raw-data diagnostics) automatically
+parallelize across CPU cores when the workload is large enough to amortize
+executor startup. The default is auto; set `PYCCAPT_PARALLEL_WORKERS=1` to
+force serial (useful for reproducible benchmarks and CI). See the
+[Parallel Execution in Calibration](tutorials/parallel_calibration.rst)
+tutorial page for the env vars, measured speedups, and which paths benefit.
+
 ### Running on small-RAM machines
 
 The calibration pipeline ships a memory-mapped I/O layer

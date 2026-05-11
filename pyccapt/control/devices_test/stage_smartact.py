@@ -47,6 +47,7 @@ def _check_smaract():
             "Or follow the SmarAct MCS2 SDK installation guide."
         )
 
+
 # ---------------------------------------------------------------------------
 # Axis channel mapping
 # ---------------------------------------------------------------------------
@@ -57,7 +58,7 @@ AXIS_Z = 2
 # ---------------------------------------------------------------------------
 # Unit conversion helpers
 # ---------------------------------------------------------------------------
-M_TO_PM = 1e12   # meters  -> picometers
+M_TO_PM = 1e12  # meters  -> picometers
 PM_TO_M = 1e-12  # picometers -> meters
 
 
@@ -74,6 +75,7 @@ def _pm_to_m(value_pm: int) -> float:
 # ---------------------------------------------------------------------------
 # Low-level helpers
 # ---------------------------------------------------------------------------
+
 
 def list_devices() -> list:
     """
@@ -145,10 +147,7 @@ def _raise_friendly(exc: "ctl.Error", locator: str):
         ),
         0xF003: "SA_CTL_ERROR_NOT_FOUND – device not found. Check the locator string.",
         0xF005: f"SA_CTL_ERROR_INVALID_LOCATOR – '{locator}' is not a valid locator.",
-        0xF00C: (
-            "SA_CTL_ERROR_DEVICE_LIMIT_REACHED – too many open handles. "
-            "Close other sessions first."
-        ),
+        0xF00C: ("SA_CTL_ERROR_DEVICE_LIMIT_REACHED – too many open handles. Close other sessions first."),
     }
     hint = hints.get(code, "")
     msg = f"ctl.Open('{locator}') failed with error code {code:#06x}."
@@ -177,12 +176,10 @@ def _wait_for_channel_stop(handle, channel: int, timeout_s: float = 30.0):
 # Public API
 # ---------------------------------------------------------------------------
 
-def move_relative(dx_m: float = 0.0,
-                  dy_m: float = 0.0,
-                  dz_m: float = 0.0,
-                  velocity_m_s: float = 1e-3,
-                  locator: str = None,
-                  wait: bool = True):
+
+def move_relative(
+    dx_m: float = 0.0, dy_m: float = 0.0, dz_m: float = 0.0, velocity_m_s: float = 1e-3, locator: str = None, wait: bool = True
+):
     """
     Move the stage by the given relative distances (in meters).
 
@@ -207,10 +204,8 @@ def move_relative(dx_m: float = 0.0,
         for channel, delta_m in axes:
             if delta_m == 0.0:
                 continue
-            ctl.SetProperty_i32(handle, channel, ctl.Property.MOVE_MODE,
-                                ctl.MoveMode.CL_RELATIVE)
-            ctl.SetProperty_i64(handle, channel, ctl.Property.MOVE_VELOCITY,
-                                velocity_pm_s)
+            ctl.SetProperty_i32(handle, channel, ctl.Property.MOVE_MODE, ctl.MoveMode.CL_RELATIVE)
+            ctl.SetProperty_i64(handle, channel, ctl.Property.MOVE_VELOCITY, velocity_pm_s)
             ctl.Move(handle, channel, _m_to_pm(delta_m), 0)
 
         if wait:
@@ -222,12 +217,9 @@ def move_relative(dx_m: float = 0.0,
         _close_controller(handle)
 
 
-def move_absolute(x_m: float = None,
-                  y_m: float = None,
-                  z_m: float = None,
-                  velocity_m_s: float = 1e-3,
-                  locator: str = None,
-                  wait: bool = True):
+def move_absolute(
+    x_m: float = None, y_m: float = None, z_m: float = None, velocity_m_s: float = 1e-3, locator: str = None, wait: bool = True
+):
     """
     Move the stage to the given absolute positions (in meters).
 
@@ -250,10 +242,8 @@ def move_absolute(x_m: float = None,
         for channel, pos_m in axes:
             if pos_m is None:
                 continue
-            ctl.SetProperty_i32(handle, channel, ctl.Property.MOVE_MODE,
-                                ctl.MoveMode.CL_ABSOLUTE)
-            ctl.SetProperty_i64(handle, channel, ctl.Property.MOVE_VELOCITY,
-                                velocity_pm_s)
+            ctl.SetProperty_i32(handle, channel, ctl.Property.MOVE_MODE, ctl.MoveMode.CL_ABSOLUTE)
+            ctl.SetProperty_i64(handle, channel, ctl.Property.MOVE_VELOCITY, velocity_pm_s)
             ctl.Move(handle, channel, _m_to_pm(pos_m), 0)
 
         if wait:
@@ -295,8 +285,7 @@ def find_reference(locator: str = None):
     handle = _open_controller(locator)
     try:
         for channel in [AXIS_X, AXIS_Y, AXIS_Z]:
-            ctl.SetProperty_i32(handle, channel,
-                                ctl.Property.REFERENCING_OPTIONS, 0)
+            ctl.SetProperty_i32(handle, channel, ctl.Property.REFERENCING_OPTIONS, 0)
             ctl.Reference(handle, channel, 0)
         for channel in [AXIS_X, AXIS_Y, AXIS_Z]:
             _wait_for_channel_stop(handle, channel, timeout_s=120.0)
@@ -388,10 +377,12 @@ if __name__ == "__main__":
     # --- 4. Read and display initial position ------------------------------
     try:
         pos = get_position(locator)
-        print(f"\nInitial position:      "
-              f"x={pos['x'] * 1e6:+10.3f} um  "
-              f"y={pos['y'] * 1e6:+10.3f} um  "
-              f"z={pos['z'] * 1e6:+10.3f} um")
+        print(
+            f"\nInitial position:      "
+            f"x={pos['x'] * 1e6:+10.3f} um  "
+            f"y={pos['y'] * 1e6:+10.3f} um  "
+            f"z={pos['z'] * 1e6:+10.3f} um"
+        )
     except RuntimeError as e:
         print(f"\nERROR reading position:\n{e}")
         raise SystemExit(1)
@@ -401,10 +392,9 @@ if __name__ == "__main__":
     try:
         move_relative(dx_m=10e-6, dy_m=10e-6, dz_m=10e-6, locator=locator)
         pos = get_position(locator)
-        print(f"After  +10 um move:    "
-              f"x={pos['x'] * 1e6:+10.3f} um  "
-              f"y={pos['y'] * 1e6:+10.3f} um  "
-              f"z={pos['z'] * 1e6:+10.3f} um")
+        print(
+            f"After  +10 um move:    x={pos['x'] * 1e6:+10.3f} um  y={pos['y'] * 1e6:+10.3f} um  z={pos['z'] * 1e6:+10.3f} um"
+        )
     except RuntimeError as e:
         print(f"\nERROR during forward move:\n{e}")
         raise SystemExit(1)
@@ -414,10 +404,9 @@ if __name__ == "__main__":
     try:
         move_relative(dx_m=-10e-6, dy_m=-10e-6, dz_m=-10e-6, locator=locator)
         pos = get_position(locator)
-        print(f"After  -10 um move:    "
-              f"x={pos['x'] * 1e6:+10.3f} um  "
-              f"y={pos['y'] * 1e6:+10.3f} um  "
-              f"z={pos['z'] * 1e6:+10.3f} um")
+        print(
+            f"After  -10 um move:    x={pos['x'] * 1e6:+10.3f} um  y={pos['y'] * 1e6:+10.3f} um  z={pos['z'] * 1e6:+10.3f} um"
+        )
     except RuntimeError as e:
         print(f"\nERROR during backward move:\n{e}")
         raise SystemExit(1)

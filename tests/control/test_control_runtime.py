@@ -1,4 +1,4 @@
-﻿"""Tests for control runtime/bootstrap helpers."""
+"""Tests for control runtime/bootstrap helpers."""
 
 from __future__ import annotations
 
@@ -56,4 +56,3 @@ def test_load_project_config_requires_toml(tmp_path):
 
     with pytest.raises(FileNotFoundError):
         runtime.load_project_config(root=tmp_path, change_cwd=False)
-

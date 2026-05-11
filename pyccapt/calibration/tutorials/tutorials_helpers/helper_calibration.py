@@ -9,8 +9,12 @@ from ipywidgets import Output
 from pyccapt.calibration.core.adaptive_residual_calibration import adaptive_residual_calibration
 from pyccapt.calibration.core import calibration, mc_plot
 from pyccapt.calibration.core.mc_plot_peak_helpers import fast_mrp, gaussian_mrp_report
-from pyccapt.calibration.tutorials.tutorials_helpers.helper_adaptive_residual_calibration import build_adaptive_residual_calibration_panel
-from pyccapt.calibration.tutorials.tutorials_helpers.helper_combined_mc_tof_calibration import build_combined_mc_tof_calibration_panel
+from pyccapt.calibration.tutorials.tutorials_helpers.helper_adaptive_residual_calibration import (
+    build_adaptive_residual_calibration_panel,
+)
+from pyccapt.calibration.tutorials.tutorials_helpers.helper_combined_mc_tof_calibration import (
+    build_combined_mc_tof_calibration_panel,
+)
 
 # Public utilities and pure helpers are kept in a sibling module so the host
 # file stays under the calibration module-length policy. They are re-exported
@@ -51,8 +55,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     clear_plot = widgets.Button(description="Clear plots", layout=label_layout)
 
     calibration_mode = widgets.Dropdown(
-        options=[('mass_to_charge', 'mc_calib'), ('time_of_flight', 'tof_calib')],
-        description='Calibration mode:'
+        options=[('mass_to_charge', 'mc_calib'), ('time_of_flight', 'tof_calib')], description='Calibration mode:'
     )
 
     bin_size = widgets.FloatText(value=0.1, description='Bin size:', layout=label_layout)
@@ -72,7 +75,8 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         layout=label_layout,
     )
     verbose = widgets.Dropdown(options=[('True', True), ('False', False)], description='Verbose:', layout=label_layout)
-    figure_mc_size_x = widgets.FloatText(value=9.0, description="Fig. size W:", layout=label_layout); figure_mc_size_y = widgets.FloatText(value=5.0, description="Fig. size H:", layout=label_layout)
+    figure_mc_size_x = widgets.FloatText(value=9.0, description="Fig. size W:", layout=label_layout)
+    figure_mc_size_y = widgets.FloatText(value=5.0, description="Fig. size H:", layout=label_layout)
 
     sample_size_v = widgets.IntText(value=10000, description='Sample size:', layout=label_layout)
     index_fig_v = widgets.IntText(value=1, description='Fig index:', layout=label_layout)
@@ -107,7 +111,8 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         layout=label_layout,
     )
     bin_size_v = widgets.FloatText(value=0.01, description='Bin size:', layout=label_layout)
-    figure_v_size_x = widgets.FloatText(value=5.0, description="Fig. size W:", layout=label_layout); figure_v_size_y = widgets.FloatText(value=5.0, description="Fig. size H:", layout=label_layout)
+    figure_v_size_x = widgets.FloatText(value=5.0, description="Fig. size W:", layout=label_layout)
+    figure_v_size_y = widgets.FloatText(value=5.0, description="Fig. size H:", layout=label_layout)
 
     sample_size_b = widgets.IntText(value=5, description='Sample size:', layout=label_layout)
     sample_size_b_help = widgets.HTML(
@@ -170,7 +175,8 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         layout=label_layout,
     )
     peak_val = widgets.FloatText(value=0, description='Peak value:', layout=label_layout)
-    figure_b_size_x = widgets.FloatText(value=5.0, description="Fig. size W:", layout=label_layout); figure_b_size_y = widgets.FloatText(value=5.0, description="Fig. size H:", layout=label_layout)
+    figure_b_size_x = widgets.FloatText(value=5.0, description="Fig. size W:", layout=label_layout)
+    figure_b_size_y = widgets.FloatText(value=5.0, description="Fig. size H:", layout=label_layout)
 
     pb_bowl = widgets.HTML(value=" ", placeholder='Status:', description='Status:', layout=label_layout)
     pb_vol = widgets.HTML(value=" ", placeholder='Status:', description='Status:', layout=label_layout)
@@ -246,20 +252,30 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     def _sampling_mode_value():
         variables.bowl_sampling_mode = sampling_mode_b.value
         return sampling_mode_b.value
-    def _verbosity_context(): return nullcontext() if verbose.value else redirect_stdout(io.StringIO())
+
+    def _verbosity_context():
+        return nullcontext() if verbose.value else redirect_stdout(io.StringIO())
 
     def _state_is_valid(state):
         state = np.asarray(state, dtype=float)
         return state.size > 0 and np.all(np.isfinite(state)) and np.nanstd(state) > 0
 
     def _selected_peak_ready():
-        return not (variables.selected_x1 == 0 and variables.selected_x2 == 0) and variables.selected_x2 > variables.selected_x1
+        return (
+            not (variables.selected_x1 == 0 and variables.selected_x2 == 0) and variables.selected_x2 > variables.selected_x1
+        )
 
     def _evaluate_mrp_values():
-        return [float('nan')] * 3 if not _selected_peak_ready() else fast_mrp(_get_calibration_array(), variables.selected_x1, variables.selected_x2, bin_size=0.001)
+        return (
+            [float('nan')] * 3
+            if not _selected_peak_ready()
+            else fast_mrp(_get_calibration_array(), variables.selected_x1, variables.selected_x2, bin_size=0.001)
+        )
 
     def _print_mrp(prefix):
-        mrp = _evaluate_mrp_values(); print(f'{prefix} MRP(0.5, 0.1, 0.01): {mrp}'); return mrp
+        mrp = _evaluate_mrp_values()
+        print(f'{prefix} MRP(0.5, 0.1, 0.01): {mrp}')
+        return mrp
 
     def _selected_peak_entry():
         if not _selected_peak_ready():
@@ -364,13 +380,15 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                 continue
             weight = float(peak.get('weight', 1.0))
             weighted_scores.append((score, weight))
-            details.append({
-                'label': peak.get('label', f'{peak["position"]:.2f}'),
-                'score': float(score),
-                'weight': weight,
-                'position': float(peak['position']),
-                'num_ions': int(peak.get('n_ions', report['num_ions'] if report is not None else 0)),
-            })
+            details.append(
+                {
+                    'label': peak.get('label', f'{peak["position"]:.2f}'),
+                    'score': float(score),
+                    'weight': weight,
+                    'position': float(peak['position']),
+                    'num_ions': int(peak.get('n_ions', report['num_ions'] if report is not None else 0)),
+                }
+            )
         if not weighted_scores:
             return float('nan'), details
         total_weight = sum(weight for _, weight in weighted_scores)
@@ -492,18 +510,24 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         return after_selection != before_selection and _selected_peak_ready()
 
     def _run_with_mode(mode_value, callback):
-        previous_mode = calibration_mode.value; calibration_mode.value = mode_value
-        try: return callback()
-        finally: calibration_mode.value = previous_mode
+        previous_mode = calibration_mode.value
+        calibration_mode.value = mode_value
+        try:
+            return callback()
+        finally:
+            calibration_mode.value = previous_mode
 
     def _save_both_corrections():
-        variables.dld_t_calib_backup = np.copy(variables.dld_t_calib); variables.mc_calib_backup = np.copy(variables.mc_calib)
+        variables.dld_t_calib_backup = np.copy(variables.dld_t_calib)
+        variables.mc_calib_backup = np.copy(variables.mc_calib)
 
     def _restore_both_corrections():
-        variables.dld_t_calib = np.copy(variables.dld_t_calib_backup); variables.mc_calib = np.copy(variables.mc_calib_backup)
+        variables.dld_t_calib = np.copy(variables.dld_t_calib_backup)
+        variables.mc_calib = np.copy(variables.mc_calib_backup)
 
     def _reset_both_corrections():
-        variables.dld_t_calib = variables.data['t (ns)'].to_numpy(); variables.mc_calib = variables.data['mc_uc (Da)'].to_numpy()
+        variables.dld_t_calib = variables.data['t (ns)'].to_numpy()
+        variables.mc_calib = variables.data['mc_uc (Da)'].to_numpy()
 
     def _auto_select_peak_for_mode(mode_value, lim_value_override, initial_peak_selection=False):
         _run_with_mode(
@@ -536,10 +560,12 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     def _print_gaussian_for_current_mode(title):
         print(f'--- {title} Gaussian MRP ---')
         if not _selected_peak_ready():
-            print('Please first select a peak'); return
+            print('Please first select a peak')
+            return
         result = gaussian_mrp_report(_get_calibration_array(), variables.selected_x1, variables.selected_x2, bin_size=0.001)
         if result is None:
-            print('Gaussian MRP: insufficient data in selected range'); return
+            print('Gaussian MRP: insufficient data in selected range')
+            return
         print(f'MRP model: {result["recommended_label"]}')
         print(f'MRP bin size used: {result["bin_size"]} ({result["num_bins"]} bins)')
         if result['window_warning']:
@@ -576,9 +602,13 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         )
 
         if calibration_mode.value == 'tof_calib':
-            mask_temporal = np.logical_and((variables.dld_t_calib > variables.selected_x1), (variables.dld_t_calib < variables.selected_x2))
+            mask_temporal = np.logical_and(
+                (variables.dld_t_calib > variables.selected_x1), (variables.dld_t_calib < variables.selected_x2)
+            )
         else:
-            mask_temporal = np.logical_and((variables.mc_calib > variables.selected_x1), (variables.mc_calib < variables.selected_x2))
+            mask_temporal = np.logical_and(
+                (variables.mc_calib > variables.selected_x1), (variables.mc_calib < variables.selected_x2)
+            )
 
         sample_size = max(1, int(len(variables.dld_high_voltage[mask_temporal]) / 100)) if np.any(mask_temporal) else 1
         sample_size_widget.value = sample_size
@@ -765,10 +795,13 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         calibration_mode_t = 'tof' if calibration_mode_widget.value == 'tof_calib' else 'mc'
         with output:
             output.clear_output()
-            calibration.plot_selected_statistic(variables, bin_fdm.value, index_fig.value, calibration_mode=calibration_mode_t, save=True)
+            calibration.plot_selected_statistic(
+                variables, bin_fdm.value, index_fig.value, calibration_mode=calibration_mode_t, save=True
+            )
 
-    def _optimize_sequence(action_specs, title, figure_size, max_iterations=10, max_no_improve=3,
-                           retry_peak_window_on_stall=False):
+    def _optimize_sequence(
+        action_specs, title, figure_size, max_iterations=10, max_no_improve=3, retry_peak_window_on_stall=False
+    ):
         if not _selected_peak_ready():
             print('Please first select a peak')
             return
@@ -817,9 +850,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                         f'selected={quality["selected_score"]:.2f}'
                     )
 
-                    has_valid_signal = (
-                        np.isfinite(quality['train_score']) and quality['train_score'] > 0
-                    ) or (
+                    has_valid_signal = (np.isfinite(quality['train_score']) and quality['train_score'] > 0) or (
                         np.isfinite(quality['selected_score']) and quality['selected_score'] > 0
                     )
                     if not has_valid_signal:
@@ -1111,7 +1142,9 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     bowl_button.on_click(lambda b: bowl_correction(b, variables, out, out_status, calibration_mode, pulse_mode))
     clear_plot.on_click(lambda b: clear_plot_on_click(out, out_status))
     auto_button.on_click(lambda b: automatic_calibration(b, variables, out, out_status, calibration_mode, pulse_mode))
-    auto_button_bowl.on_click(lambda b: automatic_bowl_calibration(b, variables, out, out_status, calibration_mode, pulse_mode))
+    auto_button_bowl.on_click(
+        lambda b: automatic_bowl_calibration(b, variables, out, out_status, calibration_mode, pulse_mode)
+    )
     initial_calib_button.on_click(lambda b: initial_calibration(b, variables, calibration_mode, flight_path_length))
     gaussian_mrp_button.on_click(on_gaussian_mrp)
     multi_peak_button.on_click(on_multi_peak_calibrate)
@@ -1125,77 +1158,89 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     plot_button.click()
     sample_size_v_set(sample_size_v)
 
-    column11 = widgets.VBox([
-        bin_size,
-        lim_tof,
-        prominence,
-        distance,
-        percent,
-        bin_fdm,
-        plot_peak,
-        index_fig,
-        save,
-        verbose,
-        figure_mc_size_x,
-        figure_mc_size_y,
-    ])
-    column12 = widgets.VBox([
-        plot_button,
-        save_button,
-        reset_back_button,
-        reset_button,
-        clear_plot,
-        gaussian_mrp_button,
-        plot_stat_button,
-    ])
-    column22 = widgets.VBox([
-        sample_size_b,
-        sample_size_b_help,
-        bin_size_b,
-        fit_mode_b,
-        sampling_mode_b,
-        maximum_cal_method_b,
-        maximum_sample_method_b,
-        plot_b,
-        index_fig_b,
-        save_b,
-        figure_b_size_x,
-        figure_b_size_y,
-    ])
+    column11 = widgets.VBox(
+        [
+            bin_size,
+            lim_tof,
+            prominence,
+            distance,
+            percent,
+            bin_fdm,
+            plot_peak,
+            index_fig,
+            save,
+            verbose,
+            figure_mc_size_x,
+            figure_mc_size_y,
+        ]
+    )
+    column12 = widgets.VBox(
+        [
+            plot_button,
+            save_button,
+            reset_back_button,
+            reset_button,
+            clear_plot,
+            gaussian_mrp_button,
+            plot_stat_button,
+        ]
+    )
+    column22 = widgets.VBox(
+        [
+            sample_size_b,
+            sample_size_b_help,
+            bin_size_b,
+            fit_mode_b,
+            sampling_mode_b,
+            maximum_cal_method_b,
+            maximum_sample_method_b,
+            plot_b,
+            index_fig_b,
+            save_b,
+            figure_b_size_x,
+            figure_b_size_y,
+        ]
+    )
     column21 = widgets.VBox([bowl_button, pb_bowl])
-    column33 = widgets.VBox([
-        sample_size_v,
-        bin_size_v,
-        model_v,
-        maximum_cal_method_v,
-        maximum_sample_method_v,
-        mode_v,
-        plot_v,
-        index_fig_v,
-        save_v,
-        figure_v_size_x,
-        figure_v_size_y,
-    ])
+    column33 = widgets.VBox(
+        [
+            sample_size_v,
+            bin_size_v,
+            model_v,
+            maximum_cal_method_v,
+            maximum_sample_method_v,
+            mode_v,
+            plot_v,
+            index_fig_v,
+            save_v,
+            figure_v_size_x,
+            figure_v_size_y,
+        ]
+    )
     column32 = widgets.VBox([vol_button, pb_vol])
     column34 = widgets.VBox([fast_calibration, automatic_window_update, lock_peak_selection, peak_val])
 
     layout1 = widgets.HBox([column11, column22, column33, column34])
     layout2 = widgets.HBox([column12, column21, column32])
-    advanced_action_row = widgets.HBox([
-        initial_calib_button,
-        auto_button,
-        auto_button_bowl,
-        multi_peak_button,
-        hybrid_button,
-        auto_optimize_button,
-    ])
+    advanced_action_row = widgets.HBox(
+        [
+            initial_calib_button,
+            auto_button,
+            auto_button_bowl,
+            multi_peak_button,
+            hybrid_button,
+            auto_optimize_button,
+        ]
+    )
     advanced_panel = widgets.VBox([layout1, layout2, advanced_action_row, widgets.VBox([out, out_status])])
 
     simple_bin_size = widgets.FloatText(value=bin_size.value, description='Bin size:', layout=label_layout)
     simple_lim = widgets.IntText(value=lim_tof.value, description='Lim tof/mc:', layout=label_layout)
     simple_percent = widgets.IntText(value=percent.value, description='Percent MRP:', layout=label_layout)
     simple_bin_fdm = widgets.IntText(value=bin_fdm.value, description='Bin FDM:', layout=label_layout)
-    simple_plot_peak = widgets.Dropdown(options=plot_peak.options, value=plot_peak.value, description='Plot peak', layout=label_layout)
+    simple_plot_peak = widgets.Dropdown(
+        options=plot_peak.options, value=plot_peak.value, description='Plot peak', layout=label_layout
+    )
     simple_index_fig = widgets.IntText(value=index_fig.value, description='Fig save index:', layout=label_layout)
     simple_save = widgets.Dropdown(options=save.options, value=save.value, description='Save fig:', layout=label_layout)
     simple_fig_w = widgets.FloatText(value=figure_mc_size_x.value, description='Fig. size W:', layout=label_layout)
@@ -1236,39 +1281,48 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     simple_multi_peak_button.on_click(on_multi_peak_calibrate)
     simple_hybrid_button.on_click(on_hybrid_auto_residual)
     simple_auto_optimize_button.on_click(on_auto_optimize)
-    simple_controls = widgets.VBox([
-        simple_bin_size,
-        simple_lim,
-        simple_percent,
-        simple_bin_fdm,
-        simple_plot_peak,
-        simple_index_fig,
-        simple_save,
-        verbose,
-        simple_fig_w,
-        simple_fig_h,
-    ])
-    simple_common_actions = widgets.VBox([
-        simple_plot_button,
-        simple_save_button,
-        simple_reset_back_button,
-        simple_reset_button,
-        simple_clear_button,
-        simple_gaussian_button,
-        simple_plot_stat_button,
-    ])
+    simple_controls = widgets.VBox(
+        [
+            simple_bin_size,
+            simple_lim,
+            simple_percent,
+            simple_bin_fdm,
+            simple_plot_peak,
+            simple_index_fig,
+            simple_save,
+            verbose,
+            simple_fig_w,
+            simple_fig_h,
+        ]
+    )
+    simple_common_actions = widgets.VBox(
+        [
+            simple_plot_button,
+            simple_save_button,
+            simple_reset_back_button,
+            simple_reset_button,
+            simple_clear_button,
+            simple_gaussian_button,
+            simple_plot_stat_button,
+        ]
+    )
     simple_mode_actions = widgets.VBox()
-    simple_panel = widgets.VBox([
-        widgets.HBox([simple_controls, simple_common_actions, simple_mode_actions]),
-        widgets.VBox([out, out_status]),
-    ])
+    simple_panel = widgets.VBox(
+        [
+            widgets.HBox([simple_controls, simple_common_actions, simple_mode_actions]),
+            widgets.VBox([out, out_status]),
+        ]
+    )
     subtab_placeholders = [widgets.VBox(), widgets.VBox()]
     sub_tabs = widgets.Tab(children=subtab_placeholders)
     sub_tabs.set_title(0, 'simple')
     sub_tabs.set_title(1, 'advance')
+
     def _render_subtab_content():
         selected_panel = simple_panel if sub_tabs.selected_index == 0 else advanced_panel
-        for index, placeholder in enumerate(subtab_placeholders): placeholder.children = (selected_panel,) if index == sub_tabs.selected_index else ()
+        for index, placeholder in enumerate(subtab_placeholders):
+            placeholder.children = (selected_panel,) if index == sub_tabs.selected_index else ()
+
     def _sync_mode_ui(*_):
         if mode_tabs.selected_index not in (1, 2):
             _render_top_content()
@@ -1277,25 +1331,60 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         calibration_mode.value = mode_key
         lim_tof.value = variables.max_tof if mode_key == 'tof_calib' else 400
         simple_mode_actions.children = (
-            simple_initial_button, simple_auto_button, simple_multi_peak_button, simple_hybrid_button, simple_auto_optimize_button
+            simple_initial_button,
+            simple_auto_button,
+            simple_multi_peak_button,
+            simple_hybrid_button,
+            simple_auto_optimize_button,
         )
         _render_subtab_content()
         _render_top_content()
+
     combined_panel = build_combined_mc_tof_calibration_panel(
-        variables, out, out_status, calibration_mode, label_layout, bin_size, percent, bin_fdm, plot_peak, index_fig,
-        save, verbose, figure_mc_size_x, figure_mc_size_y, flight_path_length, _auto_select_peak_for_mode,
-        _selected_peak_ready, _verbosity_context, lambda: initial_calibration(None, variables, calibration_mode, flight_path_length),
+        variables,
+        out,
+        out_status,
+        calibration_mode,
+        label_layout,
+        bin_size,
+        percent,
+        bin_fdm,
+        plot_peak,
+        index_fig,
+        save,
+        verbose,
+        figure_mc_size_x,
+        figure_mc_size_y,
+        flight_path_length,
+        _auto_select_peak_for_mode,
+        _selected_peak_ready,
+        _verbosity_context,
+        lambda: initial_calibration(None, variables, calibration_mode, flight_path_length),
         lambda: automatic_calibration(None, variables, out, out_status, calibration_mode, pulse_mode),
-        lambda: on_hybrid_auto_residual(None), _save_both_corrections, _restore_both_corrections,
-        _reset_both_corrections, lambda: clear_plot_on_click(out, out_status), _print_gaussian_for_current_mode,
+        lambda: on_hybrid_auto_residual(None),
+        _save_both_corrections,
+        _restore_both_corrections,
+        _reset_both_corrections,
+        lambda: clear_plot_on_click(out, out_status),
+        _print_gaussian_for_current_mode,
     )
     adaptive_panel = build_adaptive_residual_calibration_panel(variables, det_diam, flight_path_length, pulse_mode)
 
     top_placeholders = [widgets.VBox(), widgets.VBox(), widgets.VBox(), widgets.VBox()]
     mode_tabs = widgets.Tab(children=top_placeholders)
-    mode_tabs.set_title(0, 'mc + tof calibration'); mode_tabs.set_title(1, 'mc calibration'); mode_tabs.set_title(2, 'tof calibration'); mode_tabs.set_title(3, 'adaptive residual')
+    mode_tabs.set_title(0, 'mc + tof calibration')
+    mode_tabs.set_title(1, 'mc calibration')
+    mode_tabs.set_title(2, 'tof calibration')
+    mode_tabs.set_title(3, 'adaptive residual')
 
     def _render_top_content():
         mapping = {0: combined_panel, 1: sub_tabs, 2: sub_tabs, 3: adaptive_panel}
-        for index, placeholder in enumerate(top_placeholders): placeholder.children = (mapping[index],) if index == mode_tabs.selected_index else ()
-    mode_tabs.observe(_sync_mode_ui, names='selected_index'); sub_tabs.observe(lambda change: _render_subtab_content(), names='selected_index'); mode_tabs.selected_index = 0; _sync_mode_ui(); _render_top_content(); display(mode_tabs)
+        for index, placeholder in enumerate(top_placeholders):
+            placeholder.children = (mapping[index],) if index == mode_tabs.selected_index else ()
+
+    mode_tabs.observe(_sync_mode_ui, names='selected_index')
+    sub_tabs.observe(lambda change: _render_subtab_content(), names='selected_index')
+    mode_tabs.selected_index = 0
+    _sync_mode_ui()
+    _render_top_content()
+    display(mode_tabs)

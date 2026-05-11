@@ -20,17 +20,17 @@ def tof2mcSimple(t: int, t0: int, V: float, xDet: int, yDet: int, flightPathLeng
 
     try:
         t = t - t0  # t0 correction
-        t = t * 1E-9  # tof from ns to s
-        xDet = xDet * 1E-2  # xDet from cm to m
-        yDet = yDet * 1E-2  # yDet from cm to m
-        flightPathLength = flightPathLength * 1E-3  # flightPathLength from mm to m
+        t = t * 1e-9  # tof from ns to s
+        xDet = xDet * 1e-2  # xDet from cm to m
+        yDet = yDet * 1e-2  # yDet from cm to m
+        flightPathLength = flightPathLength * 1e-3  # flightPathLength from mm to m
 
-        e = 1.6E-19  # coulombs per electron
-        amu = 1.66E-27  # conversion from kg to Dalton
+        e = 1.6e-19  # coulombs per electron
+        amu = 1.66e-27  # conversion from kg to Dalton
 
-        flightPathLength = xDet ** 2 + yDet ** 2 + flightPathLength ** 2
+        flightPathLength = xDet**2 + yDet**2 + flightPathLength**2
 
-        mc = 2 * e * V * (t ** 2) / flightPathLength
+        mc = 2 * e * V * (t**2) / flightPathLength
         mc = mc / amu  # conversion from kg/C to Da (6.022E23 g/mol, 1.6E-19C/ec)
 
         return mc
@@ -39,8 +39,9 @@ def tof2mcSimple(t: int, t0: int, V: float, xDet: int, yDet: int, flightPathLeng
         return None
 
 
-def tof2mc(t: int, t0: int, V: float, xDet: int, yDet: int,
-           flightPathLength: int, V_pulse: float, mode: str = 'voltage') -> None:
+def tof2mc(
+    t: int, t0: int, V: float, xDet: int, yDet: int, flightPathLength: int, V_pulse: float, mode: str = 'voltage'
+) -> None:
     """
     Calculate m/c based on idealized geometry and electrostatics using the formula:
     m/c = 2eα(V + βV_pulse)(t/L)^2
@@ -79,15 +80,15 @@ def tof2mc(t: int, t0: int, V: float, xDet: int, yDet: int,
         beta = 0.7
 
         t = t - t0  # t0 correction
-        t = t * 1E-9  # tof from ns to s
-        xDet = xDet * 1E-2  # xDet from cm to m
-        yDet = yDet * 1E-2  # yDet from cm to m
-        flightPathLength = flightPathLength * 1E-3  # flightPathLength from mm to m
+        t = t * 1e-9  # tof from ns to s
+        xDet = xDet * 1e-2  # xDet from cm to m
+        yDet = yDet * 1e-2  # yDet from cm to m
+        flightPathLength = flightPathLength * 1e-3  # flightPathLength from mm to m
 
-        e = 1.6E-19  # coulombs per electron
-        amu = 1.66E-27  # conversion from kg to Dalton
+        e = 1.6e-19  # coulombs per electron
+        amu = 1.66e-27  # conversion from kg to Dalton
 
-        flightPathLength = np.sqrt(xDet ** 2 + yDet ** 2 + flightPathLength ** 2)
+        flightPathLength = np.sqrt(xDet**2 + yDet**2 + flightPathLength**2)
 
         if mode == 'laser':
             mc = 2 * V * e * (t / flightPathLength) ** 2

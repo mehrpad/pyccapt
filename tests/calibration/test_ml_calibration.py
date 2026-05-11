@@ -23,6 +23,7 @@ from pyccapt.calibration.core.exceptions import CalibrationInputError
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 class _FakeVariables:
     """Minimal stand-in for share_variables.Variables."""
 
@@ -65,10 +66,14 @@ def _make_synthetic_spectrum(n_ions=50000, rng_seed=42):
 # Feature matrix tests
 # ---------------------------------------------------------------------------
 
+
 class TestBuildFeatureMatrix:
     def test_shape_and_names(self):
         X, names = _build_feature_matrix(
-            np.ones(10), np.zeros(10), np.zeros(10), np.linspace(0, 1, 10),
+            np.ones(10),
+            np.zeros(10),
+            np.zeros(10),
+            np.linspace(0, 1, 10),
         )
         assert X.shape == (10, 7)
         assert len(names) == 7
@@ -86,6 +91,7 @@ class TestBuildFeatureMatrix:
 # ---------------------------------------------------------------------------
 # Normalisation tests
 # ---------------------------------------------------------------------------
+
 
 class TestNormalisation:
     def test_voltage_normalisation_centres_data(self):
@@ -105,6 +111,7 @@ class TestNormalisation:
 # Training data extraction
 # ---------------------------------------------------------------------------
 
+
 class TestExtractTrainingData:
     def test_extracts_from_peaks(self):
         mc, voltage, x, y = _make_synthetic_spectrum(10000)
@@ -122,7 +129,10 @@ class TestExtractTrainingData:
         mc = np.array([1.0, 2.0, 3.0])
         with pytest.raises(CalibrationInputError):
             _extract_training_data(
-                mc, np.ones(3), np.zeros(3), np.zeros(3),
+                mc,
+                np.ones(3),
+                np.zeros(3),
+                np.zeros(3),
                 [{"position": 100.0, "x1": 99.0, "x2": 101.0}],
             )
 
@@ -130,6 +140,7 @@ class TestExtractTrainingData:
 # ---------------------------------------------------------------------------
 # Model training
 # ---------------------------------------------------------------------------
+
 
 class TestTrainGBCS:
     def test_trains_and_returns_diagnostics(self):
@@ -146,6 +157,7 @@ class TestTrainGBCS:
 # Prediction & clamping
 # ---------------------------------------------------------------------------
 
+
 class TestPrediction:
     def test_clamp_bounds(self):
         rng = np.random.RandomState(0)
@@ -154,8 +166,14 @@ class TestPrediction:
         model, _ = _train_gbcs(X, y, n_estimators=20, max_depth=3)
         norm_params = (0.0, 1.0, 1.0)  # (v_center, v_scale, s_scale)
         pred = _predict_correction(
-            model, rng.randn(50), rng.randn(50), rng.randn(50),
-            np.linspace(0, 1, 50), norm_params, clamp_low=0.95, clamp_high=1.05,
+            model,
+            rng.randn(50),
+            rng.randn(50),
+            rng.randn(50),
+            np.linspace(0, 1, 50),
+            norm_params,
+            clamp_low=0.95,
+            clamp_high=1.05,
         )
         assert np.all(pred >= 0.95)
         assert np.all(pred <= 1.05)
@@ -164,6 +182,7 @@ class TestPrediction:
 # ---------------------------------------------------------------------------
 # Mode-aware defaults (ToF fix)
 # ---------------------------------------------------------------------------
+
 
 class TestModeAwareDefaults:
     def test_mc_mode_uses_user_value(self):
@@ -188,6 +207,7 @@ class TestModeAwareDefaults:
 # ---------------------------------------------------------------------------
 # Integration test: full ml_calibration
 # ---------------------------------------------------------------------------
+
 
 class TestMLCalibrationIntegration:
     def test_improves_drifted_spectrum(self):

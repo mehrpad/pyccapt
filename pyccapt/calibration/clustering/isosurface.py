@@ -2,7 +2,6 @@ import numpy as np
 import pyvista as pv
 
 
-
 def bin_vectors_from_distance(dist, bin_values, mode='distance'):
     """
     Create a set of grid vectors to be used in nD binning. The bounds are calculated
@@ -44,18 +43,16 @@ def bin_vectors_from_distance(dist, bin_values, mode='distance'):
 
             # Filter bin centers within the distance range
             centers = bin_vector_raw[
-                (bin_vector_raw >= dist[:, dim].min() - bin_values[dim]) &
-                (bin_vector_raw <= dist[:, dim].max() + bin_values[dim])
+                (bin_vector_raw >= dist[:, dim].min() - bin_values[dim])
+                & (bin_vector_raw <= dist[:, dim].max() + bin_values[dim])
             ]
             bin_centers.append(centers)
 
             # Calculate bin edges
             edges = (centers[1:] + centers[:-1]) / 2
-            edges = np.concatenate((
-                [centers[0] - (centers[1] - centers[0]) / 2],
-                edges,
-                [centers[-1] + (centers[-1] - centers[-2]) / 2]
-            ))
+            edges = np.concatenate(
+                ([centers[0] - (centers[1] - centers[0]) / 2], edges, [centers[-1] + (centers[-1] - centers[-2]) / 2])
+            )
             bin_edges.append(edges)
 
     # Constant bin count interval
@@ -80,24 +77,26 @@ def bin_vectors_from_distance(dist, bin_values, mode='distance'):
 
     return bin_centers, bin_edges
 
+
 import numpy as np
+
 
 def pos_to_voxel(data, grid_vec, species=None):
     """
-    Creates a voxelization of the data in 'pos' based on the bin centers in 'grid_vec'
-    for the atoms/ions in the specified species.
+        Creates a voxelization of the data in 'pos' based on the bin centers in 'grid_vec'
+        for the atoms/ions in the specified species.
 
-    Parameters:
-        data (pyccapt DataFrame): The data to be voxelized. when input species is given, ranges must be allocated.
-%          A decomposed DataFrame file is also possible. Use range_to_pyccapt to decompose the data.
-        grid_vec (list of numpy.ndarray): Grid vectors for the voxel grid. These are the bin centers.
-        species (list, str, or numpy.ndarray, optional): The species to filter by. Can be:
-                                                         - List of species names (e.g., ['Fe', 'Mn']).
-                                                         - Boolean array matching the length of `pos`.
-                                                         - None, to include all atoms/ions.
+        Parameters:
+            data (pyccapt DataFrame): The data to be voxelized. when input species is given, ranges must be allocated.
+    %          A decomposed DataFrame file is also possible. Use range_to_pyccapt to decompose the data.
+            grid_vec (list of numpy.ndarray): Grid vectors for the voxel grid. These are the bin centers.
+            species (list, str, or numpy.ndarray, optional): The species to filter by. Can be:
+                                                             - List of species names (e.g., ['Fe', 'Mn']).
+                                                             - Boolean array matching the length of `pos`.
+                                                             - None, to include all atoms/ions.
 
-    Returns:
-        numpy.ndarray: A 3D array representing the voxelized data.
+        Returns:
+            numpy.ndarray: A 3D array representing the voxelized data.
     """
     # Ensure `pos` is a numpy array
     if hasattr(data, "columns"):  # Assume pandas.DataFrame
@@ -121,14 +120,8 @@ def pos_to_voxel(data, grid_vec, species=None):
         pos_array = pos_array[species_mask]
 
     # Calculate bin sizes and edge vectors
-    bin_sizes = [
-        grid_vec[d][1] - grid_vec[d][0] for d in range(3)
-    ]
-    edge_vec = [
-        np.concatenate(([grid_vec[d][0] - bin_sizes[d] / 2],
-                        grid_vec[d] + bin_sizes[d] / 2))
-        for d in range(3)
-    ]
+    bin_sizes = [grid_vec[d][1] - grid_vec[d][0] for d in range(3)]
+    edge_vec = [np.concatenate(([grid_vec[d][0] - bin_sizes[d] / 2], grid_vec[d] + bin_sizes[d] / 2)) for d in range(3)]
 
     # Determine voxel indices
     loc = np.empty((pos_array.shape[0], 3), dtype=int)
@@ -144,6 +137,7 @@ def pos_to_voxel(data, grid_vec, species=None):
         vox[tuple(loc[i])] += 1
 
     return vox
+
 
 def isosurface(gridVec, data, isovalue):
     """
@@ -166,8 +160,10 @@ def isosurface(gridVec, data, isovalue):
     isosurf = grid.contour([isovalue])  # Pass isovalue as a list for compatibility
     return isosurf
 
+
 if __name__ == "__main__":
     import pandas as pd
+
     # Test the function
     def generate_atom_dataset(num_atoms):
         """
@@ -183,28 +179,23 @@ if __name__ == "__main__":
         positions = np.random.uniform(0, 100, (num_atoms, 3))  # Example range: [0, 100] nm
 
         # Assign elements randomly with 80% Al and 20% Fe
-        elements = np.random.choice(
-            ["Al", "Fe"], size=num_atoms, p=[0.8, 0.2]
-        )
+        elements = np.random.choice(["Al", "Fe"], size=num_atoms, p=[0.8, 0.2])
 
         # Create the DataFrame
-        df = pd.DataFrame(
-            positions, columns=["x (nm)", "y (nm)", "z (nm)"]
-        )
+        df = pd.DataFrame(positions, columns=["x (nm)", "y (nm)", "z (nm)"])
         df["element"] = elements
 
         return df
-
 
     # Example usage
     num_atoms = 1_000  # Set the desired dataset size
     data = generate_atom_dataset(num_atoms)
 
     # make pandas dataframe
-    bin_values = [1, 1, 1] # nm
-    bin_centers, bin_edges = bin_vectors_from_distance([data['x (nm)'].to_numpy(), data['y (nm)'].to_numpy(),
-                                                        data['z (nm)'].to_numpy()], bin_values, mode='distance')
-
+    bin_values = [1, 1, 1]  # nm
+    bin_centers, bin_edges = bin_vectors_from_distance(
+        [data['x (nm)'].to_numpy(), data['y (nm)'].to_numpy(), data['z (nm)'].to_numpy()], bin_values, mode='distance'
+    )
 
     grid_vec = np.array(bin_centers)
     vox = pos_to_voxel(data, grid_vec)
@@ -238,7 +229,7 @@ if __name__ == "__main__":
         z=al_positions[:, 2],
         mode="markers",
         marker=dict(size=2, color="red", opacity=0.5),
-        name="Al Atoms"
+        name="Al Atoms",
     )
 
     # Create the mesh for the isosurface
@@ -252,19 +243,14 @@ if __name__ == "__main__":
         opacity=0.6,
         alphahull=5,
         color="blue",
-        name="Fe Isosurface"
+        name="Fe Isosurface",
     )
 
     # Combine and plot
     fig = go.Figure(data=[scatter, mesh])
     fig.update_layout(
-        scene=dict(
-            xaxis_title="X (nm)",
-            yaxis_title="Y (nm)",
-            zaxis_title="Z (nm)"
-        ),
-        title="Scatter Plot of Al Atoms with Fe Isosurface"
+        scene=dict(xaxis_title="X (nm)", yaxis_title="Y (nm)", zaxis_title="Z (nm)"),
+        title="Scatter Plot of Al Atoms with Fe Isosurface",
     )
 
     fig.show()
-

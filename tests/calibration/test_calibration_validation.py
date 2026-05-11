@@ -1,4 +1,4 @@
-﻿import pytest
+import pytest
 
 from pyccapt.calibration.core.exceptions import CalibrationInputError
 from pyccapt.calibration.core.validation import (
@@ -25,4 +25,3 @@ def test_ensure_choice_rejects_invalid_value():
 def test_ensure_positive_rejects_zero_when_zero_not_allowed():
     with pytest.raises(CalibrationInputError):
         ensure_positive(0, field_name="bin")
-

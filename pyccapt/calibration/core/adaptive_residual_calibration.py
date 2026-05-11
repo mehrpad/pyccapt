@@ -31,7 +31,11 @@ def _mode_aware_defaults(calibration_array, calibration_mode, user_template_bin_
         auto_template_bin = max(0.05, data_range * 0.001)
         auto_hist_bin = max(0.1, data_range * 0.002)
         template_bin_size = user_template_bin_size if user_template_bin_size > auto_template_bin * 0.5 else auto_template_bin
-        hist_bin_size = user_hist_bin_size if user_hist_bin_size is not None and user_hist_bin_size > auto_hist_bin * 0.5 else auto_hist_bin
+        hist_bin_size = (
+            user_hist_bin_size
+            if user_hist_bin_size is not None and user_hist_bin_size > auto_hist_bin * 0.5
+            else auto_hist_bin
+        )
     else:
         template_bin_size = max(user_template_bin_size, 1e-4)
         hist_bin_size = user_hist_bin_size if user_hist_bin_size is not None else max(user_template_bin_size, 1e-4)
@@ -230,7 +234,14 @@ def _collect_temporal_observations(calibration_array, template, n_windows, overl
                 y_obs.append(shift)
                 w_obs.append(max(1.0, np.sqrt(local_values.size)) * max(1.0, score / local_values.size))
             if best_attempt is None or len(x_obs) > best_attempt["n_observations"]:
-                best_attempt = {"x_obs": np.asarray(x_obs, dtype=float), "y_obs": np.asarray(y_obs, dtype=float), "w_obs": np.asarray(w_obs, dtype=float), "n_observations": len(x_obs), "scale": scale, "threshold": threshold}
+                best_attempt = {
+                    "x_obs": np.asarray(x_obs, dtype=float),
+                    "y_obs": np.asarray(y_obs, dtype=float),
+                    "w_obs": np.asarray(w_obs, dtype=float),
+                    "n_observations": len(x_obs),
+                    "scale": scale,
+                    "threshold": threshold,
+                }
             if len(x_obs) >= 4:
                 x_obs = np.asarray(x_obs, dtype=float)
                 y_obs = np.asarray(y_obs, dtype=float)
@@ -258,7 +269,12 @@ def _fit_temporal_residual(calibration_array, template, n_windows, overlap, min_
     unique_x = np.unique(x_obs)
     if unique_x.size < 4:
         correction = np.interp(np.arange(len(calibration_array)), x_obs, y_centered)
-        return correction, {"n_observations": len(x_obs), "peak_center": template.center, "scale": observations.get("scale", 1.0), "threshold": observations.get("threshold", min_window_ions)}
+        return correction, {
+            "n_observations": len(x_obs),
+            "peak_center": template.center,
+            "scale": observations.get("scale", 1.0),
+            "threshold": observations.get("threshold", min_window_ions),
+        }
     spline = UnivariateSpline(
         x_obs,
         y_centered,
@@ -268,7 +284,12 @@ def _fit_temporal_residual(calibration_array, template, n_windows, overlap, min_
     )
     correction = spline(np.arange(len(calibration_array), dtype=float))
     max_abs = max(np.nanstd(y_centered) * 4.0, np.nanpercentile(np.abs(y_centered), 95) * 1.5, 1e-6)
-    return np.clip(correction, -max_abs, max_abs), {"n_observations": len(x_obs), "peak_center": template.center, "scale": observations.get("scale", 1.0), "threshold": observations.get("threshold", min_window_ions)}
+    return np.clip(correction, -max_abs, max_abs), {
+        "n_observations": len(x_obs),
+        "peak_center": template.center,
+        "scale": observations.get("scale", 1.0),
+        "threshold": observations.get("threshold", min_window_ions),
+    }
 
 
 def _fit_spatial_residual(calibration_array, template, x_det_cm, y_det_cm, grid_size, min_cell_ions):
@@ -306,7 +327,13 @@ def _fit_spatial_residual(calibration_array, template, x_det_cm, y_det_cm, grid_
                     weight_grid[ix, iy] = total_weight
                     cell_count += 1
             if best_payload is None or cell_count > best_payload["n_cells"]:
-                best_payload = {"sum_grid": sum_grid.copy(), "weight_grid": weight_grid.copy(), "n_cells": cell_count, "scale": scale, "threshold": threshold}
+                best_payload = {
+                    "sum_grid": sum_grid.copy(),
+                    "weight_grid": weight_grid.copy(),
+                    "n_cells": cell_count,
+                    "scale": scale,
+                    "threshold": threshold,
+                }
             if cell_count >= 4:
                 break
         if best_payload is not None and best_payload["n_cells"] >= 4:
@@ -334,7 +361,12 @@ def _fit_spatial_residual(calibration_array, template, x_det_cm, y_det_cm, grid_
     )
     correction = interp(np.column_stack([x_mm, y_mm]))
     max_abs = max(np.nanpercentile(np.abs(correction), 95) * 1.5, 1e-6)
-    return np.clip(correction, -max_abs, max_abs), {"n_cells": best_payload["n_cells"], "peak_center": template.center, "scale": best_payload["scale"], "threshold": best_payload["threshold"]}
+    return np.clip(correction, -max_abs, max_abs), {
+        "n_cells": best_payload["n_cells"],
+        "peak_center": template.center,
+        "scale": best_payload["scale"],
+        "threshold": best_payload["threshold"],
+    }
 
 
 def _best_candidate(candidates, baseline_quality):
@@ -375,7 +407,9 @@ def adaptive_residual_calibration(
 
     # Scale bin sizes for tof vs mc domains
     template_bin_size, hist_bin_size = _mode_aware_defaults(
-        initial_array, calibration_mode, template_bin_size,
+        initial_array,
+        calibration_mode,
+        template_bin_size,
     )
 
     peaks = calibration_core.auto_detect_reference_peaks(
@@ -413,13 +447,23 @@ def adaptive_residual_calibration(
         temporal_candidates = []
         for peak, template in peak_template_pairs:
             temporal_correction, candidate_info = _fit_temporal_residual(
-                current_array, template, n_windows=n_windows, overlap=overlap, min_window_ions=min_window_ions, smoothing=temporal_smoothing
+                current_array,
+                template,
+                n_windows=n_windows,
+                overlap=overlap,
+                min_window_ions=min_window_ions,
+                smoothing=temporal_smoothing,
             )
             if candidate_info.get("n_observations", 0) < 4:
                 continue
             temporal_candidate = current_array - temporal_correction
             temporal_candidates.append(
-                {"label": f"temporal@{peak['position']:.4f}", "correction": temporal_correction, "quality": _evaluate_quality(temporal_candidate, round_reference_peaks), "info": candidate_info}
+                {
+                    "label": f"temporal@{peak['position']:.4f}",
+                    "correction": temporal_correction,
+                    "quality": _evaluate_quality(temporal_candidate, round_reference_peaks),
+                    "info": candidate_info,
+                }
             )
         best_temporal = _best_candidate(temporal_candidates, round_quality)
         if best_temporal is not None:
@@ -430,18 +474,30 @@ def adaptive_residual_calibration(
 
         spatial_quality = None
         if apply_spatial:
-            templates = [_build_peak_template(current_array, peak, template_bin_size) for peak in round_reference_peaks["train"]]
+            templates = [
+                _build_peak_template(current_array, peak, template_bin_size) for peak in round_reference_peaks["train"]
+            ]
             peak_template_pairs = [(p, t) for p, t in zip(round_reference_peaks["train"], templates) if t is not None]
             spatial_candidates = []
             for peak, template in peak_template_pairs:
                 spatial_correction, candidate_info = _fit_spatial_residual(
-                    current_array, template, variables.dld_x_det, variables.dld_y_det, grid_size=spatial_grid, min_cell_ions=min_cell_ions
+                    current_array,
+                    template,
+                    variables.dld_x_det,
+                    variables.dld_y_det,
+                    grid_size=spatial_grid,
+                    min_cell_ions=min_cell_ions,
                 )
                 if candidate_info.get("n_cells", 0) < 4:
                     continue
                 spatial_candidate = current_array - spatial_correction
                 spatial_candidates.append(
-                    {"label": f"spatial@{peak['position']:.4f}", "correction": spatial_correction, "quality": _evaluate_quality(spatial_candidate, round_reference_peaks), "info": candidate_info}
+                    {
+                        "label": f"spatial@{peak['position']:.4f}",
+                        "correction": spatial_correction,
+                        "quality": _evaluate_quality(spatial_candidate, round_reference_peaks),
+                        "info": candidate_info,
+                    }
                 )
             best_spatial = _best_candidate(spatial_candidates, round_quality)
             if best_spatial is not None:
@@ -451,7 +507,14 @@ def adaptive_residual_calibration(
                 spatial_info = best_spatial["info"]
                 round_steps.append(best_spatial["label"])
 
-        iteration_history.append({"round": round_index + 1, "baseline_quality": round_baseline_quality, "final_quality": round_quality, "accepted_steps": list(round_steps)})
+        iteration_history.append(
+            {
+                "round": round_index + 1,
+                "baseline_quality": round_baseline_quality,
+                "final_quality": round_quality,
+                "accepted_steps": list(round_steps),
+            }
+        )
         if not round_steps:
             stop_reason = "no_improvement"
             break

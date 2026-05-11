@@ -58,8 +58,7 @@ class AnnotationFinder:
 
         candidates = []
         for x, y, annotation in self.data:
-            if ((click_x - self.xtol < x < click_x + self.xtol) and
-                    (click_y - self.ytol < y < click_y + self.ytol)):
+            if (click_x - self.xtol < x < click_x + self.xtol) and (click_y - self.ytol < y < click_y + self.ytol):
                 candidates.append((distance(x, click_x, y, click_y), x, y, annotation))
         if not candidates:
             return
@@ -131,4 +130,3 @@ class AnnotationFinder:
 
 class AnnoteFinder(AnnotationFinder):
     """Backward-compatible class alias with legacy name."""
-

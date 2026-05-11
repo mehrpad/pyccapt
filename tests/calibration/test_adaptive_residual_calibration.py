@@ -8,7 +8,7 @@ def _window_peak_centers(values, peak_min, peak_max, n_windows=18):
     centers = []
     step = max(50, len(values) // n_windows)
     for start in range(0, len(values), step):
-        chunk = values[start:start + step]
+        chunk = values[start : start + step]
         peak_values = chunk[(chunk > peak_min) & (chunk < peak_max)]
         if peak_values.size < 20:
             continue

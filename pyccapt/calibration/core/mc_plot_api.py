@@ -1,4 +1,4 @@
-﻿"""Public histogram workflow API separated from the plotting class module."""
+"""Public histogram workflow API separated from the plotting class module."""
 
 from __future__ import annotations
 
@@ -249,7 +249,3 @@ def hist_plot(
             print("------------------------------")
 
     return mrp_list
-
-
-
-

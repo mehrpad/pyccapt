@@ -1,4 +1,4 @@
-﻿"""Selector wiring helpers for :mod:`mc_plot`."""
+"""Selector wiring helpers for :mod:`mc_plot`."""
 
 from __future__ import annotations
 
@@ -50,4 +50,3 @@ def zoom_to_x_range(plotter, x_min, x_max, reset=False):
 
 
 __all__ = ['attach_selector', 'zoom_to_x_range']
-

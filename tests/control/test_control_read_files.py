@@ -1,4 +1,4 @@
-﻿"""Tests for control config file loading helpers."""
+"""Tests for control config file loading helpers."""
 
 from __future__ import annotations
 
@@ -66,4 +66,3 @@ def test_load_config_file_rejects_unsupported_suffix(tmp_path):
     ini_path.write_text("[x]\na=1\n", encoding="utf-8")
     with pytest.raises(ValueError):
         read_files.load_config_file(ini_path)
-

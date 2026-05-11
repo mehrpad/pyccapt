@@ -1,4 +1,4 @@
-﻿"""Detector process orchestration for APT experiments."""
+"""Detector process orchestration for APT experiments."""
 
 from __future__ import annotations
 

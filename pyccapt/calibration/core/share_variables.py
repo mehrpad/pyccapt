@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
 from pathlib import Path
@@ -80,8 +80,7 @@ class SharedVariablesBase:
             raise CalibrationInputError("Peak range boundaries must be numeric") from exc
         if right_value <= left_value:
             raise CalibrationInputError(
-                f"Invalid peak range: left={left_value}, right={right_value}. "
-                "'right' must be greater than 'left'."
+                f"Invalid peak range: left={left_value}, right={right_value}. 'right' must be greater than 'left'."
             )
         self.selected_x1 = left_value
         self.selected_x2 = right_value
@@ -101,8 +100,7 @@ class SharedVariablesBase:
             raise CalibrationInputError("Peak range boundaries must be numeric") from exc
         if right_value <= left_value:
             raise CalibrationInputError(
-                f"Invalid peak range: left={left_value}, right={right_value}. "
-                "'right' must be greater than 'left'."
+                f"Invalid peak range: left={left_value}, right={right_value}. 'right' must be greater than 'left'."
             )
         return left_value, right_value
 
@@ -135,9 +133,7 @@ class SharedVariablesBase:
         if self.selected_x1 == 0 and self.selected_x2 == 0:
             raise CalibrationStateError("No peak range selected")
         if self.selected_x2 <= self.selected_x1:
-            raise CalibrationStateError(
-                f"Invalid peak range: selected_x1={self.selected_x1}, selected_x2={self.selected_x2}"
-            )
+            raise CalibrationStateError(f"Invalid peak range: selected_x1={self.selected_x1}, selected_x2={self.selected_x2}")
 
     def build_calibration_mask(self, calibration_mode: str) -> np.ndarray:
         """Build a boolean mask from the selected peak range and calibration mode."""
@@ -158,8 +154,7 @@ class SharedVariablesBase:
         mask = np.logical_and(data > left, data < right)
         if not np.any(mask):
             raise CalibrationStateError(
-                "Selected peak range does not include any ions for "
-                f"calibration_mode={calibration_mode!r}"
+                f"Selected peak range does not include any ions for calibration_mode={calibration_mode!r}"
             )
         return mask
 
@@ -169,9 +164,7 @@ class SharedVariablesBase:
         data = self.get_calibration_array(mode)
         locked_mask = np.asarray(mask, dtype=bool)
         if locked_mask.shape != data.shape:
-            raise CalibrationInputError(
-                f"Mask shape {locked_mask.shape} does not match calibration data shape {data.shape}"
-            )
+            raise CalibrationInputError(f"Mask shape {locked_mask.shape} does not match calibration data shape {data.shape}")
         if not np.any(locked_mask):
             raise CalibrationInputError("Locked calibration mask cannot be empty")
         self.calibration_selection_masks[mode] = locked_mask.copy()
@@ -193,8 +186,9 @@ class SharedVariablesBase:
             return np.zeros(len(dataframe[like].to_numpy()))
         return np.zeros(len(dataframe))
 
-    def sync_from_data(self, data: pd.DataFrame | None = None, *, update_backups: bool = False,
-                       clear_selection: bool = True) -> pd.DataFrame:
+    def sync_from_data(
+        self, data: pd.DataFrame | None = None, *, update_backups: bool = False, clear_selection: bool = True
+    ) -> pd.DataFrame:
         """Synchronize shared arrays from the current dataframe after crop/load/reset operations."""
         frame = self.data if data is None else data
         if frame is None:
@@ -383,4 +377,3 @@ class Variables(SharedVariablesBase):
     @data_name.setter
     def data_name(self, value):
         self.dataset_name = value
-

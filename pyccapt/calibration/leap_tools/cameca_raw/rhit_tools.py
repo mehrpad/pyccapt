@@ -26,8 +26,7 @@ def _require_uproot():
         import uproot  # type: ignore
     except ImportError as exc:  # pragma: no cover - depends on optional runtime package
         raise ImportError(
-            "RHIT support requires the optional 'uproot' package. Install it with "
-            "'pip install uproot'."
+            "RHIT support requires the optional 'uproot' package. Install it with 'pip install uproot'."
         ) from exc
     return uproot
 
@@ -37,8 +36,7 @@ def _require_h5py():
         import h5py  # type: ignore
     except ImportError as exc:  # pragma: no cover - depends on optional runtime package
         raise ImportError(
-            "HDF5 export for RHIT support requires the optional 'h5py' package. "
-            "Install it with 'pip install h5py'."
+            "HDF5 export for RHIT support requires the optional 'h5py' package. Install it with 'pip install h5py'."
         ) from exc
     return h5py
 
@@ -70,9 +68,9 @@ def _decompress_tkey(raw, offset: int) -> bytes:
     chunks = []
     position = 0
     while position < len(compressed):
-        if compressed[position:position + 2] == b"ZL":
-            compressed_size = int.from_bytes(compressed[position + 3:position + 6], "little")
-            chunk = zlib.decompress(compressed[position + 9:position + 9 + compressed_size])
+        if compressed[position : position + 2] == b"ZL":
+            compressed_size = int.from_bytes(compressed[position + 3 : position + 6], "little")
+            chunk = zlib.decompress(compressed[position + 9 : position + 9 + compressed_size])
             chunks.append(chunk)
             position += 9 + compressed_size
         else:
@@ -113,7 +111,7 @@ def _decode_run_header(file_path: str | Path) -> dict[str, Any]:
             cycle = struct.unpack(">h", header[16:18])[0]
             class_name_length = header[26]
             if 27 + class_name_length <= len(header):
-                class_name = header[27:27 + class_name_length].decode("ascii", errors="replace")
+                class_name = header[27 : 27 + class_name_length].decode("ascii", errors="replace")
                 if class_name == "CRunHeader" and cycle > best_cycle:
                     best_cycle = cycle
                     best_offset = offset
@@ -129,8 +127,8 @@ def _decode_run_header(file_path: str | Path) -> dict[str, Any]:
 
     try:
         for index in range(30, 70):
-            if rest[index:index + 1].isdigit():
-                null_offset = rest[index:index + 20].find(b"\x00")
+            if rest[index : index + 1].isdigit():
+                null_offset = rest[index : index + 20].find(b"\x00")
                 end = index + null_offset if null_offset >= 0 else index + 15
                 candidate = rest[index:end].decode("ascii", errors="replace")
                 if "." in candidate and len(candidate) > 5:
@@ -142,7 +140,7 @@ def _decode_run_header(file_path: str | Path) -> dict[str, Any]:
     for month in (b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun", b"Jul", b"Aug", b"Sep", b"Oct", b"Nov", b"Dec"):
         index = rest.find(month)
         if index > 0:
-            params["run_date"] = rest[index:index + 20].split(b"\x00")[0].decode("ascii", errors="replace").strip()
+            params["run_date"] = rest[index : index + 20].split(b"\x00")[0].decode("ascii", errors="replace").strip()
             break
 
     float_fields = {
@@ -159,13 +157,13 @@ def _decode_run_header(file_path: str | Path) -> dict[str, Any]:
     for offset_in_rest, field_name in float_fields.items():
         if offset_in_rest + 4 > len(rest):
             continue
-        value = struct.unpack(">f", rest[offset_in_rest:offset_in_rest + 4])[0]
+        value = struct.unpack(">f", rest[offset_in_rest : offset_in_rest + 4])[0]
         if np.isfinite(value) and abs(value) < 1e8:
             params[field_name] = float(value)
 
     coefficients = []
     for index in range(1952, min(2112, len(rest)), 8):
-        value = struct.unpack(">d", rest[index:index + 8])[0]
+        value = struct.unpack(">d", rest[index : index + 8])[0]
         if np.isfinite(value) and abs(value) < 1e15:
             coefficients.append(float(value))
     if coefficients:
@@ -223,9 +221,7 @@ def _flatten_rhit_tree(tree, verbose: bool = True) -> pd.DataFrame:
             print(f"    {name}: FAILED -> {reason}")
 
     if not by_length:
-        raise ValueError(
-            f"Could not read any branches from RHIT tree (expected {expected_entries:,} entries)"
-        )
+        raise ValueError(f"Could not read any branches from RHIT tree (expected {expected_entries:,} entries)")
 
     primary_length = max(by_length.keys(), key=lambda length: len(by_length[length]))
     primary_columns = by_length[primary_length]
@@ -233,10 +229,7 @@ def _flatten_rhit_tree(tree, verbose: bool = True) -> pd.DataFrame:
 
     print(f"  Building dataframe from {len(primary_columns)} columns at length {primary_length:,}")
     if primary_length != expected_entries:
-        print(
-            f"  Note: dataframe length ({primary_length:,}) differs from tree.num_entries "
-            f"({expected_entries:,})."
-        )
+        print(f"  Note: dataframe length ({primary_length:,}) differs from tree.num_entries ({expected_entries:,}).")
     for length, cols in other_lengths.items():
         preview = ", ".join(sorted(cols.keys())[:6])
         extra = " ..." if len(cols) > 6 else ""
@@ -414,9 +407,7 @@ def rhit_to_ccapt(hits: pd.DataFrame, drop_invalid: bool = True) -> pd.DataFrame
 
     length = len(hits)
     pulse = hits["pulse"].to_numpy(dtype=float) if "pulse" in hits.columns else np.zeros(length)
-    start_counter = (
-        hits["tElapsed"].to_numpy(dtype=float) if "tElapsed" in hits.columns else np.arange(length, dtype=float)
-    )
+    start_counter = hits["tElapsed"].to_numpy(dtype=float) if "tElapsed" in hits.columns else np.arange(length, dtype=float)
     return pd.DataFrame(
         {
             "x (nm)": np.zeros(length),
@@ -481,9 +472,7 @@ def rhit_to_raw_hdf5(
     pulse_value = hits["pulse"].to_numpy(dtype=float) if "pulse" in hits.columns else np.zeros(n, dtype=float)
     pulse_value = pulse_value.reshape(-1, 1)
     laser_value = (
-        hits["laserpower"].to_numpy(dtype=float)
-        if "laserpower" in hits.columns
-        else np.zeros(n, dtype=float)
+        hits["laserpower"].to_numpy(dtype=float) if "laserpower" in hits.columns else np.zeros(n, dtype=float)
     ).reshape(-1, 1)
     if pulse_mode == "laser":
         pulse_v = np.zeros_like(pulse_value)
@@ -506,29 +495,21 @@ def rhit_to_raw_hdf5(
         grp.create_dataset("x", data=det_x_cm, compression="gzip", compression_opts=4)
         grp.create_dataset("y", data=det_y_cm, compression="gzip", compression_opts=4)
         grp.attrs["num_entries"] = n
-        grp.attrs["units"] = (
-            "high_voltage=V, pulse=V, laser_intensity=pJ, t=ns, x=cm, y=cm, start_counter=uint32"
-        )
+        grp.attrs["units"] = "high_voltage=V, pulse=V, laser_intensity=pJ, t=ns, x=cm, y=cm, start_counter=uint32"
         grp.attrs["source"] = "rhit_to_raw_hdf5"
         grp.attrs["pulse_mode"] = pulse_mode
 
         # tdc/ group: one channel per RHIT event (the file doesn't carry
         # per-DL-end timings; use tof as the time_data and channel=0).
         tdc = handle.create_group("tdc")
-        tdc.create_dataset("channel", data=np.zeros((n, 1), dtype=np.uint32),
-                           compression="gzip", compression_opts=4)
-        tdc.create_dataset("start_counter", data=start_counter,
-                           compression="gzip", compression_opts=4)
-        tdc.create_dataset("high_voltage", data=high_voltage,
-                           compression="gzip", compression_opts=4)
-        tdc.create_dataset("pulse", data=pulse_v,
-                           compression="gzip", compression_opts=4)
-        tdc.create_dataset("laser_pulse", data=pulse_l,
-                           compression="gzip", compression_opts=4)
+        tdc.create_dataset("channel", data=np.zeros((n, 1), dtype=np.uint32), compression="gzip", compression_opts=4)
+        tdc.create_dataset("start_counter", data=start_counter, compression="gzip", compression_opts=4)
+        tdc.create_dataset("high_voltage", data=high_voltage, compression="gzip", compression_opts=4)
+        tdc.create_dataset("pulse", data=pulse_v, compression="gzip", compression_opts=4)
+        tdc.create_dataset("laser_pulse", data=pulse_l, compression="gzip", compression_opts=4)
         # time_data in raw analysis is uint32 TDC counts; we don't have those
         # for RHIT, so write tof in ns as the placeholder time_data.
-        tdc.create_dataset("time_data", data=tof_ns.astype(np.uint32),
-                           compression="gzip", compression_opts=4)
+        tdc.create_dataset("time_data", data=tof_ns.astype(np.uint32), compression="gzip", compression_opts=4)
         tdc.attrs["num_entries"] = n
         tdc.attrs["channel_count"] = 1
         tdc.attrs["channel_map"] = "0=tof_ns"

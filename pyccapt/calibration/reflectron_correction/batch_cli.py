@@ -81,11 +81,7 @@ def _find_epos_files(root: Path, recursive: bool) -> list[Path]:
 
 def _find_corrected_outputs(root: Path, recursive: bool) -> list[Path]:
     """Return every ``*_corrected.h5`` and ``*_corrected.epos`` file under ``root``."""
-    patterns = (
-        ("**/*_corrected.h5", "**/*_corrected.epos")
-        if recursive
-        else ("*_corrected.h5", "*_corrected.epos")
-    )
+    patterns = ("**/*_corrected.h5", "**/*_corrected.epos") if recursive else ("*_corrected.h5", "*_corrected.epos")
     found: set[Path] = set()
     for pattern in patterns:
         for path in root.glob(pattern):
@@ -172,7 +168,7 @@ def _find_matlab_range_fig(epos_path: Path, pattern: str, max_depth: int) -> Pat
     ``Massspectrum_pretty.fig`` -- prefer ``Massspectrum.fig`` exactly, then
     fall back to whichever ``pattern`` match is newest.
     """
-    parents = [epos_path.parent, *epos_path.parents][:max_depth + 1]
+    parents = [epos_path.parent, *epos_path.parents][: max_depth + 1]
     seen: set[Path] = set()
     candidates: list[Path] = []
     for parent in parents:
@@ -479,23 +475,13 @@ def main(argv: list[str] | None = None) -> int:
         if range_info is not None:
             if range_info.get("status") == "ok":
                 n_range_ok += 1
-                print(
-                    "    matlab range: "
-                    f"{range_info['fig']} -> {range_info['range_h5']} "
-                    f"({range_info['ranges']} ranges)"
-                )
+                print(f"    matlab range: {range_info['fig']} -> {range_info['range_h5']} ({range_info['ranges']} ranges)")
             else:
-                print(
-                    "    matlab range: skipped (output exists) "
-                    f"{range_info['range_h5']}"
-                )
+                print(f"    matlab range: skipped (output exists) {range_info['range_h5']}")
         elif args.with_matlab_range:
             print("    matlab range: no .fig found within search depth")
 
-    print(
-        f"\nDone. corrected={n_ok}, skipped={n_skipped}, "
-        f"failed={len(failed_files)}, matlab_range_written={n_range_ok}"
-    )
+    print(f"\nDone. corrected={n_ok}, skipped={n_skipped}, failed={len(failed_files)}, matlab_range_written={n_range_ok}")
     if failed_files:
         print("Failed files:")
         for path, reason in failed_files:

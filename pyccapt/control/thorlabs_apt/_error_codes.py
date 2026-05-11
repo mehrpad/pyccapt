@@ -51,5 +51,5 @@ error_message = {
     MG17_NOSTAGEAXISINFO: "No stage has been assigned.",
     MG17_CALIBTABLE_ERR: "Internal error when using an encoded stage.",
     MG17_ENCCALIB_ERR: "Internal error when using an encoded stage.",
-    MG17_ENCNOTPRESENT_ERR: "Call only applicable to encoded stages."
+    MG17_ENCNOTPRESENT_ERR: "Call only applicable to encoded stages.",
 }

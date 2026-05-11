@@ -160,11 +160,13 @@ class CameraWorker(QObject):
 
             self.flag_default_exposure_time = True
             if self.variables.light:
-                exposure_times = [self.exposure_time_cam_1_light, self.exposure_time_cam_2_light,
-                                  self.exposure_time_cam_3_light]
+                exposure_times = [
+                    self.exposure_time_cam_1_light,
+                    self.exposure_time_cam_2_light,
+                    self.exposure_time_cam_3_light,
+                ]
             else:
-                exposure_times = [self.exposure_time_cam_1, self.exposure_time_cam_2,
-                                  self.exposure_time_cam_3]
+                exposure_times = [self.exposure_time_cam_1, self.exposure_time_cam_2, self.exposure_time_cam_3]
             self.emitter.cams_exposure_time_default.emit(exposure_times)
         else:
             print('Cannot set the default exposure time when auto exposure is on')
@@ -379,13 +381,15 @@ class CameraWorker(QObject):
                 model = dev.GetModelName()
             except Exception:
                 model = ""
-            out.append({
-                "serial": sn,
-                "model": model,
-                "slot": slot_by_serial.get(sn),
-                "attached": sn in slot_by_serial,
-                "user_disabled": sn in self._user_disabled_serials,
-            })
+            out.append(
+                {
+                    "serial": sn,
+                    "model": model,
+                    "slot": slot_by_serial.get(sn),
+                    "attached": sn in slot_by_serial,
+                    "user_disabled": sn in self._user_disabled_serials,
+                }
+            )
         return out
 
     def disconnect_serial(self, serial):
@@ -399,9 +403,7 @@ class CameraWorker(QObject):
         for slot in range(self.SLOT_COUNT):
             if self._slot_serials[slot] == serial and self._slots[slot] is not None:
                 self._close_slot(slot)
-                self._set_status(
-                    f"Disconnected camera {serial} from slot {slot}."
-                )
+                self._set_status(f"Disconnected camera {serial} from slot {slot}.")
                 return
         self._set_status(f"Camera {serial} marked disconnected.")
 
@@ -422,9 +424,7 @@ class CameraWorker(QObject):
             if self._slot_serials[slot] == serial and self._slots[slot] is not None:
                 self._set_status(f"Connected camera {serial} (slot {slot}).")
                 return
-        self._set_status(
-            f"Camera {serial} could not be attached — see terminal log."
-        )
+        self._set_status(f"Camera {serial} could not be attached — see terminal log.")
 
     def _apply_exposure_changes(self):
         for slot in range(self.SLOT_COUNT):
@@ -501,10 +501,7 @@ class CameraWorker(QObject):
                 self.index_save_image = 0
 
             now = time.time()
-            if (
-                    now - last_save_time >= self.variables.save_meta_interval_camera
-                    and self.variables.start_flag
-            ):
+            if now - last_save_time >= self.variables.save_meta_interval_camera and self.variables.start_flag:
                 last_save_time = now
                 self._save_screenshots(grabbed_images)
 

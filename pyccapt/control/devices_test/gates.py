@@ -2,12 +2,12 @@ import nidaqmx
 import time
 
 if __name__ == '__main__':
-	with nidaqmx.Task() as task:
-		task.do_channels.add_do_chan('Dev2/port0/line1')
+    with nidaqmx.Task() as task:
+        task.do_channels.add_do_chan('Dev2/port0/line1')
 
-		task.start()
-		task.write([False])
-		time.sleep(0.5)
+        task.start()
+        task.write([False])
+        time.sleep(0.5)
 
 # Uncomment and modify the lines below as needed
 # task.write([False, False, False, False, False, False])

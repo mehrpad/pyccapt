@@ -206,10 +206,7 @@ class LazyTable:
         return self._source_path
 
     def __repr__(self) -> str:
-        return (
-            f"LazyTable(rows={self._n_rows}, columns={self.columns}, "
-            f"source={self._source_path})"
-        )
+        return f"LazyTable(rows={self._n_rows}, columns={self.columns}, source={self._source_path})"
 
     # --- access ------------------------------------------------------------
 
@@ -280,9 +277,7 @@ class LazyTable:
             return pd.DataFrame({name: np.empty(0, dtype=self._columns[name].dtype) for name in wanted})
         # Preallocate the destination per-column. Once the destination buffers
         # exist we never hold a second full copy of any column.
-        buffers = {
-            name: np.empty(lengths[name], dtype=self._columns[name].dtype) for name in wanted
-        }
+        buffers = {name: np.empty(lengths[name], dtype=self._columns[name].dtype) for name in wanted}
         extent = max(lengths.values())
         for start in range(0, extent, chunk_size):
             for name in wanted:
@@ -378,19 +373,21 @@ class _PlainMemmapColumn:
 # ---------------------------------------------------------------------------
 
 
-EPOS_RECORD_DTYPE = np.dtype([
-    ("x", ">f4"),
-    ("y", ">f4"),
-    ("z", ">f4"),
-    ("mc", ">f4"),
-    ("tof", ">f4"),
-    ("hv", ">f4"),
-    ("pulse", ">f4"),
-    ("det_x", ">f4"),
-    ("det_y", ">f4"),
-    ("pslep", ">u4"),
-    ("ipp", ">u4"),
-])
+EPOS_RECORD_DTYPE = np.dtype(
+    [
+        ("x", ">f4"),
+        ("y", ">f4"),
+        ("z", ">f4"),
+        ("mc", ">f4"),
+        ("tof", ">f4"),
+        ("hv", ">f4"),
+        ("pulse", ">f4"),
+        ("det_x", ">f4"),
+        ("det_y", ">f4"),
+        ("pslep", ">u4"),
+        ("ipp", ">u4"),
+    ]
+)
 
 # Column rename map matches the eager ``read_epos`` output so callers can
 # swap between the two without renaming downstream references.
@@ -462,10 +459,7 @@ def open_pos(file_path: str | Path) -> LazyTable:
         return _empty_lazy_table(POS_COLUMN_NAMES, source_path=file_path)
 
     records = np.memmap(file_path, dtype=">f4", mode="r", shape=(record_count, 4))
-    columns = {
-        name: LazyColumn(_PlainMemmapColumn(records, idx), name=name)
-        for idx, name in enumerate(POS_COLUMN_NAMES)
-    }
+    columns = {name: LazyColumn(_PlainMemmapColumn(records, idx), name=name) for idx, name in enumerate(POS_COLUMN_NAMES)}
 
     def _close():
         try:
@@ -514,9 +508,7 @@ def open_pyccapt_raw_hdf5(file_path: str | Path) -> LazyTable:
 
     if not columns:
         handle.close()
-        raise ValueError(
-            f"{file_path} contains no /dld/* or /tdc/* datasets -- is this a pyccapt-raw HDF5?"
-        )
+        raise ValueError(f"{file_path} contains no /dld/* or /tdc/* datasets -- is this a pyccapt-raw HDF5?")
 
     return LazyTable(columns, source_path=file_path, close=handle.close)
 
@@ -553,7 +545,7 @@ def chunked_min_max(column: LazyColumn, *, chunk_size: int = DEFAULT_CHUNK_SIZE)
     lo: float | None = None
     hi: float | None = None
     for start in range(0, len(column), chunk_size):
-        chunk = column[start:start + chunk_size]
+        chunk = column[start : start + chunk_size]
         if chunk.size == 0:
             continue
         c_lo = float(np.min(chunk))
@@ -589,7 +581,7 @@ def chunked_histogram(
         edges = np.asarray(bins, dtype=float)
     counts = np.zeros(len(edges) - 1, dtype=np.int64)
     for start in range(0, len(column), chunk_size):
-        chunk = column[start:start + chunk_size]
+        chunk = column[start : start + chunk_size]
         if chunk.size == 0:
             continue
         c_counts, _ = np.histogram(chunk, bins=edges)

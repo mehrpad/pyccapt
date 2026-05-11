@@ -1,4 +1,4 @@
-﻿"""Calibration package public exports."""
+"""Calibration package public exports."""
 
 from pyccapt.calibration.core.exceptions import CalibrationError, CalibrationInputError, CalibrationStateError
 from pyccapt.calibration.core.share_variables import SharedVariablesBase, Variables
@@ -12,4 +12,3 @@ __all__ = [
     "Variables",
     "simulate_mass_spectrum",
 ]
-

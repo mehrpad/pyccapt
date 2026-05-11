@@ -1,4 +1,4 @@
-﻿import sys
+import sys
 import time
 
 import nidaqmx
@@ -58,11 +58,13 @@ class Ui_Gates(object):
         self.diagram = QtWidgets.QLabel(parent=Gates)
         self.diagram.setMinimumSize(QtCore.QSize(378, 246))
         self.diagram.setMaximumSize(QtCore.QSize(16777215, 16777215))
-        self.diagram.setStyleSheet("QWidget{\n"
-                                   "                                            border: 2px solid gray;\n"
-                                   "                                            background: rgb(255, 255, 255)\n"
-                                   "                                            }\n"
-                                   "                                        ")
+        self.diagram.setStyleSheet(
+            "QWidget{\n"
+            "                                            border: 2px solid gray;\n"
+            "                                            background: rgb(255, 255, 255)\n"
+            "                                            }\n"
+            "                                        "
+        )
         self.diagram.setText("")
         self.diagram.setObjectName("diagram")
         self.verticalLayout_4.addWidget(self.diagram)
@@ -78,10 +80,12 @@ class Ui_Gates(object):
         self.verticalLayout_3.addWidget(self.led_cryo, 0, QtCore.Qt.AlignmentFlag.AlignHCenter)
         self.cryo_switch = QtWidgets.QPushButton(parent=Gates)
         self.cryo_switch.setMinimumSize(QtCore.QSize(0, 25))
-        self.cryo_switch.setStyleSheet("QPushButton{\n"
-                                       "                                                            background: rgb(193, 193, 193)\n"
-                                       "                                                            }\n"
-                                       "                                                        ")
+        self.cryo_switch.setStyleSheet(
+            "QPushButton{\n"
+            "                                                            background: rgb(193, 193, 193)\n"
+            "                                                            }\n"
+            "                                                        "
+        )
         self.cryo_switch.setObjectName("cryo_switch")
         self.verticalLayout_3.addWidget(self.cryo_switch)
         self.gridLayout.addLayout(self.verticalLayout_3, 0, 2, 1, 1)
@@ -95,10 +99,12 @@ class Ui_Gates(object):
         self.verticalLayout.addWidget(self.led_main_chamber, 0, QtCore.Qt.AlignmentFlag.AlignHCenter)
         self.main_chamber_switch = QtWidgets.QPushButton(parent=Gates)
         self.main_chamber_switch.setMinimumSize(QtCore.QSize(0, 25))
-        self.main_chamber_switch.setStyleSheet("QPushButton{\n"
-                                               "                                                            background: rgb(193, 193, 193)\n"
-                                               "                                                            }\n"
-                                               "                                                        ")
+        self.main_chamber_switch.setStyleSheet(
+            "QPushButton{\n"
+            "                                                            background: rgb(193, 193, 193)\n"
+            "                                                            }\n"
+            "                                                        "
+        )
         self.main_chamber_switch.setObjectName("main_chamber_switch")
         self.verticalLayout.addWidget(self.main_chamber_switch)
         self.gridLayout.addLayout(self.verticalLayout, 0, 0, 1, 1)
@@ -112,10 +118,12 @@ class Ui_Gates(object):
         self.verticalLayout_2.addWidget(self.led_load_lock, 0, QtCore.Qt.AlignmentFlag.AlignHCenter)
         self.load_lock_switch = QtWidgets.QPushButton(parent=Gates)
         self.load_lock_switch.setMinimumSize(QtCore.QSize(0, 25))
-        self.load_lock_switch.setStyleSheet("QPushButton{\n"
-                                            "                                                            background: rgb(193, 193, 193)\n"
-                                            "                                                            }\n"
-                                            "                                                        ")
+        self.load_lock_switch.setStyleSheet(
+            "QPushButton{\n"
+            "                                                            background: rgb(193, 193, 193)\n"
+            "                                                            }\n"
+            "                                                        "
+        )
         self.load_lock_switch.setObjectName("load_lock_switch")
         self.verticalLayout_2.addWidget(self.load_lock_switch)
         self.gridLayout.addLayout(self.verticalLayout_2, 0, 1, 1, 1)
@@ -129,10 +137,12 @@ class Ui_Gates(object):
         sizePolicy.setHeightForWidth(self.superuser.sizePolicy().hasHeightForWidth())
         self.superuser.setSizePolicy(sizePolicy)
         self.superuser.setMinimumSize(QtCore.QSize(400, 25))
-        self.superuser.setStyleSheet("QPushButton{\n"
-                                     "                                                    background: rgb(193, 193, 193)\n"
-                                     "                                                    }\n"
-                                     "                                                ")
+        self.superuser.setStyleSheet(
+            "QPushButton{\n"
+            "                                                    background: rgb(193, 193, 193)\n"
+            "                                                    }\n"
+            "                                                "
+        )
         self.superuser.setObjectName("superuser")
         self.gridLayout_2.addWidget(self.superuser, 0, 1, 1, 1)
         self.Error = QtWidgets.QLabel(parent=Gates)
@@ -147,11 +157,13 @@ class Ui_Gates(object):
         self.Error.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.LinksAccessibleByMouse)
         self.Error.setObjectName("Error")
         self.gridLayout_2.addWidget(self.Error, 1, 1, 1, 1)
-        spacerItem = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Policy.Expanding,
-                                           QtWidgets.QSizePolicy.Policy.Minimum)
+        spacerItem = QtWidgets.QSpacerItem(
+            40, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum
+        )
         self.gridLayout_2.addItem(spacerItem, 0, 2, 1, 1)
-        spacerItem1 = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Policy.Expanding,
-                                            QtWidgets.QSizePolicy.Policy.Minimum)
+        spacerItem1 = QtWidgets.QSpacerItem(
+            40, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum
+        )
         self.gridLayout_2.addItem(spacerItem1, 0, 0, 1, 1)
         self.verticalLayout_4.addLayout(self.gridLayout_2)
         self.gridLayout_3.addLayout(self.verticalLayout_4, 0, 0, 1, 1)
@@ -228,18 +240,14 @@ class Ui_Gates(object):
             warning.setWindowTitle("Confirm Access Override")
             warning.setText("Gate override can bypass interlocks and may be dangerous.")
             warning.setInformativeText("Only continue if you really want to override gate access.")
-            warning.setStandardButtons(
-                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
-            )
+            warning.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No)
             warning.setDefaultButton(QtWidgets.QMessageBox.StandardButton.No)
             if warning.exec() != QtWidgets.QMessageBox.StandardButton.Yes:
                 self.error_message("Override Access canceled.")
                 self.timer.start(8000)
                 return
             self.flag_super_user = True
-            self.superuser.setStyleSheet("QPushButton{\n"
-                                         "background: rgb(0, 255, 26)\n"
-                                         "}")
+            self.superuser.setStyleSheet("QPushButton{\nbackground: rgb(0, 255, 26)\n}")
             self.error_message("!!! Override Access Granted !!!")
         elif self.flag_super_user:
             self.flag_super_user = False
@@ -273,7 +281,7 @@ class Ui_Gates(object):
                     task.do_channels.add_do_chan(self.conf["COM_PORT_gates"] + 'line%s' % num)
                     task.start()
                     task.write([True])
-                    time.sleep(.5)
+                    time.sleep(0.5)
                     task.write([False])
                 else:
                     print('The gates control is off')
@@ -293,12 +301,17 @@ class Ui_Gates(object):
             else:
                 self.error_message("!!! Close the previous opened gate first !!!")
             self.timer.start(8000)
+
         # Main gate
         if gate_num == 1:
-            if ((not self.variables.start_flag and (
+            if (
+                not self.variables.start_flag
+                and (
                     not self.variables.flag_load_gate
-                    and not self.variables.flag_cryo_gate and self.variables.flag_pump_load_lock))
-                    or self.flag_super_user):
+                    and not self.variables.flag_cryo_gate
+                    and self.variables.flag_pump_load_lock
+                )
+            ) or self.flag_super_user:
                 if not self.variables.flag_main_gate:  # Open the main gate
                     if self.conf["gates"] == "on":
                         switch_gate(0)
@@ -313,10 +326,14 @@ class Ui_Gates(object):
                 error_gate()
         # Buffer gate
         elif gate_num == 2:
-            if ((not self.variables.start_flag and (not self.variables.flag_main_gate
-                                      and not self.variables.flag_cryo_gate
-                                                    and self.variables.flag_pump_load_lock))
-                    or self.flag_super_user):
+            if (
+                not self.variables.start_flag
+                and (
+                    not self.variables.flag_main_gate
+                    and not self.variables.flag_cryo_gate
+                    and self.variables.flag_pump_load_lock
+                )
+            ) or self.flag_super_user:
                 if not self.variables.flag_load_gate:  # Open the main gate
                     if self.conf["gates"] == "on":
                         switch_gate(2)
@@ -331,10 +348,14 @@ class Ui_Gates(object):
                 error_gate()
         # Cryo gate
         elif gate_num == 3:
-            if ((not self.variables.start_flag and (
-                    not self.variables.flag_main_gate and not self.variables.flag_load_gate
-                    and self.variables.flag_pump_load_lock))
-                    or self.flag_super_user):
+            if (
+                not self.variables.start_flag
+                and (
+                    not self.variables.flag_main_gate
+                    and not self.variables.flag_load_gate
+                    and self.variables.flag_pump_load_lock
+                )
+            ) or self.flag_super_user:
                 if not self.variables.flag_cryo_gate:  # Open the main gate
                     if self.conf["gates"] == "on":
                         switch_gate(4)
@@ -380,9 +401,11 @@ class Ui_Gates(object):
             None
         """
         _translate = QtCore.QCoreApplication.translate
-        self.Error.setText(_translate("OXCART",
-                                      "<html><head/><body><p><span style=\" color:#ff0000;\">"
-                                      + message + "</span></p></body></html>"))
+        self.Error.setText(
+            _translate(
+                "OXCART", "<html><head/><body><p><span style=\" color:#ff0000;\">" + message + "</span></p></body></html>"
+            )
+        )
 
     def hideMessage(self):
         """
@@ -396,9 +419,9 @@ class Ui_Gates(object):
         """
         # Hide the message and stop the timer
         _translate = QtCore.QCoreApplication.translate
-        self.Error.setText(_translate("OXCART",
-                                      "<html><head/><body><p><span style=\" "
-                                      "color:#ff0000;\"></span></p></body></html>"))
+        self.Error.setText(
+            _translate("OXCART", "<html><head/><body><p><span style=\" color:#ff0000;\"></span></p></body></html>")
+        )
 
         self.timer.stop()
 
@@ -414,6 +437,7 @@ class Ui_Gates(object):
         """
         # Add any additional cleanup code here
         pass
+
 
 class GatesWindow(QtWidgets.QWidget):
     closed = QtCore.pyqtSignal()  # Define a custom closed signal
@@ -437,8 +461,8 @@ class GatesWindow(QtWidgets.QWidget):
             event: Close event.
         """
         if getattr(self, "force_close", False):
-	        event.accept()
-	        return
+            event.accept()
+            return
         event.ignore()
         self.hide()
         self.closed.emit()
@@ -464,4 +488,3 @@ if __name__ == "__main__":
     ui.setupUi(Gates)
     Gates.show()
     sys.exit(app.exec())
-

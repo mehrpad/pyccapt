@@ -102,19 +102,12 @@ def _print_processed_summary(dataframe: pd.DataFrame, title: str) -> None:
     print(f"Rows: {summary.get('num_rows', 0):,}")
     if 'mc (Da)_median' in summary:
         print(
-            f"mc range: {summary['mc (Da)_min']:.4f} to {summary['mc (Da)_max']:.4f} | "
-            f"median {summary['mc (Da)_median']:.4f}"
+            f"mc range: {summary['mc (Da)_min']:.4f} to {summary['mc (Da)_max']:.4f} | median {summary['mc (Da)_median']:.4f}"
         )
     if 't (ns)_median' in summary:
-        print(
-            f"tof range: {summary['t (ns)_min']:.4f} to {summary['t (ns)_max']:.4f} | "
-            f"median {summary['t (ns)_median']:.4f}"
-        )
+        print(f"tof range: {summary['t (ns)_min']:.4f} to {summary['t (ns)_max']:.4f} | median {summary['t (ns)_median']:.4f}")
     if 'high_voltage (V)_median' in summary:
-        print(
-            f"high voltage range: {summary['high_voltage (V)_min']:.2f} to "
-            f"{summary['high_voltage (V)_max']:.2f}"
-        )
+        print(f"high voltage range: {summary['high_voltage (V)_min']:.2f} to {summary['high_voltage (V)_max']:.2f}")
 
 
 _PYCCAPT_RAW_EXTENSIONS = {'.h5', '.hdf', '.hdf5'}
@@ -220,10 +213,7 @@ def call_raw_data_workflow(variables=None):
             f"Recovered hits: {recovery['recovered_hits']:,} total, "
             f"{recovery['two_d_hits']:,} 4-DLTS, {recovery['one_d_hits']:,} 2-DLTS"
         )
-        print(
-            f"In detector: {recovery['two_d_in_detector']:,} 4-DLTS and "
-            f"{recovery['one_d_in_detector']:,} 2-DLTS"
-        )
+        print(f"In detector: {recovery['two_d_in_detector']:,} 4-DLTS and {recovery['one_d_in_detector']:,} 2-DLTS")
         print(
             f"Outside detector: {recovery['outside_detector_hits']:,} | "
             f"Unrecoverable chunks: {recovery['unrecoverable_chunks']:,}"
@@ -317,7 +307,9 @@ def call_raw_data_workflow(variables=None):
     def _analyze_3dl():
         # 3 DL detectors expose 6 channels (3 delay lines x 2 ends each).
         df_tdc = data_loadcrop.fetch_dataset_from_dld_grp(
-            surface_path.value, extract_mode='tdc_ro', lazy=surface_low_memory.value,
+            surface_path.value,
+            extract_mode='tdc_ro',
+            lazy=surface_low_memory.value,
         )
         if df_tdc is None:
             raise RuntimeError(
@@ -327,9 +319,7 @@ def call_raw_data_workflow(variables=None):
                 "Re-export from the cameca raw import workflow if the source is LEAP."
             )
         unique_channels = sorted(int(c) for c in df_tdc['channel'].unique())
-        print(
-            f"Loaded 3DL tdc frame: {len(df_tdc):,} rows, channels={unique_channels}."
-        )
+        print(f"Loaded 3DL tdc frame: {len(df_tdc):,} rows, channels={unique_channels}.")
         if len(unique_channels) > 6:
             print(
                 f"  [WARN] {len(unique_channels)} channels seen but 3DL expects <= 6. "
@@ -397,10 +387,7 @@ def call_raw_data_workflow(variables=None):
     surface_load_button.on_click(on_load_surface)
 
     surface_window_box = widgets.VBox(
-        [
-            widgets.HBox([label_widget, min_widget, max_widget])
-            for label_widget, min_widget, max_widget in surface_window_rows
-        ]
+        [widgets.HBox([label_widget, min_widget, max_widget]) for label_widget, min_widget, max_widget in surface_window_rows]
     )
 
     panel = widgets.VBox(
@@ -423,9 +410,21 @@ def call_raw_data_workflow(variables=None):
             _path_row('PyCCAPT raw HDF5 path:', surface_path, surface_browse),
             widgets.HBox([widgets.Label(value='Detector type:', layout=label_layout), surface_detector_type]),
             widgets.HBox([widgets.Label(value='Signal plots:', layout=label_layout), surface_signal_kind]),
-            widgets.HBox([widgets.Label(value='Calibration inputs:', layout=label_layout), widgets.HBox([surface_t0, surface_flight_path, surface_detector_limit])]),
+            widgets.HBox(
+                [
+                    widgets.Label(value='Calibration inputs:', layout=label_layout),
+                    widgets.HBox([surface_t0, surface_flight_path, surface_detector_limit]),
+                ]
+            ),
             widgets.HBox([widgets.Label(value='Pulse mode:', layout=label_layout), surface_pulse_mode]),
-            widgets.HBox([widgets.Label(value='Plot settings:', layout=label_layout), widgets.HBox([surface_bin_size, surface_max_value, surface_max_bins, surface_drift_segments, surface_low_memory])]),
+            widgets.HBox(
+                [
+                    widgets.Label(value='Plot settings:', layout=label_layout),
+                    widgets.HBox(
+                        [surface_bin_size, surface_max_value, surface_max_bins, surface_drift_segments, surface_low_memory]
+                    ),
+                ]
+            ),
             widgets.HBox([widgets.Label(value='Peak windows:', layout=label_layout), surface_window_box]),
             widgets.HBox([widgets.Label(value='Save processed file:', layout=label_layout), surface_save_processed_path]),
             widgets.HBox([surface_analyze_button, surface_save_button, surface_load_button]),

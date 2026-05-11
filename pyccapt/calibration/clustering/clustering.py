@@ -421,7 +421,9 @@ def hdbscan_clustering(
         labels = np.asarray(DBSCAN(eps=eps, min_samples=n_min).fit_predict(points), dtype=int)
         labels = _drop_small_clusters(labels, n_min=n_min)
         centers = _centers_from_labeled_points(points, labels)
-        parameters.update({"backend": False, "d_max": float(eps), "auto_d_max": bool(auto_d_max), "percentile": float(percentile)})
+        parameters.update(
+            {"backend": False, "d_max": float(eps), "auto_d_max": bool(auto_d_max), "percentile": float(percentile)}
+        )
         return labels, centers, parameters
 
 

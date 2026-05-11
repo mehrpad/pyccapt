@@ -6,15 +6,15 @@ import numpy as np
 
 def rename_subcategory(hdf5_file_path, old_name, new_name):
     """
-        rename subcategory
+    rename subcategory
 
-        Args:
-            hdf5_file_path: path to the hdf5 file
-            old_name: old name of the subcategory
-            new_name: new name of the subcategory
+    Args:
+        hdf5_file_path: path to the hdf5 file
+        old_name: old name of the subcategory
+        new_name: new name of the subcategory
 
-        Returns:
-            None
+    Returns:
+        None
     """
 
     with h5py.File(hdf5_file_path, 'r+') as file:
@@ -31,13 +31,13 @@ def rename_subcategory(hdf5_file_path, old_name, new_name):
 
 def correct_surface_concept_old_data(hdf5_file_path):
     """
-        correct surface concept old data
+    correct surface concept old data
 
-        Args:
-            hdf5_file_path: path to the hdf5 file
+    Args:
+        hdf5_file_path: path to the hdf5 file
 
-        Returns:
-            None
+    Returns:
+        None
     """
     # surface concept tdc specific binning and factors
     TOFFACTOR = 27.432 / (1000.0 * 4.0)  # 27.432 ps/bin, tof in ns, data is TDC time sum
@@ -55,7 +55,7 @@ def correct_surface_concept_old_data(hdf5_file_path):
         data_y = np.array(data_y)
         data_t = np.array(data_t)
 
-        modified_t = (data_t.astype(np.float64) * TOFFACTOR)
+        modified_t = data_t.astype(np.float64) * TOFFACTOR
         del file['dld/t']
         file.create_dataset('dld/t', data=modified_t, dtype=np.float64)
         modified_x = ((data_x.astype(np.float64) - XYBINSHIFT) * XYFACTOR) / 10.0
@@ -68,14 +68,14 @@ def correct_surface_concept_old_data(hdf5_file_path):
 
 def copy_npy_to_hdf_surface_concept(path, hdf5_file_name):
     """
-        copy npy data to hdf5 file for surface concept TDC
+    copy npy data to hdf5 file for surface concept TDC
 
-        Args:
-            path: path to the npy files
-            hdf5_file_name: name of the hdf5 file
+    Args:
+        path: path to the npy files
+        hdf5_file_name: name of the hdf5 file
 
-        Returns:
-            None
+    Returns:
+        None
     """
     # TOFFACTOR = 27.432 / (1000 * 4)  # 27.432 ps/bin, tof in ns, data is TDC time sum
     # DETBINS = 4900
@@ -176,7 +176,7 @@ def load_and_copy_chunks_to_hdf(path, hdf5_file_path, chunk_id):
                 if os.path.exists(chunk_file):
                     chunk_data = np.load(chunk_file)
                     chunk_size = chunk_data.shape[0]
-                    hdf_file[f'{group_name}/{dataset_name}'][offset:offset + chunk_size] = chunk_data
+                    hdf_file[f'{group_name}/{dataset_name}'][offset : offset + chunk_size] = chunk_data
                     offset += chunk_size
                 else:
                     print(f"File '{chunk_file}' not found.")
@@ -233,15 +233,15 @@ def crop_dataset_to_new_file(original_path, new_path, num_of_samples):
         if index is not None:
             # Copy cropped data to the new file
             for key in original_file['apt']:
-                cropped_data = original_file['apt/%s' % key][:index + 1]
+                cropped_data = original_file['apt/%s' % key][: index + 1]
                 new_file.create_dataset(f'apt/{key}', data=cropped_data, dtype=original_file['apt/%s' % key].dtype)
 
             for key in original_file['dld']:
-                cropped_data = original_file['dld/%s' % key][:index_event + 1]
+                cropped_data = original_file['dld/%s' % key][: index_event + 1]
                 new_file.create_dataset(f'dld/{key}', data=cropped_data, dtype=original_file['dld/%s' % key].dtype)
 
             for key in original_file['tdc']:
-                cropped_data = original_file['tdc/%s' % key][:index_raw + 1]
+                cropped_data = original_file['tdc/%s' % key][: index_raw + 1]
                 new_file.create_dataset(f'tdc/{key}', data=cropped_data, dtype=original_file['tdc/%s' % key].dtype)
 
             print("Cropped dataset written to the new file.")
@@ -284,7 +284,7 @@ if __name__ == '__main__':
     # # rename_subcategory(path + name, old_name='dld', new_name='dld_1')
     # # copy_npy_to_hdf_surface_concept(path+'/temp_data/', name)
     # # rename_subcategory(path + name, old_name='tdc/voltage_laser', new_name='tdc/laser_pulse')
-    load_and_copy_chunks_to_hdf(path + '/temp_data/chunks/', path + name, 900) #1273
+    load_and_copy_chunks_to_hdf(path + '/temp_data/chunks/', path + name, 900)  # 1273
     # crop_dataset_to_new_file(path, new_path, 500000)
 
     # data_path_1 = 'E://2440-2441//2440_Mar-27-2025_09-15_NiC9_Pd_HPCF_4.h5'

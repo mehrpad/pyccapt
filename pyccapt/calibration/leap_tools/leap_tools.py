@@ -290,7 +290,7 @@ def _average_hex_colours(colours: list[str]) -> str:
     if not colours:
         return "FFFFFF"
     rgb = np.array(
-        [[int(colour[i:i + 2], 16) for i in (0, 2, 4)] for colour in colours],
+        [[int(colour[i : i + 2], 16) for i in (0, 2, 4)] for colour in colours],
         dtype=float,
     )
     blended = np.round(rgb.mean(axis=0)).astype(int)
@@ -327,7 +327,7 @@ def _parse_rng_block(lines: list[str], start_index: int):
             raise ValueError("Malformed legacy .rng range row")
         lower = float(tokens[1])
         upper = float(tokens[2])
-        counts = [int(value) for value in tokens[3:3 + len(headers)]]
+        counts = [int(value) for value in tokens[3 : 3 + len(headers)]]
         composition = [(header, count) for header, count in zip(headers, counts) if count > 0]
         comp_string = " ".join(f"{name}:{count}" for name, count in composition) if composition else "Name:0"
         active_colours = [ion_colours.get(name, "FFFFFF") for name, count in composition if count > 0]
@@ -427,6 +427,7 @@ def read_pos(file_path):
         reads columns on demand instead of materializing the full DataFrame.
     """
     from pyccapt.calibration.data_tools import lazy_io
+
     with lazy_io.open_pos(file_path) as table:
         return table.to_dataframe()
 
@@ -439,6 +440,7 @@ def read_pos_lazy(file_path):
     (preferred: ``with read_pos_lazy(path) as table: ...``).
     """
     from pyccapt.calibration.data_tools import lazy_io
+
     return lazy_io.open_pos(file_path)
 
 
@@ -467,6 +469,7 @@ def read_epos(file_path):
         column instead of the previous 11-fold ``np.asarray`` cascade.
     """
     from pyccapt.calibration.data_tools import lazy_io
+
     with lazy_io.open_epos(file_path) as table:
         return table.to_dataframe()
 
@@ -480,6 +483,7 @@ def read_epos_lazy(file_path):
     promptly on Windows.
     """
     from pyccapt.calibration.data_tools import lazy_io
+
     return lazy_io.open_epos(file_path)
 
 
@@ -702,9 +706,6 @@ def volvis(pos, size=2, alpha=1):
         app.run()
 
 
-
-
-
 class RelationKind(Enum):
     UNSPECIFIED = 0
     SINGLE = 1
@@ -712,11 +713,13 @@ class RelationKind(Enum):
     INDEPENDENT = 3
     MULTIPLE = 4
 
+
 class DataCategory(Enum):
     UNSPECIFIED = 0
     CONSTANT = 1
     VARIABLE = 2
     INDEXED_VARIABLE = 3
+
 
 class DataFormat(Enum):
     UNSPECIFIED = 0
@@ -726,12 +729,14 @@ class DataFormat(Enum):
     TEXT = 4
     CUSTOM = 5
 
+
 class ByteFormat(Enum):
     INT_32 = 4
     INT_64 = 8
     CHAR = 1
     WIDE_CHAR = 2
     TIME_STAMP = 8
+
 
 def read_apt(file_path: str, debug: bool = False) -> pd.DataFrame:
     """
@@ -780,7 +785,9 @@ def read_apt(file_path: str, debug: bool = False) -> pd.DataFrame:
 
     with open(file_path, "rb") as file:
 
-        def extract_data(data_type: ByteFormat, num_items: int = 1, position: Union[None, int] = None) -> Union[Tuple[Any], Any]:
+        def extract_data(
+            data_type: ByteFormat, num_items: int = 1, position: Union[None, int] = None
+        ) -> Union[Tuple[Any], Any]:
             if isinstance(position, int):
                 file.seek(position)
 
@@ -925,7 +932,9 @@ def read_apt(file_path: str, debug: bool = False) -> pd.DataFrame:
 
     if debug:
         for section in data_sections.keys():
-            print(f"Section: {section} - {data_sections[section].shape} - {data_sections[section].dtype} - {data_sections[section]}")
+            print(
+                f"Section: {section} - {data_sections[section].shape} - {data_sections[section].dtype} - {data_sections[section]}"
+            )
     df = pd.DataFrame(data_sections)
     if tipbox is not None:
         df.attrs["tipbox"] = tipbox

@@ -116,10 +116,12 @@ CBR_COMPLETE = 1
 CBR_USER_ABORT = 2
 CBR_BUFFER_FULL = 3
 CBR_EARLY_NOTIF = 4
-CBR_DICT = {CBR_COMPLETE: "Measurement and data processing completed.",
-            CBR_USER_ABORT: "Measurement was interrupted by user.",
-            CBR_BUFFER_FULL: "Measurement was aborted because buffers were full.",
-            CBR_EARLY_NOTIF: "Acquisition finished, not all data processed yet."}
+CBR_DICT = {
+    CBR_COMPLETE: "Measurement and data processing completed.",
+    CBR_USER_ABORT: "Measurement was interrupted by user.",
+    CBR_BUFFER_FULL: "Measurement was aborted because buffers were full.",
+    CBR_EARLY_NOTIF: "Acquisition finished, not all data processed yet.",
+}
 
 # enum sc_data_field_t
 SC_DATA_FIELD_SUBDEVICE = 0x0001
@@ -141,104 +143,109 @@ else:
 
 
 class sc3du_t(ctypes.Structure):
-    _fields_ = [("x", ctypes.c_uint),
-                ("y", ctypes.c_uint),
-                ("time", ctypes.c_uint64)]
+    _fields_ = [("x", ctypes.c_uint), ("y", ctypes.c_uint), ("time", ctypes.c_uint64)]
 
 
 class sc3d_t(ctypes.Structure):
-    _fields_ = [("x", ctypes.c_int),
-                ("y", ctypes.c_int),
-                ("time", ctypes.c_int64)]
+    _fields_ = [("x", ctypes.c_int), ("y", ctypes.c_int), ("time", ctypes.c_int64)]
 
 
 class roi_t(ctypes.Structure):
-    _fields_ = [("offset", sc3d_t),
-                ("size", sc3du_t)]
+    _fields_ = [("offset", sc3d_t), ("size", sc3du_t)]
 
 
-ALLOCATORFUNC = _FUNCTYPE(ctypes.c_int, ctypes.POINTER(None),
-                          ctypes.POINTER(ctypes.POINTER(None)))
+ALLOCATORFUNC = _FUNCTYPE(ctypes.c_int, ctypes.POINTER(None), ctypes.POINTER(ctypes.POINTER(None)))
 
 
 class sc_pipe_dld_image_xyt_params_t(ctypes.Structure):
-    _fields_ = [("depth", ctypes.c_int),
-                ("channel", ctypes.c_int),
-                ("modulo", ctypes.c_uint64),
-                ("binning", sc3du_t),
-                ("roi", roi_t),
-                ("accumulation_ms", ctypes.c_uint),
-                ("allocator_owner", ctypes.c_char_p),
-                ("allocator_cb", ALLOCATORFUNC)]
+    _fields_ = [
+        ("depth", ctypes.c_int),
+        ("channel", ctypes.c_int),
+        ("modulo", ctypes.c_uint64),
+        ("binning", sc3du_t),
+        ("roi", roi_t),
+        ("accumulation_ms", ctypes.c_uint),
+        ("allocator_owner", ctypes.c_char_p),
+        ("allocator_cb", ALLOCATORFUNC),
+    ]
 
 
 class sc_pipe_tdc_histo_params_t(ctypes.Structure):
-    _fields_ = [("depth", ctypes.c_int),
-                ("channel", ctypes.c_uint),
-                ("modulo", ctypes.c_uint64),
-                ("binning", ctypes.c_uint),
-                ("offset", ctypes.c_uint64),
-                ("size", ctypes.c_uint),
-                ("accumulation_ms", ctypes.c_uint),
-                ("allocator_owner", ctypes.c_char_p),
-                ("allocator_cb", ALLOCATORFUNC)]
+    _fields_ = [
+        ("depth", ctypes.c_int),
+        ("channel", ctypes.c_uint),
+        ("modulo", ctypes.c_uint64),
+        ("binning", ctypes.c_uint),
+        ("offset", ctypes.c_uint64),
+        ("size", ctypes.c_uint),
+        ("accumulation_ms", ctypes.c_uint),
+        ("allocator_owner", ctypes.c_char_p),
+        ("allocator_cb", ALLOCATORFUNC),
+    ]
 
 
 class sc_pipe_statistics_params_t(ctypes.Structure):
-    _fields_ = [("allocator_owner", ctypes.c_char_p),
-                ("allocator_cb", ALLOCATORFUNC)]
+    _fields_ = [("allocator_owner", ctypes.c_char_p), ("allocator_cb", ALLOCATORFUNC)]
 
 
 class statistics_t(ctypes.Structure):
-    _fields_ = [("counts_read", ctypes.c_uint * 64),
-                ("counts_received", ctypes.c_uint * 64),
-                ("events_found", ctypes.c_uint * 4),
-                ("events_in_roi", ctypes.c_uint * 4),
-                ("events_received", ctypes.c_uint * 4),
-                ("counters", ctypes.c_uint * 64),
-                ("reserved", ctypes.c_uint * 52)]
+    _fields_ = [
+        ("counts_read", ctypes.c_uint * 64),
+        ("counts_received", ctypes.c_uint * 64),
+        ("events_found", ctypes.c_uint * 4),
+        ("events_in_roi", ctypes.c_uint * 4),
+        ("events_received", ctypes.c_uint * 4),
+        ("counters", ctypes.c_uint * 64),
+        ("reserved", ctypes.c_uint * 52),
+    ]
 
 
 class tdc_event_t(ctypes.Structure):
-    _fields_ = [("subdevice", ctypes.c_uint),
-                ("channel", ctypes.c_uint),
-                ("start_counter", ctypes.c_ulonglong),
-                ("time_tag", ctypes.c_ulonglong),
-                ("time_data", ctypes.c_ulonglong),
-                ("sign_counter", ctypes.c_ulonglong)]
+    _fields_ = [
+        ("subdevice", ctypes.c_uint),
+        ("channel", ctypes.c_uint),
+        ("start_counter", ctypes.c_ulonglong),
+        ("time_tag", ctypes.c_ulonglong),
+        ("time_data", ctypes.c_ulonglong),
+        ("sign_counter", ctypes.c_ulonglong),
+    ]
 
 
 class dld_event_t(ctypes.Structure):
-    _fields_ = [("start_counter", ctypes.c_ulonglong),
-                ("time_tag", ctypes.c_ulonglong),
-                ("subdevice", ctypes.c_uint),
-                ("channel", ctypes.c_uint),
-                ("sum", ctypes.c_ulonglong),
-                ("dif1", ctypes.c_ushort),
-                ("dif2", ctypes.c_ushort),
-                ("master_rst_counter", ctypes.c_uint),
-                ("adc", ctypes.c_ushort),
-                ("signal1bit", ctypes.c_ushort)]
+    _fields_ = [
+        ("start_counter", ctypes.c_ulonglong),
+        ("time_tag", ctypes.c_ulonglong),
+        ("subdevice", ctypes.c_uint),
+        ("channel", ctypes.c_uint),
+        ("sum", ctypes.c_ulonglong),
+        ("dif1", ctypes.c_ushort),
+        ("dif2", ctypes.c_ushort),
+        ("master_rst_counter", ctypes.c_uint),
+        ("adc", ctypes.c_ushort),
+        ("signal1bit", ctypes.c_ushort),
+    ]
 
 
 class sc_pipe_buf_callback_args(ctypes.Structure):
-    _fields_ = [("event_index", ctypes.c_ulonglong),
-                ("som_indices", ctypes.POINTER(ctypes.c_ulonglong)),
-                ("ms_indices", ctypes.POINTER(ctypes.c_ulonglong)),
-                ("subdevice", ctypes.POINTER(ctypes.c_uint)),
-                ("channel", ctypes.POINTER(ctypes.c_uint)),
-                ("start_counter", ctypes.POINTER(ctypes.c_ulonglong)),
-                ("time_tag", ctypes.POINTER(ctypes.c_uint)),
-                ("dif1", ctypes.POINTER(ctypes.c_uint)),
-                ("dif2", ctypes.POINTER(ctypes.c_uint)),
-                ("time", ctypes.POINTER(ctypes.c_ulonglong)),
-                ("master_rst_counter", ctypes.POINTER(ctypes.c_uint)),
-                ("adc", ctypes.POINTER(ctypes.c_int)),
-                ("signal1bit", ctypes.POINTER(ctypes.c_ushort)),
-                ("som_indices_len", ctypes.c_uint),
-                ("ms_indices_len", ctypes.c_uint),
-                ("data_len", ctypes.c_uint),
-                ("reserved", ctypes.c_char * 12)]
+    _fields_ = [
+        ("event_index", ctypes.c_ulonglong),
+        ("som_indices", ctypes.POINTER(ctypes.c_ulonglong)),
+        ("ms_indices", ctypes.POINTER(ctypes.c_ulonglong)),
+        ("subdevice", ctypes.POINTER(ctypes.c_uint)),
+        ("channel", ctypes.POINTER(ctypes.c_uint)),
+        ("start_counter", ctypes.POINTER(ctypes.c_ulonglong)),
+        ("time_tag", ctypes.POINTER(ctypes.c_uint)),
+        ("dif1", ctypes.POINTER(ctypes.c_uint)),
+        ("dif2", ctypes.POINTER(ctypes.c_uint)),
+        ("time", ctypes.POINTER(ctypes.c_ulonglong)),
+        ("master_rst_counter", ctypes.POINTER(ctypes.c_uint)),
+        ("adc", ctypes.POINTER(ctypes.c_int)),
+        ("signal1bit", ctypes.POINTER(ctypes.c_ushort)),
+        ("som_indices_len", ctypes.c_uint),
+        ("ms_indices_len", ctypes.c_uint),
+        ("data_len", ctypes.c_uint),
+        ("reserved", ctypes.c_char * 12),
+    ]
 
 
 ### ----    callbacks   -------------------------------------------------------
@@ -249,38 +256,37 @@ CB_ENDMEAS = CB_STARTMEAS
 # void (*millisecond_countup) (void *priv);
 CB_MILLISEC = CB_STARTMEAS
 # void (*statistics) (void *priv, const struct statistics_t *stat);
-CB_STATISTICS = _FUNCTYPE(None, ctypes.POINTER(None),
-                          ctypes.POINTER(statistics_t))
+CB_STATISTICS = _FUNCTYPE(None, ctypes.POINTER(None), ctypes.POINTER(statistics_t))
 # void (*tdc_event)
 # (void *priv, const struct sc_TdcEvent *const event_array,
 #  size_t event_array_len);
-CB_TDCEVENT = _FUNCTYPE(None, ctypes.POINTER(None),
-                        ctypes.POINTER(tdc_event_t), ctypes.c_size_t)
+CB_TDCEVENT = _FUNCTYPE(None, ctypes.POINTER(None), ctypes.POINTER(tdc_event_t), ctypes.c_size_t)
 #   void (*dld_event)
 #    (void *priv, const struct sc_DldEvent *const event_array,
 #     size_t event_array_len);
-CB_DLDEVENT = _FUNCTYPE(None, ctypes.POINTER(None),
-                        ctypes.POINTER(dld_event_t), ctypes.c_size_t)
+CB_DLDEVENT = _FUNCTYPE(None, ctypes.POINTER(None), ctypes.POINTER(dld_event_t), ctypes.c_size_t)
 # the following callback type does not belong to the user callbacks, but is
 # used in the sc_tdc_set_complete_callback2 function
 # void (*cb)(void *, int));
 CB_COMPLETE = _FUNCTYPE(None, ctypes.c_void_p, ctypes.c_int)
 # the following callback belongs to the BUFFERED_DATA_CALLBACKS pipe
-CB_BUFDATA_DATA = _FUNCTYPE(None, ctypes.c_void_p,
-                            ctypes.POINTER(sc_pipe_buf_callback_args))
+CB_BUFDATA_DATA = _FUNCTYPE(None, ctypes.c_void_p, ctypes.POINTER(sc_pipe_buf_callback_args))
 CB_BUFDATA_END_OF_MEAS = _FUNCTYPE(ctypes.c_bool, ctypes.c_void_p)
 
 
 ### ---------------------------------------------------------------------------
 
+
 class sc_pipe_callbacks(ctypes.Structure):
-    _fields_ = [("priv", ctypes.POINTER(None)),
-                ("start_of_measure", CB_STARTMEAS),
-                ("end_of_measure", CB_ENDMEAS),
-                ("millisecond_countup", CB_MILLISEC),
-                ("statistics", CB_STATISTICS),
-                ("tdc_event", CB_TDCEVENT),
-                ("dld_event", CB_DLDEVENT)]
+    _fields_ = [
+        ("priv", ctypes.POINTER(None)),
+        ("start_of_measure", CB_STARTMEAS),
+        ("end_of_measure", CB_ENDMEAS),
+        ("millisecond_countup", CB_MILLISEC),
+        ("statistics", CB_STATISTICS),
+        ("tdc_event", CB_TDCEVENT),
+        ("dld_event", CB_DLDEVENT),
+    ]
 
 
 class sc_pipe_callback_params_t(ctypes.Structure):
@@ -288,18 +294,20 @@ class sc_pipe_callback_params_t(ctypes.Structure):
 
 
 class sc_pipe_buf_callbacks_params_t(ctypes.Structure):
-    _fields_ = [("priv", ctypes.POINTER(None)),
-                ("data", CB_BUFDATA_DATA),
-                ("end_of_measurement", CB_BUFDATA_END_OF_MEAS),
-                ("data_field_selection", ctypes.c_uint),
-                ("max_buffered_data_len", ctypes.c_uint),
-                ("dld_events", ctypes.c_int),
-                ("version", ctypes.c_int),
-                ("reserved", ctypes.c_ubyte * 24)]
+    _fields_ = [
+        ("priv", ctypes.POINTER(None)),
+        ("data", CB_BUFDATA_DATA),
+        ("end_of_measurement", CB_BUFDATA_END_OF_MEAS),
+        ("data_field_selection", ctypes.c_uint),
+        ("max_buffered_data_len", ctypes.c_uint),
+        ("dld_events", ctypes.c_int),
+        ("version", ctypes.c_int),
+        ("reserved", ctypes.c_ubyte * 24),
+    ]
 
 
 def copy_statistics(s):
-    assert (type(s) == statistics_t)
+    assert type(s) == statistics_t
     r = statistics_t()
     ctypes.memmove(ctypes.byref(r), ctypes.byref(s), ctypes.sizeof(s))
     return r
@@ -337,7 +345,6 @@ def _vendor_runtime_environment(module_dir: Path):
 
 
 class scTDClib:
-
     def __init__(self):
         """
         loads the shared library
@@ -361,23 +368,16 @@ class scTDClib:
         self.lib.sc_tdc_start_measure2.restype = ctypes.c_int
         self.lib.sc_tdc_interrupt2.argtypes = [ctypes.c_int]
         self.lib.sc_tdc_interrupt2.restype = ctypes.c_int
-        self.lib.sc_pipe_open2.argtypes = [ctypes.c_int, ctypes.c_int,
-                                           ctypes.POINTER(None)]
+        self.lib.sc_pipe_open2.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.POINTER(None)]
         self.lib.sc_pipe_open2.restype = ctypes.c_int
         self.lib.sc_pipe_close2.argtypes = [ctypes.c_int, ctypes.c_int]
         self.lib.sc_pipe_close2.restype = ctypes.c_int
-        self.lib.sc_tdc_get_status2.argtypes = [ctypes.c_int,
-                                                ctypes.POINTER(ctypes.c_int)]
+        self.lib.sc_tdc_get_status2.argtypes = [ctypes.c_int, ctypes.POINTER(ctypes.c_int)]
         self.lib.sc_tdc_get_status2.restype = ctypes.c_int
-        self.lib.sc_pipe_read2.argtypes = \
-            [ctypes.c_int, ctypes.c_int,
-             ctypes.POINTER(ctypes.POINTER(None)),
-             ctypes.c_uint]
+        self.lib.sc_pipe_read2.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.POINTER(None)), ctypes.c_uint]
         self.lib.sc_pipe_read2.restype = ctypes.c_int
-        self.lib.sc_tdc_get_statistics2.argtypes = \
-            [ctypes.c_int, ctypes.POINTER(statistics_t)]
-        self.lib.sc_tdc_set_complete_callback2.argtypes = \
-            [ctypes.c_int, ctypes.c_void_p, CB_COMPLETE]
+        self.lib.sc_tdc_get_statistics2.argtypes = [ctypes.c_int, ctypes.POINTER(statistics_t)]
+        self.lib.sc_tdc_set_complete_callback2.argtypes = [ctypes.c_int, ctypes.c_void_p, CB_COMPLETE]
         self.lib.sc_tdc_set_complete_callback2.restype = ctypes.c_int
 
     def sc_tdc_init_inifile(self, inifile_path="tdc_gpx3.ini"):
@@ -450,26 +450,18 @@ class scTDClib:
         Returns an integer containing either the pipe handle (non-negative),
         or, in case of failure, an error code (negative number)
         """
-        assert (pipe_type == DLD_IMAGE_XY and
-                isinstance(pipe_params, sc_pipe_dld_image_xyt_params_t)) \
-               or (pipe_type == DLD_IMAGE_XT and
-                   isinstance(pipe_params, sc_pipe_dld_image_xyt_params_t)) \
-               or (pipe_type == DLD_IMAGE_YT and
-                   isinstance(pipe_params, sc_pipe_dld_image_xyt_params_t)) \
-               or (pipe_type == DLD_IMAGE_3D and
-                   isinstance(pipe_params, sc_pipe_dld_image_xyt_params_t)) \
-               or (pipe_type == DLD_SUM_HISTO and
-                   isinstance(pipe_params, sc_pipe_dld_image_xyt_params_t)) \
-               or (pipe_type == TDC_HISTO and
-                   isinstance(pipe_params, sc_pipe_tdc_histo_params_t)) \
-               or (pipe_type == STATISTICS and
-                   isinstance(pipe_params, sc_pipe_statistics_params_t)) \
-               or (pipe_type == USER_CALLBACKS and
-                   isinstance(pipe_params, sc_pipe_callback_params_t)) \
-               or (pipe_type == BUFFERED_DATA_CALLBACKS and
-                   isinstance(pipe_params, sc_pipe_buf_callbacks_params_t))
-        return self.lib.sc_pipe_open2(dev_desc, pipe_type,
-                                      ctypes.addressof(pipe_params))
+        assert (
+            (pipe_type == DLD_IMAGE_XY and isinstance(pipe_params, sc_pipe_dld_image_xyt_params_t))
+            or (pipe_type == DLD_IMAGE_XT and isinstance(pipe_params, sc_pipe_dld_image_xyt_params_t))
+            or (pipe_type == DLD_IMAGE_YT and isinstance(pipe_params, sc_pipe_dld_image_xyt_params_t))
+            or (pipe_type == DLD_IMAGE_3D and isinstance(pipe_params, sc_pipe_dld_image_xyt_params_t))
+            or (pipe_type == DLD_SUM_HISTO and isinstance(pipe_params, sc_pipe_dld_image_xyt_params_t))
+            or (pipe_type == TDC_HISTO and isinstance(pipe_params, sc_pipe_tdc_histo_params_t))
+            or (pipe_type == STATISTICS and isinstance(pipe_params, sc_pipe_statistics_params_t))
+            or (pipe_type == USER_CALLBACKS and isinstance(pipe_params, sc_pipe_callback_params_t))
+            or (pipe_type == BUFFERED_DATA_CALLBACKS and isinstance(pipe_params, sc_pipe_buf_callbacks_params_t))
+        )
+        return self.lib.sc_pipe_open2(dev_desc, pipe_type, ctypes.addressof(pipe_params))
 
     def sc_pipe_close2(self, dev_desc, pipe_handle):
         """
@@ -490,8 +482,7 @@ class scTDClib:
         the databuffer.
         """
         bufptr = ctypes.POINTER(None)
-        retcode = self.lib.sc_pipe_read2(dev_desc, pipe_handle,
-                                         ctypes.byref(bufptr), timeout)
+        retcode = self.lib.sc_pipe_read2(dev_desc, pipe_handle, ctypes.byref(bufptr), timeout)
         return (retcode, bufptr)
 
     def sc_tdc_get_status2(self, dev_desc):
@@ -501,8 +492,7 @@ class scTDClib:
         """
         statuscode = ctypes.c_int()
         # statuscodeptr = ctypes.POINTER(ctypes.c_int)(statuscode)
-        retcode = self.lib.sc_tdc_get_status2(dev_desc,
-                                              ctypes.byref(statuscode))
+        retcode = self.lib.sc_tdc_get_status2(dev_desc, ctypes.byref(statuscode))
         if retcode < 0:
             return retcode
         else:
@@ -514,8 +504,7 @@ class scTDClib:
         This function is kept for older scTDC library versions.
         """
         stat1 = statistics_t()
-        retcode = self.lib.sc_tdc_get_statistics2(dev_desc,
-                                                  ctypes.byref(stat1))
+        retcode = self.lib.sc_tdc_get_statistics2(dev_desc, ctypes.byref(stat1))
         if retcode < 0:
             return retcode
         else:
@@ -525,8 +514,7 @@ class scTDClib:
         """
         Set a measurement complete callback
         """
-        return self.lib.sc_tdc_set_complete_callback2(dev_desc, privptr,
-                                                      callback)
+        return self.lib.sc_tdc_set_complete_callback2(dev_desc, privptr, callback)
 
 
 class scTDC_hdf5lib:
@@ -603,12 +591,9 @@ class buffered_data_callbacks_pipe(object):
       on_end_of_meas
     """
 
-    def __init__(self,
-                 lib,
-                 dev_desc,
-                 data_field_selection=SC_DATA_FIELD_TIME,
-                 max_buffered_data_len=(1 << 16),
-                 dld_events=True):
+    def __init__(
+        self, lib, dev_desc, data_field_selection=SC_DATA_FIELD_TIME, max_buffered_data_len=(1 << 16), dld_events=True
+    ):
         """
         Parameters
         ----------
@@ -637,11 +622,9 @@ class buffered_data_callbacks_pipe(object):
         self.dev_desc = dev_desc
         self.lib = lib
         self._pipe_desc = None
-        self._open_pipe(data_field_selection, max_buffered_data_len,
-                        dld_events)
+        self._open_pipe(data_field_selection, max_buffered_data_len, dld_events)
 
-    def _open_pipe(self, data_field_selection, max_buffered_data_len,
-                   dld_events):
+    def _open_pipe(self, data_field_selection, max_buffered_data_len, dld_events):
         p = sc_pipe_buf_callbacks_params_t()
         p.priv = None
         self._cb_data = CB_BUFDATA_DATA(lambda x, y: self._data_cb(y))
@@ -655,8 +638,7 @@ class buffered_data_callbacks_pipe(object):
         reservedlist = [0] * 24
         p.reserved = (ctypes.c_ubyte * 24)(*reservedlist)
         self._pipe_args = p  # prevent garbage collection!
-        self._pipe_desc = self.lib.sc_pipe_open2(
-            self.dev_desc, BUFFERED_DATA_CALLBACKS, p)
+        self._pipe_desc = self.lib.sc_pipe_open2(self.dev_desc, BUFFERED_DATA_CALLBACKS, p)
 
     def _data_cb(self, dptr):
         d = dptr.contents
@@ -835,8 +817,7 @@ class usercallbacks_pipe(object):
         p2.callbacks = ctypes.pointer(self.struct_callbacks)
         self._pipe_args = p
         self._pipe_args2 = p2
-        self._pipe_desc = self.lib.sc_pipe_open2(self.dev_desc, USER_CALLBACKS,
-                                                 p2)
+        self._pipe_desc = self.lib.sc_pipe_open2(self.dev_desc, USER_CALLBACKS, p2)
 
     def do_measurement(self, time_ms):
         self.lib.sc_tdc_start_measure2(self.dev_desc, time_ms)
@@ -883,6 +864,7 @@ def _get_voxel_type(depth):
 # * 0x10 time since start pulse ("sum"), 0x20 "x" detector coordinate ("dif1"),
 # * 0x40 "y" detector coordinate ("dif2"), 0x80 master reset counter,
 # * 0x100 ADC value, 0x200 signal bit. If this function is not called, the
+
 
 class HDF5DataSelection:
     STARTCTR = 0x001
@@ -937,13 +919,13 @@ class Device(object):
             self.dev_desc = retcode
             # register end of measurement callback
             if not hasattr(self, "_eomcbfobj"):
+
                 def _eomcb(privptr, reason):
                     for i in self.eomcb.keys():
                         self.eomcb[i](reason)
 
                 self._eomcbfobj = CB_COMPLETE(_eomcb)  # extend lifetime!
-            ret2 = self.lib.sc_tdc_set_complete_callback2(self.dev_desc, None,
-                                                          self._eomcbfobj)
+            ret2 = self.lib.sc_tdc_set_complete_callback2(self.dev_desc, None, self._eomcbfobj)
             if ret2 < 0:
                 print("Registering measurement-complete callback failed")
                 print(" message:", self.lib.sc_get_err_msg(ret2))
@@ -972,7 +954,7 @@ class Device(object):
             return (0, "")
 
     def is_initialized(self):
-        """ Returns True, if the device is initialized """
+        """Returns True, if the device is initialized"""
         return self.dev_desc is not None
 
     def do_measurement(self, time_ms=100, synchronous=False):
@@ -1072,8 +1054,7 @@ class Device(object):
         array view/copy of the buffer, the 'F' (Fortran) indexing order can be
         chosen, such that the indices are intuitively ordered x, y, time.
         """
-        return self._add_img_pipe_impl(depth, modulo, binning, roi,
-                                       typestr="3d")
+        return self._add_img_pipe_impl(depth, modulo, binning, roi, typestr="3d")
 
     def add_xy_pipe(self, depth, modulo, binning, roi):
         """
@@ -1096,8 +1077,7 @@ class Device(object):
         the integration range, such that only events inside this time range are
         inserted into the data buffer.
         """
-        return self._add_img_pipe_impl(depth, modulo, binning, roi,
-                                       typestr="xy")
+        return self._add_img_pipe_impl(depth, modulo, binning, roi, typestr="xy")
 
     def add_xt_pipe(self, depth, modulo, binning, roi):
         """
@@ -1118,8 +1098,7 @@ class Device(object):
         integration range, such that only events inside this y range are
         inserted into the data buffer.
         """
-        return self._add_img_pipe_impl(depth, modulo, binning, roi,
-                                       typestr="xt")
+        return self._add_img_pipe_impl(depth, modulo, binning, roi, typestr="xt")
 
     def add_yt_pipe(self, depth, modulo, binning, roi):
         """
@@ -1140,8 +1119,7 @@ class Device(object):
         integration range, such that only events inside this x range are
         inserted into the data buffer.
         """
-        return self._add_img_pipe_impl(depth, modulo, binning, roi,
-                                       typestr="yt")
+        return self._add_img_pipe_impl(depth, modulo, binning, roi, typestr="yt")
 
     def add_t_pipe(self, depth, modulo, binning, roi):
         """
@@ -1161,8 +1139,7 @@ class Device(object):
         the roi specify the integration ranges, such that only events inside
         the x and y ranges are inserted into the data buffer.
         """
-        return self._add_img_pipe_impl(depth, modulo, binning, roi,
-                                       typestr="t")
+        return self._add_img_pipe_impl(depth, modulo, binning, roi, typestr="t")
 
     def add_statistics_pipe(self):
         """
@@ -1178,8 +1155,7 @@ class Device(object):
         else:
             return pipe  # return id and object
 
-    def add_tdc_histo_pipe(self, depth, channel, modulo, binning, offset,
-                           size):
+    def add_tdc_histo_pipe(self, depth, channel, modulo, binning, offset, size):
         """
         Adds a pipe for time histograms from a stand-alone TDC.
         Returns a tuple containing a non-negative pipe ID on success and the
@@ -1250,8 +1226,8 @@ class Device(object):
             return (False, "Need initialized device to enable hdf5 streaming")
 
     def hdf5_disable(self):
-        """ Disconnects the HDF5 streamer instance from this Device. Does
-        not return anything """
+        """Disconnects the HDF5 streamer instance from this Device. Does
+        not return anything"""
         if not hasattr(self, 'libh5') or not hasattr(self, 'h5obj'):
             return
         self.libh5.sc_tdc_hdf5_disconnect(self.h5obj)
@@ -1315,7 +1291,7 @@ class Pipe(object):
     """
 
     def __init__(self, typestr, par, parent):
-        """ Constructs a pipe object. typestr must be one of '3d', 'xy', 'xt',
+        """Constructs a pipe object. typestr must be one of '3d', 'xy', 'xt',
         'yt', 't', 'stat'. par is of the sc_pipe_dld_image_xyt_params_t type,
         or in case of typestr=='stat', of the sc_pipe_statistics_params_t type.
         parent must be a Device object. Creates the data buffer and opens the
@@ -1338,8 +1314,7 @@ class Pipe(object):
             self.par.allocator_cb = self._get_stat_allocator()
             retcode, errmsg = self.reopen()
             if retcode < 0:
-                print("scTDC.Pipe.__init__ : error during creation:\n"
-                      + "  ({}) {}".format(errmsg, retcode))
+                print("scTDC.Pipe.__init__ : error during creation:\n" + "  ({}) {}".format(errmsg, retcode))
             return
         # ---------------------------------------------------------------------
         self.nrvoxels = None
@@ -1363,12 +1338,10 @@ class Pipe(object):
             self.nrvoxels = par.size
             self.pipetypeconst = TDC_HISTO
         if self.nrvoxels is not None:
-            self.par.allocator_cb = self._get_allocator(self.nrvoxels,
-                                                        self.voxeltype)
+            self.par.allocator_cb = self._get_allocator(self.nrvoxels, self.voxeltype)
             retcode, errmsg = self.reopen()
             if retcode < 0:
-                print("scTDC.Pipe.__init__ : error during creation:\n"
-                      + "  ({}) {}".format(errmsg, retcode))
+                print("scTDC.Pipe.__init__ : error during creation:\n" + "  ({}) {}".format(errmsg, retcode))
 
     def _get_allocator(self, nrvoxels, voxeltype):
         if self.buf is not None and self.nrvoxels != nrvoxels:
@@ -1379,6 +1352,7 @@ class Pipe(object):
             self.nrvoxels = nrvoxels
             self.bufsize = nrvoxels * ctypes.sizeof(voxeltype)
         if not hasattr(self, '_allocatorfunc'):
+
             def _allocator(privptr, bufptrptr):
                 bufptrptr[0] = ctypes.cast(self.bufptr, ctypes.c_void_p)
                 return 0
@@ -1417,8 +1391,7 @@ class Pipe(object):
         references to them)."""
         if self.handle is not None and not force:
             return
-        retcode = self.parent.lib.sc_pipe_open2(
-            self.parent.dev_desc, self.pipetypeconst, self.par)
+        retcode = self.parent.lib.sc_pipe_open2(self.parent.dev_desc, self.pipetypeconst, self.par)
         if retcode < 0:
             return (retcode, self.parent.lib.sc_get_err_msg(retcode))
         else:
@@ -1434,8 +1407,7 @@ class Pipe(object):
         object via the parent device and discarding all other references to the
         Pipe object, as well.
         """
-        retcode = self.parent.lib.sc_pipe_close2(self.parent.dev_desc,
-                                                 self.handle)
+        retcode = self.parent.lib.sc_pipe_close2(self.parent.dev_desc, self.handle)
         if retcode < 0:
             return (retcode, self.parent.lib.sc_get_err_msg(retcode))
         else:
@@ -1444,17 +1416,13 @@ class Pipe(object):
 
     def _reshape(self, a):
         if self.typestr == '3d':
-            return np.reshape(a, (self.par.roi.size.x, self.par.roi.size.y,
-                                  self.par.roi.size.time), order='F')
+            return np.reshape(a, (self.par.roi.size.x, self.par.roi.size.y, self.par.roi.size.time), order='F')
         elif self.typestr == 'xy':
-            return np.reshape(a, (self.par.roi.size.x, self.par.roi.size.y),
-                              order='F')
+            return np.reshape(a, (self.par.roi.size.x, self.par.roi.size.y), order='F')
         elif self.typestr == 'xt':
-            return np.reshape(a, (self.par.roi.size.x, self.par.roi.size.time),
-                              order='F')
+            return np.reshape(a, (self.par.roi.size.x, self.par.roi.size.time), order='F')
         elif self.typestr == 'yt':
-            return np.reshape(a, (self.par.roi.size.y, self.par.roi.size.time),
-                              order='F')
+            return np.reshape(a, (self.par.roi.size.y, self.par.roi.size.time), order='F')
         elif self.typestr == 't' or self.typestr == 'tdch':
             # return np.reshape(a, (self.par.roi.size.time,))
             return a  # buffer is already 1D, needs no reshaping

@@ -19,6 +19,7 @@ def copy_xytof_from_cobold_txt_to_hdf5(txt_path, save_path):
 
     def append_number_at_index(array, index, number):
         return np.concatenate((array[:index], [number], array[index:]))
+
     # Read data from text file
     with open(txt_path, 'r') as f:
         data = np.loadtxt(f)
@@ -44,7 +45,7 @@ def copy_xytof_from_cobold_txt_to_hdf5(txt_path, save_path):
         del file['dld/t']
         # del file['dld/start_counter']
         del file['dld/AbsoluteTimeStamp']
-        laser_intensity =  file['dld/laser_intensity'][:]
+        laser_intensity = file['dld/laser_intensity'][:]
         del file['dld/laser_intensity']
 
         file.create_dataset('dld/x', data=xx)
@@ -108,7 +109,6 @@ def copy_xytof_from_cobold_txt_to_hdf5(txt_path, save_path):
     print('finish')
 
 
-
 def rename_a_category(file_path, old_name, new_name):
     with h5py.File(file_path, 'r+') as data:
         temp = data[old_name][:]
@@ -149,7 +149,6 @@ def laser_pulse_energy_from_mat_file(mat_path, source_file, target_file):
     plt.grid(True)
     plt.show()
 
-
     with h5py.File(source_file, 'r') as data:
         laser_angle = data['dld/laser_intensity'][:]
     # laser_P_L = interp_func(laser_angle)
@@ -164,9 +163,6 @@ def laser_pulse_energy_from_mat_file(mat_path, source_file, target_file):
     with h5py.File(target_file, 'r+') as data:
         del data['dld/pulse']
         data.create_dataset("dld/pulse", data=laser_P_L, dtype='f')
-
-
-
 
 
 if __name__ == "__main__":

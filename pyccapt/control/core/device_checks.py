@@ -118,9 +118,7 @@ def collect_startup_device_issues(
     """
 
     issues: list[DeviceIssue] = []
-    needs_voltage_hw = _is_enabled(conf, "v_dc") or (
-        _is_enabled(conf, "v_p") and _is_voltage_pulse_mode(pulse_mode)
-    )
+    needs_voltage_hw = _is_enabled(conf, "v_dc") or (_is_enabled(conf, "v_p") and _is_voltage_pulse_mode(pulse_mode))
     needs_signal_generator = _is_enabled(conf, "signal_generator") and _is_voltage_pulse_mode(pulse_mode)
 
     if serial_factory is None and needs_voltage_hw:
@@ -239,7 +237,4 @@ def format_serial_port_issue_message(
 
     details = "; ".join(f"{item.device}: {item.reason}" for item in issues)
     available = ", ".join(available_ports) if available_ports else "none detected"
-    return (
-        "Some configured control devices are unavailable: "
-        f"{details}. Available serial ports: {available}."
-    )
+    return f"Some configured control devices are unavailable: {details}. Available serial ports: {available}."

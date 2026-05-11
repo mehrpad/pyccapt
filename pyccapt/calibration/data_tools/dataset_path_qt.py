@@ -1,5 +1,10 @@
-from PyQt6.QtWidgets import QApplication, QFileDialog
+"""Qt file/directory pickers for the dataset-path Browse buttons.
 
+PyQt6 is imported lazily inside the dialog functions so that headless CI
+environments (which don't ship PyQt6 by default) can still import this module
+to read the filter constants -- the dialog itself is only ever invoked from
+the Jupyter notebooks, where PyQt6 is present.
+"""
 
 DATASET_FILTER = (
     "Dataset files (*.epos *.pos *.apt *.h5 *.ato *.csv *.rhit *.RHIT *.str *.STR *.hits *.HITS);;"
@@ -11,13 +16,7 @@ DATASET_FILTER = (
     "CSV (*.csv);;"
     "All Files (*)"
 )
-RANGE_FILTER = (
-    "Range files (*.h5 *.rrng *.rng);;"
-    "PyCCAPT / HDF5 (*.h5);;"
-    "LEAP RRNG (*.rrng);;"
-    "LEAP RNG (*.rng);;"
-    "All Files (*)"
-)
+RANGE_FILTER = "Range files (*.h5 *.rrng *.rng);;PyCCAPT / HDF5 (*.h5);;LEAP RRNG (*.rrng);;LEAP RNG (*.rng);;All Files (*)"
 CAMECA_RAW_FILTER = (
     "LEAP CAMECA raw (*.rhit *.RHIT *.str *.STR *.hits *.HITS *.epos *.EPOS);;"
     "LEAP CAMECA RHIT (*.rhit *.RHIT);;"
@@ -42,6 +41,7 @@ def gui_fname(initial_directory, file_kind="any"):
     Returns:
         chosen_file (str): path to the chosen file.
     """
+    from PyQt6.QtWidgets import QApplication, QFileDialog
 
     app = QApplication.instance() or QApplication([initial_directory])
     selected_filter = {
@@ -65,6 +65,7 @@ def gui_fname(initial_directory, file_kind="any"):
 
 def gui_dirname(initial_directory):
     """Select an existing directory via a dialog and return its path."""
+    from PyQt6.QtWidgets import QApplication, QFileDialog
 
     app = QApplication.instance() or QApplication([initial_directory])
     chosen_dir = QFileDialog.getExistingDirectory(

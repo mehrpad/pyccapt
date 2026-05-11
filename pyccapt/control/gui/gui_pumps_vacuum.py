@@ -1,4 +1,4 @@
-﻿import sys
+import sys
 import threading
 import time
 
@@ -13,7 +13,6 @@ from pyccapt.control.gui import tooltips
 
 
 class Ui_Pumps_Vacuum(object):
-
     def __init__(self, variables, conf, SignalEmitter, parent=None):
         """
         Constructor for the Pumps and Vacuum UI class.
@@ -60,8 +59,7 @@ class Ui_Pumps_Vacuum(object):
         self.label_212.setObjectName("label_212")
         self.gridLayout.addWidget(self.label_212, 0, 0, 1, 1)
         self.vacuum_main = QtWidgets.QLCDNumber(parent=Pumps_Vacuum)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred,
-                                           QtWidgets.QSizePolicy.Policy.Preferred)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.vacuum_main.sizePolicy().hasHeightForWidth())
@@ -70,12 +68,14 @@ class Ui_Pumps_Vacuum(object):
         font = QtGui.QFont()
         font.setPointSize(9)
         self.vacuum_main.setFont(font)
-        self.vacuum_main.setStyleSheet("QLCDNumber{\n"
-                                       "                                    border: 2px solid green;\n"
-                                       "                                    border-radius: 10px;\n"
-                                       "                                    padding: 0 8px;\n"
-                                       "                                    }\n"
-                                       "                                ")
+        self.vacuum_main.setStyleSheet(
+            "QLCDNumber{\n"
+            "                                    border: 2px solid green;\n"
+            "                                    border-radius: 10px;\n"
+            "                                    padding: 0 8px;\n"
+            "                                    }\n"
+            "                                "
+        )
         self.vacuum_main.setObjectName("vacuum_main")
         self.gridLayout.addWidget(self.vacuum_main, 0, 1, 1, 2)
         self.label_211 = QtWidgets.QLabel(parent=Pumps_Vacuum)
@@ -85,8 +85,7 @@ class Ui_Pumps_Vacuum(object):
         self.label_211.setObjectName("label_211")
         self.gridLayout.addWidget(self.label_211, 1, 0, 1, 2)
         self.vacuum_buffer = QtWidgets.QLCDNumber(parent=Pumps_Vacuum)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred,
-                                           QtWidgets.QSizePolicy.Policy.Preferred)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.vacuum_buffer.sizePolicy().hasHeightForWidth())
@@ -95,12 +94,14 @@ class Ui_Pumps_Vacuum(object):
         font = QtGui.QFont()
         font.setPointSize(8)
         self.vacuum_buffer.setFont(font)
-        self.vacuum_buffer.setStyleSheet("QLCDNumber{\n"
-                                         "                                            border: 2px solid brown;\n"
-                                         "                                            border-radius: 10px;\n"
-                                         "                                            padding: 0 8px;\n"
-                                         "                                            }\n"
-                                         "                                        ")
+        self.vacuum_buffer.setStyleSheet(
+            "QLCDNumber{\n"
+            "                                            border: 2px solid brown;\n"
+            "                                            border-radius: 10px;\n"
+            "                                            padding: 0 8px;\n"
+            "                                            }\n"
+            "                                        "
+        )
         self.vacuum_buffer.setObjectName("vacuum_buffer")
         self.gridLayout.addWidget(self.vacuum_buffer, 1, 2, 1, 1)
         self.label_216 = QtWidgets.QLabel(parent=Pumps_Vacuum)
@@ -110,19 +111,20 @@ class Ui_Pumps_Vacuum(object):
         self.label_216.setObjectName("label_216")
         self.gridLayout.addWidget(self.label_216, 2, 0, 1, 2)
         self.vacuum_cryo_load_lock = QtWidgets.QLCDNumber(parent=Pumps_Vacuum)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred,
-                                           QtWidgets.QSizePolicy.Policy.Preferred)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.vacuum_cryo_load_lock.sizePolicy().hasHeightForWidth())
         self.vacuum_cryo_load_lock.setSizePolicy(sizePolicy)
         self.vacuum_cryo_load_lock.setMinimumSize(QtCore.QSize(150, 50))
-        self.vacuum_cryo_load_lock.setStyleSheet("QLCDNumber{\n"
-                                                 "                                            border: 2px solid magenta;\n"
-                                                 "                                            border-radius: 10px;\n"
-                                                 "                                            padding: 0 8px;\n"
-                                                 "                                            }\n"
-                                                 "                                        ")
+        self.vacuum_cryo_load_lock.setStyleSheet(
+            "QLCDNumber{\n"
+            "                                            border: 2px solid magenta;\n"
+            "                                            border-radius: 10px;\n"
+            "                                            padding: 0 8px;\n"
+            "                                            }\n"
+            "                                        "
+        )
         self.vacuum_cryo_load_lock.setObjectName("vacuum_cryo_load_lock")
         self.gridLayout.addWidget(self.vacuum_cryo_load_lock, 2, 2, 1, 1)
         self.label_210 = QtWidgets.QLabel(parent=Pumps_Vacuum)
@@ -132,27 +134,30 @@ class Ui_Pumps_Vacuum(object):
         self.label_210.setObjectName("label_210")
         self.gridLayout.addWidget(self.label_210, 3, 0, 1, 2)
         self.vacuum_load_lock = QtWidgets.QLCDNumber(parent=Pumps_Vacuum)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred,
-                                           QtWidgets.QSizePolicy.Policy.Preferred)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.vacuum_load_lock.sizePolicy().hasHeightForWidth())
         self.vacuum_load_lock.setSizePolicy(sizePolicy)
         self.vacuum_load_lock.setMinimumSize(QtCore.QSize(150, 50))
-        self.vacuum_load_lock.setStyleSheet("QLCDNumber{\n"
-                                            "                                            border: 2px solid blue;\n"
-                                            "                                                            border-radius: 10px;\n"
-                                            "                                                            padding: 0 8px;\n"
-                                            "                                                            }\n"
-                                            "                                        ")
+        self.vacuum_load_lock.setStyleSheet(
+            "QLCDNumber{\n"
+            "                                            border: 2px solid blue;\n"
+            "                                                            border-radius: 10px;\n"
+            "                                                            padding: 0 8px;\n"
+            "                                                            }\n"
+            "                                        "
+        )
         self.vacuum_load_lock.setObjectName("vacuum_load_lock")
         self.gridLayout.addWidget(self.vacuum_load_lock, 3, 2, 1, 1)
         self.gridLayout_4.addLayout(self.gridLayout, 0, 0, 2, 1)
-        spacerItem = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Policy.Expanding,
-                                           QtWidgets.QSizePolicy.Policy.Minimum)
+        spacerItem = QtWidgets.QSpacerItem(
+            40, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum
+        )
         self.gridLayout_4.addItem(spacerItem, 0, 1, 1, 1)
-        spacerItem1 = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum,
-                                            QtWidgets.QSizePolicy.Policy.Expanding)
+        spacerItem1 = QtWidgets.QSpacerItem(
+            20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding
+        )
         self.gridLayout_4.addItem(spacerItem1, 0, 2, 1, 1)
         self.gridLayout_2 = QtWidgets.QGridLayout()
         self.gridLayout_2.setObjectName("gridLayout_2")
@@ -163,8 +168,7 @@ class Ui_Pumps_Vacuum(object):
         self.label_214.setObjectName("label_214")
         self.gridLayout_2.addWidget(self.label_214, 0, 0, 1, 1)
         self.vacuum_buffer_back = QtWidgets.QLCDNumber(parent=Pumps_Vacuum)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred,
-                                           QtWidgets.QSizePolicy.Policy.Preferred)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.vacuum_buffer_back.sizePolicy().hasHeightForWidth())
@@ -173,12 +177,14 @@ class Ui_Pumps_Vacuum(object):
         font = QtGui.QFont()
         font.setPointSize(8)
         self.vacuum_buffer_back.setFont(font)
-        self.vacuum_buffer_back.setStyleSheet("QLCDNumber{\n"
-                                              "                                            border: 2px solid brown;\n"
-                                              "                                                            border-radius: 10px;\n"
-                                              "                                                            padding: 0 8px;\n"
-                                              "                                                            }\n"
-                                              "                                                        ")
+        self.vacuum_buffer_back.setStyleSheet(
+            "QLCDNumber{\n"
+            "                                            border: 2px solid brown;\n"
+            "                                                            border-radius: 10px;\n"
+            "                                                            padding: 0 8px;\n"
+            "                                                            }\n"
+            "                                                        "
+        )
         self.vacuum_buffer_back.setObjectName("vacuum_buffer_back")
         self.gridLayout_2.addWidget(self.vacuum_buffer_back, 0, 1, 1, 1)
         self.label_217 = QtWidgets.QLabel(parent=Pumps_Vacuum)
@@ -188,19 +194,20 @@ class Ui_Pumps_Vacuum(object):
         self.label_217.setObjectName("label_217")
         self.gridLayout_2.addWidget(self.label_217, 1, 0, 1, 1)
         self.vacuum_cryo_load_lock_back = QtWidgets.QLCDNumber(parent=Pumps_Vacuum)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred,
-                                           QtWidgets.QSizePolicy.Policy.Preferred)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.vacuum_cryo_load_lock_back.sizePolicy().hasHeightForWidth())
         self.vacuum_cryo_load_lock_back.setSizePolicy(sizePolicy)
         self.vacuum_cryo_load_lock_back.setMinimumSize(QtCore.QSize(150, 50))
-        self.vacuum_cryo_load_lock_back.setStyleSheet("QLCDNumber{\n"
-                                                      "                                            border: 2px solid magenta;\n"
-                                                      "                                            border-radius: 10px;\n"
-                                                      "                                            padding: 0 8px;\n"
-                                                      "                                            }\n"
-                                                      "                                        ")
+        self.vacuum_cryo_load_lock_back.setStyleSheet(
+            "QLCDNumber{\n"
+            "                                            border: 2px solid magenta;\n"
+            "                                            border-radius: 10px;\n"
+            "                                            padding: 0 8px;\n"
+            "                                            }\n"
+            "                                        "
+        )
         self.vacuum_cryo_load_lock_back.setObjectName("vacuum_cryo_load_lock_back")
         self.gridLayout_2.addWidget(self.vacuum_cryo_load_lock_back, 1, 1, 1, 1)
         self.label_213 = QtWidgets.QLabel(parent=Pumps_Vacuum)
@@ -210,19 +217,20 @@ class Ui_Pumps_Vacuum(object):
         self.label_213.setObjectName("label_213")
         self.gridLayout_2.addWidget(self.label_213, 2, 0, 1, 1)
         self.vacuum_load_lock_back = QtWidgets.QLCDNumber(parent=Pumps_Vacuum)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred,
-                                           QtWidgets.QSizePolicy.Policy.Preferred)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.vacuum_load_lock_back.sizePolicy().hasHeightForWidth())
         self.vacuum_load_lock_back.setSizePolicy(sizePolicy)
         self.vacuum_load_lock_back.setMinimumSize(QtCore.QSize(150, 50))
-        self.vacuum_load_lock_back.setStyleSheet("QLCDNumber{\n"
-                                                 "                                            border: 2px solid blue;\n"
-                                                 "                                            border-radius: 10px;\n"
-                                                 "                                            padding: 0 8px;\n"
-                                                 "                                            }\n"
-                                                 "                                        ")
+        self.vacuum_load_lock_back.setStyleSheet(
+            "QLCDNumber{\n"
+            "                                            border: 2px solid blue;\n"
+            "                                            border-radius: 10px;\n"
+            "                                            padding: 0 8px;\n"
+            "                                            }\n"
+            "                                        "
+        )
         self.vacuum_load_lock_back.setObjectName("vacuum_load_lock_back")
         self.gridLayout_2.addWidget(self.vacuum_load_lock_back, 2, 1, 1, 1)
         self.gridLayout_4.addLayout(self.gridLayout_2, 1, 1, 1, 2)
@@ -235,10 +243,12 @@ class Ui_Pumps_Vacuum(object):
         sizePolicy.setHeightForWidth(self.superuser.sizePolicy().hasHeightForWidth())
         self.superuser.setSizePolicy(sizePolicy)
         self.superuser.setMinimumSize(QtCore.QSize(0, 25))
-        self.superuser.setStyleSheet("QPushButton{\n"
-                                     "                                    background: rgb(193, 193, 193)\n"
-                                     "                                    }\n"
-                                     "                                ")
+        self.superuser.setStyleSheet(
+            "QPushButton{\n"
+            "                                    background: rgb(193, 193, 193)\n"
+            "                                    }\n"
+            "                                "
+        )
         self.superuser.setObjectName("superuser")
         self.gridLayout_3.addWidget(self.superuser, 0, 0, 1, 2)
         self.pump_cryo_load_lock_switch = QtWidgets.QPushButton(parent=Pumps_Vacuum)
@@ -248,10 +258,12 @@ class Ui_Pumps_Vacuum(object):
         sizePolicy.setHeightForWidth(self.pump_cryo_load_lock_switch.sizePolicy().hasHeightForWidth())
         self.pump_cryo_load_lock_switch.setSizePolicy(sizePolicy)
         self.pump_cryo_load_lock_switch.setMinimumSize(QtCore.QSize(0, 25))
-        self.pump_cryo_load_lock_switch.setStyleSheet("QPushButton{\n"
-                                                      "                                            background: rgb(193, 193, 193)\n"
-                                                      "                                            }\n"
-                                                      "                                        ")
+        self.pump_cryo_load_lock_switch.setStyleSheet(
+            "QPushButton{\n"
+            "                                            background: rgb(193, 193, 193)\n"
+            "                                            }\n"
+            "                                        "
+        )
         self.pump_cryo_load_lock_switch.setObjectName("pump_cryo_load_lock_switch")
         self.gridLayout_3.addWidget(self.pump_cryo_load_lock_switch, 1, 0, 1, 1)
         self.led_pump_cryo_load_lock = QtWidgets.QLabel(parent=Pumps_Vacuum)
@@ -267,10 +279,12 @@ class Ui_Pumps_Vacuum(object):
         sizePolicy.setHeightForWidth(self.pump_load_lock_switch.sizePolicy().hasHeightForWidth())
         self.pump_load_lock_switch.setSizePolicy(sizePolicy)
         self.pump_load_lock_switch.setMinimumSize(QtCore.QSize(0, 25))
-        self.pump_load_lock_switch.setStyleSheet("QPushButton{\n"
-                                                 "                                            background: rgb(193, 193, 193)\n"
-                                                 "                                            }\n"
-                                                 "                                        ")
+        self.pump_load_lock_switch.setStyleSheet(
+            "QPushButton{\n"
+            "                                            background: rgb(193, 193, 193)\n"
+            "                                            }\n"
+            "                                        "
+        )
         self.pump_load_lock_switch.setObjectName("pump_load_lock_switch")
         self.gridLayout_3.addWidget(self.pump_load_lock_switch, 2, 0, 1, 1)
         self.led_pump_load_lock = QtWidgets.QLabel(parent=Pumps_Vacuum)
@@ -292,19 +306,20 @@ class Ui_Pumps_Vacuum(object):
         self.label_215.setObjectName("label_215")
         self.gridLayout_6.addWidget(self.label_215, 0, 0, 1, 1)
         self.temp_stage = QtWidgets.QLCDNumber(parent=Pumps_Vacuum)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred,
-                                           QtWidgets.QSizePolicy.Policy.Preferred)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.temp_stage.sizePolicy().hasHeightForWidth())
         self.temp_stage.setSizePolicy(sizePolicy)
         self.temp_stage.setMinimumSize(QtCore.QSize(150, 50))
-        self.temp_stage.setStyleSheet("QLCDNumber{\n"
-                                      "                                                            border: 2px solid orange;\n"
-                                      "                                                            border-radius: 10px;\n"
-                                      "                                                            padding: 0 8px;\n"
-                                      "                                                            }\n"
-                                      "                                        ")
+        self.temp_stage.setStyleSheet(
+            "QLCDNumber{\n"
+            "                                                            border: 2px solid orange;\n"
+            "                                                            border-radius: 10px;\n"
+            "                                                            padding: 0 8px;\n"
+            "                                                            }\n"
+            "                                        "
+        )
         self.temp_stage.setObjectName("temp_stage")
         self.gridLayout_6.addWidget(self.temp_stage, 0, 1, 1, 2)
         self.set_temperature_cryo = QtWidgets.QPushButton(parent=Pumps_Vacuum)
@@ -314,19 +329,23 @@ class Ui_Pumps_Vacuum(object):
         sizePolicy.setHeightForWidth(self.set_temperature_cryo.sizePolicy().hasHeightForWidth())
         self.set_temperature_cryo.setSizePolicy(sizePolicy)
         self.set_temperature_cryo.setMinimumSize(QtCore.QSize(0, 25))
-        self.set_temperature_cryo.setStyleSheet("QPushButton{\n"
-                                                "                                    background: rgb(193, 193, 193)\n"
-                                                "                                    }\n"
-                                                "                                ")
+        self.set_temperature_cryo.setStyleSheet(
+            "QPushButton{\n"
+            "                                    background: rgb(193, 193, 193)\n"
+            "                                    }\n"
+            "                                "
+        )
         self.set_temperature_cryo.setObjectName("set_temperature_cryo")
         self.gridLayout_6.addWidget(self.set_temperature_cryo, 1, 0, 1, 2)
         self.target_tempreature_cryo = QtWidgets.QSpinBox(parent=Pumps_Vacuum)
         self.target_tempreature_cryo.setMinimumSize(QtCore.QSize(150, 0))
         self.target_tempreature_cryo.setMaximumSize(QtCore.QSize(70, 16777215))
-        self.target_tempreature_cryo.setStyleSheet("QSpinBox{\n"
-                                                   "                                    background: rgb(223,223,233)\n"
-                                                   "                                    }\n"
-                                                   "                                ")
+        self.target_tempreature_cryo.setStyleSheet(
+            "QSpinBox{\n"
+            "                                    background: rgb(223,223,233)\n"
+            "                                    }\n"
+            "                                "
+        )
         self.target_tempreature_cryo.setObjectName("target_tempreature_cryo")
         self.gridLayout_6.addWidget(self.target_tempreature_cryo, 1, 2, 1, 1)
         self.gridLayout_8.addLayout(self.gridLayout_6, 0, 0, 1, 1)
@@ -339,19 +358,20 @@ class Ui_Pumps_Vacuum(object):
         self.label_219.setObjectName("label_219")
         self.gridLayout_5.addWidget(self.label_219, 0, 0, 1, 1)
         self.temp_ll = QtWidgets.QLCDNumber(parent=Pumps_Vacuum)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred,
-                                           QtWidgets.QSizePolicy.Policy.Preferred)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.temp_ll.sizePolicy().hasHeightForWidth())
         self.temp_ll.setSizePolicy(sizePolicy)
         self.temp_ll.setMinimumSize(QtCore.QSize(150, 50))
-        self.temp_ll.setStyleSheet("QLCDNumber{\n"
-                                   "                                    border: 2px solid orange;\n"
-                                   "                                    border-radius: 10px;\n"
-                                   "                                    padding: 0 8px;\n"
-                                   "                                    }\n"
-                                   "                                ")
+        self.temp_ll.setStyleSheet(
+            "QLCDNumber{\n"
+            "                                    border: 2px solid orange;\n"
+            "                                    border-radius: 10px;\n"
+            "                                    padding: 0 8px;\n"
+            "                                    }\n"
+            "                                "
+        )
         self.temp_ll.setObjectName("temp_ll")
         self.gridLayout_5.addWidget(self.temp_ll, 0, 1, 1, 2)
         self.set_temperature_ll = QtWidgets.QPushButton(parent=Pumps_Vacuum)
@@ -361,19 +381,23 @@ class Ui_Pumps_Vacuum(object):
         sizePolicy.setHeightForWidth(self.set_temperature_ll.sizePolicy().hasHeightForWidth())
         self.set_temperature_ll.setSizePolicy(sizePolicy)
         self.set_temperature_ll.setMinimumSize(QtCore.QSize(0, 25))
-        self.set_temperature_ll.setStyleSheet("QPushButton{\n"
-                                              "                                    background: rgb(193, 193, 193)\n"
-                                              "                                    }\n"
-                                              "                                ")
+        self.set_temperature_ll.setStyleSheet(
+            "QPushButton{\n"
+            "                                    background: rgb(193, 193, 193)\n"
+            "                                    }\n"
+            "                                "
+        )
         self.set_temperature_ll.setObjectName("set_temperature_ll")
         self.gridLayout_5.addWidget(self.set_temperature_ll, 1, 0, 1, 2)
         self.target_tempreature_ll = QtWidgets.QSpinBox(parent=Pumps_Vacuum)
         self.target_tempreature_ll.setMinimumSize(QtCore.QSize(150, 0))
         self.target_tempreature_ll.setMaximumSize(QtCore.QSize(70, 16777215))
-        self.target_tempreature_ll.setStyleSheet("QSpinBox{\n"
-                                                 "                                                    background: rgb(223,223,233)\n"
-                                                 "                                                    }\n"
-                                                 "                                                ")
+        self.target_tempreature_ll.setStyleSheet(
+            "QSpinBox{\n"
+            "                                                    background: rgb(223,223,233)\n"
+            "                                                    }\n"
+            "                                                "
+        )
         self.target_tempreature_ll.setObjectName("target_tempreature_ll")
         self.gridLayout_5.addWidget(self.target_tempreature_ll, 1, 2, 1, 1)
         self.gridLayout_8.addLayout(self.gridLayout_5, 0, 1, 1, 1)
@@ -386,19 +410,20 @@ class Ui_Pumps_Vacuum(object):
         self.label_218.setObjectName("label_218")
         self.gridLayout_7.addWidget(self.label_218, 0, 0, 1, 1)
         self.temp_cryo_head = QtWidgets.QLCDNumber(parent=Pumps_Vacuum)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred,
-                                           QtWidgets.QSizePolicy.Policy.Preferred)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.temp_cryo_head.sizePolicy().hasHeightForWidth())
         self.temp_cryo_head.setSizePolicy(sizePolicy)
         self.temp_cryo_head.setMinimumSize(QtCore.QSize(150, 50))
-        self.temp_cryo_head.setStyleSheet("QLCDNumber{\n"
-                                          "                                            border: 2px solid orange;\n"
-                                          "                                                            border-radius: 10px;\n"
-                                          "                                                            padding: 0 8px;\n"
-                                          "                                                            }\n"
-                                          "                                        ")
+        self.temp_cryo_head.setStyleSheet(
+            "QLCDNumber{\n"
+            "                                            border: 2px solid orange;\n"
+            "                                                            border-radius: 10px;\n"
+            "                                                            padding: 0 8px;\n"
+            "                                                            }\n"
+            "                                        "
+        )
         self.temp_cryo_head.setObjectName("temp_cryo_head")
         self.gridLayout_7.addWidget(self.temp_cryo_head, 0, 1, 1, 1)
         self.label_221 = QtWidgets.QLabel(parent=Pumps_Vacuum)
@@ -408,18 +433,15 @@ class Ui_Pumps_Vacuum(object):
         self.label_221.setObjectName("label_221")
         self.gridLayout_7.addWidget(self.label_221, 1, 0, 1, 1)
         self.temp_cryo_head_inside = QtWidgets.QLCDNumber(parent=Pumps_Vacuum)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred,
-                                           QtWidgets.QSizePolicy.Policy.Preferred)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.temp_cryo_head_inside.sizePolicy().hasHeightForWidth())
         self.temp_cryo_head_inside.setSizePolicy(sizePolicy)
         self.temp_cryo_head_inside.setMinimumSize(QtCore.QSize(150, 50))
-        self.temp_cryo_head_inside.setStyleSheet("QLCDNumber{\n"
-                                                 "    border: 2px solid orange;\n"
-                                                 "    border-radius: 10px;\n"
-                                                 "    padding: 0 8px;\n"
-                                                 "    }\n")
+        self.temp_cryo_head_inside.setStyleSheet(
+            "QLCDNumber{\n    border: 2px solid orange;\n    border-radius: 10px;\n    padding: 0 8px;\n    }\n"
+        )
         self.temp_cryo_head_inside.setObjectName("temp_cryo_head_inside")
         self.gridLayout_7.addWidget(self.temp_cryo_head_inside, 1, 1, 1, 1)
         self.label_220 = QtWidgets.QLabel(parent=Pumps_Vacuum)
@@ -435,10 +457,12 @@ class Ui_Pumps_Vacuum(object):
         sizePolicy.setHeightForWidth(self.ll_baking_time.sizePolicy().hasHeightForWidth())
         self.ll_baking_time.setSizePolicy(sizePolicy)
         self.ll_baking_time.setMinimumSize(QtCore.QSize(0, 0))
-        self.ll_baking_time.setStyleSheet("QLineEdit{\n"
-                                          "                                    background: rgb(223,223,233)\n"
-                                          "                                    }\n"
-                                          "                                ")
+        self.ll_baking_time.setStyleSheet(
+            "QLineEdit{\n"
+            "                                    background: rgb(223,223,233)\n"
+            "                                    }\n"
+            "                                "
+        )
         self.ll_baking_time.setObjectName("ll_baking_time")
         self.gridLayout_7.addWidget(self.ll_baking_time, 2, 1, 1, 1)
         self.gridLayout_8.addLayout(self.gridLayout_7, 0, 2, 1, 1)
@@ -514,8 +538,14 @@ class Ui_Pumps_Vacuum(object):
         # Thread for reading gauges
         if self.conf['gauges'] == "on":
             # Thread for reading gauges
-            self.gauges_thread = threading.Thread(target=initialize_devices.state_update,
-                                                  args=(self.conf, self.variables, self.emitter,))
+            self.gauges_thread = threading.Thread(
+                target=initialize_devices.state_update,
+                args=(
+                    self.conf,
+                    self.variables,
+                    self.emitter,
+                ),
+            )
             self.gauges_thread.setDaemon(True)
             self.gauges_thread.start()
 
@@ -530,8 +560,7 @@ class Ui_Pumps_Vacuum(object):
         self.original_button_style = self.set_temperature_cryo.styleSheet()
 
         # default Qlcd color
-        self.default_color = self.vacuum_buffer_back.style().standardPalette().color(
-            QtGui.QPalette.ColorRole.WindowText)
+        self.default_color = self.vacuum_buffer_back.style().standardPalette().color(QtGui.QPalette.ColorRole.WindowText)
 
         self.superuser.clicked.connect(self.super_user_access)
         self.original_button_style = self.superuser.styleSheet()
@@ -637,7 +666,9 @@ class Ui_Pumps_Vacuum(object):
         else:
             self.temp_ll.display(round(value, 2))
 
-    def update_target_temperature_cryo(self, ):
+    def update_target_temperature_cryo(
+        self,
+    ):
         """
         Update the temperature value of the cryo head
         Args:
@@ -656,9 +687,7 @@ class Ui_Pumps_Vacuum(object):
         else:
             if not self.variables.set_temperature_flag_cryo:
                 self.variables.set_temperature_flag_cryo = True
-                self.set_temperature_cryo.setStyleSheet("QPushButton{\n"
-                                                        "background: rgb(0, 255, 26)\n"
-                                                        "}")
+                self.set_temperature_cryo.setStyleSheet("QPushButton{\nbackground: rgb(0, 255, 26)\n}")
                 self.variables.set_temperature_cryo = self.target_tempreature_cryo.value()
             elif self.variables.set_temperature_flag_cryo:
                 self.variables.set_temperature_flag_cryo = False
@@ -684,9 +713,7 @@ class Ui_Pumps_Vacuum(object):
                 self.ll_baking_time.setEnabled(False)
                 self.target_tempreature_ll.setEnabled(False)
                 self.variables.set_temperature_flag_ll = True
-                self.set_temperature_ll.setStyleSheet("QPushButton{\n"
-                                                      "background: rgb(0, 255, 26)\n"
-                                                      "}")
+                self.set_temperature_ll.setStyleSheet("QPushButton{\nbackground: rgb(0, 255, 26)\n}")
                 self.variables.set_temperature_ll = self.target_tempreature_ll.value()
                 # Start the timer for baking which is min * 60000
                 self.baking_timer.start(int(self.ll_baking_time.text()) * 60000)
@@ -728,8 +755,7 @@ class Ui_Pumps_Vacuum(object):
         self._update_gauge(self.vacuum_cryo_load_lock, self.label_216, value, 'vacuum_threshold_cryo_load_lock')
 
     def update_vacuum_cryo_load_lock_back(self, value):
-        self._update_gauge(self.vacuum_cryo_load_lock_back, self.label_217, value,
-                           'vacuum_threshold_cryo_load_lock_back')
+        self._update_gauge(self.vacuum_cryo_load_lock_back, self.label_217, value, 'vacuum_threshold_cryo_load_lock_back')
 
     def super_user_access(self):
         """
@@ -747,18 +773,14 @@ class Ui_Pumps_Vacuum(object):
             warning.setWindowTitle("Confirm Access Override")
             warning.setText("Pump and vacuum override can bypass safety interlocks.")
             warning.setInformativeText("Only continue if you really want to override access.")
-            warning.setStandardButtons(
-                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
-            )
+            warning.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No)
             warning.setDefaultButton(QtWidgets.QMessageBox.StandardButton.No)
             if warning.exec() != QtWidgets.QMessageBox.StandardButton.Yes:
                 self.error_message("Override Access canceled.")
                 self.timer.start(8000)
                 return
             self.flag_super_user = True
-            self.superuser.setStyleSheet("QPushButton{\n"
-                                         "background: rgb(0, 255, 26)\n"
-                                         "}")
+            self.superuser.setStyleSheet("QPushButton{\nbackground: rgb(0, 255, 26)\n}")
             self.error_message("!!! Override Access Granted !!!")
         elif self.flag_super_user:
             self.flag_super_user = False
@@ -777,9 +799,9 @@ class Ui_Pumps_Vacuum(object):
         """
         # Hide the message and stop the timer
         _translate = QtCore.QCoreApplication.translate
-        self.Error.setText(_translate("OXCART",
-                                      "<html><head/><body><p><span style=\" "
-                                      "color:#ff0000;\"></span></p></body></html>"))
+        self.Error.setText(
+            _translate("OXCART", "<html><head/><body><p><span style=\" color:#ff0000;\"></span></p></body></html>")
+        )
 
         self.timer.stop()
 
@@ -793,8 +815,12 @@ class Ui_Pumps_Vacuum(object):
                 None
         """
         try:
-            if self.flag_super_user or (not self.variables.start_flag and not self.variables.flag_main_gate \
-                                        and not self.variables.flag_cryo_gate and not self.variables.flag_load_gate):
+            if self.flag_super_user or (
+                not self.variables.start_flag
+                and not self.variables.flag_main_gate
+                and not self.variables.flag_cryo_gate
+                and not self.variables.flag_load_gate
+            ):
                 if self.variables.flag_pump_load_lock:
                     self.variables.flag_pump_load_lock_click = True
                     self.led_pump_load_lock.setPixmap(self.led_red)
@@ -830,8 +856,12 @@ class Ui_Pumps_Vacuum(object):
                 None
         """
         try:
-            if self.flag_super_user or (not self.variables.start_flag and not self.variables.flag_main_gate \
-                                        and not self.variables.flag_cryo_gate and not self.variables.flag_load_gate):
+            if self.flag_super_user or (
+                not self.variables.start_flag
+                and not self.variables.flag_main_gate
+                and not self.variables.flag_cryo_gate
+                and not self.variables.flag_load_gate
+            ):
                 if self.variables.flag_pump_cryo_load_lock:
                     self.variables.flag_pump_cryo_load_lock_click = True
                     self.led_pump_cryo_load_lock.setPixmap(self.led_red)
@@ -866,9 +896,11 @@ class Ui_Pumps_Vacuum(object):
                 None
         """
         _translate = QtCore.QCoreApplication.translate
-        self.Error.setText(_translate("OXCART",
-                                      "<html><head/><body><p><span style=\" color:#ff0000;\">"
-                                      + message + "</span></p></body></html>"))
+        self.Error.setText(
+            _translate(
+                "OXCART", "<html><head/><body><p><span style=\" color:#ff0000;\">" + message + "</span></p></body></html>"
+            )
+        )
 
     def stop(self):
         """
@@ -906,6 +938,7 @@ class PumpsVacuumWindow(QtWidgets.QWidget):
     """
     Widget for Pumps and Vacuum control window.
     """
+
     closed = QtCore.pyqtSignal()  # Define a custom closed signal
 
     def __init__(self, gui_pumps_vacuum, signal_emitter, *args, **kwargs):
@@ -924,10 +957,10 @@ class PumpsVacuumWindow(QtWidgets.QWidget):
 
     def closeEvent(self, event):
         """
-            Close event for the window.
+        Close event for the window.
 
-            Args:
-                event: Close event.
+        Args:
+            event: Close event.
         """
         if getattr(self, "force_close", False):
             event.accept()
@@ -958,4 +991,3 @@ if __name__ == "__main__":
     ui.setupUi(Pumps_vacuum)
     Pumps_vacuum.show()
     sys.exit(app.exec())
-

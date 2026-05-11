@@ -109,8 +109,7 @@ def _surface_concept_pulse_column(tdc_frame: pd.DataFrame, pulse_mode: str) -> s
         if column in tdc_frame.columns:
             return column
     raise ValueError(
-        f"Surface Concept tdc frame is missing the pulse column required for pulse_mode={pulse_mode!r}. "
-        f"Tried: {candidates}."
+        f"Surface Concept tdc frame is missing the pulse column required for pulse_mode={pulse_mode!r}. Tried: {candidates}."
     )
 
 
@@ -246,9 +245,16 @@ def extract_surface_concept_hits(
     hit_table = recovered.rename(columns={'accepted': 'in_detector'})
     hit_table['recovery'] = hit_table['dlts'].astype(int).astype(str) + ' DLTS'
     keep_columns = [
-        'start_counter', 'high_voltage (V)', 'pulse',
-        'tof (ns)', 'x_det (cm)', 'y_det (cm)',
-        'dlts', 'detector_axis', 'recovery', 'in_detector',
+        'start_counter',
+        'high_voltage (V)',
+        'pulse',
+        'tof (ns)',
+        'x_det (cm)',
+        'y_det (cm)',
+        'dlts',
+        'detector_axis',
+        'recovery',
+        'in_detector',
     ]
     if 'parent_pulse_length' in hit_table.columns:
         keep_columns.append('parent_pulse_length')
@@ -292,20 +298,17 @@ def plot_surface_concept_recovery_summary(recovery_stats: dict[str, int]) -> plt
     return fig
 
 
-def build_surface_concept_recovery_diagnostics(
-    sequence_records: list[dict],
-    *,
-    detector_limit_cm: float = 4.0,
-    show_progress: bool = False,
-) -> pd.DataFrame:
-    """Build a per-candidate recovery table for advanced Surface Concept diagnostics."""
-    rows = []
-    records_iter = enumerate(sequence_records)
-    if show_progress:
-        records_iter = enumerate(
-            tqdm(sequence_records, desc='Recovering Surface Concept hits', unit='sequence')
-        )
-    for sequence_index, record in records_iter:
+def _build_diagnostics_batch(args: tuple) -> list[dict]:
+    """Process one batch of sequence records for ``build_surface_concept_recovery_diagnostics``.
+
+    Defined at module level (not nested) so the ProcessPoolExecutor spawn
+    workers can import and call it. ``args`` is a tuple to keep the worker
+    signature single-arg, which lets us drive it with ``parallel_map``.
+    """
+    records, start_index, detector_limit_cm = args
+    rows: list[dict] = []
+    for offset, record in enumerate(records):
+        sequence_index = start_index + offset
         channel_array = np.asarray(record.get('channels', []), dtype=np.int64)
         time_array = np.asarray(record.get('time_data', []), dtype=np.int64)
         length = len(channel_array)
@@ -326,8 +329,6 @@ def build_surface_concept_recovery_diagnostics(
             if is_valid:
                 det_x, det_y, tof = _surface_concept_hit_from_time_data(chunk_times)
                 radius = float(np.hypot(det_x, det_y))
-                # 4-DLTS hit: BOTH coordinates are reconstructed, so both must
-                # be within the physical detector.
                 in_detector = abs(det_x) <= detector_limit_cm and abs(det_y) <= detector_limit_cm
                 rows.append(
                     {
@@ -375,10 +376,6 @@ def build_surface_concept_recovery_diagnostics(
                 det_x = float(partial_hit['x_det (cm)'])
                 det_y = float(partial_hit['y_det (cm)'])
                 axis = str(partial_hit['detector_axis'])
-                # 2-DLTS hit: only the *recoverable* axis was measured; the
-                # other coordinate is set to 0.0 by the recovery routine and
-                # carries no information. So the detector-area check here
-                # only validates the reconstructed axis.
                 if axis == 'x':
                     in_detector = abs(det_x) <= detector_limit_cm
                 elif axis == 'y':
@@ -403,6 +400,63 @@ def build_surface_concept_recovery_diagnostics(
                         'status': '2 DLTS in detector' if in_detector else '2 DLTS outside detector',
                     }
                 )
+    return rows
+
+
+def build_surface_concept_recovery_diagnostics(
+    sequence_records: list[dict],
+    *,
+    detector_limit_cm: float = 4.0,
+    show_progress: bool = False,
+) -> pd.DataFrame:
+    """Build a per-candidate recovery table for advanced Surface Concept diagnostics.
+
+    The per-record work is pure Python (dict construction, classification),
+    so we farm batches of records to a ProcessPool via :func:`parallel_map`
+    (``gil_releasing=False``). Below the auto-serial threshold, this is the
+    same in-process loop as before; for >=200 records the wall-clock drops
+    proportionally to ``PYCCAPT_PARALLEL_WORKERS``.
+    """
+    from pyccapt.calibration.core.parallel import ParallelConfig, parallel_map
+
+    n_records = len(sequence_records)
+    if n_records == 0:
+        return pd.DataFrame()
+
+    # Measured break-even: ProcessPool only beats serial above ~500 k records
+    # for this data shape (list of dicts of lists). At smaller sizes the
+    # pickle/IPC cost of shipping batches between workers exceeds the inner
+    # compute. Below the threshold we run the worker in-process. The
+    # threshold can be lowered via PYCCAPT_PARALLEL_WORKERS env tweaks when
+    # users have a faster IPC path (e.g. fork on Linux).
+    PROCESS_ENGAGE_THRESHOLD = 500_000
+    if n_records < PROCESS_ENGAGE_THRESHOLD:
+        return pd.DataFrame(_build_diagnostics_batch((sequence_records, 0, detector_limit_cm)))
+
+    batch_size = max(500, n_records // 16)
+    batches: list[tuple] = []
+    for start in range(0, n_records, batch_size):
+        batches.append((sequence_records[start : start + batch_size], start, detector_limit_cm))
+
+    progress = None
+    if show_progress:
+        progress = tqdm(total=n_records, desc='Recovering Surface Concept hits', unit='sequence')
+
+    batch_config = ParallelConfig(min_items=2)
+    batch_results = parallel_map(
+        _build_diagnostics_batch,
+        batches,
+        config=batch_config,
+        gil_releasing=False,
+    )
+
+    rows: list[dict] = []
+    for batch_rows in batch_results:
+        rows.extend(batch_rows)
+        if progress is not None:
+            progress.update(batch_size)
+    if progress is not None:
+        progress.close()
     return pd.DataFrame(rows)
 
 
@@ -576,7 +630,9 @@ def plot_partial_hit_efficiency_maps(recovery_diagnostics: pd.DataFrame) -> plt.
         if subset.empty:
             axis_plot.text(0.5, 0.5, 'No data', ha='center', va='center', transform=axis_plot.transAxes)
         else:
-            positions = subset['x_det (cm)'].to_numpy(dtype=float) if axis_name == 'x' else subset['y_det (cm)'].to_numpy(dtype=float)
+            positions = (
+                subset['x_det (cm)'].to_numpy(dtype=float) if axis_name == 'x' else subset['y_det (cm)'].to_numpy(dtype=float)
+            )
             event_index = subset['sequence_index'].to_numpy(dtype=float)
             accepted = subset['accepted'].to_numpy(dtype=float)
             axis_plot.hexbin(
@@ -633,7 +689,9 @@ def summarize_surface_concept_peak_windows(
     noise_label = 'Noise'
     ordered_labels = [*labels, noise_label]
     if summary.empty:
-        summary = pd.DataFrame({'label': ordered_labels, 'dlts': np.zeros(len(ordered_labels)), 'count': np.zeros(len(ordered_labels))})
+        summary = pd.DataFrame(
+            {'label': ordered_labels, 'dlts': np.zeros(len(ordered_labels)), 'count': np.zeros(len(ordered_labels))}
+        )
 
     def _count_for(label: str, dlts: int) -> int:
         matches = summary[(summary['label'] == label) & (summary['dlts'] == dlts)]
@@ -643,8 +701,12 @@ def summarize_surface_concept_peak_windows(
 
     total_in_detector = int(
         np.count_nonzero(
-            (hit_table['dlts'].isin([2, 4]).to_numpy()) &
-            (hit_table['in_detector'].to_numpy() if 'in_detector' in hit_table.columns else np.ones(len(hit_table), dtype=bool))
+            (hit_table['dlts'].isin([2, 4]).to_numpy())
+            & (
+                hit_table['in_detector'].to_numpy()
+                if 'in_detector' in hit_table.columns
+                else np.ones(len(hit_table), dtype=bool)
+            )
         )
     )
     outside_detector_count = int(
@@ -927,7 +989,8 @@ def plot_peak_chunk_length_distribution(
     # on user input.  20 in × 300 dpi = 6 000 px — comfortably below 65 535.
     height_inches = min(max(2.4 * n_peaks, 3.0), 20.0)
     fig, axes = plt.subplots(
-        n_peaks, 1,
+        n_peaks,
+        1,
         figsize=(8.0, height_inches),
         squeeze=False,
     )
@@ -938,8 +1001,7 @@ def plot_peak_chunk_length_distribution(
         ax = axes[index][0]
         peak = filter_peak_hits(hit_table, window, signal_kind=signal_kind, only_in_detector=only_in_detector)
         if peak.empty:
-            ax.text(0.5, 0.5, "no hits in this peak window",
-                    ha='center', va='center', transform=ax.transAxes, color='gray')
+            ax.text(0.5, 0.5, "no hits in this peak window", ha='center', va='center', transform=ax.transAxes, color='gray')
             ax.set_xlim(0.5, max_length + 0.5)
             ax.set_xticks(centers)
             ax.set_title(f"{window.get('label', f'Peak {index + 1}')}")
@@ -948,13 +1010,13 @@ def plot_peak_chunk_length_distribution(
             continue
 
         partial = peak[peak['dlts'] == 2]['parent_pulse_length'].to_numpy()
-        full    = peak[peak['dlts'] == 4]['parent_pulse_length'].to_numpy()
+        full = peak[peak['dlts'] == 4]['parent_pulse_length'].to_numpy()
         partial_hist = np.histogram(partial, bins=bins)[0]
-        full_hist    = np.histogram(full,    bins=bins)[0]
+        full_hist = np.histogram(full, bins=bins)[0]
 
         w = 0.4
         ax.bar(centers - 0.5 * w, partial_hist, width=w, color=DLTS_COLORS.get(2, '#f59e0b'), label='2 DLTS')
-        ax.bar(centers + 0.5 * w, full_hist,    width=w, color=DLTS_COLORS.get(4, '#1f77b4'), label='4 DLTS')
+        ax.bar(centers + 0.5 * w, full_hist, width=w, color=DLTS_COLORS.get(4, '#1f77b4'), label='4 DLTS')
         ax.set_yscale('log')
         ax.set_xlim(0.5, max_length + 0.5)
         ax.set_xticks(centers)
@@ -1026,7 +1088,8 @@ def _hit_in_detector_axis_aware(det_x: float, det_y: float, axis: str, limit_cm:
 
 
 def _signal_distance_to_nearest_peak(
-    signal_value: float, peak_windows: Sequence[dict] | None,
+    signal_value: float,
+    peak_windows: Sequence[dict] | None,
 ) -> float:
     """Distance from ``signal_value`` to the centre of its closest peak window.
 
@@ -1177,8 +1240,10 @@ def _score_candidate_validity(
     showed only the peak regions, defeating its purpose.
     """
     candidate['in_detector'] = _hit_in_detector_axis_aware(
-        candidate['x_det (cm)'], candidate['y_det (cm)'],
-        candidate['detector_axis'], detector_limit_cm,
+        candidate['x_det (cm)'],
+        candidate['y_det (cm)'],
+        candidate['detector_axis'],
+        detector_limit_cm,
     )
     tof_value = candidate.get('tof (ns)')
     if tof_value is None or not np.isfinite(tof_value):
@@ -1193,15 +1258,11 @@ def _score_candidate_validity(
         candidate['signal_distance'] = float('inf')
     else:
         candidate['in_peak'] = _signal_in_any_window(float(signal_value), peak_windows)
-        candidate['signal_distance'] = _signal_distance_to_nearest_peak(
-            float(signal_value), peak_windows
-        )
+        candidate['signal_distance'] = _signal_distance_to_nearest_peak(float(signal_value), peak_windows)
 
     # Validity for SELECTION = geometric only. Peak windows are applied
     # later, by the peak-yield helpers, against the full hit table.
-    candidate['valid'] = bool(
-        candidate['in_detector'] and candidate['in_tof_range']
-    )
+    candidate['valid'] = bool(candidate['in_detector'] and candidate['in_tof_range'])
 
 
 def _select_max_disjoint_greedy(candidates: list[dict]) -> list[dict]:
@@ -1292,15 +1353,14 @@ def _select_hits_two_stage(
     decomposition is considered, which is what the user asked for.
     """
     completes = [c for c in valid_candidates if int(c.get('dlts', 0)) == 4]
-    partials  = [c for c in valid_candidates if int(c.get('dlts', 0)) != 4]
+    partials = [c for c in valid_candidates if int(c.get('dlts', 0)) != 4]
 
-    selector = (_select_max_disjoint_exhaustive
-                if str(mode).lower() == 'exhaustive'
-                else _select_max_disjoint_greedy)
+    selector = _select_max_disjoint_exhaustive if str(mode).lower() == 'exhaustive' else _select_max_disjoint_greedy
 
     if str(mode).lower() == 'exhaustive':
         chosen_completes = _select_max_disjoint_exhaustive(
-            completes, max_candidates=exhaustive_max_candidates,
+            completes,
+            max_candidates=exhaustive_max_candidates,
         )
     else:
         chosen_completes = _select_max_disjoint_greedy(completes)
@@ -1309,12 +1369,11 @@ def _select_hits_two_stage(
     if chosen_completes:
         used = frozenset().union(*(c['used_indices'] for c in chosen_completes))
 
-    available_partials = [
-        p for p in partials if p['used_indices'].isdisjoint(used)
-    ]
+    available_partials = [p for p in partials if p['used_indices'].isdisjoint(used)]
     if str(mode).lower() == 'exhaustive':
         chosen_partials = _select_max_disjoint_exhaustive(
-            available_partials, max_candidates=exhaustive_max_candidates,
+            available_partials,
+            max_candidates=exhaustive_max_candidates,
         )
     else:
         chosen_partials = _select_max_disjoint_greedy(available_partials)
@@ -1326,6 +1385,7 @@ def _select_hits_two_stage(
 # under their previous names so any direct callers (and the existing tests)
 # continue to work, but they now route through the two-stage logic so the
 # completes-first contract is uniform across modes.
+
 
 def _select_hits_greedy(valid_candidates: list[dict]) -> list[dict]:
     return _select_hits_two_stage(valid_candidates, mode='greedy')
@@ -1364,9 +1424,14 @@ def _compute_mc_for_candidates(
     voltage = np.full(n, float(high_voltage))
     pulse_arr = np.full(n, float(pulse_v)) if pulse_mode == 'voltage' else np.zeros(n)
     mc_values = mc_tools.tof2mc(
-        t=tof, t0=t0, V=voltage, xDet=x, yDet=y,
+        t=tof,
+        t0=t0,
+        V=voltage,
+        xDet=x,
+        yDet=y,
         flightPathLength=flight_path_length_mm,
-        V_pulse=pulse_arr, mode=pulse_mode,
+        V_pulse=pulse_arr,
+        mode=pulse_mode,
     )
     for candidate, mc_value in zip(candidates, mc_values):
         candidate['mc (Da)'] = float(mc_value)
@@ -1412,19 +1477,32 @@ def extract_valid_hits_combinatorial(
     pulse_length = int(channels.size)
 
     complete_candidates = _generate_complete_candidates(
-        channels, times,
+        channels,
+        times,
         xy_factor=xy_factor,
         xy_bin_shift=xy_bin_shift,
         tof_factor_4d=tof_factor_4d,
         pair_sum_tolerance_bins=pair_sum_tolerance_bins,
     )
     partial_x = _generate_partial_candidates_for_axis(
-        channels, times, 'x', 0, 1,
-        xy_factor=xy_factor, xy_bin_shift=xy_bin_shift, tof_factor_2d=tof_factor_2d,
+        channels,
+        times,
+        'x',
+        0,
+        1,
+        xy_factor=xy_factor,
+        xy_bin_shift=xy_bin_shift,
+        tof_factor_2d=tof_factor_2d,
     )
     partial_y = _generate_partial_candidates_for_axis(
-        channels, times, 'y', 2, 3,
-        xy_factor=xy_factor, xy_bin_shift=xy_bin_shift, tof_factor_2d=tof_factor_2d,
+        channels,
+        times,
+        'y',
+        2,
+        3,
+        xy_factor=xy_factor,
+        xy_bin_shift=xy_bin_shift,
+        tof_factor_2d=tof_factor_2d,
     )
     all_candidates = complete_candidates + partial_x + partial_y
 
@@ -1434,9 +1512,11 @@ def extract_valid_hits_combinatorial(
     # processed dataframe without a missing-column error.
     _compute_mc_for_candidates(
         all_candidates,
-        high_voltage=high_voltage, pulse_v=pulse_v,
+        high_voltage=high_voltage,
+        pulse_v=pulse_v,
         flight_path_length_mm=flight_path_length_mm,
-        pulse_mode=pulse_mode, t0=t0,
+        pulse_mode=pulse_mode,
+        t0=t0,
     )
 
     for candidate in all_candidates:
@@ -1503,9 +1583,7 @@ def analyze_surface_concept_tdc_frame_combinatorial(
     required = {'start_counter', 'channel', 'time_data', 'high_voltage (V)'}
     missing = required.difference(df_tdc.columns)
     if missing:
-        raise ValueError(
-            f"Surface Concept tdc frame is missing required columns: {sorted(missing)}"
-        )
+        raise ValueError(f"Surface Concept tdc frame is missing required columns: {sorted(missing)}")
 
     pulse_column = _surface_concept_pulse_column(df_tdc, pulse_mode)
     sequence_records = raw_data_surface_concept.find_consecutive_sequences(
@@ -1565,12 +1643,26 @@ def analyze_surface_concept_tdc_frame_combinatorial(
             for hit in emitted
         )
 
-    hit_table = pd.DataFrame(rows) if rows else pd.DataFrame(
-        columns=[
-            'start_counter', 'high_voltage (V)', 'pulse', 'tof (ns)', 'mc (Da)',
-            'x_det (cm)', 'y_det (cm)', 'dlts', 'detector_axis', 'recovery',
-            'in_detector', 'in_peak', 'parent_pulse_length',
-        ]
+    hit_table = (
+        pd.DataFrame(rows)
+        if rows
+        else pd.DataFrame(
+            columns=[
+                'start_counter',
+                'high_voltage (V)',
+                'pulse',
+                'tof (ns)',
+                'mc (Da)',
+                'x_det (cm)',
+                'y_det (cm)',
+                'dlts',
+                'detector_axis',
+                'recovery',
+                'in_detector',
+                'in_peak',
+                'parent_pulse_length',
+            ]
+        )
     )
 
     return {
@@ -1620,7 +1712,8 @@ def plot_peak_detector_diagnostics(
     # conservative; the cap further bounds the worst case.
     height_inches = min(max(3.0 * n_peaks, 3.4), 24.0)
     fig, axes = plt.subplots(
-        n_peaks, 3,
+        n_peaks,
+        3,
         figsize=(11.0, height_inches),
         squeeze=False,
     )
@@ -1635,8 +1728,7 @@ def plot_peak_detector_diagnostics(
 
         if peak.empty:
             for ax in (ax_2d, ax_x, ax_y):
-                ax.text(0.5, 0.5, "no hits", ha='center', va='center',
-                        transform=ax.transAxes, color='gray')
+                ax.text(0.5, 0.5, "no hits", ha='center', va='center', transform=ax.transAxes, color='gray')
             ax_2d.set_title(f"{peak_label}: 2D FDM")
             ax_x.set_title(f"{peak_label}: x distribution")
             ax_y.set_title(f"{peak_label}: y distribution")
@@ -1664,11 +1756,13 @@ def plot_peak_detector_diagnostics(
 
         # 1D x distribution: 4-DLTS hits + 2-DLTS x-axis partials.
         if not full_hits.empty:
-            ax_x.hist(full_hits['x_det (cm)'].to_numpy(), bins=edges,
-                      color=DLTS_COLORS.get(4, '#1f77b4'), alpha=0.6, label=label_4)
+            ax_x.hist(
+                full_hits['x_det (cm)'].to_numpy(), bins=edges, color=DLTS_COLORS.get(4, '#1f77b4'), alpha=0.6, label=label_4
+            )
         if not partial_x.empty:
-            ax_x.hist(partial_x['x_det (cm)'].to_numpy(), bins=edges,
-                      color=DLTS_COLORS.get(2, '#f59e0b'), alpha=0.6, label=label_2)
+            ax_x.hist(
+                partial_x['x_det (cm)'].to_numpy(), bins=edges, color=DLTS_COLORS.get(2, '#f59e0b'), alpha=0.6, label=label_2
+            )
         ax_x.set_yscale('log')
         ax_x.set_xlim(-detector_limit_cm, detector_limit_cm)
         ax_x.set_xlabel('x_det (cm)')
@@ -1679,11 +1773,13 @@ def plot_peak_detector_diagnostics(
 
         # 1D y distribution: 4-DLTS hits + 2-DLTS y-axis partials.
         if not full_hits.empty:
-            ax_y.hist(full_hits['y_det (cm)'].to_numpy(), bins=edges,
-                      color=DLTS_COLORS.get(4, '#1f77b4'), alpha=0.6, label=label_4)
+            ax_y.hist(
+                full_hits['y_det (cm)'].to_numpy(), bins=edges, color=DLTS_COLORS.get(4, '#1f77b4'), alpha=0.6, label=label_4
+            )
         if not partial_y.empty:
-            ax_y.hist(partial_y['y_det (cm)'].to_numpy(), bins=edges,
-                      color=DLTS_COLORS.get(2, '#f59e0b'), alpha=0.6, label=label_2)
+            ax_y.hist(
+                partial_y['y_det (cm)'].to_numpy(), bins=edges, color=DLTS_COLORS.get(2, '#f59e0b'), alpha=0.6, label=label_2
+            )
         ax_y.set_yscale('log')
         ax_y.set_xlim(-detector_limit_cm, detector_limit_cm)
         ax_y.set_xlabel('y_det (cm)')

@@ -48,9 +48,7 @@ def _normalize_epos_calibration_dataframe(epos: pd.DataFrame | str | Path) -> pd
     return normalized
 
 
-def _find_rhit_anchor_for_epos_start(
-    hits: pd.DataFrame, epos: pd.DataFrame, sample_size: int = 200
-) -> int:
+def _find_rhit_anchor_for_epos_start(hits: pd.DataFrame, epos: pd.DataFrame, sample_size: int = 200) -> int:
     """Locate the RHIT index where the EPOS file appears to begin.
 
     The MATLAB ``rhitCalibrateFromEpos`` assumes ``epos[0]`` ↔ ``hits[0]``, but
@@ -223,21 +221,37 @@ def _adaptive_match(
             continue
         seen.add(key)
         matched_epos, matched_rhit = _chunked_match_events(
-            hits, epos, trial_icf, vdc_tol=vdc_tol, det_tol=det_tol,
-            rhit_anchor=rhit_anchor, verbose=verbose,
+            hits,
+            epos,
+            trial_icf,
+            vdc_tol=vdc_tol,
+            det_tol=det_tol,
+            rhit_anchor=rhit_anchor,
+            verbose=verbose,
         )
         if len(matched_epos) >= min_matches:
-            return matched_epos, matched_rhit, {
-                "icf": trial_icf, "vdc_tol": vdc_tol, "det_tol": det_tol,
-                "rhit_anchor": rhit_anchor,
-            }
+            return (
+                matched_epos,
+                matched_rhit,
+                {
+                    "icf": trial_icf,
+                    "vdc_tol": vdc_tol,
+                    "det_tol": det_tol,
+                    "rhit_anchor": rhit_anchor,
+                },
+            )
 
-    matched_epos, matched_rhit = _chunked_match_events(
-        hits, epos, icf, rhit_anchor=rhit_anchor, verbose=False
+    matched_epos, matched_rhit = _chunked_match_events(hits, epos, icf, rhit_anchor=rhit_anchor, verbose=False)
+    return (
+        matched_epos,
+        matched_rhit,
+        {
+            "icf": icf,
+            "vdc_tol": 0.1,
+            "det_tol": 0.2,
+            "rhit_anchor": rhit_anchor,
+        },
     )
-    return matched_epos, matched_rhit, {
-        "icf": icf, "vdc_tol": 0.1, "det_tol": 0.2, "rhit_anchor": rhit_anchor,
-    }
 
 
 def rhit_apply_calibration(hits: pd.DataFrame, calibration: dict[str, Any]) -> pd.DataFrame:
@@ -278,9 +292,12 @@ def _calibrate_via_event_match(
         if verbose:
             print("  Anchor-based matching short on hits; retrying with rhit_anchor=0")
         fallback = _adaptive_match(
-            hits_df, epos_df,
+            hits_df,
+            epos_df,
             _estimate_icf(hits_df, epos_df, verbose=False, rhit_offset=0),
-            rhit_anchor=0, min_matches=50, verbose=verbose,
+            rhit_anchor=0,
+            min_matches=50,
+            verbose=verbose,
         )
         if len(fallback[0]) > len(matched_epos):
             matched_epos, matched_rhit, used_tols = fallback
@@ -327,9 +344,7 @@ def _calibrate_via_event_match(
     }
 
 
-def _seed_constants_from_metadata(
-    hits_df: pd.DataFrame, metadata: dict[str, Any]
-) -> tuple[float, float, float, float]:
+def _seed_constants_from_metadata(hits_df: pd.DataFrame, metadata: dict[str, Any]) -> tuple[float, float, float, float]:
     """Return (flight_path_m, t0_meta_ns, kf_seed, base_C0) from metadata."""
     instrument_params = metadata.get("instrumentParams", {}) if metadata else {}
     flight_path_m = float(instrument_params.get("flight_path_mm", DEFAULT_FLIGHT_PATH_M * 1000.0)) / 1000.0
@@ -434,8 +449,9 @@ def _spectrum_match_two_stage(
         return -float(corr)
 
     best_stage1 = (np.inf, np.array([t0_meta, base_c0], dtype=float))
-    t0_seeds = np.array([t0_meta - 20.0, t0_meta - 5.0, t0_meta - 1.0, t0_meta,
-                         t0_meta + 1.0, t0_meta + 5.0, t0_meta + 20.0], dtype=float)
+    t0_seeds = np.array(
+        [t0_meta - 20.0, t0_meta - 5.0, t0_meta - 1.0, t0_meta, t0_meta + 1.0, t0_meta + 5.0, t0_meta + 20.0], dtype=float
+    )
     c0_seeds = np.array([0.5 * base_c0, base_c0, 2.0 * base_c0], dtype=float)
     if verbose:
         print(f"  Stage 1: t0+C0 only, seeds {len(t0_seeds)} x {len(c0_seeds)}")
@@ -451,7 +467,7 @@ def _spectrum_match_two_stage(
                 best_stage1 = (float(result.fun), np.asarray(result.x, dtype=float))
                 if verbose:
                     print(
-                        f"    t0={t0_seed:.2f}, C0_factor={c0_seed/base_c0:.2f} -> "
+                        f"    t0={t0_seed:.2f}, C0_factor={c0_seed / base_c0:.2f} -> "
                         f"corr={-result.fun:.4f}, t_offset={result.x[0]:.3f}, C0={result.x[1]:.3e}"
                     )
 
@@ -462,12 +478,15 @@ def _spectrum_match_two_stage(
             print(f"  Stage 2: refining bowl (C1, C2) from Stage 1 optimum")
         for c1_seed_factor in (0.0, 0.05, -0.05):
             for c2_seed_factor in (0.0, 0.05, -0.05):
-                x0 = np.array([
-                    stage1_t,
-                    stage1_c0,
-                    c1_seed_factor * bowl_scale_c1,
-                    c2_seed_factor * bowl_scale_c2,
-                ], dtype=float)
+                x0 = np.array(
+                    [
+                        stage1_t,
+                        stage1_c0,
+                        c1_seed_factor * bowl_scale_c1,
+                        c2_seed_factor * bowl_scale_c2,
+                    ],
+                    dtype=float,
+                )
                 result = minimize(
                     _cost_stage2,
                     x0,
@@ -521,10 +540,7 @@ def _calibrate_via_spectrum_match(
     detx_sub = hits_df["detx"].to_numpy(dtype=float)[::stride]
     dety_sub = hits_df["dety"].to_numpy(dtype=float)[::stride]
     radius_sq_sub = detx_sub * detx_sub + dety_sub * dety_sub
-    finite_mask = (
-        np.isfinite(tof_sub) & np.isfinite(vdc_sub)
-        & np.isfinite(detx_sub) & np.isfinite(dety_sub)
-    )
+    finite_mask = np.isfinite(tof_sub) & np.isfinite(vdc_sub) & np.isfinite(detx_sub) & np.isfinite(dety_sub)
     tof_sub = tof_sub[finite_mask]
     vdc_sub = vdc_sub[finite_mask]
     radius_sq_sub = radius_sq_sub[finite_mask]
@@ -539,8 +555,7 @@ def _calibrate_via_spectrum_match(
             f"({n_reference_samples:,} samples, bin width {bin_width:.3f} Da)"
         )
         print(
-            f"  Seed: flight_path={flight_path_m*1000:.1f} mm, "
-            f"t0={t0_meta:.2f} ns, kf={kf_seed:.4f}, base C0={base_c0:.3e}"
+            f"  Seed: flight_path={flight_path_m * 1000:.1f} mm, t0={t0_meta:.2f} ns, kf={kf_seed:.4f}, base C0={base_c0:.3e}"
         )
 
     parameters, best_cost = _spectrum_match_two_stage(
@@ -679,18 +694,11 @@ def rhit_calibrate_from_epos(
     if method == "event_match":
         calibration = _calibrate_via_event_match(hits_df, epos_df, verbose=verbose)
     elif method == "spectrum_match":
-        calibration = _calibrate_via_spectrum_match(
-            hits_df, epos_df, metadata=metadata or {}, verbose=verbose
-        )
+        calibration = _calibrate_via_spectrum_match(hits_df, epos_df, metadata=metadata or {}, verbose=verbose)
     elif method == "pmass_match":
-        calibration = _calibrate_via_pmass_match(
-            hits_df, rhit_histograms or {}, metadata=metadata or {}, verbose=verbose
-        )
+        calibration = _calibrate_via_pmass_match(hits_df, rhit_histograms or {}, metadata=metadata or {}, verbose=verbose)
     else:
-        raise ValueError(
-            f"Unknown calibration method {method!r}. "
-            f"Use 'spectrum_match', 'pmass_match', or 'event_match'."
-        )
+        raise ValueError(f"Unknown calibration method {method!r}. Use 'spectrum_match', 'pmass_match', or 'event_match'.")
 
     calibrated_hits = rhit_apply_calibration(hits_df, calibration)
     return calibrated_hits, calibration

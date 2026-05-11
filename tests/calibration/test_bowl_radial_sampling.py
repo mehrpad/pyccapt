@@ -19,10 +19,10 @@ def _sample_uniform_disk(rng, n_points, radius_mm):
 def test_bowl_correction_uses_radial_model_with_polar_sampling():
     rng = np.random.default_rng(7)
     x_mm, y_mm = _sample_uniform_disk(rng, n_points=5000, radius_mm=20.0)
-    r2 = x_mm ** 2 + y_mm ** 2
+    r2 = x_mm**2 + y_mm**2
 
     peak_location = 25.0
-    true_factor = 1.0 + 2.0e-4 * r2 + 2.0e-7 * (r2 ** 2)
+    true_factor = 1.0 + 2.0e-4 * r2 + 2.0e-7 * (r2**2)
     dld_t = peak_location * true_factor + rng.normal(0.0, 0.02, size=len(r2))
 
     model = calibration.bowl_correction(
@@ -53,7 +53,7 @@ def test_bowl_correction_uses_radial_model_with_polar_sampling():
 def test_bowl_correction_supports_cartesian_override():
     rng = np.random.default_rng(9)
     x_mm, y_mm = _sample_uniform_disk(rng, n_points=2500, radius_mm=20.0)
-    r2 = x_mm ** 2 + y_mm ** 2
+    r2 = x_mm**2 + y_mm**2
     peak_location = 25.0
     true_factor = 1.0 + 2.0e-4 * r2
     dld_t = peak_location * true_factor + rng.normal(0.0, 0.03, size=len(r2))
@@ -79,5 +79,3 @@ def test_bowl_correction_supports_cartesian_override():
     # Cartesian mode keeps the legacy polynomial surface model (6 coefficients).
     assert not isinstance(model, dict)
     assert len(model) == 6
-
-

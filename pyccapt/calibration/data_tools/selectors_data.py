@@ -24,8 +24,8 @@ class CircleSelector(RectangleSelector):
         x0, x1, y0, y1 = extents
         xmin, xmax = sorted([x0, x1])
         ymin, ymax = sorted([y0, y1])
-        center = [x0 + (x1 - x0) / 2., y0 + (y1 - y0) / 2.]
-        radius = min((xmax - xmin) / 2., (ymax - ymin) / 2.)
+        center = [x0 + (x1 - x0) / 2.0, y0 + (y1 - y0) / 2.0]
+        radius = min((xmax - xmin) / 2.0, (ymax - ymin) / 2.0)
 
         self._selection_artist.center = center
         self._selection_artist.radius = radius
@@ -35,6 +35,7 @@ class CircleSelector(RectangleSelector):
         x, y = self._selection_artist.center
         radius = self._selection_artist.radius
         return x - radius, y - radius, 2 * radius, 2 * radius
+
 
 def onselect(eclick, erelease, variables):
     """
@@ -55,6 +56,7 @@ def onselect(eclick, erelease, variables):
     variables.selected_x_fdm = x0 + (x1 - x0) / 2
     variables.selected_y_fdm = y0 + (y1 - y0) / 2
     variables.roi_fdm = min(x1 - x0, y1 - y0) / 2
+
 
 def line_select_callback(eclick, erelease, variables):
     """
@@ -79,7 +81,9 @@ def line_select_callback(eclick, erelease, variables):
     variables.selected_calculated = False
 
 
-def toggle_selector(event,):
+def toggle_selector(
+    event,
+):
     """
     Toggles the rectangle selector based on the key press event.
 

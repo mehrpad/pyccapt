@@ -4,6 +4,7 @@ These tests deliberately avoid invoking matplotlib pipelines: they cover the
 pure data plumbing (detector detection, species extraction from a range
 table, save_data with save_range, and the bundled load helper).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -68,13 +69,15 @@ def test_delay_line_pairs():
 
 
 def test_species_from_range_skips_unranged_and_invalid():
-    range_df = pd.DataFrame({
-        "name": ["Al", "unranged0", "Cr", "bad"],
-        "ion": ["$Al^+$", "un", "$Cr^+$", "X"],
-        "mc_low": [26.78, 0.0, 51.79, 5.0],
-        "mc_up":  [27.18, 400.0, 52.19, 4.0],   # last row: invalid (up <= low)
-        "color":  ["#aaa", "#000", "#bbb", "#ccc"],
-    })
+    range_df = pd.DataFrame(
+        {
+            "name": ["Al", "unranged0", "Cr", "bad"],
+            "ion": ["$Al^+$", "un", "$Cr^+$", "X"],
+            "mc_low": [26.78, 0.0, 51.79, 5.0],
+            "mc_up": [27.18, 400.0, 52.19, 4.0],  # last row: invalid (up <= low)
+            "color": ["#aaa", "#000", "#bbb", "#ccc"],
+        }
+    )
     species = helper_auto_raw_analysis.species_from_range(range_df)
     labels = [s["label"] for s in species]
     assert labels == ["Al", "Cr"]
@@ -124,40 +127,44 @@ class _StubVariables:
 
 
 def _make_simple_dld(num_rows: int = 6) -> pd.DataFrame:
-    return pd.DataFrame({
-        "high_voltage (V)": np.linspace(1000.0, 4000.0, num_rows),
-        "pulse_v (V)": np.full(num_rows, 200.0),
-        "pulse_l (pJ)": np.zeros(num_rows),
-        "t (ns)": np.linspace(100.0, 600.0, num_rows),
-        "x_det (cm)": np.linspace(-1.0, 1.0, num_rows),
-        "y_det (cm)": np.linspace(-1.0, 1.0, num_rows),
-        "mc (Da)": np.linspace(20.0, 30.0, num_rows),
-        "mc_uc (Da)": np.linspace(20.0, 30.0, num_rows),
-        "x (nm)": np.zeros(num_rows),
-        "y (nm)": np.zeros(num_rows),
-        "z (nm)": np.zeros(num_rows),
-        "t_c (ns)": np.zeros(num_rows),
-        "delta_p": np.zeros(num_rows, dtype=np.uint32),
-        "multi": np.ones(num_rows, dtype=np.uint32),
-        "start_counter": np.arange(num_rows, dtype=np.uint32),
-    })
+    return pd.DataFrame(
+        {
+            "high_voltage (V)": np.linspace(1000.0, 4000.0, num_rows),
+            "pulse_v (V)": np.full(num_rows, 200.0),
+            "pulse_l (pJ)": np.zeros(num_rows),
+            "t (ns)": np.linspace(100.0, 600.0, num_rows),
+            "x_det (cm)": np.linspace(-1.0, 1.0, num_rows),
+            "y_det (cm)": np.linspace(-1.0, 1.0, num_rows),
+            "mc (Da)": np.linspace(20.0, 30.0, num_rows),
+            "mc_uc (Da)": np.linspace(20.0, 30.0, num_rows),
+            "x (nm)": np.zeros(num_rows),
+            "y (nm)": np.zeros(num_rows),
+            "z (nm)": np.zeros(num_rows),
+            "t_c (ns)": np.zeros(num_rows),
+            "delta_p": np.zeros(num_rows, dtype=np.uint32),
+            "multi": np.ones(num_rows, dtype=np.uint32),
+            "start_counter": np.arange(num_rows, dtype=np.uint32),
+        }
+    )
 
 
 def test_save_data_with_save_range_writes_range_group(tmp_path: Path):
     dld_df = _make_simple_dld()
-    range_df = pd.DataFrame({
-        "name": ["Al", "Cr"],
-        "ion": ["$Al^+$", "$Cr^+$"],
-        "mass": [26.98, 51.99],
-        "mc": [26.98, 51.99],
-        "mc_low": [26.78, 51.79],
-        "mc_up": [27.18, 52.19],
-        "color": ["#aaa", "#bbb"],
-        "element": [["Al"], ["Cr"]],
-        "complex": [[1], [1]],
-        "isotope": [[0], [0]],
-        "charge": [1, 1],
-    })
+    range_df = pd.DataFrame(
+        {
+            "name": ["Al", "Cr"],
+            "ion": ["$Al^+$", "$Cr^+$"],
+            "mass": [26.98, 51.99],
+            "mc": [26.98, 51.99],
+            "mc_low": [26.78, 51.79],
+            "mc_up": [27.18, 52.19],
+            "color": ["#aaa", "#bbb"],
+            "element": [["Al"], ["Cr"]],
+            "complex": [[1], [1]],
+            "isotope": [[0], [0]],
+            "charge": [1, 1],
+        }
+    )
     variables = _StubVariables(tmp_path, name="testset")
     variables.range_data = range_df
 
@@ -186,29 +193,33 @@ def test_save_data_warns_when_save_range_but_table_empty(tmp_path: Path):
 def test_load_calibrated_h5_round_trip_with_tdc_and_range(tmp_path: Path):
     dld_df = _make_simple_dld(num_rows=4)
     dld_df["event_group_id"] = np.array([0, 1, 2, 3], dtype=np.int64)
-    tdc_df = pd.DataFrame({
-        "channel": np.arange(8, dtype=np.uint32) % 4,
-        "start_counter": np.repeat(np.arange(4), 2).astype(np.uint32),
-        "high_voltage (V)": np.full(8, 1500.0),
-        "pulse_v (V)": np.full(8, 200.0),
-        "pulse_l (pJ)": np.zeros(8),
-        "time_data": np.linspace(40.0, 80.0, 8),
-        "event_group_id": np.repeat(np.arange(4), 2).astype(np.int64),
-        "has_dld_match": np.ones(8, dtype=bool),
-    })
-    range_df = pd.DataFrame({
-        "name": ["Al"],
-        "ion": ["$Al^+$"],
-        "mass": [26.98],
-        "mc": [26.98],
-        "mc_low": [26.78],
-        "mc_up": [27.18],
-        "color": ["#aaa"],
-        "element": [["Al"]],
-        "complex": [[1]],
-        "isotope": [[0]],
-        "charge": [1],
-    })
+    tdc_df = pd.DataFrame(
+        {
+            "channel": np.arange(8, dtype=np.uint32) % 4,
+            "start_counter": np.repeat(np.arange(4), 2).astype(np.uint32),
+            "high_voltage (V)": np.full(8, 1500.0),
+            "pulse_v (V)": np.full(8, 200.0),
+            "pulse_l (pJ)": np.zeros(8),
+            "time_data": np.linspace(40.0, 80.0, 8),
+            "event_group_id": np.repeat(np.arange(4), 2).astype(np.int64),
+            "has_dld_match": np.ones(8, dtype=bool),
+        }
+    )
+    range_df = pd.DataFrame(
+        {
+            "name": ["Al"],
+            "ion": ["$Al^+$"],
+            "mass": [26.98],
+            "mc": [26.98],
+            "mc_low": [26.78],
+            "mc_up": [27.18],
+            "color": ["#aaa"],
+            "element": [["Al"]],
+            "complex": [[1]],
+            "isotope": [[0]],
+            "charge": [1],
+        }
+    )
 
     h5_path = tmp_path / "bundled.h5"
     dld_df.to_hdf(h5_path, key="df", mode="w")
@@ -216,9 +227,7 @@ def test_load_calibrated_h5_round_trip_with_tdc_and_range(tmp_path: Path):
     range_df.to_hdf(h5_path, key="range", mode="a")
 
     variables = Variables()
-    loaded_dld, loaded_tdc, loaded_range = helper_data_loader.load_calibrated_h5(
-        str(h5_path), variables
-    )
+    loaded_dld, loaded_tdc, loaded_range = helper_data_loader.load_calibrated_h5(str(h5_path), variables)
 
     assert len(loaded_dld) == 4
     assert loaded_tdc is not None and len(loaded_tdc) == 8
@@ -236,9 +245,7 @@ def test_load_calibrated_h5_works_without_tdc_and_range(tmp_path: Path):
     dld_df.to_hdf(h5_path, key="df", mode="w")
 
     variables = Variables()
-    loaded_dld, loaded_tdc, loaded_range = helper_data_loader.load_calibrated_h5(
-        str(h5_path), variables
-    )
+    loaded_dld, loaded_tdc, loaded_range = helper_data_loader.load_calibrated_h5(str(h5_path), variables)
 
     assert len(loaded_dld) == 3
     assert loaded_tdc is None
@@ -259,15 +266,17 @@ def test_load_calibrated_h5_dispatches_rhit_files_to_leap_loader(tmp_path: Path,
     rhit_path = tmp_path / "R56_09048.RHIT"
     rhit_path.write_bytes(b"placeholder-rhit-bytes-not-actually-root")
 
-    fake_hits = pd.DataFrame({
-        "mc":      [12.0, 27.0, 56.0],
-        "tof":     [200.0, 400.0, 600.0],
-        "VDC":     [4500.0, 4500.0, 4500.0],
-        "detx":    [1.0, -2.0, 0.5],
-        "dety":    [0.5, 1.5, -1.0],
-        "tElapsed": [0.0, 1.0, 2.0],
-        "pulse":   [0.0, 0.0, 0.0],
-    })
+    fake_hits = pd.DataFrame(
+        {
+            "mc": [12.0, 27.0, 56.0],
+            "tof": [200.0, 400.0, 600.0],
+            "VDC": [4500.0, 4500.0, 4500.0],
+            "detx": [1.0, -2.0, 0.5],
+            "dety": [0.5, 1.5, -1.0],
+            "tElapsed": [0.0, 1.0, 2.0],
+            "pulse": [0.0, 0.0, 0.0],
+        }
+    )
 
     rhit_load_calls: list[str] = []
 
@@ -294,12 +303,21 @@ def test_load_calibrated_h5_dispatches_rhit_files_to_leap_loader(tmp_path: Path,
     assert loaded_dld is not None
     assert len(loaded_dld) == 3
     expected_cols = {
-        "x (nm)", "y (nm)", "z (nm)",
-        "mc (Da)", "mc_uc (Da)",
-        "high_voltage (V)", "pulse_v (V)", "pulse_l (pJ)",
-        "t (ns)", "t_c (ns)",
-        "x_det (cm)", "y_det (cm)",
-        "delta_p", "multi", "start_counter",
+        "x (nm)",
+        "y (nm)",
+        "z (nm)",
+        "mc (Da)",
+        "mc_uc (Da)",
+        "high_voltage (V)",
+        "pulse_v (V)",
+        "pulse_l (pJ)",
+        "t (ns)",
+        "t_c (ns)",
+        "x_det (cm)",
+        "y_det (cm)",
+        "delta_p",
+        "multi",
+        "start_counter",
     }
     assert expected_cols.issubset(loaded_dld.columns)
     # Values come straight from the fake hits (with the cm = mm/10 conversion).
@@ -319,9 +337,7 @@ def test_load_calibrated_h5_accepts_show_progress_flag(tmp_path: Path):
     dld_df.to_hdf(h5_path, key="df", mode="w")
 
     variables = Variables()
-    loaded_dld, loaded_tdc, loaded_range = helper_data_loader.load_calibrated_h5(
-        str(h5_path), variables, show_progress=False
-    )
+    loaded_dld, loaded_tdc, loaded_range = helper_data_loader.load_calibrated_h5(str(h5_path), variables, show_progress=False)
 
     assert len(loaded_dld) == 2
     assert loaded_tdc is None
@@ -391,9 +407,7 @@ def test_load_calibrated_h5_falls_back_to_pure_raw_acquisition_layout(tmp_path: 
         tdc_grp.create_dataset("time_data", data=np.linspace(40.0, 80.0, n_tdc).reshape(-1, 1))
 
     variables = Variables()
-    loaded_dld, loaded_tdc, _ = helper_data_loader.load_calibrated_h5(
-        str(h5_path), variables
-    )
+    loaded_dld, loaded_tdc, _ = helper_data_loader.load_calibrated_h5(str(h5_path), variables)
 
     # The /df-style processed schema must exist on the loaded dld.
     assert "mc (Da)" in loaded_dld.columns
@@ -414,15 +428,17 @@ def test_call_auto_raw_data_analysis_renders_single_panel_with_dropdown():
             super().__init__()
 
     variables = _CapturingVariables()
-    variables.data = pd.DataFrame({
-        "mc (Da)": [27.0, 27.05, 27.1],
-        "t (ns)": [400.0, 410.0, 420.0],
-        "x_det (cm)": [0.0, 0.1, -0.1],
-        "y_det (cm)": [0.0, 0.1, -0.1],
-        "delta_p": [0, 1, 2],
-        "multi": [1, 1, 1],
-        "start_counter": [1, 2, 3],
-    })
+    variables.data = pd.DataFrame(
+        {
+            "mc (Da)": [27.0, 27.05, 27.1],
+            "t (ns)": [400.0, 410.0, 420.0],
+            "x_det (cm)": [0.0, 0.1, -0.1],
+            "y_det (cm)": [0.0, 0.1, -0.1],
+            "delta_p": [0, 1, 2],
+            "multi": [1, 1, 1],
+            "start_counter": [1, 2, 3],
+        }
+    )
 
     captured = {}
     real_display = helper_auto_raw_analysis.display
@@ -453,18 +469,16 @@ def test_call_auto_raw_data_analysis_renders_single_panel_with_dropdown():
 
     # Manual rows: a VBox with exactly six child HBoxes.
     manual_grids = [
-        c for c in panel.children
-        if isinstance(c, widgets.VBox) and len(c.children) == 6
-        and all(isinstance(row, widgets.HBox) for row in c.children)
+        c
+        for c in panel.children
+        if isinstance(c, widgets.VBox) and len(c.children) == 6 and all(isinstance(row, widgets.HBox) for row in c.children)
     ]
     assert len(manual_grids) == 1
     manual_grid = manual_grids[0]
 
     def _all_disabled():
         return all(
-            child.children[0].disabled
-            and child.children[1].disabled
-            and child.children[2].disabled
+            child.children[0].disabled and child.children[1].disabled and child.children[2].disabled
             for child in manual_grid.children
         )
 
@@ -487,16 +501,18 @@ def test_run_analysis_saves_plots_beside_dataset(tmp_path: Path):
     dataset_path.touch()
     variables.path = str(dataset_path)
     variables.dataset_name = dataset_path.stem
-    variables.data = pd.DataFrame({
-        "mc (Da)": [27.0, 27.05, 27.1, 52.0],
-        "mc_uc (Da)": [27.0, 27.05, 27.1, 52.0],
-        "t (ns)": [400.0, 410.0, 420.0, 510.0],
-        "x_det (cm)": [0.0, 0.1, -0.1, 0.05],
-        "y_det (cm)": [0.0, 0.1, -0.1, -0.05],
-        "delta_p": [0, 1, 2, 3],
-        "multi": [1, 1, 2, 1],
-        "start_counter": [1, 2, 3, 4],
-    })
+    variables.data = pd.DataFrame(
+        {
+            "mc (Da)": [27.0, 27.05, 27.1, 52.0],
+            "mc_uc (Da)": [27.0, 27.05, 27.1, 52.0],
+            "t (ns)": [400.0, 410.0, 420.0, 510.0],
+            "x_det (cm)": [0.0, 0.1, -0.1, 0.05],
+            "y_det (cm)": [0.0, 0.1, -0.1, -0.05],
+            "delta_p": [0, 1, 2, 3],
+            "multi": [1, 1, 2, 1],
+            "start_counter": [1, 2, 3, 4],
+        }
+    )
     variables.data_tdc = None
 
     species = [{"label": "Al", "mc_low": 26.8, "mc_up": 27.2, "color": "#1f77b4"}]
@@ -575,7 +591,7 @@ def _row(label: str, low: float, high: float):
 def test_species_from_manual_skips_zero_rows_and_keeps_valid_ones():
     rows = [
         _row("Al", 26.78, 27.18),
-        _row("", 0.0, 0.0),                # both zero -> skipped
+        _row("", 0.0, 0.0),  # both zero -> skipped
         _row("Cr", 51.79, 52.19),
     ]
     species = helper_auto_raw_analysis.species_from_manual(rows)
@@ -603,31 +619,35 @@ def test_species_from_manual_rejects_inverted_range():
 
 
 def test_pyccapt_raw_to_processed_carries_event_group_id():
-    raw = pd.DataFrame({
-        "high_voltage (V)": [1000.0, 1100.0],
-        "pulse_v (V)": [200.0, 200.0],
-        "pulse_l (pJ)": [0.0, 0.0],
-        "t (ns)": [400.0, 500.0],
-        "x_det (cm)": [0.5, -0.5],
-        "y_det (cm)": [0.5, -0.5],
-        "start_counter": [11, 12],
-        "event_group_id": [42, 43],
-    })
+    raw = pd.DataFrame(
+        {
+            "high_voltage (V)": [1000.0, 1100.0],
+            "pulse_v (V)": [200.0, 200.0],
+            "pulse_l (pJ)": [0.0, 0.0],
+            "t (ns)": [400.0, 500.0],
+            "x_det (cm)": [0.5, -0.5],
+            "y_det (cm)": [0.5, -0.5],
+            "start_counter": [11, 12],
+            "event_group_id": [42, 43],
+        }
+    )
     processed = data_tools.pyccapt_raw_to_processed(raw)
     assert "event_group_id" in processed.columns
     assert processed["event_group_id"].tolist() == [42, 43]
 
 
 def test_pyccapt_raw_to_processed_omits_event_group_id_when_absent():
-    raw = pd.DataFrame({
-        "high_voltage (V)": [1000.0],
-        "pulse_v (V)": [200.0],
-        "pulse_l (pJ)": [0.0],
-        "t (ns)": [400.0],
-        "x_det (cm)": [0.5],
-        "y_det (cm)": [0.5],
-        "start_counter": [11],
-    })
+    raw = pd.DataFrame(
+        {
+            "high_voltage (V)": [1000.0],
+            "pulse_v (V)": [200.0],
+            "pulse_l (pJ)": [0.0],
+            "t (ns)": [400.0],
+            "x_det (cm)": [0.5],
+            "y_det (cm)": [0.5],
+            "start_counter": [11],
+        }
+    )
     processed = data_tools.pyccapt_raw_to_processed(raw)
     assert "event_group_id" not in processed.columns
 
@@ -642,11 +662,21 @@ def _write_dld_only(h5_path: Path, num_rows: int = 3) -> None:
 
 
 def _write_external_range(range_path: Path) -> None:
-    pd.DataFrame({
-        "name": ["Al"], "ion": ["$Al^+$"], "mass": [26.98], "mc": [26.98],
-        "mc_low": [26.78], "mc_up": [27.18], "color": ["#aaa"],
-        "element": [["Al"]], "complex": [[1]], "isotope": [[0]], "charge": [1],
-    }).to_hdf(range_path, key="df", mode="w")
+    pd.DataFrame(
+        {
+            "name": ["Al"],
+            "ion": ["$Al^+$"],
+            "mass": [26.98],
+            "mc": [26.98],
+            "mc_low": [26.78],
+            "mc_up": [27.18],
+            "color": ["#aaa"],
+            "element": [["Al"]],
+            "complex": [[1]],
+            "isotope": [[0]],
+            "charge": [1],
+        }
+    ).to_hdf(range_path, key="df", mode="w")
 
 
 def test_load_calibrated_h5_uses_explicit_range_path(tmp_path: Path):
@@ -656,9 +686,7 @@ def test_load_calibrated_h5_uses_explicit_range_path(tmp_path: Path):
     _write_external_range(external_range)
 
     variables = Variables()
-    _, _, loaded_range = helper_data_loader.load_calibrated_h5(
-        str(h5_path), variables, range_path=str(external_range)
-    )
+    _, _, loaded_range = helper_data_loader.load_calibrated_h5(str(h5_path), variables, range_path=str(external_range))
     assert loaded_range is not None
     assert list(loaded_range["name"]) == ["Al"]
     assert variables.range_data is not None
@@ -684,21 +712,33 @@ def test_save_data_save_tdc_and_save_range_in_same_call(tmp_path: Path):
     dld_df = _make_simple_dld(num_rows=3)
     dld_df["start_counter"] = dld_sc
     dld_df["event_group_id"] = dld_gid
-    tdc_df = pd.DataFrame({
-        "channel": np.arange(len(tdc_sc), dtype=np.uint32) % 4,
-        "start_counter": tdc_sc.astype(np.uint32),
-        "high_voltage (V)": np.full(len(tdc_sc), 1500.0),
-        "pulse_v (V)": np.full(len(tdc_sc), 200.0),
-        "pulse_l (pJ)": np.zeros(len(tdc_sc)),
-        "time_data": np.linspace(40.0, 80.0, len(tdc_sc)),
-        "event_group_id": tdc_gid,
-        "has_dld_match": has_match,
-    })
-    range_df = pd.DataFrame({
-        "name": ["Al"], "ion": ["$Al^+$"], "mass": [26.98], "mc": [26.98],
-        "mc_low": [26.78], "mc_up": [27.18], "color": ["#aaa"],
-        "element": [["Al"]], "complex": [[1]], "isotope": [[0]], "charge": [1],
-    })
+    tdc_df = pd.DataFrame(
+        {
+            "channel": np.arange(len(tdc_sc), dtype=np.uint32) % 4,
+            "start_counter": tdc_sc.astype(np.uint32),
+            "high_voltage (V)": np.full(len(tdc_sc), 1500.0),
+            "pulse_v (V)": np.full(len(tdc_sc), 200.0),
+            "pulse_l (pJ)": np.zeros(len(tdc_sc)),
+            "time_data": np.linspace(40.0, 80.0, len(tdc_sc)),
+            "event_group_id": tdc_gid,
+            "has_dld_match": has_match,
+        }
+    )
+    range_df = pd.DataFrame(
+        {
+            "name": ["Al"],
+            "ion": ["$Al^+$"],
+            "mass": [26.98],
+            "mc": [26.98],
+            "mc_low": [26.78],
+            "mc_up": [27.18],
+            "color": ["#aaa"],
+            "element": [["Al"]],
+            "complex": [[1]],
+            "isotope": [[0]],
+            "charge": [1],
+        }
+    )
     variables = _StubVariables(tmp_path, name="bundle")
     variables.data_tdc = tdc_df
     variables.range_data = range_df
@@ -719,20 +759,20 @@ def test_save_data_save_tdc_and_save_range_in_same_call(tmp_path: Path):
 def _tdc(rows: list[tuple[int, int]]) -> pd.DataFrame:
     """Helper: build a tdc-style dataframe from (event_group_id, channel) rows."""
     gid, ch = zip(*rows)
-    return pd.DataFrame({
-        "event_group_id": list(gid),
-        "channel": list(ch),
-    })
+    return pd.DataFrame(
+        {
+            "event_group_id": list(gid),
+            "channel": list(ch),
+        }
+    )
 
 
 def test_classify_pulse_chunks_surface_concept_basic_complete():
     """A pulse with channels [0,1,2,3] is one complete (4-DLTS) chunk."""
     tdc = _tdc([(0, 0), (0, 1), (0, 2), (0, 3)])
-    out = helper_auto_raw_analysis._classify_pulse_chunks(
-        tdc, "event_group_id", "surface_concept"
-    )
-    assert out["frequency"].tolist() == [4]      # one pulse, length 4
-    assert out["complete"].tolist() == [4]       # one complete chunk
+    out = helper_auto_raw_analysis._classify_pulse_chunks(tdc, "event_group_id", "surface_concept")
+    assert out["frequency"].tolist() == [4]  # one pulse, length 4
+    assert out["complete"].tolist() == [4]  # one complete chunk
     assert out["midtier"].tolist() == []
     assert out["partial"].tolist() == []
 
@@ -740,9 +780,7 @@ def test_classify_pulse_chunks_surface_concept_basic_complete():
 def test_classify_pulse_chunks_surface_concept_partial_x_only():
     """Channels [0,1,1] — one chunk with only the (0,1) pair → partial."""
     tdc = _tdc([(0, 0), (0, 1), (0, 1)])
-    out = helper_auto_raw_analysis._classify_pulse_chunks(
-        tdc, "event_group_id", "surface_concept"
-    )
+    out = helper_auto_raw_analysis._classify_pulse_chunks(tdc, "event_group_id", "surface_concept")
     assert out["complete"].tolist() == []
     assert out["partial"].tolist() == [3]
 
@@ -752,11 +790,9 @@ def test_classify_pulse_chunks_surface_concept_partial_y_only_no_legacy_bug():
     that silently dropped y-only partials from the orange bar; the new
     chunked classifier must count it correctly."""
     tdc = _tdc([(0, 2), (0, 3), (0, 3)])
-    out = helper_auto_raw_analysis._classify_pulse_chunks(
-        tdc, "event_group_id", "surface_concept"
-    )
+    out = helper_auto_raw_analysis._classify_pulse_chunks(tdc, "event_group_id", "surface_concept")
     assert out["complete"].tolist() == []
-    assert out["partial"].tolist() == [3]   # ← would have been [] under the legacy bug
+    assert out["partial"].tolist() == [3]  # ← would have been [] under the legacy bug
 
 
 def test_classify_pulse_chunks_per_chunk_not_per_pulse():
@@ -771,25 +807,32 @@ def test_classify_pulse_chunks_per_chunk_not_per_pulse():
     So under sort-chunk semantics it contributes 2 entries to the *partial*
     bar at x=8 — not 1, and not in the complete bar.
     """
-    tdc = _tdc([
-        # pulse 0: clean 4-DLTS hit → one complete chunk
-        (0, 0), (0, 1), (0, 2), (0, 3),
-        # pulse 1: length-8 multi-hit
-        (1, 0), (1, 1), (1, 2), (1, 3),
-        (1, 0), (1, 1), (1, 2), (1, 3),
-    ])
-    out = helper_auto_raw_analysis._classify_pulse_chunks(
-        tdc, "event_group_id", "surface_concept"
+    tdc = _tdc(
+        [
+            # pulse 0: clean 4-DLTS hit → one complete chunk
+            (0, 0),
+            (0, 1),
+            (0, 2),
+            (0, 3),
+            # pulse 1: length-8 multi-hit
+            (1, 0),
+            (1, 1),
+            (1, 2),
+            (1, 3),
+            (1, 0),
+            (1, 1),
+            (1, 2),
+            (1, 3),
+        ]
     )
-    assert out["frequency"].tolist() == [4, 8]      # one entry per pulse
+    out = helper_auto_raw_analysis._classify_pulse_chunks(tdc, "event_group_id", "surface_concept")
+    assert out["frequency"].tolist() == [4, 8]  # one entry per pulse
     # Per-chunk: pulse 0 → 1 complete; pulse 1 → 2 partial under sort-chunk.
     assert out["complete"].tolist() == [4]
     assert out["partial"].tolist() == [8, 8]
     # Sanity check: total chunks emitted = 3 (the per-pulse classifier would
     # have emitted at most 2, one per pulse).
-    total_chunks = (
-        len(out["complete"]) + len(out["midtier"]) + len(out["partial"])
-    )
+    total_chunks = len(out["complete"]) + len(out["midtier"]) + len(out["partial"])
     assert total_chunks == 3
 
 
@@ -800,21 +843,17 @@ def test_classify_pulse_chunks_length_two_pair_counts_as_partial():
     deliberately diverge from that — the more permissive interpretation is
     the physics-correct one.)"""
     tdc = _tdc([(0, 0), (0, 1)])
-    out = helper_auto_raw_analysis._classify_pulse_chunks(
-        tdc, "event_group_id", "surface_concept"
-    )
+    out = helper_auto_raw_analysis._classify_pulse_chunks(tdc, "event_group_id", "surface_concept")
     assert out["frequency"].tolist() == [2]
-    assert out["partial"].tolist()   == [2]
-    assert out["complete"].tolist()  == []
+    assert out["partial"].tolist() == [2]
+    assert out["complete"].tolist() == []
 
 
 def test_classify_pulse_chunks_length_two_y_pair_counts_as_partial():
     """Symmetric test: a length-2 SC pulse with channels [2, 3] is also a
     valid 2-DLTS partial (reconstructible in y)."""
     tdc = _tdc([(0, 2), (0, 3)])
-    out = helper_auto_raw_analysis._classify_pulse_chunks(
-        tdc, "event_group_id", "surface_concept"
-    )
+    out = helper_auto_raw_analysis._classify_pulse_chunks(tdc, "event_group_id", "surface_concept")
     assert out["partial"].tolist() == [2]
 
 
@@ -823,42 +862,50 @@ def test_classify_pulse_chunks_length_two_unrelated_channels_is_noise():
     [0, 0]) still counts as noise — we only flip on chunks with at least
     one complete delay-line pair."""
     tdc = _tdc([(0, 0), (0, 2), (1, 0), (1, 0)])
-    out = helper_auto_raw_analysis._classify_pulse_chunks(
-        tdc, "event_group_id", "surface_concept"
-    )
+    out = helper_auto_raw_analysis._classify_pulse_chunks(tdc, "event_group_id", "surface_concept")
     # Pulse 0: [0, 2] — no pair complete. Pulse 1: [0, 0] — no pair complete.
     # Both contribute to frequency but not to partial/complete.
     assert out["frequency"].tolist() == [2, 2]
-    assert out["partial"].tolist()   == []
-    assert out["complete"].tolist()  == []
+    assert out["partial"].tolist() == []
+    assert out["complete"].tolist() == []
 
 
 def test_classify_pulse_chunks_roentdek_three_categories():
     """RoentDek must distinguish 6 DLTS (all 3 pairs), 4 DLTS (2 of 3 pairs),
     and 2 DLTS (1 of 3 pairs)."""
-    tdc = _tdc([
-        # pulse 0: full hex hit  → complete
-        (0, 0), (0, 1), (0, 2), (0, 3), (0, 4), (0, 5),
-        # pulse 1: x + y pairs only, no z pair  → midtier (4 DLTS)
-        (1, 0), (1, 1), (1, 2), (1, 3), (1, 0), (1, 1),
-        # pulse 2: only x pair  → partial (2 DLTS)
-        (2, 0), (2, 1), (2, 1),
-    ])
-    out = helper_auto_raw_analysis._classify_pulse_chunks(
-        tdc, "event_group_id", "roentdek"
+    tdc = _tdc(
+        [
+            # pulse 0: full hex hit  → complete
+            (0, 0),
+            (0, 1),
+            (0, 2),
+            (0, 3),
+            (0, 4),
+            (0, 5),
+            # pulse 1: x + y pairs only, no z pair  → midtier (4 DLTS)
+            (1, 0),
+            (1, 1),
+            (1, 2),
+            (1, 3),
+            (1, 0),
+            (1, 1),
+            # pulse 2: only x pair  → partial (2 DLTS)
+            (2, 0),
+            (2, 1),
+            (2, 1),
+        ]
     )
+    out = helper_auto_raw_analysis._classify_pulse_chunks(tdc, "event_group_id", "roentdek")
     assert out["complete"].tolist() == [6]
-    assert out["midtier"].tolist()  == [6]
-    assert out["partial"].tolist()  == [3]
+    assert out["midtier"].tolist() == [6]
+    assert out["partial"].tolist() == [3]
 
 
 def test_classify_pulse_chunks_single_delay_line():
     """A 1-DL system: a complete event is the (0,1) pair = 2 DLTS."""
     tdc = _tdc([(0, 0), (0, 1), (1, 0), (1, 0)])
-    out = helper_auto_raw_analysis._classify_pulse_chunks(
-        tdc, "event_group_id", "single_delay_line"
-    )
-    assert out["complete"].tolist() == [2]   # pulse 0 has the (0,1) pair
+    out = helper_auto_raw_analysis._classify_pulse_chunks(tdc, "event_group_id", "single_delay_line")
+    assert out["complete"].tolist() == [2]  # pulse 0 has the (0,1) pair
     # pulse 1 has [0,0] — no pair fully present, no partial
     assert out["partial"].tolist() == []
 
@@ -871,19 +918,21 @@ def test_classify_pulse_chunks_single_delay_line():
 def test_pyccapt_raw_to_processed_preserves_existing_mc_and_mc_uc():
     """A frame that already has calibrated mc / uncalibrated mc_uc columns
     (e.g. from a partly-processed bundle) must keep them, NOT zero them."""
-    raw = pd.DataFrame({
-        "high_voltage (V)": [1500.0, 1500.0],
-        "pulse_v (V)": [200.0, 200.0],
-        "pulse_l (pJ)": [0.0, 0.0],
-        "start_counter": [1, 2],
-        "t (ns)": [400.0, 410.0],
-        "x_det (cm)": [0.5, 0.6],
-        "y_det (cm)": [-0.5, -0.6],
-        "mc (Da)":    [27.0, 27.05],
-        "mc_uc (Da)": [27.5, 27.55],
-    })
+    raw = pd.DataFrame(
+        {
+            "high_voltage (V)": [1500.0, 1500.0],
+            "pulse_v (V)": [200.0, 200.0],
+            "pulse_l (pJ)": [0.0, 0.0],
+            "start_counter": [1, 2],
+            "t (ns)": [400.0, 410.0],
+            "x_det (cm)": [0.5, 0.6],
+            "y_det (cm)": [-0.5, -0.6],
+            "mc (Da)": [27.0, 27.05],
+            "mc_uc (Da)": [27.5, 27.55],
+        }
+    )
     processed = data_tools.pyccapt_raw_to_processed(raw)
-    assert processed["mc (Da)"].tolist()    == [27.0, 27.05]
+    assert processed["mc (Da)"].tolist() == [27.0, 27.05]
     assert processed["mc_uc (Da)"].tolist() == [27.5, 27.55]
 
 
@@ -891,19 +940,22 @@ def test_pyccapt_raw_to_processed_computes_mc_uc_when_absent():
     """If the raw frame has no mc_uc column but has all the inputs (t, V,
     x_det, y_det), mc_uc is computed using tof2mc(t0=0, V_pulse=0, fpl=110).
     This is the formula the legacy raw-data notebook used for Fig. 6A."""
-    raw = pd.DataFrame({
-        "high_voltage (V)": [3000.0],
-        "pulse_v (V)": [400.0],
-        "pulse_l (pJ)": [0.0],
-        "start_counter": [1],
-        "t (ns)": [600.0],
-        "x_det (cm)": [0.0],
-        "y_det (cm)": [0.0],
-    })
+    raw = pd.DataFrame(
+        {
+            "high_voltage (V)": [3000.0],
+            "pulse_v (V)": [400.0],
+            "pulse_l (pJ)": [0.0],
+            "start_counter": [1],
+            "t (ns)": [600.0],
+            "x_det (cm)": [0.0],
+            "y_det (cm)": [0.0],
+        }
+    )
     processed = data_tools.pyccapt_raw_to_processed(raw)
     # Reference value from mc_tools.tof2mc directly — proves we're calling the
     # same formula instead of zeroing.
     from pyccapt.calibration.mc import mc_tools
+
     expected = mc_tools.tof2mc(
         t=np.array([600.0]),
         t0=0,
@@ -924,15 +976,17 @@ def test_run_analysis_accepts_peak_units_argument():
     """The top-level runner must accept ``peak_units='tof'`` and ``'mc'``
     without crashing on a tdc-less variables object."""
     variables = Variables()
-    variables.data = pd.DataFrame({
-        "mc (Da)": [27.0, 27.05],
-        "t (ns)": [400.0, 410.0],
-        "x_det (cm)": [0.0, 0.1],
-        "y_det (cm)": [0.0, 0.1],
-        "delta_p": [0, 1],
-        "multi": [1, 1],
-        "start_counter": [1, 2],
-    })
+    variables.data = pd.DataFrame(
+        {
+            "mc (Da)": [27.0, 27.05],
+            "t (ns)": [400.0, 410.0],
+            "x_det (cm)": [0.0, 0.1],
+            "y_det (cm)": [0.0, 0.1],
+            "delta_p": [0, 1],
+            "multi": [1, 1],
+            "start_counter": [1, 2],
+        }
+    )
     species = [{"label": "Al+", "mc_low": 26.78, "mc_up": 27.18, "color": "#ccc"}]
 
     captured: list[object] = []
@@ -957,15 +1011,17 @@ def test_call_auto_raw_data_analysis_panel_has_save_dropdown_and_units_dropdown(
     output. ``save plots`` must default to ``False``; ``peak units`` must
     default to ``'tof'``."""
     variables = Variables()
-    variables.data = pd.DataFrame({
-        "mc (Da)": [27.0],
-        "t (ns)": [400.0],
-        "x_det (cm)": [0.0],
-        "y_det (cm)": [0.0],
-        "delta_p": [0],
-        "multi": [1],
-        "start_counter": [1],
-    })
+    variables.data = pd.DataFrame(
+        {
+            "mc (Da)": [27.0],
+            "t (ns)": [400.0],
+            "x_det (cm)": [0.0],
+            "y_det (cm)": [0.0],
+            "delta_p": [0],
+            "multi": [1],
+            "start_counter": [1],
+        }
+    )
 
     captured = {}
     real_display = helper_auto_raw_analysis.display
@@ -994,7 +1050,8 @@ def test_call_auto_raw_data_analysis_panel_has_save_dropdown_and_units_dropdown(
     # legacy per-chunk "fixed" mode has been removed entirely.
     assert by_desc["Recovery:"].value == "exhaustive"
     assert {value for _label, value in by_desc["Recovery:"].options} == {
-        "greedy", "exhaustive",
+        "greedy",
+        "exhaustive",
     }
 
 
@@ -1008,12 +1065,14 @@ def test_plot_full_spectrum_renders_panels_for_available_signal_columns():
 
     # Calibrated bundle scenario: t_c (ns) populated → tof panel uses it,
     # mc (Da) populated → mc panel uses it. mc_uc absent. Two panels expected.
-    dld = pd.DataFrame({
-        "t (ns)":     np.linspace(50.0, 700.0, 200),
-        "t_c (ns)":   np.linspace(60.0, 690.0, 200),
-        "mc (Da)":    np.linspace(1.0,  60.0, 200),
-        "mc_uc (Da)": np.zeros(200),
-    })
+    dld = pd.DataFrame(
+        {
+            "t (ns)": np.linspace(50.0, 700.0, 200),
+            "t_c (ns)": np.linspace(60.0, 690.0, 200),
+            "mc (Da)": np.linspace(1.0, 60.0, 200),
+            "mc_uc (Da)": np.zeros(200),
+        }
+    )
 
     figs: list[object] = []
     real_display = helper_auto_raw_analysis.display
@@ -1044,12 +1103,14 @@ def test_plot_full_spectrum_handles_pure_raw_dld_with_only_t_and_mc_uc():
 
     matplotlib.use("Agg")
 
-    dld = pd.DataFrame({
-        "t (ns)":     np.linspace(50.0, 700.0, 200),
-        "t_c (ns)":   np.zeros(200),                 # never calibrated
-        "mc (Da)":    np.zeros(200),                 # never calibrated
-        "mc_uc (Da)": np.linspace(1.0, 60.0, 200),   # raw mc only
-    })
+    dld = pd.DataFrame(
+        {
+            "t (ns)": np.linspace(50.0, 700.0, 200),
+            "t_c (ns)": np.zeros(200),  # never calibrated
+            "mc (Da)": np.zeros(200),  # never calibrated
+            "mc_uc (Da)": np.linspace(1.0, 60.0, 200),  # raw mc only
+        }
+    )
 
     figs: list[object] = []
     real_display = helper_auto_raw_analysis.display
@@ -1071,17 +1132,19 @@ def test_call_auto_raw_data_analysis_run_button_disables_during_processing():
     must be disabled and the button label must indicate "Processing…".
     After the run finishes (or raises), all controls must be re-enabled."""
     variables = Variables()
-    variables.data = pd.DataFrame({
-        "mc (Da)":    [27.0],
-        "mc_uc (Da)": [27.0],
-        "t (ns)":     [400.0],
-        "t_c (ns)":   [0.0],
-        "x_det (cm)": [0.0],
-        "y_det (cm)": [0.0],
-        "delta_p":    [0],
-        "multi":      [1],
-        "start_counter": [1],
-    })
+    variables.data = pd.DataFrame(
+        {
+            "mc (Da)": [27.0],
+            "mc_uc (Da)": [27.0],
+            "t (ns)": [400.0],
+            "t_c (ns)": [0.0],
+            "x_det (cm)": [0.0],
+            "y_det (cm)": [0.0],
+            "delta_p": [0],
+            "multi": [1],
+            "start_counter": [1],
+        }
+    )
 
     captured: dict = {}
     real_display = helper_auto_raw_analysis.display
@@ -1143,17 +1206,19 @@ def test_call_auto_raw_data_analysis_runs_with_no_peaks_when_manual_rows_empty()
     runner must still proceed (skipping the per-peak sections) instead of
     short-circuiting with a hard error."""
     variables = Variables()
-    variables.data = pd.DataFrame({
-        "mc (Da)":    [27.0],
-        "mc_uc (Da)": [27.0],
-        "t (ns)":     [400.0],
-        "t_c (ns)":   [0.0],
-        "x_det (cm)": [0.0],
-        "y_det (cm)": [0.0],
-        "delta_p":    [0],
-        "multi":      [1],
-        "start_counter": [1],
-    })
+    variables.data = pd.DataFrame(
+        {
+            "mc (Da)": [27.0],
+            "mc_uc (Da)": [27.0],
+            "t (ns)": [400.0],
+            "t_c (ns)": [0.0],
+            "x_det (cm)": [0.0],
+            "y_det (cm)": [0.0],
+            "delta_p": [0],
+            "multi": [1],
+            "start_counter": [1],
+        }
+    )
 
     captured: dict = {}
     real_display = helper_auto_raw_analysis.display
@@ -1179,7 +1244,7 @@ def test_call_auto_raw_data_analysis_runs_with_no_peaks_when_manual_rows_empty()
     real_run = helper_auto_raw_analysis.run_analysis
     helper_auto_raw_analysis.run_analysis = _capture_run
     try:
-        run_button.click()       # manual rows are all 0 → empty species
+        run_button.click()  # manual rows are all 0 → empty species
     finally:
         helper_auto_raw_analysis.run_analysis = real_run
 
@@ -1197,13 +1262,15 @@ def test_call_signal_preview_panel_lists_only_available_targets():
     file with only ``t (ns)`` + ``mc (Da)`` populated must show those two
     targets and hide ``tof_c`` / ``mc_uc`` entirely."""
     variables = Variables()
-    variables.data = pd.DataFrame({
-        "t (ns)":     [400.0, 410.0, 420.0],   # available → "tof"
-        "t_c (ns)":   [0.0, 0.0, 0.0],         # all-zero → hidden
-        "mc (Da)":    [27.0, 27.05, 27.1],     # available → "mc"
-        # mc_uc (Da) absent entirely → hidden
-        "high_voltage (V)": [1500.0, 1500.0, 1500.0],
-    })
+    variables.data = pd.DataFrame(
+        {
+            "t (ns)": [400.0, 410.0, 420.0],  # available → "tof"
+            "t_c (ns)": [0.0, 0.0, 0.0],  # all-zero → hidden
+            "mc (Da)": [27.0, 27.05, 27.1],  # available → "mc"
+            # mc_uc (Da) absent entirely → hidden
+            "high_voltage (V)": [1500.0, 1500.0, 1500.0],
+        }
+    )
 
     captured = {}
     real_display = helper_auto_raw_analysis.display
@@ -1227,11 +1294,10 @@ def test_call_signal_preview_panel_lists_only_available_targets():
                 _walk(child)
 
     _walk(panel)
-    target_dropdowns = [d for d in dropdowns if {value for _label, value in d.options}
-                        & {"tof", "tof_c", "mc", "mc_uc"}]
+    target_dropdowns = [d for d in dropdowns if {value for _label, value in d.options} & {"tof", "tof_c", "mc", "mc_uc"}]
     assert len(target_dropdowns) == 1
     target_values = {value for _label, value in target_dropdowns[0].options}
-    assert target_values == {"tof", "mc"}        # the two with data
+    assert target_values == {"tof", "mc"}  # the two with data
     assert "tof_c" not in target_values
     assert "mc_uc" not in target_values
 
@@ -1244,10 +1310,12 @@ def test_call_signal_preview_peak_find_propagates_print_and_overlay_flags():
     printed beneath the figure). When Peak find is False, all three must
     be False so we don't pay for unwanted peak-finding work."""
     variables = Variables()
-    variables.data = pd.DataFrame({
-        "t (ns)":  [400.0, 410.0, 420.0],
-        "mc (Da)": [27.0, 27.05, 27.1],
-    })
+    variables.data = pd.DataFrame(
+        {
+            "t (ns)": [400.0, 410.0, 420.0],
+            "mc (Da)": [27.0, 27.05, 27.1],
+        }
+    )
 
     captured = {}
     real_display = helper_auto_raw_analysis.display
@@ -1297,6 +1365,7 @@ def test_call_signal_preview_peak_find_propagates_print_and_overlay_flags():
         captured_calls.append(kwargs)
 
     from pyccapt.calibration.core import mc_plot
+
     real_hist = mc_plot.hist_plot
     mc_plot.hist_plot = _fake_hist_plot
     try:
@@ -1312,13 +1381,13 @@ def test_call_signal_preview_peak_find_propagates_print_and_overlay_flags():
     assert len(captured_calls) == 2
 
     on_call, off_call = captured_calls
-    assert on_call["peaks_find"]      is True
+    assert on_call["peaks_find"] is True
     assert on_call["peaks_find_plot"] is True
-    assert on_call["print_info"]      is True
+    assert on_call["print_info"] is True
 
-    assert off_call["peaks_find"]      is False
+    assert off_call["peaks_find"] is False
     assert off_call["peaks_find_plot"] is False
-    assert off_call["print_info"]      is False
+    assert off_call["print_info"] is False
 
 
 def test_close_after_skips_close_on_interactive_backends():
@@ -1352,9 +1421,7 @@ def test_close_after_skips_close_on_interactive_backends():
     plt.get_backend = lambda: "module://matplotlib_inline.backend_inline"
     try:
         helper_auto_raw_analysis._close_after(fig_static)
-        assert not plt.fignum_exists(fig_static.number), (
-            "static backend: _close_after must close the figure to free memory"
-        )
+        assert not plt.fignum_exists(fig_static.number), "static backend: _close_after must close the figure to free memory"
     finally:
         plt.get_backend = real_get_backend
         # Already closed in the static branch; calling close again is a no-op.
@@ -1365,11 +1432,13 @@ def test_call_signal_preview_handles_empty_dataframe():
     """If every candidate column is missing or all-zero, the helper should
     print a Markdown message instead of trying to render an empty panel."""
     variables = Variables()
-    variables.data = pd.DataFrame({
-        "t (ns)":   [0.0, 0.0],
-        "t_c (ns)": [0.0, 0.0],
-        # no mc / mc_uc
-    })
+    variables.data = pd.DataFrame(
+        {
+            "t (ns)": [0.0, 0.0],
+            "t_c (ns)": [0.0, 0.0],
+            # no mc / mc_uc
+        }
+    )
 
     md_messages: list[str] = []
     real_display = helper_auto_raw_analysis.display

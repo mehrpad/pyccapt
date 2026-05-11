@@ -38,3 +38,4 @@ Tutorial Guides
    tutorials/reflectron_batch_cli
    tutorials/matlab_fig_range_import
    tutorials/low_memory_mode
+   tutorials/parallel_calibration

@@ -1,4 +1,5 @@
 """Tests for the dld<->tdc event-group mapping and the save_tdc round-trip."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -24,29 +25,63 @@ def test_build_event_group_mapping_user_example():
     that did not produce reconstructible dld events.
     """
     dld_sc = np.array([7537, 15374, 11858])
-    tdc_sc = np.array([
-        16852, 16852,
-        7537, 7537, 7537, 7537,
-        15374, 15374, 15374, 15374,
-        10994,
-        11858, 11858, 11858, 11858,
-        5082, 5082, 5082, 5082,
-        12979, 12979, 12979,
-        16462, 16462,
-    ])
+    tdc_sc = np.array(
+        [
+            16852,
+            16852,
+            7537,
+            7537,
+            7537,
+            7537,
+            15374,
+            15374,
+            15374,
+            15374,
+            10994,
+            11858,
+            11858,
+            11858,
+            11858,
+            5082,
+            5082,
+            5082,
+            5082,
+            12979,
+            12979,
+            12979,
+            16462,
+            16462,
+        ]
+    )
 
     dld_gid, tdc_gid, has_match = data_loadcrop.build_event_group_mapping(dld_sc, tdc_sc)
 
     assert dld_gid.tolist() == [0, 1, 2]
     expected_tdc_gid = [
-        -1, -1,
-        0, 0, 0, 0,
-        1, 1, 1, 1,
         -1,
-        2, 2, 2, 2,
-        -1, -1, -1, -1,
-        -1, -1, -1,
-        -1, -1,
+        -1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1,
+        -1,
+        2,
+        2,
+        2,
+        2,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
     ]
     assert tdc_gid.tolist() == expected_tdc_gid
     expected_has_match = [bool(g >= 0) for g in expected_tdc_gid]
@@ -61,12 +96,26 @@ def test_build_event_group_mapping_handles_counter_wraparound():
     """
     # Two cycles, both ending with counter 5 (the wrap value).
     dld_sc = np.array([1, 5, 2, 5])
-    tdc_sc = np.array([
-        1, 1, 1, 1,
-        5, 5, 5, 5,
-        2, 2, 2, 2,
-        5, 5, 5, 5,
-    ])
+    tdc_sc = np.array(
+        [
+            1,
+            1,
+            1,
+            1,
+            5,
+            5,
+            5,
+            5,
+            2,
+            2,
+            2,
+            2,
+            5,
+            5,
+            5,
+            5,
+        ]
+    )
 
     dld_gid, tdc_gid, has_match = data_loadcrop.build_event_group_mapping(dld_sc, tdc_sc)
 
@@ -115,28 +164,50 @@ def test_build_event_group_mapping_raises_when_dld_has_no_tdc_match():
 def _make_linked_pair():
     """Build a small dld/tdc pair using the user's example layout."""
     dld_sc = np.array([7537, 15374, 11858])
-    tdc_sc = np.array([
-        16852, 16852,
-        7537, 7537, 7537, 7537,
-        15374, 15374, 15374, 15374,
-        10994,
-        11858, 11858, 11858, 11858,
-        5082, 5082, 5082, 5082,
-        12979, 12979, 12979,
-        16462, 16462,
-    ])
+    tdc_sc = np.array(
+        [
+            16852,
+            16852,
+            7537,
+            7537,
+            7537,
+            7537,
+            15374,
+            15374,
+            15374,
+            15374,
+            10994,
+            11858,
+            11858,
+            11858,
+            11858,
+            5082,
+            5082,
+            5082,
+            5082,
+            12979,
+            12979,
+            12979,
+            16462,
+            16462,
+        ]
+    )
     dld_gid, tdc_gid, has_match = data_loadcrop.build_event_group_mapping(dld_sc, tdc_sc)
-    dld_df = pd.DataFrame({
-        "start_counter": dld_sc,
-        "t (ns)": [100.0, 200.0, 300.0],
-        "event_group_id": dld_gid,
-    })
-    tdc_df = pd.DataFrame({
-        "start_counter": tdc_sc,
-        "channel": np.arange(len(tdc_sc)),
-        "event_group_id": tdc_gid,
-        "has_dld_match": has_match,
-    })
+    dld_df = pd.DataFrame(
+        {
+            "start_counter": dld_sc,
+            "t (ns)": [100.0, 200.0, 300.0],
+            "event_group_id": dld_gid,
+        }
+    )
+    tdc_df = pd.DataFrame(
+        {
+            "start_counter": tdc_sc,
+            "channel": np.arange(len(tdc_sc)),
+            "event_group_id": tdc_gid,
+            "has_dld_match": has_match,
+        }
+    )
     return dld_df, tdc_df
 
 
@@ -150,9 +221,7 @@ def test_filter_tdc_by_dld_keeps_orphans_and_drops_only_deleted_groups():
 
     # The 4 tdc rows linked to group 1 should be gone (counter 15374).
     # All orphan tdc rows should remain.
-    assert (filtered["start_counter"] != 15374).all() or (
-        not (filtered["event_group_id"] == 1).any()
-    )
+    assert (filtered["start_counter"] != 15374).all() or (not (filtered["event_group_id"] == 1).any())
     # All orphan rows survived (they have has_dld_match == False).
     orphan_count_before = int((~tdc_df["has_dld_match"]).sum())
     orphan_count_after = int((~filtered["has_dld_match"]).sum())
@@ -221,14 +290,29 @@ def _write_minimal_pyccapt_h5(path: Path, dld_sc: np.ndarray, tdc_sc: np.ndarray
 
 def test_fetch_dataset_with_tdc_assigns_shared_event_group_id(tmp_path: Path):
     dld_sc = np.array([7537, 15374, 11858])
-    tdc_sc = np.array([
-        16852, 16852,
-        7537, 7537, 7537, 7537,
-        15374, 15374, 15374, 15374,
-        10994,
-        11858, 11858, 11858, 11858,
-        5082, 5082, 5082, 5082,
-    ])
+    tdc_sc = np.array(
+        [
+            16852,
+            16852,
+            7537,
+            7537,
+            7537,
+            7537,
+            15374,
+            15374,
+            15374,
+            15374,
+            10994,
+            11858,
+            11858,
+            11858,
+            11858,
+            5082,
+            5082,
+            5082,
+            5082,
+        ]
+    )
     h5_path = tmp_path / "synthetic.h5"
     _write_minimal_pyccapt_h5(h5_path, dld_sc, tdc_sc)
 
@@ -336,11 +420,13 @@ def test_save_data_warns_when_save_tdc_but_no_tdc_loaded(tmp_path: Path):
 def test_save_data_warns_when_dld_lacks_event_group_id(tmp_path: Path):
     # dld has no event_group_id column (raw tdc was not loaded with the link).
     dld_df = pd.DataFrame({"start_counter": [1, 2, 3], "t (ns)": [10.0, 20.0, 30.0]})
-    tdc_df = pd.DataFrame({
-        "start_counter": [1, 2, 3],
-        "event_group_id": [0, 1, 2],
-        "has_dld_match": [True, True, True],
-    })
+    tdc_df = pd.DataFrame(
+        {
+            "start_counter": [1, 2, 3],
+            "event_group_id": [0, 1, 2],
+            "has_dld_match": [True, True, True],
+        }
+    )
     variables = _StubVariables(tmp_path, name="testset")
     variables.data_tdc = tdc_df
 
@@ -350,15 +436,17 @@ def test_save_data_warns_when_dld_lacks_event_group_id(tmp_path: Path):
 
 def test_event_group_id_survives_typical_filtering_chain():
     """The group id rides through drop/iloc/reset_index without being mangled."""
-    dld_df = pd.DataFrame({
-        "start_counter": [1, 2, 3, 4, 5],
-        # remove_invalid_data drops rows with t<50 or t>max_tof; pick valid TOFs.
-        "t (ns)": [100.0, 6000.0, 200.0, 300.0, 400.0],
-        "x_det (cm)": [0.5] * 5,
-        "y_det (cm)": [0.5] * 5,
-        "high_voltage (V)": [1000.0] * 5,
-        "event_group_id": [10, 11, 12, 13, 14],
-    })
+    dld_df = pd.DataFrame(
+        {
+            "start_counter": [1, 2, 3, 4, 5],
+            # remove_invalid_data drops rows with t<50 or t>max_tof; pick valid TOFs.
+            "t (ns)": [100.0, 6000.0, 200.0, 300.0, 400.0],
+            "x_det (cm)": [0.5] * 5,
+            "y_det (cm)": [0.5] * 5,
+            "high_voltage (V)": [1000.0] * 5,
+            "event_group_id": [10, 11, 12, 13, 14],
+        }
+    )
 
     # 1) remove_invalid_data drops the second row (TOF > 5000).
     cleaned = data_tools.remove_invalid_data(dld_df.copy(), max_tof=5000)

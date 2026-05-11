@@ -22,8 +22,18 @@ from pyccapt.calibration.reconstructions.io_utils import (
 )
 
 
-def build_range_mask(variables, range_sequence=None, range_mc=None, range_detx=None, range_dety=None,
-                     range_x=None, range_y=None, range_z=None, range_vol=None, verbose=False):
+def build_range_mask(
+    variables,
+    range_sequence=None,
+    range_mc=None,
+    range_detx=None,
+    range_dety=None,
+    range_x=None,
+    range_y=None,
+    range_z=None,
+    range_vol=None,
+    verbose=False,
+):
     """Build a boolean mask for the requested reconstruction sub-range."""
     range_sequence = range_sequence or []
     range_mc = range_mc or []
@@ -283,9 +293,18 @@ def _clip_isosurface_to_specimen_envelope(mesh, grid_vec, voxel_counts, smoothin
     return clipped.clean()
 
 
-def calculate_element_isosurface(variables, element_name, bin_values, base_mask=None, smoothing_sigma=1.0,
-                                 min_atoms_per_voxel=10, min_vertices=20, fig_name=None, pure_only=False,
-                                 manual_iso_value=None):
+def calculate_element_isosurface(
+    variables,
+    element_name,
+    bin_values,
+    base_mask=None,
+    smoothing_sigma=1.0,
+    min_atoms_per_voxel=10,
+    min_vertices=20,
+    fig_name=None,
+    pure_only=False,
+    manual_iso_value=None,
+):
     """Create a filtered isosurface mesh for a single interface element."""
     if base_mask is None:
         base_mask = np.ones(len(variables.x), dtype=bool)
@@ -318,8 +337,7 @@ def calculate_element_isosurface(variables, element_name, bin_values, base_mask=
 
     if not np.any(conc_for_iso > 0):
         raise ValueError(
-            f'No positive concentration voxels remain for {element_name}. '
-            f'Try lowering min atoms / voxel or smoothing sigma.'
+            f'No positive concentration voxels remain for {element_name}. Try lowering min atoms / voxel or smoothing sigma.'
         )
 
     if manual_iso_value is not None and float(manual_iso_value) > 0:
@@ -350,13 +368,36 @@ def calculate_element_isosurface(variables, element_name, bin_values, base_mask=
     }
 
 
-def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save, figname, save, make_gif=False,
-                        range_sequence=[], range_mc=[], range_detx=[], range_dety=[],
-                        range_x=[], range_y=[], range_z=[], range_vol=[], ions_individually_plots=False,
-                        max_num_ions=None, min_num_ions=None, isosurface_dic=None, detailed_isotope_charge=False,
-                        only_iso=False, cluster_result=None, smoothing_sigma=1.0, min_atoms_per_voxel=10,
-                        min_isosurface_vertices=20, pure_element_only=False, manual_iso_value=None,
-                        cluster_display_mode='overlay'):
+def reconstruction_plot(
+    variables,
+    element_percentage,
+    opacity,
+    rotary_fig_save,
+    figname,
+    save,
+    make_gif=False,
+    range_sequence=[],
+    range_mc=[],
+    range_detx=[],
+    range_dety=[],
+    range_x=[],
+    range_y=[],
+    range_z=[],
+    range_vol=[],
+    ions_individually_plots=False,
+    max_num_ions=None,
+    min_num_ions=None,
+    isosurface_dic=None,
+    detailed_isotope_charge=False,
+    only_iso=False,
+    cluster_result=None,
+    smoothing_sigma=1.0,
+    min_atoms_per_voxel=10,
+    min_isosurface_vertices=20,
+    pure_element_only=False,
+    manual_iso_value=None,
+    cluster_display_mode='overlay',
+):
     """
     Generate a 3D plot for atom probe reconstruction data.
 
@@ -462,7 +503,6 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
 
     # Create a subplots with shared axes
     if variables.range_data is not None:
-
         colors = reconstruction._normalize_plotly_colors(variables.range_data['color'].tolist())
         mc_low = variables.range_data['mc_low'].tolist()
         mc_up = variables.range_data['mc_up'].tolist()
@@ -479,10 +519,9 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
             element_percentage = [0.01] * len(ion)
             element_percentage[-1] = 0.0001  # add the noise percentage
         else:
-            element_percentage.append(0.0001) # add the noise percentage
+            element_percentage.append(0.0001)  # add the noise percentage
 
         if not detailed_isotope_charge:
-
             # Create the ion list
             ion_s = []
             for elems, comps in zip(element, complex):
@@ -546,8 +585,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
             # Generate the specs dictionary based on the number of rows and columns
             specs = [[{"type": "scatter3d", "rowspan": 1, "colspan": 1} for _ in range(cols)] for _ in range(rows)]
 
-            fig = make_subplots(rows=rows, cols=cols, subplot_titles=subplot_titles,
-                                start_cell="top-left", specs=specs)
+            fig = make_subplots(rows=rows, cols=cols, subplot_titles=subplot_titles, start_cell="top-left", specs=specs)
             for row in range(rows):
                 for col in range(cols):
                     index = col + row * 3
@@ -595,7 +633,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                                     alphahull=5,
                                     color=colors[index],
                                     name=ion_name,
-                                    showlegend=True
+                                    showlegend=True,
                                 )
                                 fig = reconstruction.draw_qube(fig, range_cube, col, row)
                                 fig.add_trace(mesh, row=row + 1, col=col + 1)
@@ -613,7 +651,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                             size=1,
                             color=colors[index],
                             opacity=opacity,
-                        )
+                        ),
                     )
                     fig = reconstruction.draw_qube(fig, range_cube, col, row)
 
@@ -666,7 +704,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                                 alphahull=5,
                                 color=colors[index],
                                 name=ion_name,
-                                showlegend=True
+                                showlegend=True,
                             )
                             fig.add_trace(mesh)
                             drawn_iso_targets.add(iso_element)
@@ -686,7 +724,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                                 size=1,
                                 color=colors[index],
                                 opacity=opacity,
-                            )
+                            ),
                         )
                     )
 
@@ -735,12 +773,12 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
                 y=variables.y[mask],
                 z=variables.z[mask],
                 mode='markers',
-                name='ions' + ' ' + '(%s)' % (max_num_ions/len(variables.x)*100),
+                name='ions' + ' ' + '(%s)' % (max_num_ions / len(variables.x) * 100),
                 showlegend=True,
                 marker=dict(
                     size=1,
                     opacity=opacity,
-                )
+                ),
             )
         )
 
@@ -750,29 +788,17 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
         rotary_fig(go.Figure(fig), rotary_fig_save, make_gif, figname)
 
     fig.update_layout(
-    scene=dict(
-        aspectmode='auto',
-    ),
-        legend=dict(
-            yanchor="top",
-            y=0.99,
-            xanchor="left",
-            x=0.99
-        )
+        scene=dict(
+            aspectmode='auto',
+        ),
+        legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.99),
     )
 
     config = dict(
         {
             'scrollZoom': True,
             'displayModeBar': True,
-            'modeBarButtonsToAdd': [
-                'drawline',
-                'drawopenpath',
-                'drawclosedpath',
-                'drawcircle',
-                'drawrect',
-                'eraseshape'
-            ]
+            'modeBarButtonsToAdd': ['drawline', 'drawopenpath', 'drawclosedpath', 'drawcircle', 'drawrect', 'eraseshape'],
         }
     )
 
@@ -812,6 +838,7 @@ def reconstruction_plot(variables, element_percentage, opacity, rotary_fig_save,
         except Exception as e:
             print('The figure could not be saved')
             print(e)
+
 
 def rotate_z(x, y, z, theta):
     """
@@ -921,13 +948,13 @@ def rotary_fig(fig, variables, rotary_fig_save, make_gif, figname):
                                     frame=dict(duration=15, redraw=True),
                                     transition=dict(duration=0),
                                     fromcurrent=True,
-                                    mode='immediate'
-                                )
-                            ]
+                                    mode='immediate',
+                                ),
+                            ],
                         )
-                    ]
+                    ],
                 )
-            ]
+            ],
         )
 
         frames = []
@@ -958,6 +985,7 @@ def format_ion(elements, complexities):
         else:
             ion_parts.append(el)
     return "$" + "".join(ion_parts) + "$"
+
 
 def bin_vectors_from_distance(dist, bin_values, mode='distance'):
     """
@@ -1005,18 +1033,16 @@ def bin_vectors_from_distance(dist, bin_values, mode='distance'):
 
             # Filter bin centers within the distance range
             centers = bin_vector_raw[
-                (bin_vector_raw >= dist[:, dim].min() - bin_values[dim]) &
-                (bin_vector_raw <= dist[:, dim].max() + bin_values[dim])
+                (bin_vector_raw >= dist[:, dim].min() - bin_values[dim])
+                & (bin_vector_raw <= dist[:, dim].max() + bin_values[dim])
             ]
             bin_centers.append(centers)
 
             # Calculate bin edges
             edges = (centers[1:] + centers[:-1]) / 2
-            edges = np.concatenate((
-                [centers[0] - (centers[1] - centers[0]) / 2],
-                edges,
-                [centers[-1] + (centers[-1] - centers[-2]) / 2]
-            ))
+            edges = np.concatenate(
+                ([centers[0] - (centers[1] - centers[0]) / 2], edges, [centers[-1] + (centers[-1] - centers[-2]) / 2])
+            )
             bin_edges.append(edges)
 
     # Constant bin count interval
@@ -1044,20 +1070,20 @@ def bin_vectors_from_distance(dist, bin_values, mode='distance'):
 
 def pos_to_voxel(data, grid_vec, species=None):
     """
-    Creates a voxelization of the data in 'pos' based on the bin centers in 'grid_vec'
-    for the atoms/ions in the specified species.
+        Creates a voxelization of the data in 'pos' based on the bin centers in 'grid_vec'
+        for the atoms/ions in the specified species.
 
-    Args:
-        data (pyccapt DataFrame): The data to be voxelized. when input species is given, ranges must be allocated.
-%          A decomposed DataFrame file is also possible. Use range_to_pyccapt to decompose the data.
-        grid_vec (list of numpy.ndarray): Grid vectors for the voxel grid. These are the bin centers.
-        species (list, str, or numpy.ndarray, optional): The species to filter by. Can be:
-                                                         - List of species names (e.g., ['Fe', 'Mn']).
-                                                         - Boolean array matching the length of `pos`.
-                                                         - None, to include all atoms/ions.
+        Args:
+            data (pyccapt DataFrame): The data to be voxelized. when input species is given, ranges must be allocated.
+    %          A decomposed DataFrame file is also possible. Use range_to_pyccapt to decompose the data.
+            grid_vec (list of numpy.ndarray): Grid vectors for the voxel grid. These are the bin centers.
+            species (list, str, or numpy.ndarray, optional): The species to filter by. Can be:
+                                                             - List of species names (e.g., ['Fe', 'Mn']).
+                                                             - Boolean array matching the length of `pos`.
+                                                             - None, to include all atoms/ions.
 
-    Returns:
-        numpy.ndarray: A 3D array representing the voxelized data.
+        Returns:
+            numpy.ndarray: A 3D array representing the voxelized data.
     """
     # Ensure `pos` is a numpy array
     if hasattr(data, "columns"):  # Assume pandas.DataFrame
@@ -1067,7 +1093,7 @@ def pos_to_voxel(data, grid_vec, species=None):
         z = data["z (nm)"].to_numpy()
         pos_array = np.column_stack([x, y, z])
     elif isinstance(data, list):
-            pos_array = np.array(data).T
+        pos_array = np.array(data).T
     else:
         pos_array = data
 
@@ -1091,14 +1117,8 @@ def pos_to_voxel(data, grid_vec, species=None):
         pos_array = pos_array[species_mask]
 
     # Calculate bin sizes and edge vectors
-    bin_sizes = [
-        grid_vec[d][1] - grid_vec[d][0] for d in range(3)
-    ]
-    edge_vec = [
-        np.concatenate(([grid_vec[d][0] - bin_sizes[d] / 2],
-                        grid_vec[d] + bin_sizes[d] / 2))
-        for d in range(3)
-    ]
+    bin_sizes = [grid_vec[d][1] - grid_vec[d][0] for d in range(3)]
+    edge_vec = [np.concatenate(([grid_vec[d][0] - bin_sizes[d] / 2], grid_vec[d] + bin_sizes[d] / 2)) for d in range(3)]
 
     # Determine voxel indices
     loc = np.empty((pos_array.shape[0], 3), dtype=int)
@@ -1114,6 +1134,7 @@ def pos_to_voxel(data, grid_vec, species=None):
         vox[tuple(loc[i])] += 1
 
     return vox.T
+
 
 def isosurface(gridVec, data, isovalue):
     """
@@ -1137,7 +1158,6 @@ def isosurface(gridVec, data, isovalue):
     # Extract the isosurface
     isosurf = grid.contour([isovalue])  # Pass isovalue as a list for compatibility
     return isosurf
-
 
 
 def calculate_iso_value(conc, save_path=None, fig_name=None):

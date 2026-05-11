@@ -58,6 +58,7 @@ def read_hdf5(filename: str | Path, *, lazy: bool = False):
     file_path = _as_path(filename)
     if lazy:
         from pyccapt.calibration.data_tools import lazy_io
+
         try:
             return lazy_io.open_pyccapt_raw_hdf5(file_path)
         except FileNotFoundError:
@@ -253,10 +254,7 @@ def remove_invalid_data(dld_group_storage: pd.DataFrame, max_tof: float) -> pd.D
         & (dld_group_storage["t (ns)"].to_numpy() == 0)
     )
     mask_4 = dld_group_storage["high_voltage (V)"].to_numpy() < 0
-    mask_5 = (
-        (dld_group_storage["x_det (cm)"].to_numpy() == 0)
-        & (dld_group_storage["y_det (cm)"].to_numpy() == 0)
-    )
+    mask_5 = (dld_group_storage["x_det (cm)"].to_numpy() == 0) & (dld_group_storage["y_det (cm)"].to_numpy() == 0)
 
     mask_f_1 = np.logical_or(mask_1, mask_2)
     mask_f_2 = np.logical_or(mask_3, mask_4)
@@ -298,7 +296,7 @@ def _slice_data_for_export(
     if end < start:
         raise ValueError("end_index must be greater than or equal to start_index")
 
-    return data.iloc[start:end + 1].reset_index(drop=True).copy()
+    return data.iloc[start : end + 1].reset_index(drop=True).copy()
 
 
 def save_data(
@@ -413,9 +411,7 @@ def save_data(
         )
         saved_outputs["ato"] = str(output_ato_path)
     if csv:
-        output_csv = _resolve_variable_output_file(
-            variables, filename=f"{data_name}.csv", data_directory=True
-        )
+        output_csv = _resolve_variable_output_file(variables, filename=f"{data_name}.csv", data_directory=True)
         store_df_to_csv(export_data, output_csv)
         saved_outputs["csv"] = output_csv
 
@@ -461,9 +457,7 @@ def load_data(dataset_path, data_type, mode="processed", *, load_tdc=False, tdc_
                 last_error = None
                 for mode_name in [primary_mode, *fallback_modes]:
                     try:
-                        return data_loadcrop.fetch_dataset_with_tdc(
-                            dataset_path, tdc_extract_mode=mode_name
-                        )
+                        return data_loadcrop.fetch_dataset_with_tdc(dataset_path, tdc_extract_mode=mode_name)
                     except Exception as error:
                         last_error = error
                 raise last_error
@@ -482,7 +476,11 @@ def load_data(dataset_path, data_type, mode="processed", *, load_tdc=False, tdc_
                         stacklevel=2,
                     )
                     pulse_v = np.zeros(len(data), dtype=float)
-                    insert_at = data.columns.get_loc("high_voltage (V)") + 1 if "high_voltage (V)" in data.columns else len(data.columns)
+                    insert_at = (
+                        data.columns.get_loc("high_voltage (V)") + 1
+                        if "high_voltage (V)" in data.columns
+                        else len(data.columns)
+                    )
                     data.insert(insert_at, "pulse_v (V)", pulse_v)
             if "pulse_l (pJ)" not in data.columns:
                 pulse_l = np.zeros(len(data), dtype=float)
@@ -492,8 +490,7 @@ def load_data(dataset_path, data_type, mode="processed", *, load_tdc=False, tdc_
                     tdc_df = pd.read_hdf(dataset_path, key="tdc", mode="r")
                 except (KeyError, ValueError):
                     warnings.warn(
-                        f"load_tdc=True but {dataset_path!r} has no /tdc group. "
-                        "Returning dld only.",
+                        f"load_tdc=True but {dataset_path!r} has no /tdc group. Returning dld only.",
                         RuntimeWarning,
                         stacklevel=2,
                     )
@@ -507,6 +504,7 @@ def load_data(dataset_path, data_type, mode="processed", *, load_tdc=False, tdc_
 
 def extract_data(data, variables, flightPathLength_d, max_mc):
     """Extract common calibrated arrays and metadata into shared variables."""
+
     def _resolve_column(candidates):
         for column in candidates:
             if column in data.columns:
@@ -551,9 +549,7 @@ def extract_data(data, variables, flightPathLength_d, max_mc):
     tof_column = _resolve_column(tof_aliases)
     if tof_column is None:
         raise KeyError(
-            "No TOF column found. Expected one of: "
-            + ", ".join(tof_aliases)
-            + f". Available columns: {list(data.columns)}"
+            "No TOF column found. Expected one of: " + ", ".join(tof_aliases) + f". Available columns: {list(data.columns)}"
         )
     if tof_column != "t (ns)":
         warnings.warn(
@@ -679,17 +675,11 @@ def pyccapt_raw_to_processed(data):
     data_processed["pulse_v (V)"] = data["pulse_v (V)"].to_numpy()
     data_processed["pulse_l (pJ)"] = data["pulse_l (pJ)"].to_numpy()
     data_processed["t (ns)"] = data["t (ns)"].to_numpy()
-    data_processed["t_c (ns)"] = (
-        data["t_c (ns)"].to_numpy() if "t_c (ns)" in data.columns else np.zeros(n)
-    )
+    data_processed["t_c (ns)"] = data["t_c (ns)"].to_numpy() if "t_c (ns)" in data.columns else np.zeros(n)
     data_processed["x_det (cm)"] = data["x_det (cm)"].to_numpy()
     data_processed["y_det (cm)"] = data["y_det (cm)"].to_numpy()
-    data_processed["delta_p"] = (
-        data["delta_p"].to_numpy() if "delta_p" in data.columns else np.zeros(n)
-    )
-    data_processed["multi"] = (
-        data["multi"].to_numpy() if "multi" in data.columns else np.zeros(n)
-    )
+    data_processed["delta_p"] = data["delta_p"].to_numpy() if "delta_p" in data.columns else np.zeros(n)
+    data_processed["multi"] = data["multi"].to_numpy() if "multi" in data.columns else np.zeros(n)
     data_processed["start_counter"] = data["start_counter"].to_numpy()
     if "event_group_id" in data.columns:
         data_processed["event_group_id"] = data["event_group_id"].to_numpy()

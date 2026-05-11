@@ -89,9 +89,7 @@ def call_reflectron_correction_workflow(variables=None):
 
     def on_browse_output_directory(_):
         try:
-            initial_dir = output_directory.value or (
-                str(Path(dataset_path.value).parent) if dataset_path.value else None
-            )
+            initial_dir = output_directory.value or (str(Path(dataset_path.value).parent) if dataset_path.value else None)
             selected_dir = file_dialog.choose_directory_path(
                 file_dialog.resolve_initial_directory(
                     initial_dir,
@@ -107,9 +105,7 @@ def call_reflectron_correction_workflow(variables=None):
 
     def on_browse_output_stem(_):
         try:
-            initial_dir = output_directory.value or (
-                str(Path(dataset_path.value).parent) if dataset_path.value else None
-            )
+            initial_dir = output_directory.value or (str(Path(dataset_path.value).parent) if dataset_path.value else None)
             selected_path = file_dialog.choose_file_path(
                 file_dialog.resolve_initial_directory(
                     initial_dir,
@@ -252,11 +248,15 @@ def call_reflectron_correction_workflow(variables=None):
                 "load an EPOS file, apply the affine detector correction, preview the detector maps, "
                 "and save the corrected dataset."
             ),
-            widgets.HBox([widgets.Label(value="EPOS dataset:", layout=label_layout), dataset_path, browse_button, load_button]),
+            widgets.HBox(
+                [widgets.Label(value="EPOS dataset:", layout=label_layout), dataset_path, browse_button, load_button]
+            ),
             widgets.HBox([widgets.Label(value="Instrument preset:", layout=label_layout), preset_dropdown]),
             widgets.HBox([widgets.Label(value="Detector-map bins:", layout=label_layout), bins]),
             widgets.HBox([preview_button, correct_button]),
-            widgets.HBox([widgets.Label(value="Output directory:", layout=label_layout), output_directory, output_directory_browse]),
+            widgets.HBox(
+                [widgets.Label(value="Output directory:", layout=label_layout), output_directory, output_directory_browse]
+            ),
             widgets.HBox([widgets.Label(value="Output stem:", layout=label_layout), output_stem, output_stem_browse]),
             widgets.HBox([widgets.Label(value="Save EPOS:", layout=label_layout), save_epos]),
             widgets.HBox([widgets.Label(value="Save HDF5:", layout=label_layout), save_h5]),

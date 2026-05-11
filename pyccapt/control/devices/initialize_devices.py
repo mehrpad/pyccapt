@@ -28,10 +28,7 @@ def _available_serial_ports_text() -> str:
 
 
 def _format_port_error(device_label, port, exc) -> str:
-    return (
-        f"{device_label} unavailable on {port}: {exc}. "
-        f"Available serial ports: {_available_serial_ports_text()}"
-    )
+    return f"{device_label} unavailable on {port}: {exc}. Available serial ports: {_available_serial_ports_text()}"
 
 
 def _serial_port_present(port):
@@ -148,8 +145,9 @@ def command_edwards(conf, variables, cmd, E_AGC, status=None):
             variables.flag_pump_cryo_load_lock = False
             variables.flag_pump_cryo_load_lock_led = False
             time.sleep(1)
-        elif (variables.flag_pump_cryo_load_lock_click and not variables.flag_pump_cryo_load_lock and
-              status == 'cryo_load_lock'):
+        elif (
+            variables.flag_pump_cryo_load_lock_click and not variables.flag_pump_cryo_load_lock and status == 'cryo_load_lock'
+        ):
             if conf['pump_cll'] == "on":
                 E_AGC.comm('!C910 1')
                 E_AGC.comm('!C904 1')
@@ -200,25 +198,25 @@ def initialize_cryovac(com_port_cryovac, variables):
     # before issuing the real query.
     time.sleep(0.2)
     try:
-	    com_port_cryovac.reset_input_buffer()
-	    com_port_cryovac.reset_output_buffer()
-	    com_port_cryovac.write(b'\r\n')
-	    time.sleep(0.15)
-	    com_port_cryovac.reset_input_buffer()
+        com_port_cryovac.reset_input_buffer()
+        com_port_cryovac.reset_output_buffer()
+        com_port_cryovac.write(b'\r\n')
+        time.sleep(0.15)
+        com_port_cryovac.reset_input_buffer()
     except Exception:
-	    pass
+        pass
 
     output = ''
     for _ in range(5):
-	    output = command_cryovac('getOutput?', com_port_cryovac)
-	    if output and output.split():
-		    break
-	    time.sleep(0.2)
+        output = command_cryovac('getOutput?', com_port_cryovac)
+        if output and output.split():
+            break
+        time.sleep(0.2)
 
     try:
-	    variables.temperature = float(output.split()[0].replace(',', ''))
+        variables.temperature = float(output.split()[0].replace(',', ''))
     except (ValueError, IndexError):
-	    variables.temperature = -1
+        variables.temperature = -1
 
 
 def initialize_edwards_tic_load_lock(conf, variables):
@@ -333,9 +331,7 @@ def state_update(conf, variables, emitter):
                 E_AGC_bc = EdwardsAGC(variables.COM_PORT_gauge_bc, variables)
             except Exception as e:
                 print(
-                    f"{bcolors.FAIL}"
-                    f"{_format_port_error('Buffer chamber gauge', variables.COM_PORT_gauge_bc, e)}"
-                    f"{bcolors.ENDC}"
+                    f"{bcolors.FAIL}{_format_port_error('Buffer chamber gauge', variables.COM_PORT_gauge_bc, e)}{bcolors.ENDC}"
                 )
                 E_AGC_bc = None
 
@@ -343,11 +339,7 @@ def state_update(conf, variables, emitter):
             try:
                 E_AGC_ll = EdwardsAGC(variables.COM_PORT_gauge_ll, variables)
             except Exception as e:
-                print(
-                    f"{bcolors.FAIL}"
-                    f"{_format_port_error('Load-lock gauge', variables.COM_PORT_gauge_ll, e)}"
-                    f"{bcolors.ENDC}"
-                )
+                print(f"{bcolors.FAIL}{_format_port_error('Load-lock gauge', variables.COM_PORT_gauge_ll, e)}{bcolors.ENDC}")
                 E_AGC_ll = None
 
         if conf['COM_PORT_gauge_cll'] != "off":
@@ -438,8 +430,7 @@ def state_update(conf, variables, emitter):
                 if variables.set_temperature_flag_cryo:
                     if variables.set_temperature_cryo != set_temperature_tmp_cryo:
                         try:
-                            res = command_cryovac(f'Out1Cryo.PID.Setpoint {variables.set_temperature_cryo}',
-                                                  com_port_cryovac)
+                            res = command_cryovac(f'Out1Cryo.PID.Setpoint {variables.set_temperature_cryo}', com_port_cryovac)
                             print(res)
                             set_temperature_tmp_cryo = variables.set_temperature_cryo
                         except Exception as e:
@@ -566,16 +557,24 @@ def state_update(conf, variables, emitter):
             if elapsed_time > log_time_time_interval:
                 start_time = time.time()
                 try:
-                    log_vacuum_levels(vacuum_main, vacuum_buffer, vacuum_buffer_backing, vacuum_load_lock,
-                                      vacuum_load_lock_backing, vacuum_cryo_load_lock, vacuum_cryo_load_lock_backing)
+                    log_vacuum_levels(
+                        vacuum_main,
+                        vacuum_buffer,
+                        vacuum_buffer_backing,
+                        vacuum_load_lock,
+                        vacuum_load_lock_backing,
+                        vacuum_cryo_load_lock,
+                        vacuum_cryo_load_lock_backing,
+                    )
                 except Exception as e:
                     print(e)
                     print("cannot log the vacuum levels")
             time.sleep(1)
 
 
-def log_vacuum_levels(main_chamber, buffer_chamber, buffer_chamber_pre, load_lock, load_lock_pre,
-                      cryo_load_lock, cryo_load_lock_pre):
+def log_vacuum_levels(
+    main_chamber, buffer_chamber, buffer_chamber_pre, load_lock, load_lock_pre, cryo_load_lock, cryo_load_lock_pre
+):
     """
     Log vacuum levels to a text file and a CSV file.
 
@@ -600,15 +599,33 @@ def log_vacuum_levels(main_chamber, buffer_chamber, buffer_chamber_pre, load_loc
     csv_file_path = path / f"vacuum_log_{current_month}.csv"
 
     with open(txt_file_path, "a") as log_file:
-        log_file.write(f"{timestamp}: Main Chamber={main_chamber}, Buffer Chamber={buffer_chamber}, "
-                       f"Buffer Chamber Pre={buffer_chamber_pre}, Load Lock={load_lock}, "
-                       f"Load Lock Pre={load_lock_pre}, Cryo Load Lock={cryo_load_lock}, "
-                       f"Cryo Load Lock Pre={cryo_load_lock_pre}\n")
+        log_file.write(
+            f"{timestamp}: Main Chamber={main_chamber}, Buffer Chamber={buffer_chamber}, "
+            f"Buffer Chamber Pre={buffer_chamber_pre}, Load Lock={load_lock}, "
+            f"Load Lock Pre={load_lock_pre}, Cryo Load Lock={cryo_load_lock}, "
+            f"Cryo Load Lock Pre={cryo_load_lock_pre}\n"
+        )
 
-    row = [timestamp, main_chamber, buffer_chamber, buffer_chamber_pre, load_lock, load_lock_pre, cryo_load_lock,
-           cryo_load_lock_pre]
-    header = ["Timestamp", "Main Chamber", "Buffer Chamber", "Buffer Chamber Backing Pump", "Load Lock",
-              "Load Lock Backing", 'Cryo Load Lock', 'Cryo Load Lock Backing']
+    row = [
+        timestamp,
+        main_chamber,
+        buffer_chamber,
+        buffer_chamber_pre,
+        load_lock,
+        load_lock_pre,
+        cryo_load_lock,
+        cryo_load_lock_pre,
+    ]
+    header = [
+        "Timestamp",
+        "Main Chamber",
+        "Buffer Chamber",
+        "Buffer Chamber Backing Pump",
+        "Load Lock",
+        "Load Lock Backing",
+        'Cryo Load Lock',
+        'Cryo Load Lock Backing',
+    ]
 
     file_empty = not os.path.exists(csv_file_path) or os.path.getsize(csv_file_path) == 0
 

@@ -64,4 +64,3 @@ def test_voltage_corr_main_uses_sqrt_factor_for_tof_and_linear_for_mc(monkeypatc
 
     np.testing.assert_allclose(variables_tof.dld_t_calib, np.array([4.0, 5.0, 6.0, 7.0]))
     np.testing.assert_allclose(variables_mc.mc_calib, np.array([20.0, 25.0, 30.0, 35.0]))
-

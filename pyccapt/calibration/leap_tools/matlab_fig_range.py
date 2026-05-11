@@ -286,9 +286,7 @@ def fig_to_range_dataframe(fig_path) -> pd.DataFrame:
         mc_up = float(x_flat[-1])
         face_color = _hex_color(getattr(props, "FaceColor", None))
 
-        display_name = _to_str(getattr(props, "DisplayName", "")) or _to_str(
-            getattr(user_data, "DisplayName", "")
-        )
+        display_name = _to_str(getattr(props, "DisplayName", "")) or _to_str(getattr(user_data, "DisplayName", ""))
         charge_state = _scalar(user_data.chargeState)
         if display_name:
             parsed = parse_display_name(display_name)
@@ -308,22 +306,24 @@ def fig_to_range_dataframe(fig_path) -> pd.DataFrame:
             except (TypeError, ValueError):
                 pass
 
-        rows.append({
-            "name": parsed["neutral_name"] or display_name,
-            "ion": _build_pyccapt_ion_label(parsed),
-            "mass": (mc_low + mc_up) / 2.0,
-            "mc": (mc_low + mc_up) / 2.0,
-            "mc_low": mc_low,
-            "mc_up": mc_up,
-            "color": face_color,
-            "element": list(parsed["elements"]),
-            "complex": list(parsed["counts"]),
-            "isotope": [iso if iso is not None else 0 for iso in parsed["isotopes"]],
-            "charge": int(parsed["charge"]),
-            "vol": 0.0,
-            "raw_comp": parsed["raw_comp"] or display_name,
-            "ion_name": parsed["neutral_name"] or display_name,
-        })
+        rows.append(
+            {
+                "name": parsed["neutral_name"] or display_name,
+                "ion": _build_pyccapt_ion_label(parsed),
+                "mass": (mc_low + mc_up) / 2.0,
+                "mc": (mc_low + mc_up) / 2.0,
+                "mc_low": mc_low,
+                "mc_up": mc_up,
+                "color": face_color,
+                "element": list(parsed["elements"]),
+                "complex": list(parsed["counts"]),
+                "isotope": [iso if iso is not None else 0 for iso in parsed["isotopes"]],
+                "charge": int(parsed["charge"]),
+                "vol": 0.0,
+                "raw_comp": parsed["raw_comp"] or display_name,
+                "ion_name": parsed["neutral_name"] or display_name,
+            }
+        )
 
     frame = pd.DataFrame(rows, columns=_PYCCAPT_RANGE_COLUMNS)
     frame.sort_values("mc_low", inplace=True, ignore_index=True)

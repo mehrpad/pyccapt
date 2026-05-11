@@ -67,6 +67,19 @@ beside each input for a chosen instrument preset. See the
 [Reflectron Batch Correction (CLI)](tutorials/reflectron_batch_cli.rst)
 tutorial page for arguments and examples.
 
+### Running on small-RAM machines
+
+The calibration pipeline ships a memory-mapped I/O layer
+(`pyccapt.calibration.data_tools.lazy_io`) so multi-gigabyte EPOS / POS /
+pyccapt-raw HDF5 files can be loaded, reflectron-corrected, and analyzed on
+machines with as little as 8 GB of RAM. The reflectron batch CLI uses it
+automatically (peak heap drops from multiple GB to ~270 MB), and the
+raw-data widget exposes a **Low memory** checkbox that routes the stats
+through chunked code paths. See the
+[Working with Big Datasets on Small RAM](tutorials/low_memory_mode.rst)
+tutorial page for the full design, opt-in entry points, and measured
+before/after numbers.
+
 Google Colab support is currently provided for:
 
 - `data_processing.ipynb`

@@ -37,3 +37,4 @@ Tutorial Guides
    tutorials/3d_reconstruction
    tutorials/reflectron_batch_cli
    tutorials/matlab_fig_range_import
+   tutorials/low_memory_mode

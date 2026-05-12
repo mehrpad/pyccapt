@@ -361,10 +361,10 @@ CAMERAS_TOOLTIPS = {
     "exposure_time_cam_2": "Exposure time for the top camera (µs).",
     "exposure_time_cam_3": "Exposure time for the angle camera (µs).",
     "auto_exposure_time": (
-        "Cameras default to auto-exposure on startup. Click to switch to "
-        "manual mode (button label flips to 'Auto Exposure Time On' — click "
-        "again to re-enable auto)."
+        "Toggle automatic exposure for all cameras. Cameras start in auto "
+        "(green LED to the left); click to switch to manual (red LED)."
     ),
+    "led_auto_exposure": "Auto-exposure indicator: green = on (Continuous), red = off (manual).",
     "default_exposure_time": "Reset exposure time to the default values for all cameras.",
     # --- Light + status -------------------------------------------------
     "light": "Toggle the alignment light (USB switch).",

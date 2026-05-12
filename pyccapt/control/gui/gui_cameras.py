@@ -267,6 +267,13 @@ class Ui_Cameras_Alignment(object):
         self.verticalLayout_2.setObjectName("verticalLayout_2")
         self.horizontalLayout = QtWidgets.QHBoxLayout()
         self.horizontalLayout.setObjectName("horizontalLayout")
+        # LED indicator that sits directly to the left of the
+        # auto-exposure button. Green = auto on, red = manual. Mirrors
+        # the light button / led_light pair just to the right.
+        self.led_auto_exposure = QtWidgets.QLabel(parent=Cameras_Alignment)
+        self.led_auto_exposure.setMaximumSize(QtCore.QSize(50, 50))
+        self.led_auto_exposure.setObjectName("led_auto_exposure")
+        self.horizontalLayout.addWidget(self.led_auto_exposure)
         self.auto_exposure_time = QtWidgets.QPushButton(parent=Cameras_Alignment)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Fixed)
         sizePolicy.setHorizontalStretch(0)
@@ -463,6 +470,9 @@ class Ui_Cameras_Alignment(object):
         self.led_red = QPixmap('./files/led-red-on.png')
         self.led_green = QPixmap('./files/green-led-on.png')
         self.led_light.setPixmap(self.led_red)
+        # Auto-exposure starts in 'Continuous' (see __init__), so light
+        # the LED green to match.
+        self.led_auto_exposure.setPixmap(self.led_green)
 
         # bottom camera (x, y)
         # arrow1 = pg.ArrowItem(pos=(925, 770), angle=0)
@@ -499,9 +509,6 @@ class Ui_Cameras_Alignment(object):
         self.exposure_time_cam_3.editingFinished.connect(self.update_exposure_time)
 
         self.original_button_style = self.auto_exposure_time.styleSheet()
-        # Auto-exposure is on by default — show the active (green) style
-        # so the user can see at a glance that the cameras are in auto.
-        self.auto_exposure_time.setStyleSheet("QPushButton{\nbackground: rgb(0, 255, 26)\n}")
 
         self.emitter.cams_exposure_time_default.connect(self.set_default_exposure_time)
         # switch off the light if it is one before opening the window
@@ -532,9 +539,7 @@ class Ui_Cameras_Alignment(object):
         self.label_211.setText(_translate("Cameras_Alignment", "Overview"))
         self.label_210.setText(_translate("Cameras_Alignment", "Detail"))
         self.label_206.setText(_translate("Cameras_Alignment", "Camera Angle"))
-        # Action-style label: text describes what clicking will do.
-        # Cameras start in auto-exposure, so the click action is "turn it Off".
-        self.auto_exposure_time.setText(_translate("Cameras_Alignment", "Auto Exposure Time Off"))
+        self.auto_exposure_time.setText(_translate("Cameras_Alignment", "Auto Exposure Time"))
         self.led_light.setText(_translate("Cameras_Alignment", "Light"))
         self.light.setText(_translate("Cameras_Alignment", "Light"))
         self.led_light_2.setText(_translate("Cameras_Alignment", "Exposure Time Side (us)"))
@@ -659,14 +664,11 @@ class Ui_Cameras_Alignment(object):
         None
         """
         self.auto_exposure_time_flag = not self.auto_exposure_time_flag
+        # LED mirrors the auto-exposure state: green = auto on, red = manual.
         if self.auto_exposure_time_flag:
-            # Auto is now ON → next click will turn it Off.
-            self.auto_exposure_time.setStyleSheet("QPushButton{\nbackground: rgb(0, 255, 26)\n}")
-            self.auto_exposure_time.setText("Auto Exposure Time Off")
+            self.led_auto_exposure.setPixmap(self.led_green)
         else:
-            # Auto is now OFF (manual) → next click will turn it On.
-            self.auto_exposure_time.setStyleSheet(self.original_button_style)
-            self.auto_exposure_time.setText("Auto Exposure Time On")
+            self.led_auto_exposure.setPixmap(self.led_red)
         self.emitter.auto_exposure_time.emit(True)
 
     def default_exposure_time_switch(self):

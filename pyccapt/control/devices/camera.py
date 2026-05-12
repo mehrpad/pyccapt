@@ -465,6 +465,50 @@ class CameraWorker(QObject):
         except Exception:
             pass
 
+        # Auto-exposure bounds.
+        #
+        # Sample alignment with the light off is very dark, and the
+        # user was bumping ExposureTime up to ~2,000,000 µs by hand to
+        # see the puck. Out of the box Basler caps AutoExposureTime at
+        # something much shorter (often 100,000–500,000 µs), so the
+        # firmware auto-loop hits the ceiling and gives up before the
+        # image is bright enough. Raising the ceiling lets the auto
+        # loop keep extending exposure for dark scenes, while a higher
+        # target brightness (≈0.6 vs. the default 0.5) shifts the
+        # set-point a notch brighter so dim specimen edges remain
+        # visible. Feature names vary across Basler model families
+        # (ace2/dart use AutoExposureTimeUpperLimit, older ace uses
+        # AutoExposureTimeAbsUpperLimit, …), so each set is wrapped.
+        DARK_EXPOSURE_UPPER_US = 3_000_000  # 3 s — covers "light off" alignment.
+        SHORT_EXPOSURE_LOWER_US = 100       # 100 µs — fast end for "light on".
+        TARGET_BRIGHTNESS = 0.6             # 0..1, default ~0.5; lift dark scenes.
+
+        for name in ("AutoExposureTimeUpperLimit", "AutoExposureTimeAbsUpperLimit"):
+            node = getattr(cam, name, None)
+            if node is not None:
+                try:
+                    node.SetValue(DARK_EXPOSURE_UPPER_US)
+                    break
+                except Exception:
+                    continue
+        for name in ("AutoExposureTimeLowerLimit", "AutoExposureTimeAbsLowerLimit"):
+            node = getattr(cam, name, None)
+            if node is not None:
+                try:
+                    node.SetValue(SHORT_EXPOSURE_LOWER_US)
+                    break
+                except Exception:
+                    continue
+        for name in ("AutoTargetBrightness", "AutoTargetValue", "BslAutoTargetBrightness"):
+            node = getattr(cam, name, None)
+            if node is not None:
+                try:
+                    # Some firmwares expect 0..1, some 0..255. Try both.
+                    self._try_set(node, TARGET_BRIGHTNESS, int(TARGET_BRIGHTNESS * 255))
+                    break
+                except Exception:
+                    continue
+
     # ------------------------------------------------------------ public API
 
     def list_cameras(self):

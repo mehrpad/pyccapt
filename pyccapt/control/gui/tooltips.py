@@ -360,7 +360,11 @@ CAMERAS_TOOLTIPS = {
     "exposure_time_cam_1": "Exposure time for the side camera, microseconds.  Increase if the image is too dark.",
     "exposure_time_cam_2": "Exposure time for the top camera (µs).",
     "exposure_time_cam_3": "Exposure time for the angle camera (µs).",
-    "auto_exposure_time": "Toggle automatic exposure adjustment for all cameras.",
+    "auto_exposure_time": (
+        "Cameras default to auto-exposure on startup. Click to switch to "
+        "manual mode (button label flips to 'Auto Exposure Time On' — click "
+        "again to re-enable auto)."
+    ),
     "default_exposure_time": "Reset exposure time to the default values for all cameras.",
     # --- Light + status -------------------------------------------------
     "light": "Toggle the alignment light (USB switch).",

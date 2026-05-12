@@ -68,8 +68,11 @@ class CameraWorker(QObject):
     def __init__(self, variables, emitter):
         super().__init__()
         self.flag_default_exposure_time = None
-        self.exposure_auto = False
-        self.exposure_mode = 'Off'
+        # Cameras start with ExposureAuto = Continuous so the user gets a
+        # usable image even before they touch the exposure inputs. The
+        # GUI's auto-exposure button toggles this back to manual ('Off').
+        self.exposure_auto = True
+        self.exposure_mode = 'Continuous'
         self.emitter = emitter
         self.variables = variables
 
@@ -305,13 +308,15 @@ class CameraWorker(QObject):
             cam = pylon.InstantCamera(self._tl_factory.CreateDevice(device_info))
             cam.Open()
             try:
-                cam.ExposureAuto.SetValue('Off')
+                cam.ExposureAuto.SetValue(self.exposure_mode)
             except Exception:
                 pass
-            try:
-                cam.ExposureTime.SetValue(self._exposure_for_slot(slot))
-            except Exception:
-                pass
+            if not self.exposure_auto:
+                try:
+                    cam.ExposureTime.SetValue(self._exposure_for_slot(slot))
+                except Exception:
+                    pass
+            self._apply_quality_settings(cam)
             cam.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
         except Exception as e:
             # Dedup per-device. The reconcile loop tries every visible
@@ -327,8 +332,12 @@ class CameraWorker(QObject):
         # the next failure (if any) prints again.
         self._last_attach_error_by_device.pop(device_key, None)
         self._slots[slot] = cam
-        self._applied_exposure[slot] = self._exposure_for_slot(slot)
-        self._applied_exposure_mode[slot] = 'Off'
+        # If we're attaching in auto mode we didn't write ExposureTime, so
+        # leave the cache empty — the manual-mode branch in
+        # _apply_exposure_changes will push the configured value the
+        # first time the user disables auto.
+        self._applied_exposure[slot] = None if self.exposure_auto else self._exposure_for_slot(slot)
+        self._applied_exposure_mode[slot] = self.exposure_mode
         try:
             sn = device_info.GetSerialNumber()
         except Exception:
@@ -340,6 +349,121 @@ class CameraWorker(QObject):
     def _set_status(self, message):
         """Publish a human-readable status / error string for the GUI."""
         self.latest_status = message or ""
+
+    @staticmethod
+    def _try_set(node, *values):
+        """Try a list of candidate values on a pylon node, accept the first one that sticks.
+
+        Returns True on success, False otherwise. Used for image-quality
+        features that exist on some Basler models but not others (e.g.
+        BslSharpnessEnhancement on dart/ace2 cameras only).
+        """
+        if node is None:
+            return False
+        for value in values:
+            try:
+                node.SetValue(value)
+                return True
+            except Exception:
+                continue
+        return False
+
+    def _apply_quality_settings(self, cam):
+        """Push image-quality tweaks that help with sample alignment.
+
+        All operations are best-effort: every Basler model exposes a
+        slightly different feature set, so each tweak is wrapped so that
+        an unsupported camera silently keeps its defaults rather than
+        bailing out of the attach path.
+
+        The goals are:
+        * Pick the highest mono / colour pixel format the camera supports
+          (12-bit if available) for better tonal range before we push to
+          the BGR8 converter.
+        * Enable Basler's PGI / sharpness enhancement and gamma so dark
+          alignment features (specimen edges, puck contours) lift out of
+          the background.
+        * Disable auto-white-balance jitter on colour cameras — for
+          alignment we want a stable image, not one that re-balances on
+          every frame.
+        """
+        # Pixel format: prefer 12-bit. The pyqtgraph view will still
+        # render 8-bit (via the converter) but a wider source format
+        # gives the auto-level step more headroom.
+        try:
+            pf = cam.PixelFormat
+            current = pf.GetValue()
+            preferred = (
+                "BayerRG12",
+                "BayerBG12",
+                "BayerGR12",
+                "BayerGB12",
+                "Mono12",
+                "BayerRG8",
+                "BayerBG8",
+                "Mono8",
+            )
+            available = set()
+            try:
+                available = {entry.GetSymbolic() for entry in pf.GetEntries() if entry.IsAvailable()}
+            except Exception:
+                pass
+            for cand in preferred:
+                if cand in available and cand != current:
+                    try:
+                        pf.SetValue(cand)
+                        break
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+
+        # Sharpness / PGI: Basler's image enhancement pipeline.
+        # BslSharpnessEnhancement is the modern node; older firmware
+        # exposes SharpnessEnhancement (no Bsl prefix) and the legacy
+        # PgiMode toggle.
+        try:
+            self._try_set(getattr(cam, "BslSharpnessEnhancement", None), 1.5)
+        except Exception:
+            pass
+        try:
+            self._try_set(getattr(cam, "SharpnessEnhancement", None), 1.5)
+        except Exception:
+            pass
+        try:
+            self._try_set(getattr(cam, "PgiMode", None), "On")
+        except Exception:
+            pass
+
+        # Gamma < 1 lifts shadows — useful when the light is off and
+        # the specimen detail lives in the darker half of the histogram.
+        try:
+            gsel = getattr(cam, "GammaSelector", None)
+            if gsel is not None:
+                self._try_set(gsel, "User")
+            gamma = getattr(cam, "Gamma", None)
+            if gamma is not None:
+                gamma.SetValue(0.7)
+        except Exception:
+            pass
+
+        # Lock auto-white-balance off so the image is stable while the
+        # operator is centring the specimen.
+        try:
+            wb = getattr(cam, "BalanceWhiteAuto", None)
+            if wb is not None:
+                self._try_set(wb, "Off")
+        except Exception:
+            pass
+
+        # Black-level: keep at default but make sure it isn't pinned to
+        # an inherited high value from a previous run.
+        try:
+            bl = getattr(cam, "BlackLevel", None)
+            if bl is not None:
+                bl.SetValue(0)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------ public API
 
@@ -435,6 +559,20 @@ class CameraWorker(QObject):
             if self._applied_exposure_mode[slot] != target_mode:
                 try:
                     cam.ExposureAuto.SetValue(target_mode)
+                    # Gain follows exposure: in auto mode, let the camera
+                    # also auto-tune the gain so low-light / high-light
+                    # scenes (light on/off) converge faster and cleaner.
+                    # In manual mode, GainAuto must be Off or the camera
+                    # will keep overriding the user's exposure value.
+                    try:
+                        cam.GainAuto.SetValue(target_mode)
+                    except Exception:
+                        pass
+                    # Auto-mode wrote its own value into ExposureTime; the
+                    # cache no longer reflects the camera. Invalidate so
+                    # the manual block below always re-pushes the user's
+                    # configured exposure on the next iteration.
+                    self._applied_exposure[slot] = None
                     self._applied_exposure_mode[slot] = target_mode
                     self._last_exposure_mode_error[slot] = None
                 except Exception as e:
@@ -442,6 +580,11 @@ class CameraWorker(QObject):
                     if self._last_exposure_mode_error[slot] != msg:
                         self._last_exposure_mode_error[slot] = msg
                         print(f"Slot {slot} exposure-auto change failed: {msg}")
+            # Skip pushing manual exposure values while the camera is in
+            # auto mode — the camera owns the value and writing here just
+            # races with the firmware loop.
+            if self.exposure_mode != 'Off':
+                continue
             target_exposure = self._exposure_for_slot(slot)
             if self._applied_exposure[slot] != target_exposure:
                 try:

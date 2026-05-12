@@ -478,7 +478,11 @@ class LiveCalibrationWorker(QtCore.QThread):
         # Cadence + thresholds (overridable via config.toml).
         self._refit_interval_s = float(conf.get("live_calibration_refit_interval_s", 15.0))
         self._min_events = int(conf.get("live_calibration_min_events", 5000))
-        self._min_fit_quality = float(conf.get("live_calibration_min_fit_quality", 0.5))
+        self._min_fit_quality = float(conf.get("live_calibration_min_fit_quality", 0.7))
+        self._max_consecutive_failures = max(
+            1, int(conf.get("live_calibration_max_consecutive_failures", 5))
+        )
+        self._consecutive_failures = 0
         self._mass_window_min = float(conf.get("live_calibration_mass_window_min", 1.0))
         self._mass_window_max = float(conf.get("live_calibration_mass_window_max", 60.0))
         self._target_mass = conf.get("live_calibration_target_mass")
@@ -518,12 +522,29 @@ class LiveCalibrationWorker(QtCore.QThread):
             except Exception as exc:
                 _log.exception("Live calibration refit raised: %s", exc)
                 self.status_changed.emit(f"refit error: {exc.__class__.__name__}")
-                continue
+                fit = None
             if fit is None:
+                # The previous params (if any) might have been borderline
+                # and are now visibly destroying peak structure in the
+                # GUI. After enough consecutive failures, throw them
+                # out so the spectrum falls back to the raw view rather
+                # than continuing to display a stale bad calibration.
+                self._consecutive_failures += 1
+                if (
+                    self._consecutive_failures >= self._max_consecutive_failures
+                    and self._ema_window
+                ):
+                    self._ema_window.clear()
+                    self.status_changed.emit(
+                        f"no good fit in {self._consecutive_failures} attempts; "
+                        "falling back to raw"
+                    )
+                    self.parameters_updated.emit(None)
                 continue
             # Push the freshly fitted parameters into the EMA window and
             # emit the *averaged* parameters so the displayed spectrum
             # updates smoothly across successive refits.
+            self._consecutive_failures = 0
             self._ema_window.append(fit)
             averaged = _mean_params(self._ema_window)
             if averaged is not None:

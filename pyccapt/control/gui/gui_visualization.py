@@ -1423,20 +1423,28 @@ class Ui_Visualization(object):
         self._calib_worker.start()
 
     def _on_calibration_params_updated(self, params):
-        """GUI-thread slot that atomically swaps in new calibration params."""
+        """GUI-thread slot that atomically swaps in new calibration params.
+
+        ``params=None`` means the worker has invalidated the cached
+        calibration (e.g. after several consecutive weak fits) and the
+        "Calibrated" view should fall back to raw geometry-only mc/tof.
+        We also clear the calibrated histogram in that case so the
+        user doesn't keep seeing bins binned under the now-discarded
+        bad parameters.
+        """
         self._calib_params = params
+        # Old calibrated bins were computed under the previous params;
+        # in either case (good new fit, or invalidation) the bin
+        # meanings have changed for the calibrated series, so reset
+        # just that accumulator. The uncalibrated accumulator's bin
+        # meanings don't depend on calibration params and keeps its
+        # full event history.
+        self._reset_cumulative_histograms(uncalib=False)
         if params is not None:
             self._set_calib_status_text(
                 f"calibrated (R²={params.fit_quality:.2f}, n={params.num_events_used})",
                 ok=True,
             )
-            # Old calibrated bins were computed under the previous
-            # parameters; clear *only* the calibrated accumulator so
-            # the displayed spectrum reflects events binned with the
-            # new calibration. The uncalibrated accumulator's bin
-            # meanings don't depend on calibration params, so it keeps
-            # the full event history.
-            self._reset_cumulative_histograms(uncalib=False)
 
     def _on_calibration_status_changed(self, text):
         """GUI-thread slot for the worker's human-readable status."""

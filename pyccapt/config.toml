@@ -68,8 +68,15 @@ live_calibration_refit_interval_s = 15.0
 live_calibration_min_events = 5000
 # Voltage-fit R² floor. Fits below this quality are rejected and the
 # previous good parameters are kept (or none, if there are no previous
-# good parameters).
-live_calibration_min_fit_quality = 0.5
+# good parameters). After several consecutive weak fits, the worker
+# *invalidates* the cached parameters (see
+# live_calibration_max_consecutive_failures) so the spectrum falls
+# back to the raw view rather than displaying a stale bad fit.
+live_calibration_min_fit_quality = 0.7
+# After this many consecutive weak fits, drop the cached parameters
+# and let the spectrum fall back to raw. At the default 15 s refit
+# cadence this is ~75 s of bad fits before we give up.
+live_calibration_max_consecutive_failures = 5
 # Mass window (Da) inside which the dominant peak is searched for. Pick
 # a window where you expect a strong, well-known peak for your sample.
 live_calibration_mass_window_min = 1.0

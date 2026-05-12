@@ -747,12 +747,22 @@ class Ui_Laser_Control(object):
         self.laser_speed_x.valueChanged.connect(lambda _v: self._update_stage_speed_label(self.laser_speed_x))
         self.laser_speed_y.valueChanged.connect(lambda _v: self._update_stage_speed_label(self.laser_speed_y))
         self.laser_speed_z.valueChanged.connect(lambda _v: self._update_stage_speed_label(self.laser_speed_z))
-        self.laser_left.clicked.connect(lambda: self._stage_jog_axis(mcs2_stage.AXIS_X, -1))
-        self.leser_right.clicked.connect(lambda: self._stage_jog_axis(mcs2_stage.AXIS_X, +1))
-        self.laser_up.clicked.connect(lambda: self._stage_jog_axis(mcs2_stage.AXIS_Y, +1))
-        self.laser_down.clicked.connect(lambda: self._stage_jog_axis(mcs2_stage.AXIS_Y, -1))
-        self.laser_forward.clicked.connect(lambda: self._stage_jog_axis(mcs2_stage.AXIS_Z, +1))
-        self.laser_backward.clicked.connect(lambda: self._stage_jog_axis(mcs2_stage.AXIS_Z, -1))
+        # Direction buttons: continuous jog while held — see the stage
+        # control GUI for the rationale. Tick interval matches
+        # click_duration_s so consecutive relative steps chain into
+        # smooth motion at the slider-selected velocity.
+        for button, axis, sign in (
+            (self.laser_left, mcs2_stage.AXIS_X, -1),
+            (self.leser_right, mcs2_stage.AXIS_X, +1),
+            (self.laser_up, mcs2_stage.AXIS_Y, +1),
+            (self.laser_down, mcs2_stage.AXIS_Y, -1),
+            (self.laser_forward, mcs2_stage.AXIS_Z, +1),
+            (self.laser_backward, mcs2_stage.AXIS_Z, -1),
+        ):
+            button.pressed.connect(
+                lambda a=axis, s=sign: self._start_continuous_stage_jog(a, s)
+            )
+            button.released.connect(self._stop_continuous_stage_jog)
         self.laser_home.clicked.connect(self._stage_go_home)
         self.laser_stage_reference.clicked.connect(self._stage_reference)
         self.laser_stage_stop.clicked.connect(self._stage_stop)
@@ -886,6 +896,48 @@ class Ui_Laser_Control(object):
             )
         except mcs2_stage.SmarActStageError as exc:
             self.error_message(f"Move failed: {exc}")
+
+    def _start_continuous_stage_jog(self, axis, sign):
+        """Hold-to-jog start: fire _stage_jog_axis on a timer.
+
+        Mirrors the stage control window's behaviour — see
+        gui_stage_control._start_continuous_jog for the full rationale.
+        Tick period = click_duration_s so the per-step relative moves
+        chain into smooth motion at the slider velocity.
+        """
+        if self.stage_device is None:
+            self.error_message(self._stage_connect_error or "Laser stage not connected.")
+            return
+        timer = getattr(self, "_continuous_stage_jog_timer", None)
+        if timer is None:
+            timer = QtCore.QTimer(self)
+            timer.setSingleShot(False)
+            self._continuous_stage_jog_timer = timer
+        else:
+            try:
+                timer.timeout.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+        # Fire one step immediately so a quick tap still moves.
+        self._stage_jog_axis(axis, sign)
+        timer.timeout.connect(lambda: self._stage_jog_axis(axis, sign))
+        interval_ms = max(50, int(self._click_duration_s * 1000))
+        timer.start(interval_ms)
+
+    def _stop_continuous_stage_jog(self):
+        """Hold-to-jog stop: kill the timer and truncate the in-flight step."""
+        timer = getattr(self, "_continuous_stage_jog_timer", None)
+        if timer is not None and timer.isActive():
+            timer.stop()
+        try:
+            timer.timeout.disconnect()
+        except (TypeError, RuntimeError, AttributeError):
+            pass
+        if self.stage_device is not None:
+            try:
+                self.stage_device.stop()
+            except Exception:
+                pass
 
     def _stage_go_home(self):
         if self.stage_device is None:

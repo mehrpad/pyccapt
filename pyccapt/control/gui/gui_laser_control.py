@@ -910,7 +910,11 @@ class Ui_Laser_Control(object):
             return
         timer = getattr(self, "_continuous_stage_jog_timer", None)
         if timer is None:
-            timer = QtCore.QTimer(self)
+            # Ui_Laser_Control is a plain Python class, not a QObject,
+            # so parenting the timer to `self` is a TypeError. Match
+            # the existing parentless QTimer pattern used elsewhere in
+            # this file.
+            timer = QtCore.QTimer()
             timer.setSingleShot(False)
             self._continuous_stage_jog_timer = timer
         else:

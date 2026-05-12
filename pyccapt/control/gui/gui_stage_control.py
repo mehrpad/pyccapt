@@ -468,7 +468,11 @@ class Ui_Stage_Control(object):
         # (e.g. user mashes two buttons) just retargets.
         timer = getattr(self, "_continuous_jog_timer", None)
         if timer is None:
-            timer = QtCore.QTimer(self)
+            # Ui_Stage_Control is a plain Python class (Qt Designer-style
+            # helper), not a QObject, so we can't parent the timer to
+            # `self`. The existing _poll_timer in this file uses the
+            # same parentless pattern.
+            timer = QtCore.QTimer()
             timer.setSingleShot(False)
             self._continuous_jog_timer = timer
         else:

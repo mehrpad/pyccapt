@@ -483,7 +483,7 @@ class CameraWorker(QObject):
         # visible. Feature names vary across Basler model families
         # (ace2/dart use AutoExposureTimeUpperLimit, older ace uses
         # AutoExposureTimeAbsUpperLimit, …), so each set is wrapped.
-        DARK_EXPOSURE_UPPER_US = 3_000_000  # 3 s — covers "light off" alignment.
+        DARK_EXPOSURE_UPPER_US = 2_000_000  # 2 s — same as the manual light-off default.
         SHORT_EXPOSURE_LOWER_US = 100       # 100 µs — fast end for "light on".
         TARGET_BRIGHTNESS = 0.6             # 0..1, default ~0.5; lift dark scenes.
 

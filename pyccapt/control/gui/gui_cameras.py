@@ -517,6 +517,11 @@ class Ui_Cameras_Alignment(object):
         self._set_manual_exposure_widgets_enabled(not self.auto_exposure_time_flag)
 
         self.emitter.cams_exposure_time_default.connect(self.set_default_exposure_time)
+        # Live read-back: each tick the worker tells us what
+        # ExposureTime each camera is actually using. Most useful in
+        # auto mode where the firmware picks the value; in manual mode
+        # it just mirrors what the user typed.
+        self.emitter.cams_exposure_time_current.connect(self._update_current_exposure_fields)
         # switch off the light if it is one before opening the window
         self.usb_lamp_switch.switch_off(16)
 
@@ -550,7 +555,7 @@ class Ui_Cameras_Alignment(object):
         self.light.setText(_translate("Cameras_Alignment", "Light"))
         self.led_light_2.setText(_translate("Cameras_Alignment", "Exposure Time Side (us)"))
         self.exposure_time_cam_1.setText(_translate("Cameras_Alignment", "2000000"))
-        self.exposure_time_cam_2.setText(_translate("Cameras_Alignment", "2000000"))
+        self.exposure_time_cam_2.setText(_translate("Cameras_Alignment", "400000"))
         self.exposure_time_cam_3.setText(_translate("Cameras_Alignment", "2000000"))
         self.led_light_3.setText(_translate("Cameras_Alignment", "Exposure Time Top (us)"))
         self.default_exposure_time.setText(_translate("Cameras_Alignment", "Default Exposure Time"))
@@ -582,6 +587,26 @@ class Ui_Cameras_Alignment(object):
         self.exposure_time_cam_1.setText(str(exposure_time_default[0]))
         self.exposure_time_cam_2.setText(str(exposure_time_default[1]))
         self.exposure_time_cam_3.setText(str(exposure_time_default[2]))
+
+    def _update_current_exposure_fields(self, values):
+        """Reflect the camera's live ExposureTime in each line edit.
+
+        Skips any field that currently has keyboard focus so the live
+        update never stomps on a value the user is mid-typing. Also
+        skips fields whose corresponding camera isn't attached (the
+        worker publishes ``None`` for those).
+        """
+        if not values:
+            return
+        widgets = (self.exposure_time_cam_1, self.exposure_time_cam_2, self.exposure_time_cam_3)
+        for widget, value in zip(widgets, values):
+            if value is None:
+                continue
+            if widget.hasFocus():
+                continue
+            text = str(int(value))
+            if widget.text() != text:
+                widget.setText(text)
 
     def update_exposure_time(self):
         """
@@ -876,6 +901,10 @@ class SignalEmitter(QObject):
     cam_2_exposure_time = pyqtSignal(int)
     cam_3_exposure_time = pyqtSignal(int)
     cams_exposure_time_default = pyqtSignal(list)
+    # Live read-back of ExposureTime from each slot — carries
+    # [t_cam_1, t_cam_2, t_cam_3] in microseconds, with None for any
+    # slot that isn't currently attached.
+    cams_exposure_time_current = pyqtSignal(list)
     default_exposure_time = pyqtSignal(bool)
     auto_exposure_time = pyqtSignal(bool)
 

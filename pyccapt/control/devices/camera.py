@@ -78,13 +78,13 @@ class CameraWorker(QObject):
 
         self.running = False
         self.index_save_image = 0
-        # Defaults for the "light off" case (microseconds). 2,000,000 µs
-        # (2 s) is the value the user previously dialled in by hand to
-        # see the puck in the dark — matches the new auto-exposure
-        # upper limit and the default reset button.
+        # Defaults for the "light off" case (microseconds). Side (cam_1)
+        # and angle (cam_3) need a long exposure (~2 s) to see the puck
+        # in the dark; the top camera (cam_2) sees more ambient light
+        # and gets washed out at 2 s, so it stays at 400 ms.
         self.exposure_time_cam_1 = 2_000_000
         self.exposure_time_cam_1_light = 10000
-        self.exposure_time_cam_2 = 2_000_000
+        self.exposure_time_cam_2 = 400_000
         self.exposure_time_cam_2_light = 20000
         self.exposure_time_cam_3 = 2_000_000
         self.exposure_time_cam_3_light = 10000
@@ -160,7 +160,7 @@ class CameraWorker(QObject):
         if not self.exposure_auto:
             self.exposure_time_cam_1 = 2_000_000
             self.exposure_time_cam_1_light = 10000
-            self.exposure_time_cam_2 = 2_000_000
+            self.exposure_time_cam_2 = 400_000
             self.exposure_time_cam_2_light = 20000
             self.exposure_time_cam_3 = 2_000_000
             self.exposure_time_cam_3_light = 10000
@@ -686,6 +686,7 @@ class CameraWorker(QObject):
                     self._last_grab_error[slot] = None
 
             self._emit_images(grabbed_images)
+            self._emit_current_exposures()
 
             if self.variables.clear_index_save_image:
                 self.variables.clear_index_save_image = False
@@ -723,6 +724,42 @@ class CameraWorker(QObject):
         angle_src = img0 if img0 is not None else img1
         if angle_src is not None:
             self.emitter.img2_orig.emit(np.swapaxes(angle_src, 0, 1))
+
+    def _emit_current_exposures(self):
+        """Publish each camera's live ExposureTime to the GUI.
+
+        Reads ExposureTime back from the hardware once per tick so the
+        line-edit fields always reflect what the camera is *actually*
+        using — most importantly in auto mode, where the firmware is
+        the one picking the value. ``None`` is published for any slot
+        that isn't currently attached.
+
+        The mapping is slot 0 → cam_1 (side), slot 1 → cam_2 (top),
+        cam_3 (angle) mirrors slot 0 because the angle view is a copy
+        of the side image when only two cameras are connected.
+        """
+
+        def _read(slot):
+            cam = self._slots[slot] if slot < self.SLOT_COUNT else None
+            if cam is None:
+                return None
+            try:
+                return int(cam.ExposureTime.GetValue())
+            except Exception:
+                return None
+
+        t0 = _read(0)
+        t1 = _read(1)
+        # Angle is a duplicate of the side feed, so report the same value.
+        t2 = t0
+        # Nothing useful to report if no slots are attached.
+        if t0 is None and t1 is None:
+            return
+        try:
+            self.emitter.cams_exposure_time_current.emit([t0, t1, t2])
+        except Exception:
+            # Emitter might be torn down during shutdown.
+            pass
 
     def _save_screenshots(self, images):
         path_meta = self.variables.path_meta

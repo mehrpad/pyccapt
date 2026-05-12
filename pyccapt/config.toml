@@ -183,8 +183,8 @@ stage_smartact_laser = "network:sn:MCS2-00017944"
 # coordinates after referencing has run (or immediately if the controller
 # already knows its reference).
 stage_home_x_mm = 1.615
-stage_home_y_mm = 1.032
-stage_home_z_mm = -3.930
+stage_home_y_mm = 2.2357
+stage_home_z_mm = -3.405
 laser_stage_home_x_mm = 0.0
 laser_stage_home_y_mm = 0.0
 laser_stage_home_z_mm = 0.0

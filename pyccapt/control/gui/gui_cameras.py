@@ -509,6 +509,12 @@ class Ui_Cameras_Alignment(object):
         self.exposure_time_cam_3.editingFinished.connect(self.update_exposure_time)
 
         self.original_button_style = self.auto_exposure_time.styleSheet()
+        # Manual exposure controls only make sense when the camera is
+        # not running its own auto-exposure loop, so the "Default
+        # Exposure Time" button and the three per-camera µs fields are
+        # disabled while auto-exposure is on. Cameras start in auto, so
+        # initialise these as disabled.
+        self._set_manual_exposure_widgets_enabled(not self.auto_exposure_time_flag)
 
         self.emitter.cams_exposure_time_default.connect(self.set_default_exposure_time)
         # switch off the light if it is one before opening the window
@@ -543,9 +549,9 @@ class Ui_Cameras_Alignment(object):
         self.led_light.setText(_translate("Cameras_Alignment", "Light"))
         self.light.setText(_translate("Cameras_Alignment", "Light"))
         self.led_light_2.setText(_translate("Cameras_Alignment", "Exposure Time Side (us)"))
-        self.exposure_time_cam_1.setText(_translate("Cameras_Alignment", "400000"))
-        self.exposure_time_cam_2.setText(_translate("Cameras_Alignment", "1000000"))
-        self.exposure_time_cam_3.setText(_translate("Cameras_Alignment", "400000"))
+        self.exposure_time_cam_1.setText(_translate("Cameras_Alignment", "2000000"))
+        self.exposure_time_cam_2.setText(_translate("Cameras_Alignment", "2000000"))
+        self.exposure_time_cam_3.setText(_translate("Cameras_Alignment", "2000000"))
         self.led_light_3.setText(_translate("Cameras_Alignment", "Exposure Time Top (us)"))
         self.default_exposure_time.setText(_translate("Cameras_Alignment", "Default Exposure Time"))
         self.led_light_4.setText(_translate("Cameras_Alignment", "Exposure Time Angle (us)"))
@@ -669,7 +675,25 @@ class Ui_Cameras_Alignment(object):
             self.led_auto_exposure.setPixmap(self.led_green)
         else:
             self.led_auto_exposure.setPixmap(self.led_red)
+        # Manual fields are only meaningful in manual mode.
+        self._set_manual_exposure_widgets_enabled(not self.auto_exposure_time_flag)
         self.emitter.auto_exposure_time.emit(True)
+
+    def _set_manual_exposure_widgets_enabled(self, enabled):
+        """Enable/disable the manual exposure inputs as a group.
+
+        Disabled in auto mode because the camera firmware owns
+        ExposureTime there — typing into the µs fields or hitting
+        "Default Exposure Time" would have no effect and only confuse
+        the user.
+        """
+        for widget in (
+            self.default_exposure_time,
+            self.exposure_time_cam_1,
+            self.exposure_time_cam_2,
+            self.exposure_time_cam_3,
+        ):
+            widget.setEnabled(enabled)
 
     def default_exposure_time_switch(self):
         """

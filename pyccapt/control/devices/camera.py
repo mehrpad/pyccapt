@@ -78,11 +78,15 @@ class CameraWorker(QObject):
 
         self.running = False
         self.index_save_image = 0
-        self.exposure_time_cam_1 = 400000
+        # Defaults for the "light off" case (microseconds). 2,000,000 µs
+        # (2 s) is the value the user previously dialled in by hand to
+        # see the puck in the dark — matches the new auto-exposure
+        # upper limit and the default reset button.
+        self.exposure_time_cam_1 = 2_000_000
         self.exposure_time_cam_1_light = 10000
-        self.exposure_time_cam_2 = 1000000
+        self.exposure_time_cam_2 = 2_000_000
         self.exposure_time_cam_2_light = 20000
-        self.exposure_time_cam_3 = 400000
+        self.exposure_time_cam_3 = 2_000_000
         self.exposure_time_cam_3_light = 10000
 
         self.emitter.cam_1_exposure_time.connect(self.set_exposure_time_1)
@@ -154,11 +158,11 @@ class CameraWorker(QObject):
     @pyqtSlot(bool)
     def set_default_exposure_time(self):
         if not self.exposure_auto:
-            self.exposure_time_cam_1 = 400000
+            self.exposure_time_cam_1 = 2_000_000
             self.exposure_time_cam_1_light = 10000
-            self.exposure_time_cam_2 = 1000000
+            self.exposure_time_cam_2 = 2_000_000
             self.exposure_time_cam_2_light = 20000
-            self.exposure_time_cam_3 = 400000
+            self.exposure_time_cam_3 = 2_000_000
             self.exposure_time_cam_3_light = 10000
 
             self.flag_default_exposure_time = True

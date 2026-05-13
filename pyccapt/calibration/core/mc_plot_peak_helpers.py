@@ -7,6 +7,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter1d
 from scipy.optimize import curve_fit
 from scipy.signal import find_peaks, peak_prominences, peak_widths
+from scipy.special import erf as _erf
 
 _MRP_INTERNAL_BIN_SIZE = 0.01
 _BOX_SELECTION_BIN_SIZE = 0.1
@@ -287,6 +288,110 @@ def _fit_voigt_mrp(x, y, peak_idx):
     return result, True, float(fwhm), profile_type
 
 
+# Asymmetric peak shape adapted from APyT's `error-expDecay` model
+# (sebi-85/apyt: apyt/spectrum/fit.py). The rising edge is an error-function
+# activation; the trailing edge is an exponential decay, which captures the
+# delayed-evaporation/thermal tail characteristic of APT peaks better than a
+# Gaussian or pseudo-Voigt.
+_SQRT2 = float(np.sqrt(2.0))
+
+
+def _err_exp_decay(x, amp, center, sigma, tail, bg):
+    """Error-function rise multiplied by an exponential decay."""
+    sigma = max(float(sigma), 1e-12)
+    tail = max(float(tail), 1e-12)
+    activation = 0.5 * (1.0 + _erf((x - center) / (_SQRT2 * sigma)))
+    dx = x - center
+    decay = np.where(dx > 0.0, np.exp(-dx / tail), 1.0)
+    return amp * activation * decay + bg
+
+
+def _fit_asymmetric_mrp(x, y, peak_idx):
+    """Fit err*expDecay around *peak_idx* and return MRP at 0.5, 0.1, 0.01."""
+    nan3 = [float('nan')] * 3
+
+    mu0 = float(x[peak_idx])
+    amp0 = float(y[peak_idx])
+    if amp0 <= 0:
+        return nan3, False, float('nan')
+
+    bin_step = float(x[1] - x[0]) if len(x) > 1 else 1.0
+    min_hw_bins = max(15, int(np.ceil(0.3 / max(bin_step, 1e-9))))
+    hw = min(min_hw_bins, peak_idx, len(x) - 1 - peak_idx)
+    sl = slice(peak_idx - hw, peak_idx + hw + 1)
+    xw, yw = x[sl], y[sl].astype(float)
+    if xw.size < 6:
+        return nan3, False, float('nan')
+
+    bg0 = float(np.min(yw))
+    sigma0 = max((x[min(peak_idx + 2, len(x) - 1)] - x[max(peak_idx - 2, 0)]) / _FWHM_FACTOR, bin_step * 0.5)
+    tail0 = sigma0
+    span = float(xw[-1] - xw[0])
+
+    try:
+        popt, _ = curve_fit(
+            _err_exp_decay,
+            xw,
+            yw,
+            p0=[amp0 - bg0, mu0, sigma0, tail0, bg0],
+            bounds=(
+                [0.0, xw[0], 1e-12, 1e-12, 0.0],
+                [np.inf, xw[-1], span, span, np.inf],
+            ),
+            maxfev=4000,
+        )
+    except (RuntimeError, ValueError):
+        return nan3, False, float('nan')
+
+    amp_fit, mu_fit, sigma_fit, tail_fit, bg_fit = popt
+    if sigma_fit <= 0 or tail_fit <= 0 or amp_fit <= 0:
+        return nan3, False, float('nan')
+
+    # Resolve MRP fractions analytically on a fine grid: the asymmetric tail
+    # may extend well past the fit window for shallow decays, so widen the
+    # sampling like the Voigt path does.
+    fit_span = span
+    base_edge_tol = max((xw[1] - xw[0]) * 2.0 if len(xw) > 1 else 0.0, fit_span / 400.0)
+    rough_fwhm = _FWHM_FACTOR * sigma_fit + 1.5 * tail_fit
+    wide_half_span = max(fit_span / 2.0, 15.0 * rough_fwhm)
+
+    result = []
+    widths = []
+    fwhm_value = float('nan')
+    for frac in [0.5, 0.1, 0.01]:
+        if frac >= 0.5:
+            x_fine = np.linspace(xw[0], xw[-1], 2000)
+            edge_tol = base_edge_tol
+        else:
+            x_fine = np.linspace(mu_fit - wide_half_span, mu_fit + wide_half_span, 4000)
+            edge_tol = float(x_fine[1] - x_fine[0]) if len(x_fine) > 1 else 0.0
+        y_fine = _err_exp_decay(x_fine, *popt) - bg_fit
+        y_max = float(np.max(y_fine))
+        if y_max <= 0:
+            result.append(float('nan'))
+            widths.append(float('nan'))
+            continue
+        above = x_fine[y_fine >= frac * y_max]
+        if len(above) < 2:
+            result.append(float('nan'))
+            widths.append(float('nan'))
+            continue
+        if above[0] <= x_fine[0] + edge_tol or above[-1] >= x_fine[-1] - edge_tol:
+            result.append(float('nan'))
+            widths.append(float('nan'))
+            continue
+        fw = float(above[-1] - above[0])
+        widths.append(fw)
+        result.append(round(float(mu_fit / fw), 2) if fw > 0 else float('nan'))
+        if frac == 0.5 and fw > 0:
+            fwhm_value = fw
+
+    sanitize_full_span = max(fit_span, 2.0 * wide_half_span)
+    widths, result = _sanitize_tail_widths(widths, result, sanitize_full_span, max(base_edge_tol, fit_span / 200.0))
+
+    return result, True, fwhm_value
+
+
 def _plotter_peak_window(plotter, peak_array_index):
     """Return a robust search window for a plotted peak using raw-ion MRP resolution."""
     x_axis = plotter.x_centers if getattr(plotter, 'x_centers', None) is not None else plotter.x[:-1]
@@ -305,7 +410,13 @@ def _plotter_peak_window(plotter, peak_array_index):
 
 
 def _recommended_mrp_payload(report):
-    """Return the recommended robust MRP set from a report."""
+    """Return the recommended robust MRP set from a report.
+
+    Priority order: Asymmetric (err*expDecay, APyT-style) > Voigt > Gaussian >
+    Histogram. The asymmetric fit captures the exponential tail of real APT
+    peaks and is the primary number; the others remain available for
+    cross-checking.
+    """
     if report is None:
         return [float('nan')] * 3, 'unavailable'
     histogram_values = report.get('histogram_mrp', [float('nan')] * 3)
@@ -313,6 +424,26 @@ def _recommended_mrp_payload(report):
     voigt_values = report.get('voigt_mrp', [float('nan')] * 3)
     gaussian_values = report.get('gaussian_mrp', [float('nan')] * 3)
     gaussian_finite = bool(report.get('gaussian_ok')) and np.isfinite(gaussian_values[0])
+    asym_values = report.get('asymmetric_mrp', [float('nan')] * 3)
+    asym_finite = bool(report.get('asymmetric_ok')) and np.isfinite(asym_values[0])
+
+    # Cross-check the asymmetric fit the same way we cross-check the Voigt fit:
+    # the histogram width is the most reliable independent reference, the
+    # Gaussian fit is the second-best fallback.
+    if histogram_valid:
+        asym_cross_check_ok = asym_values[0] <= histogram_values[0] * _MRP_REFERENCE_GUARD_FACTOR
+    elif gaussian_finite:
+        asym_cross_check_ok = asym_values[0] <= gaussian_values[0] * _MRP_REFERENCE_GUARD_FACTOR
+    else:
+        asym_cross_check_ok = True
+
+    asym_valid = (
+        asym_finite
+        and asym_cross_check_ok
+        and asym_values[0] <= _MRP_PHYSICAL_CEILING
+    )
+    if asym_valid:
+        return report['asymmetric_mrp'], 'Asymmetric (err*expDecay)'
 
     # Cross-check the Voigt fit against the most reliable independent
     # estimator we have: histogram-based MRP when the bin size makes it
@@ -888,6 +1019,7 @@ def _gaussian_mrp_report_core(
 
     gauss_mrp, gauss_ok = _fit_gaussian_mrp(x, y, peaks[peak_idx])
     voigt_mrp, voigt_ok, voigt_fwhm, profile_type = _fit_voigt_mrp(x, y, peaks[peak_idx])
+    asym_mrp, asym_ok, asym_fwhm = _fit_asymmetric_mrp(x, y, peaks[peak_idx])
 
     # scipy.signal.peak_widths walks outward from the apex bin and interpolates
     # the first downward crossing. When the histogram bin is much finer than
@@ -958,17 +1090,22 @@ def _gaussian_mrp_report_core(
     peak_position = float(x[peaks[peak_idx]])
     gaussian_peak_sides = _mrp_sides_from_values(peak_position, gauss_mrp if gauss_ok else [float('nan')] * 3)
     voigt_peak_sides = _mrp_sides_from_values(peak_position, voigt_mrp if voigt_ok else [float('nan')] * 3)
+    asymmetric_peak_sides = _mrp_sides_from_values(peak_position, asym_mrp if asym_ok else [float('nan')] * 3)
     recommended_mrp, recommended_label = _recommended_mrp_payload(
         {
             'gaussian_ok': gauss_ok,
             'gaussian_mrp': gauss_mrp if gauss_ok else [float('nan')] * 3,
             'voigt_ok': voigt_ok,
             'voigt_mrp': voigt_mrp if voigt_ok else [float('nan')] * 3,
+            'asymmetric_ok': asym_ok,
+            'asymmetric_mrp': asym_mrp if asym_ok else [float('nan')] * 3,
             'histogram_mrp': hist_mrp,
             'profile_type': profile_type,
         }
     )
-    if recommended_label.startswith('Voigt'):
+    if recommended_label.startswith('Asymmetric'):
+        recommended_peak_sides = asymmetric_peak_sides
+    elif recommended_label.startswith('Voigt'):
         recommended_peak_sides = voigt_peak_sides
     elif recommended_label == 'Gaussian':
         recommended_peak_sides = gaussian_peak_sides
@@ -1020,6 +1157,11 @@ def _gaussian_mrp_report_core(
         'voigt_peak_sides': voigt_peak_sides,
         'voigt_fwhm': voigt_fwhm,
         'profile_type': profile_type,
+        'asymmetric_mrp': asym_mrp if asym_ok else [float('nan')] * 3,
+        'asymmetric_ok': asym_ok,
+        'formatted_asymmetric_mrp': [_format_mrp_value(value) for value in (asym_mrp if asym_ok else [float('nan')] * 3)],
+        'asymmetric_peak_sides': asymmetric_peak_sides,
+        'asymmetric_fwhm': asym_fwhm,
         'histogram_mrp': hist_mrp,
         'formatted_histogram_mrp': [_format_mrp_value(value) for value in hist_mrp],
         'histogram_peak_sides': histogram_peak_sides,
@@ -1143,4 +1285,5 @@ __all__ = [
     'draw_rectangle',
     '_fit_gaussian_mrp',
     '_fit_voigt_mrp',
+    '_fit_asymmetric_mrp',
 ]

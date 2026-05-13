@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import plotly.graph_objects as go
 import plotly.io as pio
-from matplotlib import rcParams, colors
+from matplotlib import colors
 from matplotlib.animation import FuncAnimation
 from plotly.subplots import make_subplots
 
@@ -26,7 +26,6 @@ from pyccapt.calibration.reconstructions.rotation_tools import (
     rotate_z,
 )
 
-
 def _normalize_plotly_color(value):
     """Return a Plotly-safe color string from stored range colors."""
     value = str(value).strip()
@@ -34,11 +33,9 @@ def _normalize_plotly_color(value):
         return f'#{value}'
     return value
 
-
 def _normalize_plotly_colors(values):
     """Normalize a sequence of stored range colors for Plotly usage."""
     return [_normalize_plotly_color(value) for value in values]
-
 
 def cart2pol(x, y):
     """
@@ -56,7 +53,6 @@ def cart2pol(x, y):
     phi = np.arctan2(y, x)
     return rho, phi
 
-
 def pol2cart(rho, phi):
     """
     Convert polar coordinates to Cartesian coordinates.
@@ -72,7 +68,6 @@ def pol2cart(rho, phi):
     x = rho * np.cos(phi)
     y = rho * np.sin(phi)
     return x, y
-
 
 def atom_probe_recons_from_detector_Gault_et_al(detx, dety, hv, flight_path_length, kf, det_eff, icf, field_evap, avg_dens):
     """
@@ -144,7 +139,6 @@ def atom_probe_recons_from_detector_Gault_et_al(detx, dety, hv, flight_path_leng
 
     return x, y, z
 
-
 def atom_probe_recons_Bas_et_al(detx, dety, hv, flight_path_length, kf, det_eff, icf, field_evap, avg_dens):
     """
     Perform atom probe reconstruction using Bas et al.'s method.
@@ -182,7 +176,6 @@ def atom_probe_recons_Bas_et_al(detx, dety, hv, flight_path_length, kf, det_eff,
     z = np.cumsum(dz) + dz_p
 
     return x * 1e9, y * 1e9, z * 1e9
-
 
 def draw_qube(fig, range, col=None, row=None):
     x_range = range[0]
@@ -249,7 +242,6 @@ def draw_qube(fig, range, col=None, row=None):
     fig.update_scenes(zaxis_autorange="reversed")
     fig.update_layout(legend_title="", legend={'itemsizing': 'constant'}, font=dict(size=8))
     return fig
-
 
 def reconstruction_plot(
     variables,
@@ -612,7 +604,6 @@ def reconstruction_plot(
             print('The figure could not be saved')
             print(e)
 
-
 def scatter_plot(data, range_data, variables, element_percentage, selected_area, x_or_y, figname, figure_size, save=False):
     """
     Generate a scatter plot based on the provided data.
@@ -673,11 +664,8 @@ def scatter_plot(data, range_data, variables, element_percentage, selected_area,
     plt.legend(loc='upper right')
 
     if save:
-        # Enable rendering for text elements
-        rcParams['svg.fonttype'] = 'none'
-        save_matplotlib_figure(fig, variables, stem=f"projection_{figname}", formats=("png", "svg"), dpi=600)
+        save_matplotlib_figure(fig, variables, stem=f"projection_{figname}", formats=("png", "pdf"), dpi=600)
     plt.show()
-
 
 def projection(
     variables,
@@ -798,11 +786,8 @@ def projection(
     plt.legend(loc='upper right')
 
     if save:
-        # Enable rendering for text elements
-        rcParams['svg.fonttype'] = 'none'
-        save_matplotlib_figure(fig, variables, stem=f"projection_{figname}", formats=("png", "svg"), dpi=600)
+        save_matplotlib_figure(fig, variables, stem=f"projection_{figname}", formats=("png", "pdf"), dpi=600)
     plt.show()
-
 
 def heatmap(
     variables,
@@ -926,11 +911,8 @@ def heatmap(
         plt.legend(loc='upper right')
 
     if save:
-        # Enable rendering for text elements
-        rcParams['svg.fonttype'] = 'none'
-        save_matplotlib_figure(fig, variables, stem=f"{figure_name}heatmap", formats=("png", "svg"), dpi=600)
+        save_matplotlib_figure(fig, variables, stem=f"{figure_name}heatmap", formats=("png", "pdf"), dpi=600)
     plt.show()
-
 
 def reconstruction_2d_histogram(
     variables,
@@ -1047,12 +1029,9 @@ def reconstruction_2d_histogram(
     plt.ylabel(ylabel)
 
     if save:
-        # Enable rendering for text elements
-        rcParams['svg.fonttype'] = 'none'
-        save_matplotlib_figure(fig, variables, stem=figure_name, formats=("png", "svg"), dpi=600)
+        save_matplotlib_figure(fig, variables, stem=figure_name, formats=("png", "pdf"), dpi=600)
     # Show the plot
     plt.show()
-
 
 def detector_animation(
     variables, points_per_frame, ranged, selected_area_specially, selected_area_temporally, figure_name, figure_sie, save
@@ -1152,11 +1131,8 @@ def detector_animation(
     variables.animation_detector_html = animation.to_jshtml()
 
     if save:
-        # Enable rendering for text elements
-        rcParams['svg.fonttype'] = 'none'
         animation.save(resolve_result_file(variables, f"{figure_name}.gif"), writer='imagemagick')
     plt.close()
-
 
 def x_y_z_calculation_and_plot(
     variables,

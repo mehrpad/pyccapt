@@ -86,6 +86,15 @@ def call_ion_selection(variables, colab=False, show_gaussian_controls=False):
             print(f'  MRP(0.01) = {result["formatted_voigt_mrp"][2]}')
             print(f'  Voigt FWHM = {result["voigt_fwhm"]:.6f}')
         print()
+        print('Asymmetric (err*expDecay) fit MRP:' if result.get('asymmetric_ok') else 'Asymmetric (err*expDecay) fit FAILED')
+        if result.get('asymmetric_ok'):
+            print(f'  MRP(0.5)  = {result["formatted_asymmetric_mrp"][0]}')
+            print(f'  MRP(0.1)  = {result["formatted_asymmetric_mrp"][1]}')
+            print(f'  MRP(0.01) = {result["formatted_asymmetric_mrp"][2]}')
+            asym_fwhm = result.get('asymmetric_fwhm', float('nan'))
+            if np.isfinite(asym_fwhm):
+                print(f'  Asymmetric FWHM = {asym_fwhm:.6f}')
+        print()
         print('Histogram-based MRP:')
         print(f'  MRP(0.5)  = {result["formatted_histogram_mrp"][0]}')
         print(f'  MRP(0.1)  = {result["formatted_histogram_mrp"][1]}')

@@ -3,15 +3,13 @@ from matplotlib import cm
 import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib import rcParams, colors
+from matplotlib import colors
 from matplotlib.patches import Circle
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
-
 
 from pyccapt.calibration.data_tools.data_loadcrop import elliptical_shape_selector
 from pyccapt.calibration.data_tools.merge_range import merge_by_range
 from pyccapt.calibration.reconstructions.io_utils import save_matplotlib_figure
-
 
 def plot_density_map(
     x,
@@ -261,6 +259,4 @@ def plot_density_map(
             print('ROI is only supported for x-y axis')
     plt.show()
     if save and variables is not None:
-        # Enable rendering for text elements
-        rcParams['svg.fonttype'] = 'none'
-        save_matplotlib_figure(fig1, variables, stem=figname, formats=("png", "svg"), dpi=600)
+        save_matplotlib_figure(fig1, variables, stem=figname, formats=("png", "pdf"), dpi=600)

@@ -31,11 +31,9 @@ from ipywidgets import Output
 
 from pyccapt.calibration.path_utils import ensure_directory, save_figure
 
-
 # ---------------------------------------------------------------------------
 # Detector kind detection
 # ---------------------------------------------------------------------------
-
 
 def detect_detector_kind(tdc_df: pd.DataFrame | None) -> str:
     """Return the detector family inferred from the channel range in ``tdc_df``.
@@ -59,7 +57,6 @@ def detect_detector_kind(tdc_df: pd.DataFrame | None) -> str:
         return "roentdek"
     return "unknown"
 
-
 def _delay_line_pairs(detector_kind: str) -> list[tuple[int, int]]:
     """Return the list of ``(low_channel, high_channel)`` pairs, one per delay line.
 
@@ -75,17 +72,14 @@ def _delay_line_pairs(detector_kind: str) -> list[tuple[int, int]]:
         return [(0, 1), (2, 3), (4, 5)]
     return []
 
-
 def expected_dlts_full(detector_kind: str) -> int:
     """Number of DLTS that constitute a complete event for the detector."""
     pairs = _delay_line_pairs(detector_kind)
     return 2 * len(pairs)
 
-
 # ---------------------------------------------------------------------------
 # Species table builders
 # ---------------------------------------------------------------------------
-
 
 def species_from_range(range_df: pd.DataFrame | None) -> list[dict]:
     """Convert a saved range table into the species schema used here.
@@ -117,7 +111,6 @@ def species_from_range(range_df: pd.DataFrame | None) -> list[dict]:
         )
     return species
 
-
 def species_from_manual(rows: Iterable[tuple[widgets.Text, widgets.FloatText, widgets.FloatText]]) -> list[dict]:
     """Convert manual-input widget rows to the species schema."""
     species: list[dict] = []
@@ -132,11 +125,9 @@ def species_from_manual(rows: Iterable[tuple[widgets.Text, widgets.FloatText, wi
         species.append({"label": label, "mc_low": low, "mc_up": high, "color": "#1f77b4"})
     return species
 
-
 # ---------------------------------------------------------------------------
 # Plot helpers
 # ---------------------------------------------------------------------------
-
 
 def _close_after(fig):
     """Close ``fig`` only when the active matplotlib backend renders the
@@ -157,7 +148,6 @@ def _close_after(fig):
         return
     plt.close(fig)
 
-
 def _resolve_dataset_path(variables) -> Path | None:
     raw_path = str(getattr(variables, "path", "") or "").strip()
     if raw_path:
@@ -165,7 +155,6 @@ def _resolve_dataset_path(variables) -> Path | None:
         if dataset_path.is_file():
             return dataset_path
     return None
-
 
 def _analysis_save_directory(variables, enabled: bool) -> Path | None:
     if not enabled:
@@ -175,7 +164,6 @@ def _analysis_save_directory(variables, enabled: bool) -> Path | None:
         return None
     return ensure_directory(dataset_path.parent / f"{dataset_path.stem}_raw_analysis_plots")
 
-
 def _show_figure(fig, *, save_dir: str | Path | None = None, stem: str | None = None) -> None:
     if fig is None:
         return
@@ -184,23 +172,20 @@ def _show_figure(fig, *, save_dir: str | Path | None = None, stem: str | None = 
             fig,
             directory=save_dir,
             stem=stem,
-            formats=("svg", "png"),
+            formats=("pdf", "png"),
             dpi=300,
             bbox_inches="tight",
         )
     display(fig)
     _close_after(fig)
 
-
 def _md(text: str) -> None:
     display(Markdown(text))
-
 
 def _format_pct(numerator: int, denominator: int) -> str:
     if denominator == 0:
         return "0 (0.00%)"
     return f"{numerator:,} ({100.0 * numerator / denominator:.2f}%)"
-
 
 def _classify_pulse_chunks(df: pd.DataFrame, group_col: str, detector_kind: str) -> dict:
     """Walk every pulse group and classify each chunk-of-N as complete / midtier / partial.
@@ -297,7 +282,6 @@ def _classify_pulse_chunks(df: pd.DataFrame, group_col: str, detector_kind: str)
         "midtier": np.array(midtier_lengths, dtype=int),
         "partial": np.array(partial_lengths, dtype=int),
     }
-
 
 def plot_dlts_per_pulse(
     tdc_df: pd.DataFrame,
@@ -425,7 +409,6 @@ def plot_dlts_per_pulse(
         )
     _md("\n".join(lines))
 
-
 def _pick_tof_col(dld_df: pd.DataFrame) -> str | None:
     """Return the best available TOF column name.
 
@@ -437,7 +420,6 @@ def _pick_tof_col(dld_df: pd.DataFrame) -> str | None:
     if "t (ns)" in dld_df.columns:
         return "t (ns)"
     return None
-
 
 def plot_tof_with_peaks(
     dld_df: pd.DataFrame,
@@ -471,7 +453,6 @@ def plot_tof_with_peaks(
     fig.tight_layout()
     _show_figure(fig, save_dir=save_dir, stem=save_stem)
 
-
 def _pick_mc_col(dld_df: pd.DataFrame) -> str | None:
     """Return the best available mass/charge column name.
 
@@ -485,7 +466,6 @@ def _pick_mc_col(dld_df: pd.DataFrame) -> str | None:
         if col in dld_df.columns and (dld_df[col] != 0).any():
             return col
     return None
-
 
 def plot_signal_overview(
     dld_df: pd.DataFrame,
@@ -560,7 +540,6 @@ def plot_signal_overview(
         summary_lines.append("_Skipped: " + ", ".join(missing_or_zero) + "._")
     _md("\n".join(summary_lines))
 
-
 def plot_full_spectrum(
     dld_df: pd.DataFrame,
     *,
@@ -625,7 +604,6 @@ def plot_full_spectrum(
 
     fig.tight_layout()
     _show_figure(fig, save_dir=save_dir, stem=save_stem)
-
 
 def plot_mc_with_peaks(
     dld_df: pd.DataFrame,
@@ -695,7 +673,6 @@ def plot_mc_with_peaks(
         md.append(f"| {label} | {lo:.3f} | {hi:.3f} | {count:,} | {pct:.2f}% | {mrp_str} |")
     _md("\n".join(md))
 
-
 def compute_mrp_half(mc_window: np.ndarray) -> float:
     """Approximate MRP(0.5) = m / FWHM from a vector of mc values inside one peak."""
     if mc_window.size < 50:
@@ -711,7 +688,6 @@ def compute_mrp_half(mc_window: np.ndarray) -> float:
     if fwhm <= 0:
         return float("nan")
     return float(peak_value / fwhm)
-
 
 def _surface_concept_length_breakdown_markdown(sequence_stats: dict[str, dict[int, int]], *, max_bins: int = 20) -> str:
     total = sequence_stats.get('total', {})
@@ -732,7 +708,6 @@ def _surface_concept_length_breakdown_markdown(sequence_stats: dict[str, dict[in
             f"4 DLTS + 2 DLTS + unrecoverable = {recovered_4 + recovered_2 + unrecoverable:,}"
         )
     return "\n".join(lines)
-
 
 def _surface_concept_raw_summary_markdown(raw_summary: dict[str, object], recovery_stats: dict[str, int]) -> str:
     return "\n".join(
@@ -755,7 +730,6 @@ def _surface_concept_raw_summary_markdown(raw_summary: dict[str, object], recove
         ]
     )
 
-
 def _species_to_windows(species: list[dict]) -> list[dict]:
     windows = []
     for index, sp in enumerate(species, start=1):
@@ -767,7 +741,6 @@ def _species_to_windows(species: list[dict]) -> list[dict]:
             }
         )
     return windows
-
 
 def _surface_concept_peak_ratio_markdown(ratio_table: pd.DataFrame) -> str:
     if ratio_table.empty:
@@ -782,7 +755,6 @@ def _surface_concept_peak_ratio_markdown(ratio_table: pd.DataFrame) -> str:
             f"2/4 ratio = {ratio_text}"
         )
     return "\n".join(rows)
-
 
 def _roentdek_raw_summary_markdown(raw_summary: dict[str, object]) -> str:
     channel_totals = raw_summary.get('channel_timestamp_totals', {})
@@ -800,7 +772,6 @@ def _roentdek_raw_summary_markdown(raw_summary: dict[str, object]) -> str:
             f"- Channel timestamp totals: {channel_text}",
         ]
     )
-
 
 def _same_pulse_pair_summary_markdown(summary: dict[str, float | int], *, title: str) -> str:
     if not summary or int(summary.get("pair_count", 0)) == 0:
@@ -829,7 +800,6 @@ def _same_pulse_pair_summary_markdown(summary: dict[str, float | int], *, title:
             f"- Median dr: {_fmt(summary.get('median_dr'))} cm",
         ]
     )
-
 
 def plot_fdm(
     dld_df: pd.DataFrame,
@@ -879,7 +849,6 @@ def plot_fdm(
         axes[idx // cols][idx % cols].axis("off")
     fig.tight_layout()
     _show_figure(fig, save_dir=save_dir, stem=species_stem)
-
 
 def plot_multihit_and_deadzone(
     dld_df: pd.DataFrame,
@@ -978,11 +947,9 @@ def plot_multihit_and_deadzone(
         f"- delta_p median: {int(np.median(delta_p_pos)) if delta_p_pos.size else 'n/a (all-zero in this file)'}\n"
     )
 
-
 # ---------------------------------------------------------------------------
 # Top-level analysis runner
 # ---------------------------------------------------------------------------
-
 
 def run_analysis(
     variables,
@@ -1470,11 +1437,9 @@ def run_analysis(
     _md("## Multi-hit / dead-zone")
     plot_multihit_and_deadzone(plot_df, save_dir=save_dir, save_stem="multihit_deadzone")
 
-
 # ---------------------------------------------------------------------------
 # UI: single panel with peak-source dropdown
 # ---------------------------------------------------------------------------
-
 
 def _build_manual_rows() -> list[tuple[widgets.Text, widgets.FloatText, widgets.FloatText]]:
     rows = []
@@ -1485,13 +1450,11 @@ def _build_manual_rows() -> list[tuple[widgets.Text, widgets.FloatText, widgets.
         rows.append((label, low, high))
     return rows
 
-
 def _set_rows_disabled(rows, disabled: bool) -> None:
     for label, low, high in rows:
         label.disabled = disabled
         low.disabled = disabled
         high.disabled = disabled
-
 
 def call_auto_raw_data_analysis(variables) -> None:
     """Display a single-panel analysis UI driven by three dropdowns.
@@ -1664,7 +1627,6 @@ def call_auto_raw_data_analysis(variables) -> None:
         ]
     )
     display(panel)
-
 
 def call_signal_preview(variables) -> None:
     """Render the preview panel — a processing-workflow-style histogram

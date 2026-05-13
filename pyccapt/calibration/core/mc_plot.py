@@ -4,7 +4,6 @@ import re
 import matplotlib.pyplot as plt
 import numpy as np
 from adjustText import adjust_text
-from matplotlib import rcParams
 
 from pyccapt.calibration.path_utils import save_figure
 from pyccapt.calibration.core.mc_plot_background_helpers import (
@@ -24,7 +23,6 @@ from pyccapt.calibration.core.mc_plot_selector_helpers import (
     zoom_to_x_range as _zoom_to_x_range,
 )
 
-
 def _normalize_range_colors(values):
     """Normalize stored range colors for matplotlib usage."""
     normalized = []
@@ -34,7 +32,6 @@ def _normalize_range_colors(values):
             value = f'#{value}'
         normalized.append(value)
     return normalized
-
 
 def _plain_range_label(value):
     """Convert stored ion/range labels into plain text safe for matplotlib."""
@@ -48,7 +45,6 @@ def _plain_range_label(value):
     text = text.replace("^", "").strip()
     return text
 
-
 def _resolve_range_display_labels(range_data):
     """Return plain-text labels for ranged overlays and legends."""
     for column in ("name", "ion_name", "ion"):
@@ -57,7 +53,6 @@ def _resolve_range_display_labels(range_data):
             if any(label for label in labels):
                 return labels
     return [_plain_range_label(value) for value in range(len(range_data))]
-
 
 def _resolve_range_peak_labels(range_data):
     """Return peak annotation labels, preferring the raw ion column when available."""
@@ -71,7 +66,6 @@ def _resolve_range_peak_labels(range_data):
             if any(label for label in labels):
                 return labels
     return [str(value) for value in range(len(range_data))]
-
 
 class AptHistPlotter:
     """
@@ -623,13 +617,13 @@ class AptHistPlotter:
         Returns:
             None
         """
-        rcParams['svg.fonttype'] = 'none'
+
         if label == 'mc' or label == 'mc_c':
             save_figure(
                 self.fig,
                 directory=self.variables.result_path,
                 stem=f"mc_{fig_name}",
-                formats=("svg", "png"),
+                formats=("pdf", "png"),
                 dpi=600,
             )
         elif label == 'tof' or label == 'tof_c':
@@ -637,10 +631,9 @@ class AptHistPlotter:
                 self.fig,
                 directory=self.variables.result_path,
                 stem=f"tof_{fig_name}",
-                formats=("svg", "png"),
+                formats=("pdf", "png"),
                 dpi=600,
             )
-
 
 def hist_plot(
     variables,

@@ -162,6 +162,15 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         description='Fast calibration:',
         layout=label_layout,
     )
+    # Per-stage Nelder-Mead FWHM refinement (adapted from APyT's
+    # apyt/spectrum/align.py `optimize_correction`). Off by default so the
+    # baseline polynomial fit remains the reference behaviour.
+    refine_nelder_mead_widget = widgets.Dropdown(
+        options=[('False', False), ('True', True)],
+        value=False,
+        description='Refine NM (FWHM):',
+        layout=label_layout,
+    )
     automatic_window_update = widgets.Dropdown(
         options=[('False', False), ('True', True)],
         value=False,
@@ -666,6 +675,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             model=model_v.value,
             bin_size=bin_size_v.value,
             peak_maximum=peak_val.value,
+            refine_nelder_mead=refine_nelder_mead_widget.value,
         )
 
     def _run_bowl_correction(plot_override=None, save_override=None):
@@ -691,6 +701,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             bin_size=bin_size_b.value,
             peak_maximum=peak_val.value,
             sampling_mode=_sampling_mode_value(),
+            refine_nelder_mead=refine_nelder_mead_widget.value,
         )
 
     def _run_multi_peak_calibration():
@@ -1077,6 +1088,17 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                     else:
                         print('Voigt fit FAILED')
                     print()
+                    if result.get('asymmetric_ok'):
+                        print('Asymmetric (err*expDecay) fit MRP:')
+                        print(f'  MRP(0.5)  = {result["formatted_asymmetric_mrp"][0]}')
+                        print(f'  MRP(0.1)  = {result["formatted_asymmetric_mrp"][1]}')
+                        print(f'  MRP(0.01) = {result["formatted_asymmetric_mrp"][2]}')
+                        asym_fwhm = result.get('asymmetric_fwhm', float('nan'))
+                        if np.isfinite(asym_fwhm):
+                            print(f'  Asymmetric FWHM = {asym_fwhm:.6f}')
+                    else:
+                        print('Asymmetric (err*expDecay) fit FAILED')
+                    print()
                     print('Histogram-based MRP (for comparison):')
                     print(f'  MRP(0.5)  = {result["formatted_histogram_mrp"][0]}')
                     print(f'  MRP(0.1)  = {result["formatted_histogram_mrp"][1]}')
@@ -1218,7 +1240,9 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         ]
     )
     column32 = widgets.VBox([vol_button, pb_vol])
-    column34 = widgets.VBox([fast_calibration, automatic_window_update, lock_peak_selection, peak_val])
+    column34 = widgets.VBox(
+        [fast_calibration, refine_nelder_mead_widget, automatic_window_update, lock_peak_selection, peak_val]
+    )
 
     layout1 = widgets.HBox([column11, column22, column33, column34])
     layout2 = widgets.HBox([column12, column21, column32])

@@ -6,12 +6,10 @@ from copy import copy
 
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib import colors, rcParams
-
+from matplotlib import colors
 from pyccapt.calibration.core.exceptions import CalibrationInputError
 from pyccapt.calibration.core.validation import ensure_choice, ensure_positive
 from pyccapt.calibration.path_utils import save_figure
-
 
 def plot_fdm(x, y, variables, save, bins_s, index_fig, figure_size=(5, 4)):
     """Plot a field desorption map from detector hit coordinates."""
@@ -28,16 +26,15 @@ def plot_fdm(x, y, variables, save, bins_s, index_fig, figure_size=(5, 4)):
     fig1.colorbar(pcm, ax=ax1, pad=0)
 
     if save:
-        rcParams["svg.fonttype"] = "none"
+
         save_figure(
             fig1,
             directory=variables.result_path,
             stem=f"fdm_{index_fig}",
-            formats=("png", "svg"),
+            formats=("png", "pdf"),
             dpi=600,
         )
     plt.show()
-
 
 def initial_calibration(data, flight_path_length):
     """Compute initial time-of-flight calibration factors."""
@@ -51,7 +48,6 @@ def initial_calibration(data, flight_path_length):
     init_voltage_factor = np.sqrt(v_dc / np.mean(v_dc))
     return t_values * init_flight_path_factor * init_voltage_factor
 
-
 def _plot_scatter(x_values, y_values, x_label, y_label, variables, save, stem, fig_size):
     """Plot and optionally save a detector-vs-signal scatter view."""
     fig, axis = plt.subplots(figsize=fig_size, constrained_layout=True)
@@ -60,16 +56,15 @@ def _plot_scatter(x_values, y_values, x_label, y_label, variables, save, stem, f
     axis.set_ylabel(y_label, fontsize=10)
     plt.grid(alpha=0.3, linestyle="-.", linewidth=0.4)
     if save:
-        rcParams["svg.fonttype"] = "none"
+
         save_figure(
             fig,
             directory=variables.result_path,
             stem=stem,
-            formats=("png", "svg"),
+            formats=("png", "pdf"),
             dpi=600,
         )
     plt.show()
-
 
 def plot_selected_statistic(variables, bin_fdm, index_fig, calibration_mode, save, fig_size=(5, 4)):
     """Plot detector and voltage statistics for the currently selected peak range."""
@@ -125,6 +120,5 @@ def plot_selected_statistic(variables, bin_fdm, index_fig, calibration_mode, sav
         stem=f"y_t_{index_fig}",
         fig_size=fig_size,
     )
-
 
 __all__ = ["plot_fdm", "initial_calibration", "plot_selected_statistic"]

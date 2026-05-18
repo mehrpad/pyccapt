@@ -1082,22 +1082,18 @@ def run_analysis(
             pulse_mode=pulse_mode,
             show_progress=True,
         )
-        # The combinatorial path replaces only the partial-recovery branch.
-        # ``analyze_surface_concept_tdc_frame`` still produces sequence_stats,
-        # raw_summary, and recovery_diagnostics that the rest of the page
-        # consumes (DLTS-per-pulse plot, recovery summary, etc.) so we run it
-        # too and then swap in the combinatorial hit_table for the parts of
-        # the workflow that drive peak yields and FDM.
-        analysis = analyze_surface_concept_tdc_frame(
-            tdc_df,
-            detector_limit_cm=detector_limit_cm,
-            flight_path_length_mm=flight_path_length,
-            pulse_mode=pulse_mode,
-            t0=0.0,
-            show_progress=False,
-        )
-        if not combinatorial_analysis["hit_table"].empty:
-            analysis["hit_table"] = combinatorial_analysis["hit_table"]
+        # All stats (sequence_stats, raw_summary, recovery_diagnostics,
+        # recovery_stats) were computed inside the combinatorial function
+        # while sequence_records was still alive, and sequence_records was
+        # freed immediately after to avoid keeping ~20 GB of Python objects
+        # in memory alongside the downstream DataFrames.
+        analysis = {
+            'sequence_stats': combinatorial_analysis['sequence_stats'],
+            'raw_summary': combinatorial_analysis['raw_summary'],
+            'recovery_diagnostics': combinatorial_analysis['recovery_diagnostics'],
+            'recovery_stats': combinatorial_analysis['recovery_stats'],
+            'hit_table': combinatorial_analysis['hit_table'],
+        }
         counts = combinatorial_analysis["candidate_counts"]
         _md(
             "**Combinatorial recovery candidates:**\n\n"
@@ -1128,16 +1124,20 @@ def run_analysis(
             save_dir=save_dir,
             stem="surface_concept_recovery_summary",
         )
-        _show_figure(
-            plot_surface_concept_recovery_yield(analysis["recovery_diagnostics"]),
-            save_dir=save_dir,
-            stem="surface_concept_recovery_yield",
-        )
-        _show_figure(
-            plot_partial_hit_efficiency_maps(analysis["recovery_diagnostics"]),
-            save_dir=save_dir,
-            stem="surface_concept_partial_hit_efficiency",
-        )
+        _rd = analysis.get("recovery_diagnostics")
+        if _rd is not None and not (hasattr(_rd, "empty") and _rd.empty):
+            _show_figure(
+                plot_surface_concept_recovery_yield(_rd),
+                save_dir=save_dir,
+                stem="surface_concept_recovery_yield",
+            )
+            _show_figure(
+                plot_partial_hit_efficiency_maps(_rd),
+                save_dir=save_dir,
+                stem="surface_concept_partial_hit_efficiency",
+            )
+        else:
+            _md("_Recovery yield and partial-hit efficiency maps skipped (not computed in memory-safe mode)._")
 
         if not analysis["hit_table"].empty:
             windows = _species_to_windows(species)
@@ -1183,9 +1183,11 @@ def run_analysis(
 
             if windows:
                 _md(f"## Peak-window recovery breakdown ({peak_units.upper()} windows)")
+                _rd2 = analysis.get("recovery_diagnostics")
+                _has_rd = _rd2 is not None and not (hasattr(_rd2, "empty") and _rd2.empty)
                 peak_summary = summarize_surface_concept_peak_windows(
                     analysis["hit_table"],
-                    analysis["recovery_diagnostics"],
+                    _rd2 if _has_rd else pd.DataFrame(),
                     windows,
                     signal_kind=peak_units,
                     only_in_detector=True,

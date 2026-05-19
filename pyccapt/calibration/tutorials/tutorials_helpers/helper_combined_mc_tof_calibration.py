@@ -102,16 +102,6 @@ def build_combined_mc_tof_calibration_panel(
             for btn in all_buttons:
                 btn.disabled = False
 
-    def _replot_wide_window(mode_value, lim_override):
-        """Re-plot histogram with bin_size=0.1 and initial_peak_selection=True.
-
-        This matches the user's manual workflow: plotting with a coarse bin
-        size produces a wider peak selection window which is critical for
-        stable calibration.  Every auto method must call this between
-        calibration stages.
-        """
-        auto_select_peak_for_mode(mode_value, lim_override, initial_peak_selection=True)
-
     def _plot_histograms(_=None):
         with _lock_buttons():
             previous_mode = calibration_mode.value
@@ -144,142 +134,57 @@ def build_combined_mc_tof_calibration_panel(
             calibration_mode.value = previous_mode
 
     def _run_auto_fast(_):
-        """Initial → re-plot 0.1 → V+Bowl → re-plot 0.1 → temporal residual, for each mode."""
+        """For each mode (mc, tof) run the same 'Auto calibration' as the
+        dedicated mc/tof tabs: initial calibration (handled automatically by
+        the auto routine) + the V+Bowl atomic-pair optimizer loop. No
+        adaptive residual stage -- that's what 'best' is for.
+        """
         with _lock_buttons():
             previous_mode = calibration_mode.value
             try:
                 with out_status, verbosity_context():
                     out_status.clear_output()
-                    for mode_value, title, lim_override in _mode_specs():
+                    for mode_value, title, _lim_override in _mode_specs():
                         calibration_mode.value = mode_value
-                        mode_key = 'tof' if mode_value == 'tof_calib' else 'mc'
-                        print(f'--- {title} auto calibration (fast) ---')
-
-                        # Step 1: Select wide peak window (bin_size=0.1, initial=True)
-                        _replot_wide_window(mode_value, lim_override)
-                        if not selected_peak_ready():
-                            print('Unable to auto-select a peak')
-                            continue
-                        print(
-                            f'Initial stage window: ({float(variables.selected_x1):.4f}, {float(variables.selected_x2):.4f})'
-                        )
-
-                        # Step 2: Initial calibration
-                        # mc: bowl correction
-                        # tof: initial_tof + voltage + bowl
-                        run_initial_current()
-
-                        # Step 3: Re-plot with wide window after initial
-                        _replot_wide_window(mode_value, lim_override)
-                        if not selected_peak_ready():
-                            print('Unable to auto-select a peak after initial calibration')
-                            continue
-                        print(f'V+Bowl stage window: ({float(variables.selected_x1):.4f}, {float(variables.selected_x2):.4f})')
-
-                        # Step 4: Voltage + Bowl optimization
-                        run_auto_current()
-
-                        # Step 5: Re-plot with wide window after V+Bowl
-                        _replot_wide_window(mode_value, lim_override)
-
-                        # Step 6: Lightweight temporal residual
-                        print(f'Running lightweight temporal residual on {mode_key}...')
+                        print(f'--- {title} auto calibration (fast = Auto calibration) ---')
                         try:
-                            result = adaptive_residual_calibration(
-                                variables,
-                                calibration_mode=mode_key,
-                                n_peaks=3,
-                                prominence=100,
-                                distance=10,
-                                n_windows=16,
-                                overlap=0.5,
-                                template_bin_size=0.01,
-                                temporal_smoothing=0.5,
-                                apply_spatial=False,
-                                max_rounds=2,
-                                min_window_ions=40,
-                                min_cell_ions=35,
-                                verbose=True,
-                            )
-                            if result['accepted_steps']:
-                                print(f"Temporal residual steps: {result['accepted_steps']}")
-                            else:
-                                print('Temporal residual found no additional drift to correct.')
+                            run_auto_current()
                         except Exception as exc:
-                            print(f'Temporal residual skipped: {exc}')
-
+                            print(f'{title} auto calibration failed: {exc}')
                         print(f'{title} fast calibration done.')
             finally:
                 calibration_mode.value = previous_mode
+        # Plot both corrected histograms so the user can see the result.
+        try:
+            _plot_histograms()
+        except Exception:
+            pass
 
     def _run_auto_best(_):
-        """Initial → re-plot 0.1 → V+Bowl → re-plot 0.1 → full residual, for each mode."""
+        """For each mode (mc, tof) run the same 'Hybrid auto + residual' as
+        the dedicated mc/tof tabs: initial calibration + V+Bowl atomic-pair
+        optimizer loop + full adaptive residual refinement (temporal +
+        spatial). This is the slow, highest-quality option.
+        """
         with _lock_buttons():
             previous_mode = calibration_mode.value
             try:
                 with out_status, verbosity_context():
                     out_status.clear_output()
-                    for mode_value, title, lim_override in _mode_specs():
+                    for mode_value, title, _lim_override in _mode_specs():
                         calibration_mode.value = mode_value
-                        mode_key = 'tof' if mode_value == 'tof_calib' else 'mc'
-                        print(f'--- {title} auto calibration (best) ---')
-
-                        # Step 1: Wide peak window
-                        _replot_wide_window(mode_value, lim_override)
-                        if not selected_peak_ready():
-                            print('Unable to auto-select a peak')
-                            continue
-                        print(
-                            f'Initial stage window: ({float(variables.selected_x1):.4f}, {float(variables.selected_x2):.4f})'
-                        )
-
-                        # Step 2: Initial calibration
-                        run_initial_current()
-
-                        # Step 3: Re-plot wide window after initial
-                        _replot_wide_window(mode_value, lim_override)
-                        if not selected_peak_ready():
-                            print('Unable to auto-select a peak after initial calibration')
-                            continue
-                        print(f'V+Bowl stage window: ({float(variables.selected_x1):.4f}, {float(variables.selected_x2):.4f})')
-
-                        # Step 4: Voltage + Bowl optimization
-                        run_auto_current()
-
-                        # Step 5: Re-plot wide window before residual
-                        _replot_wide_window(mode_value, lim_override)
-
-                        # Step 6: Full adaptive residual calibration
-                        print(f'Running adaptive residual calibration on {mode_key}...')
+                        print(f'--- {title} auto calibration (best = Hybrid auto + residual) ---')
                         try:
-                            result = adaptive_residual_calibration(
-                                variables,
-                                calibration_mode=mode_key,
-                                n_peaks=6,
-                                prominence=100,
-                                distance=10,
-                                n_windows=24,
-                                overlap=0.5,
-                                template_bin_size=0.01,
-                                temporal_smoothing=0.5,
-                                apply_spatial=True,
-                                spatial_grid=12,
-                                min_window_ions=40,
-                                min_cell_ions=35,
-                                max_rounds=8,
-                                verbose=True,
-                            )
-                            if result['accepted_steps']:
-                                print(f"Accepted steps: {result['accepted_steps']}")
-                            else:
-                                print('Adaptive residual accepted no additional steps.')
+                            run_hybrid_current()
                         except Exception as exc:
-                            print(f'Adaptive residual failed: {exc}')
-                            print('Keeping the V+Bowl calibration result.')
-
+                            print(f'{title} hybrid auto + residual failed: {exc}')
                         print(f'{title} best calibration done.')
             finally:
                 calibration_mode.value = previous_mode
+        try:
+            _plot_histograms()
+        except Exception:
+            pass
 
     def _run_gaussian_all():
         with _lock_buttons():

@@ -787,6 +787,13 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                 _run_bowl_correction(plot_override=False, save_override=False)
                 print('Initial ToF calibration + bowl correction is done')
             else:
+                # Always re-pick the peak window for *this* mode before
+                # running bowl correction. Otherwise, when called from the
+                # combined mc+tof FAST/BEST flow, variables.selected_x1/x2
+                # may still hold the previous mode's window (e.g. tof units
+                # while we're now in mc), and the bowl fit would run on the
+                # wrong slice of the data.
+                _force_reselect_peak_window()
                 _prepare_locked_selection()
                 _run_bowl_correction(plot_override=False, save_override=False)
                 print('Initial m/c tab action applied bowl correction')
@@ -998,6 +1005,12 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         index_fig_v.value = 1
         index_fig_b.value = 1
         auto_button_bowl.disabled = False
+        # Auto-plot the result so the user can see the corrected histogram
+        # without having to click Plot.
+        try:
+            plot_button.click()
+        except Exception:
+            pass
 
     def _run_voltage_then_bowl():
         """Run voltage correction followed by bowl correction as one atomic step.
@@ -1032,6 +1045,10 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         index_fig_b.value = 1
         auto_button.disabled = False
         simple_auto_button.disabled = False
+        try:
+            plot_button.click()
+        except Exception:
+            pass
 
     def on_hybrid_auto_residual(_):
         hybrid_button.disabled = True
@@ -1100,6 +1117,10 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         finally:
             hybrid_button.disabled = False
             simple_hybrid_button.disabled = False
+            try:
+                plot_button.click()
+            except Exception:
+                pass
 
     def on_gaussian_mrp(_):
         # The user explicitly clicked the Gaussian MRP button to see the
@@ -1420,6 +1441,16 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
 
     mode_tabs.observe(_sync_mode_ui, names='selected_index')
     sub_tabs.observe(lambda change: _render_subtab_content(), names='selected_index')
+
+    def _sync_lim_to_mode(change):
+        # Keep lim_tof aligned with the current calibration mode so callers
+        # that switch calibration_mode programmatically (e.g. the combined
+        # mc+tof tab's fast / best buttons looping over both modes) don't
+        # plot tof with the m/c limit or vice versa.
+        new_value = change.get('new', calibration_mode.value)
+        lim_tof.value = variables.max_tof if new_value == 'tof_calib' else 400
+
+    calibration_mode.observe(_sync_lim_to_mode, names='value')
     mode_tabs.selected_index = 0
     _sync_mode_ui()
     _render_top_content()

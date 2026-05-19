@@ -24,14 +24,21 @@ _MRP_PHYSICAL_CEILING = 1500.0
 # calculate_mrp so the legend MRP and the on-demand MRP report operate on
 # identical windows and therefore agree.
 _AUTO_MRP_HALF_WIDTH = 0.8
-# Histogram bin size used by both the auto-pick (argmax) and the dominant
-# peak's gaussian_mrp_report call. Must match the value the MRP button
-# passes to gaussian_mrp_report, otherwise the legend and the report would
-# fit on differently-binned histograms and produce slightly different MRPs.
+# Histogram bin size used by the MRP fit inside gaussian_mrp_report. Must
+# match the value the MRP button passes to gaussian_mrp_report, otherwise
+# the legend and the report would fit on differently-binned histograms and
+# produce slightly different MRPs.
 _AUTO_MRP_BIN_SIZE = 0.001
+# Coarser bin used by the auto-pick argmax search. The peak location within
+# ±0.005 Da is plenty for the ±0.8 Da window, and a coarser histogram is
+# orders of magnitude faster on multi-million-ion arrays. Using 0.001 here
+# is what made the mass-spectrum plot slow (np.histogram with 800k bins on
+# 5M points). The actual MRP *fit* still runs at 0.001 inside
+# gaussian_mrp_report so the legend number stays exact.
+_AUTO_MRP_PICK_BIN_SIZE = 0.01
 
 
-def _auto_mrp_window_from_array(values, bin_size=_AUTO_MRP_BIN_SIZE, half_width=_AUTO_MRP_HALF_WIDTH):
+def _auto_mrp_window_from_array(values, bin_size=_AUTO_MRP_PICK_BIN_SIZE, half_width=_AUTO_MRP_HALF_WIDTH):
     """Return ``(left, right, center)`` for the tallest histogram bin.
 
     Bin edges are anchored to multiples of ``bin_size`` from zero, so the

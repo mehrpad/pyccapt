@@ -19,6 +19,48 @@ _MRP_REFERENCE_MIN_WIDTH_RATIO = 0.35
 # No single-run APT instrument physically achieves FWHM MRP above this value;
 # anything higher is a fitting artefact from a narrow sub-peak or noise spike.
 _MRP_PHYSICAL_CEILING = 1500.0
+# Half-width (Da) of the auto-picked window centred on the tallest peak.
+# Used by the "MRP" button auto-pick AND by the dominant-peak branch of
+# calculate_mrp so the legend MRP and the on-demand MRP report operate on
+# identical windows and therefore agree.
+_AUTO_MRP_HALF_WIDTH = 0.8
+# Histogram bin size used by both the auto-pick (argmax) and the dominant
+# peak's gaussian_mrp_report call. Must match the value the MRP button
+# passes to gaussian_mrp_report, otherwise the legend and the report would
+# fit on differently-binned histograms and produce slightly different MRPs.
+_AUTO_MRP_BIN_SIZE = 0.001
+
+
+def _auto_mrp_window_from_array(values, bin_size=_AUTO_MRP_BIN_SIZE, half_width=_AUTO_MRP_HALF_WIDTH):
+    """Return ``(left, right, center)`` for the tallest histogram bin.
+
+    Bin edges are anchored to multiples of ``bin_size`` from zero, so the
+    argmax bin's midpoint does NOT depend on ``min``/``max`` of the input
+    array. This makes the legend's dominant-peak auto-pick and the MRP
+    button's auto-pick produce identical centers even when one operates on a
+    filtered slice (e.g. ``hist[hist<40]``) and the other on the full series.
+    """
+    data = np.asarray(values, dtype=float)
+    data = data[np.isfinite(data)]
+    if data.size == 0:
+        return None
+    lo = float(np.min(data))
+    hi = float(np.max(data))
+    if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+        return None
+    bs = max(bin_size, 1e-9)
+    # Anchored grid: edges are multiples of bin_size irrespective of (lo, hi).
+    start = float(np.floor(lo / bs) * bs)
+    stop = float(np.ceil(hi / bs) * bs + bs)
+    edges = np.arange(start, stop + 0.5 * bs, bs)
+    if edges.size < 2:
+        return None
+    counts, edges = np.histogram(data, bins=edges)
+    if counts.sum() == 0:
+        return None
+    peak_idx = int(np.argmax(counts))
+    center = float(0.5 * (edges[peak_idx] + edges[peak_idx + 1]))
+    return center - half_width, center + half_width, center
 
 
 def _gaussian(x, amp, mu, sigma, bg):
@@ -412,28 +454,26 @@ def _plotter_peak_window(plotter, peak_array_index):
 def _recommended_mrp_payload(report):
     """Return the recommended robust MRP set from a report.
 
-    Priority order: Asymmetric (err*expDecay, APyT-style) > Voigt > Gaussian >
-    Histogram. The asymmetric fit captures the exponential tail of real APT
-    peaks and is the primary number; the others remain available for
-    cross-checking.
+    Priority order: Asymmetric (err*expDecay, APyT-style) > Voigt > Histogram.
+    The asymmetric fit captures the exponential tail of real APT peaks and is
+    the primary number; Voigt covers symmetric tails; the histogram width is
+    the final independent fallback. Gaussian is no longer used in the chain
+    (its MRP for tailed APT peaks is systematically biased) but is still
+    reported alongside the others for cross-checking.
     """
     if report is None:
         return [float('nan')] * 3, 'unavailable'
     histogram_values = report.get('histogram_mrp', [float('nan')] * 3)
     histogram_valid = np.isfinite(histogram_values[0])
     voigt_values = report.get('voigt_mrp', [float('nan')] * 3)
-    gaussian_values = report.get('gaussian_mrp', [float('nan')] * 3)
-    gaussian_finite = bool(report.get('gaussian_ok')) and np.isfinite(gaussian_values[0])
     asym_values = report.get('asymmetric_mrp', [float('nan')] * 3)
     asym_finite = bool(report.get('asymmetric_ok')) and np.isfinite(asym_values[0])
 
-    # Cross-check the asymmetric fit the same way we cross-check the Voigt fit:
-    # the histogram width is the most reliable independent reference, the
-    # Gaussian fit is the second-best fallback.
+    # Cross-check the asymmetric fit against the histogram width (the most
+    # reliable independent reference). If histogram MRP isn't usable, skip the
+    # cross-check rather than falling back to the Gaussian fit.
     if histogram_valid:
         asym_cross_check_ok = asym_values[0] <= histogram_values[0] * _MRP_REFERENCE_GUARD_FACTOR
-    elif gaussian_finite:
-        asym_cross_check_ok = asym_values[0] <= gaussian_values[0] * _MRP_REFERENCE_GUARD_FACTOR
     else:
         asym_cross_check_ok = True
 
@@ -445,14 +485,9 @@ def _recommended_mrp_payload(report):
     if asym_valid:
         return report['asymmetric_mrp'], 'Asymmetric (err*expDecay)'
 
-    # Cross-check the Voigt fit against the most reliable independent
-    # estimator we have: histogram-based MRP when the bin size makes it
-    # meaningful, otherwise the Gaussian fit. This catches over-narrow Voigt
-    # convergences that would otherwise produce unrealistically large MRPs.
+    # Cross-check Voigt the same way -- only against the histogram reference.
     if histogram_valid:
         voigt_cross_check_ok = voigt_values[0] <= histogram_values[0] * _MRP_REFERENCE_GUARD_FACTOR
-    elif gaussian_finite:
-        voigt_cross_check_ok = voigt_values[0] <= gaussian_values[0] * _MRP_REFERENCE_GUARD_FACTOR
     else:
         voigt_cross_check_ok = True
 
@@ -464,13 +499,7 @@ def _recommended_mrp_payload(report):
     )
     if voigt_valid:
         return report['voigt_mrp'], f'Voigt ({report["profile_type"]})'
-    gaussian_valid = (
-        gaussian_finite
-        and (not histogram_valid or gaussian_values[0] <= histogram_values[0] * _MRP_REFERENCE_GUARD_FACTOR)
-        and gaussian_values[0] <= _MRP_PHYSICAL_CEILING
-    )
-    if gaussian_valid:
-        return report['gaussian_mrp'], 'Gaussian'
+
     # Cap histogram fallback: replace values above the physical ceiling with NaN
     if histogram_valid and histogram_values[0] > _MRP_PHYSICAL_CEILING:
         return [float('nan')] * 3, 'Histogram (above physical ceiling)'
@@ -835,10 +864,15 @@ def calculate_mrp(plotter):
         x_axis = plotter.x_centers if getattr(plotter, 'x_centers', None) is not None else plotter.x[:-1]
         peak_centers = x_axis[plotter.peaks]
         idx_max = int(np.argmin(np.abs(peak_centers - float(dominant_seed['center']))))
+    # Reuse the same auto-pick window the MRP button uses, so the legend value
+    # matches the PEAK PROFILE MRP REPORT for the dominant peak.
+    auto_dominant_window = _auto_mrp_window_from_array(plotter.mc_tof)
     peak_reports = []
     for i in range(len(plotter.peaks)):
         if i == idx_max:
-            if dominant_seed is None:
+            if auto_dominant_window is not None:
+                peak_left, peak_right, peak_center = auto_dominant_window
+            elif dominant_seed is None:
                 peak_left, peak_right, peak_center = _plotter_peak_window(plotter, i)
             else:
                 peak_left = float(dominant_seed['left'])
@@ -848,7 +882,7 @@ def calculate_mrp(plotter):
                 plotter.mc_tof,
                 peak_left,
                 peak_right,
-                bin_size=_MRP_INTERNAL_BIN_SIZE,
+                bin_size=_AUTO_MRP_BIN_SIZE,
                 peak_center=peak_center,
             )
             if report is not None:

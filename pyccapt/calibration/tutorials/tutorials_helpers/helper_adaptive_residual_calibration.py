@@ -64,7 +64,7 @@ def build_adaptive_residual_calibration_panel(variables, det_diam, flight_path_l
     back_button = widgets.Button(description="Back to saved", layout=_LABEL_LAYOUT)
     reset_button = widgets.Button(description="Reset correction", layout=_LABEL_LAYOUT)
     clear_button = widgets.Button(description="Clear plots", layout=_LABEL_LAYOUT)
-    gaussian_button = widgets.Button(description="Gaussian MRP", layout=_LABEL_LAYOUT)
+    gaussian_button = widgets.Button(description="MRP", layout=_LABEL_LAYOUT)
     stat_button = widgets.Button(description="Plot stat", layout=_LABEL_LAYOUT)
 
     def _verbosity_context():
@@ -149,7 +149,7 @@ def build_adaptive_residual_calibration_panel(variables, det_diam, flight_path_l
                 fig_size=(fig_w.value, fig_h.value),
                 fast_calibration=False,
                 bin_size=max(0.01, min(float(bin_size.value), 0.05)),
-                sampling_mode=getattr(variables, "bowl_sampling_mode", "polar"),
+                sampling_mode=getattr(variables, "bowl_sampling_mode", "cartesian"),
             )
             if target.value == "tof_calib":
                 print("Initial ToF calibration + bowl correction is done")

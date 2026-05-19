@@ -73,7 +73,7 @@ def build_combined_mc_tof_calibration_panel(
     back_button = widgets.Button(description='Back to saved', layout=label_layout)
     reset_button = widgets.Button(description='Reset correction', layout=label_layout)
     clear_button = widgets.Button(description='Clear plots', layout=label_layout)
-    gaussian_button = widgets.Button(description='Gaussian MRP', layout=label_layout)
+    gaussian_button = widgets.Button(description='MRP', layout=label_layout)
     stat_button = widgets.Button(description='Plot stat', layout=label_layout)
 
     def _mode_specs():

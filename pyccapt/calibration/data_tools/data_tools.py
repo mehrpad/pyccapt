@@ -101,6 +101,12 @@ def read_range(filename: str | Path) -> pd.DataFrame:
             return _normalize_range_dataframe(leap_tools.read_rrng(str(file_path)))
         if suffix == ".rng":
             return _normalize_range_dataframe(leap_tools.read_rng(str(file_path)))
+        if suffix == ".fig":
+            # MATLAB Atom-Probe-Toolbox figure: extract ranges directly.
+            from pyccapt.calibration.leap_tools import matlab_fig_range
+            return _normalize_range_dataframe(
+                matlab_fig_range.fig_to_range_dataframe(file_path)
+            )
         raise ValueError(f"Unsupported range file extension: {file_path.suffix!r}")
     except FileNotFoundError as error:
         print("[*] Range file could not be found")
@@ -234,7 +240,19 @@ def store_df_to_hdf(dataframe, key, filename, *, format: str = "fixed"):
 
     file_path = _as_path(filename)
     file_path.parent.mkdir(parents=True, exist_ok=True)
-    dataframe.to_hdf(file_path, key=str(key), mode="w", format=format)
+    try:
+        dataframe.to_hdf(file_path, key=str(key), mode="w", format=format)
+    except Exception:
+        # Fixed format can't serialize some object-dtype columns; retry with
+        # the table format which handles them.
+        if format == "fixed":
+            try:
+                file_path.unlink()
+            except OSError:
+                pass
+            dataframe.to_hdf(file_path, key=str(key), mode="w", format="table")
+        else:
+            raise
 
 
 def store_df_to_csv(data: pd.DataFrame, path: str | Path) -> None:

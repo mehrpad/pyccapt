@@ -4,7 +4,10 @@ from IPython.display import display
 from ipywidgets import Output
 
 from pyccapt.calibration.core import mc_plot
-from pyccapt.calibration.core.mc_plot_peak_helpers import gaussian_mrp_report
+from pyccapt.calibration.core.mc_plot_peak_helpers import (
+    _auto_mrp_window_from_array,
+    gaussian_mrp_report,
+)
 
 # Define a layout for labels to make them a fixed width
 label_layout = widgets.Layout(width='200px')
@@ -31,7 +34,7 @@ def call_mc_plot(variables, selector):
     mrp_left_widget = widgets.FloatText(value=0.0)
     mrp_right_widget = widgets.FloatText(value=0.0)
     load_selection_button = widgets.Button(description='Load selection')
-    gaussian_mrp_button = widgets.Button(description='Gaussian MRP')
+    gaussian_mrp_button = widgets.Button(description='MRP')
 
     def _resolve_hist_array():
         if target_mode.value == 'mc_uc':
@@ -42,13 +45,24 @@ def call_mc_plot(variables, selector):
             return variables.data['t (ns)']
         return variables.data['mc (Da)']
 
+    def _auto_mrp_window(half_width=0.8):
+        """Centre a window on the tallest peak in the current histogram."""
+        result = _auto_mrp_window_from_array(_resolve_hist_array(), half_width=half_width)
+        if result is None:
+            return None
+        left, right, _center = result
+        return left, right
+
     def _resolve_gaussian_window():
         left = float(mrp_left_widget.value)
         right = float(mrp_right_widget.value)
         if right > left:
-            return left, right
+            return left, right, 'manual'
         if getattr(variables, 'selected_x2', 0) > getattr(variables, 'selected_x1', 0):
-            return float(variables.selected_x1), float(variables.selected_x2)
+            return float(variables.selected_x1), float(variables.selected_x2), 'selection'
+        auto = _auto_mrp_window()
+        if auto is not None:
+            return auto[0], auto[1], 'auto'
         return None
 
     def _print_gaussian_report(result):
@@ -97,8 +111,10 @@ def call_mc_plot(variables, selector):
             if window is None:
                 print('No active mass/charge selection is available yet.')
             else:
-                mrp_left_widget.value, mrp_right_widget.value = window
-                print(f'Loaded Gaussian MRP window: ({mrp_left_widget.value:.4f}, {mrp_right_widget.value:.4f})')
+                left, right, source = window
+                mrp_left_widget.value, mrp_right_widget.value = left, right
+                tag = ' (auto-picked around tallest peak)' if source == 'auto' else ''
+                print(f'Loaded Gaussian MRP window: ({left:.4f}, {right:.4f}){tag}')
 
     def on_gaussian_mrp(_):
         gaussian_mrp_button.disabled = True
@@ -107,11 +123,14 @@ def call_mc_plot(variables, selector):
             if window is None:
                 print('Set MRP left/right or draw a selection first.')
             else:
-                mrp_left_widget.value, mrp_right_widget.value = window
+                left, right, source = window
+                mrp_left_widget.value, mrp_right_widget.value = left, right
+                if source == 'auto':
+                    print(f'Auto-selected MRP window around tallest peak: ({left:.4f}, {right:.4f})')
                 result = gaussian_mrp_report(
                     _resolve_hist_array(),
-                    mrp_left_widget.value,
-                    mrp_right_widget.value,
+                    left,
+                    right,
                     bin_size=0.001,
                 )
                 if result is None:
@@ -160,15 +179,48 @@ def call_mc_plot(variables, selector):
                 grid=grid_value,
                 fig_size=figure_size,
             )
+            peak_warning = None
             if mode_value != 'normalized':
-                mc_hist.find_peaks_and_widths(prominence=prominence_value, distance=distance_value, percent=percent_value)
-                if plot_peak.value:
-                    mc_hist.plot_peaks()
-                mc_hist.plot_hist_info_legend(label='mc', mrp_all=mrp_all_widget.value, background=None, loc='right')
+                try:
+                    mc_hist.find_peaks_and_widths(
+                        prominence=prominence_value, distance=distance_value, percent=percent_value
+                    )
+                except Exception as exc:
+                    peak_warning = f'peak detector raised {type(exc).__name__}: {exc}'
+                if peak_warning is None and (mc_hist.peaks is None or len(mc_hist.peaks) == 0):
+                    peak_warning = (
+                        f'no peaks satisfy prominence={prominence_value} and distance={distance_value}'
+                    )
+                if peak_warning is None:
+                    if plot_peak.value:
+                        try:
+                            mc_hist.plot_peaks()
+                        except Exception as exc:
+                            peak_warning = f'plot_peaks failed: {type(exc).__name__}: {exc}'
+                    try:
+                        mc_hist.plot_hist_info_legend(
+                            label='mc', mrp_all=mrp_all_widget.value, background=None, loc='right'
+                        )
+                    except Exception as exc:
+                        peak_warning = f'plot_hist_info_legend failed: {type(exc).__name__}: {exc}'
 
-            mc_hist.selector(selector=selector)  # rect, peak_x, range
+            try:
+                mc_hist.selector(selector=selector)  # rect, peak_x, range
+            except Exception as exc:
+                if peak_warning is None:
+                    peak_warning = f'selector "{selector}" failed: {type(exc).__name__}: {exc}'
             if save.value:
-                mc_hist.save_fig(label=target_value, fig_name=figname_value)
+                try:
+                    mc_hist.save_fig(label=target_value, fig_name=figname_value)
+                except Exception as exc:
+                    print(f'Saving figure failed: {type(exc).__name__}: {exc}')
+
+            if peak_warning is not None:
+                print('=============================')
+                print('Histogram was plotted, but peak finding did not succeed.')
+                print(f'Reason: {peak_warning}.')
+                print('No peaks are available. Try lowering "Prominence" or "Distance" and plot again.')
+                print('=============================')
 
         # Enable the button when the code is finished
         button_plot.disabled = False

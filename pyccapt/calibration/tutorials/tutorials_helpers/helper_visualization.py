@@ -10,7 +10,10 @@ from ipywidgets import Output
 
 from pyccapt.calibration import clustering
 from pyccapt.calibration.core import mc_plot, ion_selection
-from pyccapt.calibration.core.mc_plot_peak_helpers import gaussian_mrp_report
+from pyccapt.calibration.core.mc_plot_peak_helpers import (
+    _auto_mrp_window_from_array,
+    gaussian_mrp_report,
+)
 from pyccapt.calibration.data_tools import data_loadcrop
 from pyccapt.calibration.reconstructions import reconstruction, sdm, rdf, density_map
 from pyccapt.calibration.reconstructions import iso_surface, proxigram
@@ -113,7 +116,7 @@ def call_visualization(variables, colab=False):
     mrp_left_mc = widgets.FloatText(value=0.0)
     mrp_right_mc = widgets.FloatText(value=0.0)
     load_mrp_window_mc_button = widgets.Button(description='Load selection')
-    gaussian_mrp_mc_button = widgets.Button(description='Gaussian MRP')
+    gaussian_mrp_mc_button = widgets.Button(description='MRP')
     range_sequence_mc = widgets.Textarea(value='[0,0]')
     range_detx_mc = widgets.Textarea(value='[0,0]')
     range_dety_mc = widgets.Textarea(value='[0,0]')
@@ -227,13 +230,26 @@ def call_visualization(variables, colab=False):
             return variables.data['t (ns)']
         return variables.data['mc (Da)']
 
+    def _auto_visualization_mrp_window(half_width=0.8):
+        """Centre a window on the tallest peak in the current histogram."""
+        result = _auto_mrp_window_from_array(
+            _resolve_visualization_hist_array(), half_width=half_width
+        )
+        if result is None:
+            return None
+        left, right, _center = result
+        return left, right
+
     def _resolve_visualization_gaussian_window():
         left = float(mrp_left_mc.value)
         right = float(mrp_right_mc.value)
         if right > left:
-            return left, right
+            return left, right, 'manual'
         if getattr(variables, 'selected_x2', 0) > getattr(variables, 'selected_x1', 0):
-            return float(variables.selected_x1), float(variables.selected_x2)
+            return float(variables.selected_x1), float(variables.selected_x2), 'selection'
+        auto = _auto_visualization_mrp_window()
+        if auto is not None:
+            return auto[0], auto[1], 'auto'
         return None
 
     def _print_visualization_gaussian_report(result):
@@ -282,8 +298,10 @@ def call_visualization(variables, colab=False):
             if window is None:
                 print('No active mass/charge selection is available yet.')
             else:
-                mrp_left_mc.value, mrp_right_mc.value = window
-                print(f'Loaded Gaussian MRP window: ({mrp_left_mc.value:.4f}, {mrp_right_mc.value:.4f})')
+                left, right, source = window
+                mrp_left_mc.value, mrp_right_mc.value = left, right
+                tag = ' (auto-picked around tallest peak)' if source == 'auto' else ''
+                print(f'Loaded Gaussian MRP window: ({left:.4f}, {right:.4f}){tag}')
 
     def run_mc_gaussian_mrp(_):
         gaussian_mrp_mc_button.disabled = True
@@ -292,11 +310,14 @@ def call_visualization(variables, colab=False):
             if window is None:
                 print('Set MRP left/right or draw a selection first.')
             else:
-                mrp_left_mc.value, mrp_right_mc.value = window
+                left, right, source = window
+                mrp_left_mc.value, mrp_right_mc.value = left, right
+                if source == 'auto':
+                    print(f'Auto-selected MRP window around tallest peak: ({left:.4f}, {right:.4f})')
                 result = gaussian_mrp_report(
                     _resolve_visualization_hist_array(),
-                    mrp_left_mc.value,
-                    mrp_right_mc.value,
+                    left,
+                    right,
                     bin_size=0.001,
                 )
                 if result is None:

@@ -36,24 +36,20 @@ def rotary_fig(fig, variables, rotary_fig_save, make_gif, figname):
     fig.update_scenes(xaxis_visible=False, yaxis_visible=False, zaxis_visible=False)
 
     if make_gif:
+        from tqdm.auto import tqdm
+
         fig.update_layout(showlegend=False)
-        layout = go.Layout(margin=go.layout.Margin(l=0, r=0, b=0, t=0))
-        fig.update_layout(layout)
+        fig.update_layout(margin=go.layout.Margin(l=0, r=0, b=0, t=0))
 
-        figures = []
-        for theta in np.arange(0, 4, 0.2):
-            xe, ye, ze = rotate_z(x_eye, y_eye, z_eye, theta)
-            rotated_fig = go.Figure(fig)
-            rotated_fig.update_layout(scene_camera_eye=dict(x=xe, y=ye, z=ze))
-            figures.append(rotated_fig)
-
+        # Full 2π turn in 20 frames. Reuse a single figure and only swap the
+        # camera eye each iteration — deep-copying the figure per frame was
+        # the dominant cost when the scene has millions of points.
+        thetas = np.arange(0.0, 2.0 * np.pi, 2.0 * np.pi / 20.0)
         images = []
-        print("Starting to process the frames for the GIF")
-        print("The total number of frames is:", len(figures))
-        for index, frame in enumerate(figures):
-            images.append(plotly_fig2array(frame))
-            print("frame", index, "is being processed")
-        print("The images are ready for the GIF")
+        for theta in tqdm(thetas, desc="Rotation GIF frames", unit="frame"):
+            xe, ye, ze = rotate_z(x_eye, y_eye, z_eye, theta)
+            fig.update_layout(scene_camera_eye=dict(x=xe, y=ye, z=ze))
+            images.append(plotly_fig2array(fig))
 
         save_gif(images, variables, f"rota_{figname}.gif", fps=2)
         fig.update_layout(showlegend=True)

@@ -25,7 +25,7 @@ def call_ion_selection(variables, colab=False, show_gaussian_controls=False):
     mrp_left = widgets.FloatText(value=0.0, description='MRP left:')
     mrp_right = widgets.FloatText(value=0.0, description='MRP right:')
     load_mrp_window_button = widgets.Button(description='Load peak range')
-    gaussian_mrp_button = widgets.Button(description='Gaussian MRP')
+    gaussian_mrp_button = widgets.Button(description='MRP')
 
     def _resolve_gaussian_window():
         left = float(mrp_left.value)
@@ -136,23 +136,30 @@ def call_ion_selection(variables, colab=False, show_gaussian_controls=False):
             clear_output(True)
             # clear the peak_idx
             variables.peaks_idx = []
-            mc_plot.hist_plot(
-                variables,
-                bin_size.value,
-                log=True,
-                target='mc',
-                normalize=False,
-                prominence=prominence.value,
-                distance=distance.value,
-                percent=percent.value,
-                selector='peak',
-                figname=index_fig.value,
-                lim=lim_tof.value,
-                peaks_find_plot=plot_peak.value,
-                print_info=False,
-                save_fig=save_fig.value,
-                compute_mrp=False,
-            )
+            try:
+                mc_plot.hist_plot(
+                    variables,
+                    bin_size.value,
+                    log=True,
+                    target='mc',
+                    normalize=False,
+                    prominence=prominence.value,
+                    distance=distance.value,
+                    percent=percent.value,
+                    selector='peak',
+                    figname=index_fig.value,
+                    lim=lim_tof.value,
+                    peaks_find_plot=plot_peak.value,
+                    print_info=False,
+                    save_fig=save_fig.value,
+                    compute_mrp=False,
+                )
+            except Exception as exc:
+                print('=============================')
+                print('Histogram was plotted, but a later step failed.')
+                print(f'Reason: {type(exc).__name__}: {exc}.')
+                print('If you intended peak finding, try lowering "Peak prominence" or "Peak distance".')
+                print('=============================')
 
     def hist_plot_r(variables, out):
         with out:
@@ -164,24 +171,31 @@ def call_ion_selection(variables, colab=False, show_gaussian_controls=False):
             print('Hold shift and use mouse scroll for zooming on x axis')
             print('Hold ctrl and left mouse bottom to move a line')
             print('=============================')
-            mc_plot.hist_plot(
-                variables,
-                bin_size.value,
-                log=True,
-                target='mc',
-                normalize=False,
-                prominence=prominence.value,
-                distance=distance.value,
-                percent=percent.value,
-                selector='range',
-                figname=index_fig.value,
-                lim=lim_tof.value,
-                peaks_find_plot=True,
-                ranging_mode=True,
-                save_fig=False,
-                print_info=False,
-                compute_mrp=False,
-            )
+            try:
+                mc_plot.hist_plot(
+                    variables,
+                    bin_size.value,
+                    log=True,
+                    target='mc',
+                    normalize=False,
+                    prominence=prominence.value,
+                    distance=distance.value,
+                    percent=percent.value,
+                    selector='range',
+                    figname=index_fig.value,
+                    lim=lim_tof.value,
+                    peaks_find_plot=True,
+                    ranging_mode=True,
+                    save_fig=False,
+                    print_info=False,
+                    compute_mrp=False,
+                )
+            except Exception as exc:
+                print('=============================')
+                print('Histogram was plotted, but a later step failed.')
+                print(f'Reason: {type(exc).__name__}: {exc}.')
+                print('If you intended peak finding, try lowering "Peak prominence" or "Peak distance".')
+                print('=============================')
 
     ##############################################
     # element calculate

@@ -7,7 +7,6 @@ from contextlib import contextmanager
 import ipywidgets as widgets
 
 from pyccapt.calibration.core import calibration, mc_plot
-from pyccapt.calibration.core.adaptive_residual_calibration import adaptive_residual_calibration
 
 
 def build_combined_mc_tof_calibration_panel(
@@ -37,6 +36,8 @@ def build_combined_mc_tof_calibration_panel(
     reset_both_corrections,
     clear_plots,
     print_gaussian_for_current_mode,
+    run_adaptive_for_mode,
+    ensure_initial_calibration,
 ):
     """Build the simple combined mc+tof calibration tab."""
     combined_bin_size = widgets.FloatText(value=bin_size.value, description='Bin size:', layout=label_layout)
@@ -161,24 +162,42 @@ def build_combined_mc_tof_calibration_panel(
             pass
 
     def _run_auto_best(_):
-        """For each mode (mc, tof) run the same 'Hybrid auto + residual' as
-        the dedicated mc/tof tabs: initial calibration + V+Bowl atomic-pair
-        optimizer loop + full adaptive residual refinement (temporal +
-        spatial). This is the slow, highest-quality option.
+        """For each mode (mc, tof) press the per-tab 'Hybrid auto + residual'
+        button. That handler ensures initial calibration is done, runs the
+        Voltage+Bowl atomic-pair optimizer loop, then applies adaptive
+        residual refinement. So BEST is exactly:
+        mc tab Hybrid -> tof tab Hybrid (in that order).
+
+        Before each Hybrid run we explicitly re-select a wide peak window
+        on the current-mode histogram. Without this, the previous mode's
+        ``selected_x1/x2`` would leak into the new mode (e.g. mc-domain
+        values when starting tof), and the V+Bowl optimizer would evaluate
+        MRP on a stale window -- which is the difference that made BEST
+        tof diverge from manual tof Hybrid.
         """
         with _lock_buttons():
             previous_mode = calibration_mode.value
             try:
-                with out_status, verbosity_context():
-                    out_status.clear_output()
-                    for mode_value, title, _lim_override in _mode_specs():
-                        calibration_mode.value = mode_value
-                        print(f'--- {title} auto calibration (best = Hybrid auto + residual) ---')
-                        try:
-                            run_hybrid_current()
-                        except Exception as exc:
-                            print(f'{title} hybrid auto + residual failed: {exc}')
-                        print(f'{title} best calibration done.')
+                for mode_value, title, lim_override in _mode_specs():
+                    calibration_mode.value = mode_value
+                    out_status.append_stdout(f'\n=== BEST: {title} (Hybrid auto + residual) ===\n')
+                    try:
+                        # Wide peak window (initial_peak_selection=True),
+                        # equivalent to plotting the histogram fresh on the
+                        # per-mode tab. This is what manual clicking the
+                        # per-mode tab implicitly relies on.
+                        with out, verbosity_context():
+                            auto_select_peak_for_mode(
+                                mode_value, lim_override, initial_peak_selection=True
+                            )
+                    except Exception as exc:
+                        out_status.append_stdout(
+                            f'{title} peak window auto-selection failed: {exc} -- continuing.\n'
+                        )
+                    try:
+                        run_hybrid_current()
+                    except Exception as exc:
+                        out_status.append_stdout(f'{title} best calibration failed: {exc}\n')
             finally:
                 calibration_mode.value = previous_mode
         try:

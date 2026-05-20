@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import io
-from contextlib import nullcontext, redirect_stdout
+import os
+import time
+from contextlib import contextmanager, nullcontext, redirect_stdout
 
 import ipywidgets as widgets
 import numpy as np
@@ -14,6 +16,67 @@ from pyccapt.calibration.core.adaptive_residual_calibration import adaptive_resi
 from pyccapt.calibration.core.mc_plot_peak_helpers import gaussian_mrp_report
 
 _LABEL_LAYOUT = widgets.Layout(width="300px")
+
+_LOG_FILENAME = "adaptive_residual_calibration.log"
+
+
+class _FanoutStream:
+    """Write text to a log file and mirror it to one or more Output widgets."""
+
+    def __init__(self, log_file, output_widgets):
+        self._log_file = log_file
+        self._widgets = [w for w in output_widgets if w is not None]
+
+    def write(self, text):
+        if not text:
+            return len(text) if text is not None else 0
+        if self._log_file is not None:
+            try:
+                self._log_file.write(text)
+                self._log_file.flush()
+            except Exception:
+                pass
+        for widget in self._widgets:
+            try:
+                widget.append_stdout(text)
+            except Exception:
+                pass
+        return len(text)
+
+    def flush(self):
+        if self._log_file is not None:
+            try:
+                self._log_file.flush()
+            except Exception:
+                pass
+
+
+@contextmanager
+def _adaptive_logging(output_widgets):
+    """Redirect stdout to a log file + the given Output widgets.
+
+    Returns the absolute log path so callers can announce where the run was
+    recorded. The file is appended to so successive runs accumulate history.
+    """
+    log_path = os.path.abspath(_LOG_FILENAME)
+    log_file = None
+    try:
+        log_file = open(log_path, "a", encoding="utf-8", buffering=1)
+        header = f"\n===== adaptive residual run @ {time.strftime('%Y-%m-%d %H:%M:%S')} =====\n"
+        log_file.write(header)
+        log_file.flush()
+    except Exception:
+        log_file = None
+    sink = _FanoutStream(log_file, output_widgets)
+    try:
+        with redirect_stdout(sink):
+            yield log_path
+    finally:
+        if log_file is not None:
+            try:
+                log_file.close()
+            except Exception:
+                pass
 
 
 def build_adaptive_residual_calibration_panel(variables, det_diam, flight_path_length, pulse_mode):
@@ -189,27 +252,50 @@ def build_adaptive_residual_calibration_panel(variables, det_diam, flight_path_l
                 save=True,
             )
 
-    def _run_adaptive(_):
+    def _run_adaptive(_, mirror_output=None):
         run_button.disabled = True
+        sinks = [out_status]
+        if mirror_output is not None and mirror_output is not out_status:
+            sinks.append(mirror_output)
+        out_status.clear_output()
         try:
-            with out_status, _verbosity_context():
-                out_status.clear_output()
-                result = adaptive_residual_calibration(
-                    variables,
-                    calibration_mode=_target_key(),
-                    n_peaks=n_peaks.value,
-                    prominence=prominence.value,
-                    distance=distance.value,
-                    n_windows=n_windows.value,
-                    overlap=overlap.value,
-                    template_bin_size=template_bin.value,
-                    temporal_smoothing=smoothing.value,
-                    apply_spatial=apply_spatial.value,
-                    spatial_grid=spatial_grid.value,
-                    min_window_ions=min_window_ions.value,
-                    min_cell_ions=min_cell_ions.value,
-                    verbose=verbose.value,
+            with _adaptive_logging(sinks) as log_path:
+                print(f"--- Adaptive residual calibration: target={_target_key()} ---")
+                print(f"Log file: {log_path}")
+                print(
+                    f"Params: n_peaks={n_peaks.value}, prominence={prominence.value}, "
+                    f"distance={distance.value}, n_windows={n_windows.value}, "
+                    f"overlap={overlap.value}, template_bin={template_bin.value}, "
+                    f"smoothing={smoothing.value}, apply_spatial={apply_spatial.value}, "
+                    f"spatial_grid={spatial_grid.value}, min_window_ions={min_window_ions.value}, "
+                    f"min_cell_ions={min_cell_ions.value}, verbose={verbose.value}"
                 )
+                start = time.time()
+                try:
+                    result = adaptive_residual_calibration(
+                        variables,
+                        calibration_mode=_target_key(),
+                        n_peaks=n_peaks.value,
+                        prominence=prominence.value,
+                        distance=distance.value,
+                        n_windows=n_windows.value,
+                        overlap=overlap.value,
+                        template_bin_size=template_bin.value,
+                        temporal_smoothing=smoothing.value,
+                        apply_spatial=apply_spatial.value,
+                        spatial_grid=spatial_grid.value,
+                        min_window_ions=min_window_ions.value,
+                        min_cell_ions=min_cell_ions.value,
+                        verbose=verbose.value,
+                    )
+                except Exception as exc:
+                    elapsed = time.time() - start
+                    print(f"Adaptive residual calibration FAILED after {elapsed:.1f}s: {exc}")
+                    import traceback
+                    traceback.print_exc()
+                    return
+                elapsed = time.time() - start
+                print(f"Adaptive residual calibration finished in {elapsed:.1f}s")
                 print(f"Accepted steps: {result['accepted_steps'] or ['none']}")
                 print(f"Iterations: {result['n_iterations']} ({result['stop_reason']})")
                 print(
@@ -218,10 +304,6 @@ def build_adaptive_residual_calibration_panel(variables, det_diam, flight_path_l
                 print(
                     f"Holdout score: {result['baseline_quality']['holdout_score']:.2f} -> {result['final_quality']['holdout_score']:.2f}"
                 )
-        except Exception as exc:
-            with out_status:
-                out_status.clear_output()
-                print(f"Adaptive residual calibration failed: {exc}")
         finally:
             run_button.disabled = False
 
@@ -263,4 +345,23 @@ def build_adaptive_residual_calibration_panel(variables, det_diam, flight_path_l
             stat_button,
         ]
     )
-    return widgets.VBox([description, widgets.HBox([left, center, right]), widgets.VBox([out, out_status])])
+    panel = widgets.VBox([description, widgets.HBox([left, center, right]), widgets.VBox([out, out_status])])
+
+    def run_for_mode(mode_key, mirror_output=None):
+        """Programmatically run the adaptive residual button for one mode.
+
+        Switches the panel's target dropdown to ``mode_key`` ("mc" or "tof")
+        and invokes the same click handler the user would trigger manually.
+        ``mirror_output``, when given, receives the same prints the adaptive
+        tab's status area sees -- so callers on another tab (e.g. the mc+tof
+        BEST button) still get live progress and the log file path.
+        """
+        target_value = "tof_calib" if mode_key == "tof" else "mc_calib"
+        previous_target = target.value
+        target.value = target_value
+        try:
+            _run_adaptive(None, mirror_output=mirror_output)
+        finally:
+            target.value = previous_target
+
+    return panel, run_for_mode

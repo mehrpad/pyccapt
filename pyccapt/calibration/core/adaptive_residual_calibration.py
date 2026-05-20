@@ -419,6 +419,12 @@ def adaptive_residual_calibration(
     if len(reference_peaks["train"]) < 2:
         raise CalibrationInputError("Adaptive residual calibration needs at least two training peaks")
     baseline_quality = _evaluate_quality(initial_array, reference_peaks)
+    if verbose:
+        print(
+            f"[Adaptive residual] start: mode={calibration_key}, train_peaks={len(reference_peaks['train'])}, "
+            f"holdout_peaks={len(reference_peaks.get('holdout', []))}, "
+            f"baseline train={baseline_quality['train_score']:.3f}, holdout={baseline_quality['holdout_score']:.3f}"
+        )
     current_array = initial_array.copy()
     temporal_info = {"n_observations": 0}
     spatial_info = {"n_cells": 0}
@@ -432,17 +438,33 @@ def adaptive_residual_calibration(
             current_array, n_peaks=max(3, int(n_peaks)), prominence=prominence, distance=distance, hist_bin_size=hist_bin_size
         )
         round_reference_peaks = _split_reference_peaks(current_array, round_peaks)
+        if verbose:
+            print(
+                f"[Adaptive residual] round {round_index + 1}: detected_peaks={len(round_peaks)}, "
+                f"train={len(round_reference_peaks['train'])}, holdout={len(round_reference_peaks.get('holdout', []))}"
+            )
         if len(round_reference_peaks["train"]) < 2:
             stop_reason = "insufficient_peaks"
+            if verbose:
+                print(f"[Adaptive residual] round {round_index + 1}: stopping -- insufficient training peaks")
             break
 
         round_baseline_quality = _evaluate_quality(current_array, round_reference_peaks)
         round_quality = dict(round_baseline_quality)
+        if verbose:
+            print(
+                f"[Adaptive residual] round {round_index + 1} baseline: "
+                f"train={round_baseline_quality['train_score']:.3f}, holdout={round_baseline_quality['holdout_score']:.3f}"
+            )
         round_steps = []
         templates = [_build_peak_template(current_array, peak, template_bin_size) for peak in round_reference_peaks["train"]]
         peak_template_pairs = [(p, t) for p, t in zip(round_reference_peaks["train"], templates) if t is not None]
+        if verbose:
+            print(f"[Adaptive residual] round {round_index + 1}: built {len(peak_template_pairs)} usable templates")
         if not peak_template_pairs:
             stop_reason = "insufficient_template_ions"
+            if verbose:
+                print(f"[Adaptive residual] round {round_index + 1}: stopping -- no usable templates")
             break
         temporal_candidates = []
         for peak, template in peak_template_pairs:
@@ -455,13 +477,26 @@ def adaptive_residual_calibration(
                 smoothing=temporal_smoothing,
             )
             if candidate_info.get("n_observations", 0) < 4:
+                if verbose:
+                    print(
+                        f"[Adaptive residual]   temporal@{peak['position']:.4f} skipped: "
+                        f"only {candidate_info.get('n_observations', 0)} windows usable"
+                    )
                 continue
             temporal_candidate = current_array - temporal_correction
+            cand_quality = _evaluate_quality(temporal_candidate, round_reference_peaks)
+            if verbose:
+                print(
+                    f"[Adaptive residual]   temporal@{peak['position']:.4f}: "
+                    f"obs={candidate_info.get('n_observations', 0)}, "
+                    f"train {round_baseline_quality['train_score']:.3f}->{cand_quality['train_score']:.3f}, "
+                    f"holdout {round_baseline_quality['holdout_score']:.3f}->{cand_quality['holdout_score']:.3f}"
+                )
             temporal_candidates.append(
                 {
                     "label": f"temporal@{peak['position']:.4f}",
                     "correction": temporal_correction,
-                    "quality": _evaluate_quality(temporal_candidate, round_reference_peaks),
+                    "quality": cand_quality,
                     "info": candidate_info,
                 }
             )
@@ -471,6 +506,13 @@ def adaptive_residual_calibration(
             round_quality = dict(best_temporal["quality"])
             temporal_info = best_temporal["info"]
             round_steps.append(best_temporal["label"])
+            if verbose:
+                print(f"[Adaptive residual] round {round_index + 1}: accepted {best_temporal['label']}")
+        elif verbose:
+            print(
+                f"[Adaptive residual] round {round_index + 1}: no temporal candidate improved over baseline "
+                f"({len(temporal_candidates)} evaluated)"
+            )
 
         spatial_quality = None
         if apply_spatial:
@@ -489,13 +531,26 @@ def adaptive_residual_calibration(
                     min_cell_ions=min_cell_ions,
                 )
                 if candidate_info.get("n_cells", 0) < 4:
+                    if verbose:
+                        print(
+                            f"[Adaptive residual]   spatial@{peak['position']:.4f} skipped: "
+                            f"only {candidate_info.get('n_cells', 0)} cells usable"
+                        )
                     continue
                 spatial_candidate = current_array - spatial_correction
+                cand_quality = _evaluate_quality(spatial_candidate, round_reference_peaks)
+                if verbose:
+                    print(
+                        f"[Adaptive residual]   spatial@{peak['position']:.4f}: "
+                        f"cells={candidate_info.get('n_cells', 0)}, "
+                        f"train {round_quality['train_score']:.3f}->{cand_quality['train_score']:.3f}, "
+                        f"holdout {round_quality['holdout_score']:.3f}->{cand_quality['holdout_score']:.3f}"
+                    )
                 spatial_candidates.append(
                     {
                         "label": f"spatial@{peak['position']:.4f}",
                         "correction": spatial_correction,
-                        "quality": _evaluate_quality(spatial_candidate, round_reference_peaks),
+                        "quality": cand_quality,
                         "info": candidate_info,
                     }
                 )
@@ -506,6 +561,13 @@ def adaptive_residual_calibration(
                 spatial_quality = best_spatial["quality"]
                 spatial_info = best_spatial["info"]
                 round_steps.append(best_spatial["label"])
+                if verbose:
+                    print(f"[Adaptive residual] round {round_index + 1}: accepted {best_spatial['label']}")
+            elif verbose:
+                print(
+                    f"[Adaptive residual] round {round_index + 1}: no spatial candidate improved over baseline "
+                    f"({len(spatial_candidates)} evaluated)"
+                )
 
         iteration_history.append(
             {
@@ -517,6 +579,8 @@ def adaptive_residual_calibration(
         )
         if not round_steps:
             stop_reason = "no_improvement"
+            if verbose:
+                print(f"[Adaptive residual] round {round_index + 1}: no improvement -- stopping")
             break
         accepted_steps.extend(round_steps)
 

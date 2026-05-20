@@ -1397,6 +1397,9 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         _render_subtab_content()
         _render_top_content()
 
+    adaptive_panel, run_adaptive_for_mode = build_adaptive_residual_calibration_panel(
+        variables, det_diam, flight_path_length, pulse_mode
+    )
     combined_panel = build_combined_mc_tof_calibration_panel(
         variables,
         out,
@@ -1424,8 +1427,9 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         _reset_both_corrections,
         lambda: clear_plot_on_click(out, out_status),
         _print_gaussian_for_current_mode,
+        run_adaptive_for_mode,
+        _ensure_initial_calibration,
     )
-    adaptive_panel = build_adaptive_residual_calibration_panel(variables, det_diam, flight_path_length, pulse_mode)
 
     top_placeholders = [widgets.VBox(), widgets.VBox(), widgets.VBox(), widgets.VBox()]
     mode_tabs = widgets.Tab(children=top_placeholders)

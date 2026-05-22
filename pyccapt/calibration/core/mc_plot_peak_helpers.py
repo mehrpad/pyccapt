@@ -9,6 +9,27 @@ from scipy.optimize import curve_fit
 from scipy.signal import find_peaks, peak_prominences, peak_widths
 from scipy.special import erf as _erf
 
+try:
+    import fast_histogram as _fhist  # ~10x faster than np.histogram for uniform bins
+    _HAS_FAST_HIST = True
+except ImportError:
+    _fhist = None
+    _HAS_FAST_HIST = False
+
+
+def _fast_uniform_histogram(data, n_bins, lo, hi):
+    """``fast_histogram.histogram1d`` if available, else ``np.histogram``."""
+    if _HAS_FAST_HIST and n_bins >= 1:
+        try:
+            return _fhist.histogram1d(np.asarray(data, dtype=float),
+                                       bins=int(n_bins),
+                                       range=(float(lo), float(hi)))
+        except Exception:
+            pass
+    edges = np.linspace(float(lo), float(hi), int(n_bins) + 1)
+    counts, _ = np.histogram(data, bins=edges)
+    return counts
+
 _MRP_INTERNAL_BIN_SIZE = 0.01
 _BOX_SELECTION_BIN_SIZE = 0.1
 _MRP_REFERENCE_BIN_SIZE = 0.01
@@ -59,10 +80,11 @@ def _auto_mrp_window_from_array(values, bin_size=_AUTO_MRP_PICK_BIN_SIZE, half_w
     # Anchored grid: edges are multiples of bin_size irrespective of (lo, hi).
     start = float(np.floor(lo / bs) * bs)
     stop = float(np.ceil(hi / bs) * bs + bs)
-    edges = np.arange(start, stop + 0.5 * bs, bs)
+    n_bins = max(1, int(round((stop - start) / bs)))
+    edges = start + bs * np.arange(n_bins + 1)
     if edges.size < 2:
         return None
-    counts, edges = np.histogram(data, bins=edges)
+    counts = _fast_uniform_histogram(data, n_bins, start, start + n_bins * bs)
     if counts.sum() == 0:
         return None
     peak_idx = int(np.argmax(counts))
@@ -584,7 +606,7 @@ def _internal_peak_seed(values, percent=50, bin_size=_MRP_INTERNAL_BIN_SIZE, cen
 
     n_bins = max(_MRP_MIN_BINS, int(np.ceil((data_max - data_min) / max(bin_size, 1e-9))))
     edges = np.linspace(data_min, data_max, n_bins + 1)
-    y, edges = np.histogram(data, bins=edges)
+    y = _fast_uniform_histogram(data, n_bins, data_min, data_max)
     x = (edges[:-1] + edges[1:]) * 0.5
     if len(x) == 0:
         return None
@@ -1017,7 +1039,13 @@ def _fast_mrp_core(data, x1, x2, bin_size):
     nan3 = [float('nan')] * 3
 
     n_bins = max(2, int((x2 - x1) / bin_size))
-    y, edges = np.histogram(data, bins=n_bins)
+    data_arr = np.asarray(data, dtype=float)
+    data_lo = float(data_arr.min()) if data_arr.size else float(x1)
+    data_hi = float(data_arr.max()) if data_arr.size else float(x2)
+    if data_hi <= data_lo:
+        data_hi = data_lo + max(bin_size, 1e-9)
+    y = _fast_uniform_histogram(data_arr, n_bins, data_lo, data_hi)
+    edges = np.linspace(data_lo, data_hi, n_bins + 1)
     x = (edges[:-1] + edges[1:]) * 0.5
 
     try:
@@ -1123,7 +1151,7 @@ def _gaussian_mrp_report_core(
 
     n_bins = max(_MRP_MIN_BINS, int(np.ceil((used_x2 - used_x1) / max(bin_size, 1e-6))))
     edges = np.linspace(used_x1, used_x2, n_bins + 1)
-    y, edges = np.histogram(data, bins=edges)
+    y = _fast_uniform_histogram(data, n_bins, used_x1, used_x2)
     x = (edges[:-1] + edges[1:]) * 0.5
 
     try:
@@ -1155,7 +1183,7 @@ def _gaussian_mrp_report_core(
         coarse_bin = HIST_COMPARISON_MIN_BIN
         coarse_n_bins = max(_MRP_MIN_BINS, int(np.ceil((used_x2 - used_x1) / coarse_bin)))
         coarse_edges = np.linspace(used_x1, used_x2, coarse_n_bins + 1)
-        coarse_y, coarse_edges = np.histogram(data, bins=coarse_edges)
+        coarse_y = _fast_uniform_histogram(data, coarse_n_bins, used_x1, used_x2)
         coarse_x = (coarse_edges[:-1] + coarse_edges[1:]) * 0.5
         try:
             coarse_peaks, _ = find_peaks(coarse_y, height=0)

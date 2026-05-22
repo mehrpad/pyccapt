@@ -203,7 +203,12 @@ def _build_peak_template(calibration_array, peak, template_bin_size):
     search_half_range = max((peak["x2"] - peak["x1"]) * 0.75, template_bin_size * 6.0)
     n_bins = max(25, int(np.ceil((2.0 * search_half_range) / max(template_bin_size, 1e-6))))
     edges = np.linspace(-search_half_range, search_half_range, n_bins + 1)
-    counts = np.histogram(offsets, bins=edges)[0].astype(float)
+    try:
+        import fast_histogram as _fhist  # ~10x faster for uniform bins
+        counts = _fhist.histogram1d(offsets, bins=int(n_bins),
+                                     range=(-float(search_half_range), float(search_half_range))).astype(float)
+    except ImportError:
+        counts = np.histogram(offsets, bins=edges)[0].astype(float)
     counts = gaussian_filter1d(counts, sigma=1.0, mode="nearest")
     counts += max(1e-9, counts.max() * 1e-6)
     pdf = counts / np.sum(counts)

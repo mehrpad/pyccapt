@@ -139,7 +139,12 @@ def _estimate_peak_fwhm(values, bin_size=0.01):
     bin_size = float(max(bin_size, 1e-6))
     n_bins = max(40, int(np.ceil((data_max - data_min) / bin_size)))
     edges = np.linspace(data_min, data_max, n_bins + 1)
-    y, edges = np.histogram(values, bins=edges)
+    try:
+        import fast_histogram as _fhist
+        y = _fhist.histogram1d(values, bins=int(n_bins),
+                               range=(data_min, data_max))
+    except ImportError:
+        y, edges = np.histogram(values, bins=edges)
     if y.max() <= 0:
         return float('inf')
     x = (edges[:-1] + edges[1:]) * 0.5

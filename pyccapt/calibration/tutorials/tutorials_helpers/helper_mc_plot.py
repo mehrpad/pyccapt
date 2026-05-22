@@ -30,6 +30,16 @@ def call_mc_plot(variables, selector):
     figure_mc_size_y = widgets.FloatText(value=5.0)
     target_mode = widgets.Dropdown(options=[('mc', 'mc'), ('tof', 'tof'), ('mc_uc', 'mc_uc'), ('tof_c', 'tof_c')])
     plot_peak = widgets.Dropdown(options=[('True', True), ('False', False)])
+    background_widget = widgets.Dropdown(
+        options=[
+            ('None', None),
+            ('pchip_valley', 'pchip_valley'),
+            ('decay  a/x + b', 'decay_inv_x'),
+            ('decay  a/sqrt(x) + b', 'decay_inv_sqrt'),
+            ('decay  a*exp(-b*x) + c', 'decay_exp'),
+        ],
+        value=None,
+    )
     save = widgets.Dropdown(options=[('False', False), ('True', True)])
     mrp_left_widget = widgets.FloatText(value=0.0)
     mrp_right_widget = widgets.FloatText(value=0.0)
@@ -204,6 +214,13 @@ def call_mc_plot(variables, selector):
                     except Exception as exc:
                         peak_warning = f'plot_hist_info_legend failed: {type(exc).__name__}: {exc}'
 
+            if background_widget.value is not None:
+                try:
+                    mc_hist.plot_background(mode=background_widget.value)
+                except Exception as exc:
+                    print(f'Background fit "{background_widget.value}" failed: '
+                          f'{type(exc).__name__}: {exc}')
+
             try:
                 mc_hist.selector(selector=selector)  # rect, peak_x, range
             except Exception as exc:
@@ -242,6 +259,7 @@ def call_mc_plot(variables, selector):
             widgets.HBox([widgets.Label(value='Percent:', layout=label_layout), percent_widget]),
             widgets.HBox([widgets.Label(value='MRP all:', layout=label_layout), mrp_all_widget]),
             widgets.HBox([widgets.Label(value='Plot peak:', layout=label_layout), plot_peak]),
+            widgets.HBox([widgets.Label(value='Background:', layout=label_layout), background_widget]),
             widgets.HBox([widgets.Label(value='Save:', layout=label_layout), save]),
             widgets.HBox([widgets.Label(value='Fig name:', layout=label_layout), figname_widget]),
             widgets.HBox(

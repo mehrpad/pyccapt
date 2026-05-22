@@ -220,7 +220,10 @@ def hist_plot(
         mrp_list, mrp_list_all_peak = mc_hist.mrp_calculation()
 
     if background is not None:
-        if background in ["aspls", "fabc", "manual@4", "manual@100"]:
+        if background in [
+            "pchip_valley", "decay_inv_x", "decay_inv_sqrt", "decay_exp",
+            "aspls", "fabc", "manual@4", "manual@100",
+        ]:
             mc_hist.plot_background(mode=background)
         elif background == "user":
             mc_hist.manual_background_fit()

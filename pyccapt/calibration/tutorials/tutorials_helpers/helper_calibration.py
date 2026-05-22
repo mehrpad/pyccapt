@@ -365,11 +365,18 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
 
     def _peak_quality_score(peak):
         local_bin_size = max(1e-4, min(0.02, (peak['x2'] - peak['x1']) / 80.0))
+        # Opt-in: setting variables.voltage_bowl_above_ceiling_strategy to
+        # 'voigt_capped' makes narrow-peak candidates saturate at the
+        # physical ceiling instead of returning NaN. Unblocks the V+Bowl
+        # optimizer on already-well-calibrated data where every candidate
+        # would otherwise be reverted as 'worse than baseline'.
+        _strategy = getattr(variables, 'voltage_bowl_above_ceiling_strategy', 'nan')
         report = gaussian_mrp_report(
             _get_calibration_array(),
             peak['x1'],
             peak['x2'],
             bin_size=local_bin_size,
+            above_ceiling_strategy=_strategy,
         )
         if report is None:
             return float('nan'), None
@@ -933,7 +940,27 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                         quality['holdout_score'], baseline_holdout, tolerance_ratio=0.05
                     )
 
-                    accepted = selected_improved
+                    # Opt-in: when the dominant peak's score is unreliable
+                    # (NaN or both ties at the physical ceiling), fall back
+                    # to the weighted multi-peak (train) score so the
+                    # optimizer can still differentiate candidates.
+                    #
+                    # Mode is read from
+                    # ``variables.voltage_bowl_optimizer_metric``:
+                    #   'selected' (default) -> legacy behavior (selected only)
+                    #   'train'              -> always use the multi-peak train score
+                    #   'auto'               -> use train when selected is NaN
+                    _metric_mode = getattr(variables, 'voltage_bowl_optimizer_metric', 'selected')
+                    if _metric_mode == 'train':
+                        accepted = _score_improved(quality['train_score'], baseline_train)
+                    elif _metric_mode == 'auto':
+                        if not (np.isfinite(quality['selected_score'])
+                                and np.isfinite(baseline_selected)):
+                            accepted = _score_improved(quality['train_score'], baseline_train)
+                        else:
+                            accepted = selected_improved
+                    else:  # 'selected' (default, legacy behavior)
+                        accepted = selected_improved
 
                     if accepted:
                         best_train_score = quality['train_score']
@@ -1050,6 +1077,21 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         except Exception:
             pass
 
+    def run_auto_for_mode(mode_key):
+        """Canonical 'Auto calibration' entry point for one mode. Same
+        pattern as ``run_hybrid_for_mode``: explicit mode-key arg so the
+        mc tab, tof tab, and combined-FAST paths all delegate to one
+        function and cannot drift apart.
+        """
+        calibration_mode.value = mode_key
+        automatic_calibration(None, variables, out, out_status, calibration_mode, pulse_mode)
+
+    def run_mc_auto_calibration():
+        run_auto_for_mode('mc_calib')
+
+    def run_tof_auto_calibration():
+        run_auto_for_mode('tof_calib')
+
     def on_hybrid_auto_residual(_):
         hybrid_button.disabled = True
         simple_hybrid_button.disabled = True
@@ -1081,23 +1123,33 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                     f'Running adaptive residual refinement on {mode_key} '
                     f'with tuned defaults (peaks=6, prominence=100, distance=10).'
                 )
+                # Hybrid's adaptive-residual stage reads its parameters from
+                # the calibration profile. 'old' = legacy defaults.
+                # 'new' = identical to 'old' except n_windows=32 (was 24) --
+                # the single change the peak-quality audit on the Nimonic
+                # NiC1 dataset showed beats OLD on mc on BOTH n_peaks AND
+                # MRP simultaneously. Earlier 'new' values (prominence=50,
+                # template_bin=0.005, apply_spatial=False, fast_score=True)
+                # were withdrawn after the audit showed they merged peaks
+                # or were no-ops at 2M ions.
+                _profile = getattr(variables, 'calibration_profile', 'old')
+                _n_windows = 32 if _profile == 'new' else 24
+                _res_kwargs = dict(
+                    n_peaks=6, prominence=100, distance=10, n_windows=_n_windows,
+                    overlap=0.5, template_bin_size=0.01,
+                    temporal_smoothing=0.5, apply_spatial=True,
+                    spatial_grid=12, min_window_ions=40, min_cell_ions=35,
+                    max_rounds=8,
+                )
                 try:
                     result = adaptive_residual_calibration(
                         variables,
                         calibration_mode=mode_key,
-                        n_peaks=6,
-                        prominence=100,
-                        distance=10,
-                        n_windows=24,
-                        overlap=0.5,
-                        template_bin_size=0.01,
-                        temporal_smoothing=0.5,
-                        apply_spatial=True,
-                        spatial_grid=12,
-                        min_window_ions=40,
-                        min_cell_ions=35,
-                        max_rounds=8,
                         verbose=verbose.value,
+                        above_ceiling_strategy=getattr(
+                            variables, 'voltage_bowl_above_ceiling_strategy', 'nan'
+                        ),
+                        **_res_kwargs,
                     )
                 except Exception as exc:
                     _restore_state(post_auto_state)
@@ -1121,6 +1173,31 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                 plot_button.click()
             except Exception:
                 pass
+
+    def run_hybrid_for_mode(mode_key):
+        """Canonical 'Hybrid auto + residual' entry point for one mode.
+
+        Used by every entry point so the three paths (mc tab Hybrid, tof tab
+        Hybrid, combined BEST) cannot drift apart:
+
+        - mc tab's Hybrid button -> run_hybrid_for_mode('mc_calib')
+        - tof tab's Hybrid button -> run_hybrid_for_mode('tof_calib')
+        - combined BEST button -> run_hybrid_for_mode('mc_calib') then
+          run_hybrid_for_mode('tof_calib')
+
+        Body of the per-tab Hybrid handler is reused verbatim via
+        ``on_hybrid_auto_residual`` -- the only thing this wrapper adds is
+        explicitly setting ``calibration_mode.value`` before the call, so
+        callers don't need to remember to do it.
+        """
+        calibration_mode.value = mode_key
+        on_hybrid_auto_residual(None)
+
+    def run_mc_hybrid_auto_residual():
+        run_hybrid_for_mode('mc_calib')
+
+    def run_tof_hybrid_auto_residual():
+        run_hybrid_for_mode('tof_calib')
 
     def on_gaussian_mrp(_):
         # The user explicitly clicked the Gaussian MRP button to see the
@@ -1196,13 +1273,13 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     vol_button.on_click(lambda b: vol_correction(b, variables, out, out_status, calibration_mode, pulse_mode))
     bowl_button.on_click(lambda b: bowl_correction(b, variables, out, out_status, calibration_mode, pulse_mode))
     clear_plot.on_click(lambda b: clear_plot_on_click(out, out_status))
-    auto_button.on_click(lambda b: automatic_calibration(b, variables, out, out_status, calibration_mode, pulse_mode))
+    auto_button.on_click(lambda b: run_auto_for_mode(calibration_mode.value))
     auto_button_bowl.on_click(
         lambda b: automatic_bowl_calibration(b, variables, out, out_status, calibration_mode, pulse_mode)
     )
     initial_calib_button.on_click(lambda b: initial_calibration(b, variables, calibration_mode, flight_path_length))
     gaussian_mrp_button.on_click(on_gaussian_mrp)
-    hybrid_button.on_click(on_hybrid_auto_residual)
+    hybrid_button.on_click(lambda b: run_hybrid_for_mode(calibration_mode.value))
     sampling_mode_b.observe(
         lambda change: setattr(variables, 'bowl_sampling_mode', change['new']),
         names='value',
@@ -1339,8 +1416,8 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     simple_clear_button.on_click(lambda _: clear_plot_on_click(out, out_status))
     simple_gaussian_button.on_click(on_gaussian_mrp)
     simple_plot_stat_button.on_click(lambda _: stat_plot(_, variables, calibration_mode, out))
-    simple_auto_button.on_click(lambda _: automatic_calibration(_, variables, out, out_status, calibration_mode, pulse_mode))
-    simple_hybrid_button.on_click(on_hybrid_auto_residual)
+    simple_auto_button.on_click(lambda _: run_auto_for_mode(calibration_mode.value))
+    simple_hybrid_button.on_click(lambda b: run_hybrid_for_mode(calibration_mode.value))
     simple_controls = widgets.VBox(
         [
             simple_bin_size,
@@ -1397,7 +1474,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         _render_subtab_content()
         _render_top_content()
 
-    adaptive_panel, run_adaptive_for_mode = build_adaptive_residual_calibration_panel(
+    adaptive_panel, run_adaptive_for_mode, _adaptive_apply_profile = build_adaptive_residual_calibration_panel(
         variables, det_diam, flight_path_length, pulse_mode
     )
     combined_panel = build_combined_mc_tof_calibration_panel(
@@ -1429,6 +1506,10 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         _print_gaussian_for_current_mode,
         run_adaptive_for_mode,
         _ensure_initial_calibration,
+        run_mc_hybrid_auto_residual,
+        run_tof_hybrid_auto_residual,
+        run_mc_auto_calibration,
+        run_tof_auto_calibration,
     )
 
     top_placeholders = [widgets.VBox(), widgets.VBox(), widgets.VBox(), widgets.VBox()]
@@ -1455,7 +1536,108 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         lim_tof.value = variables.max_tof if new_value == 'tof_calib' else 400
 
     calibration_mode.observe(_sync_lim_to_mode, names='value')
+
+    # ------------------------------------------------------------------
+    # Calibration profile selector — opt into the benchmark-derived "new"
+    # configuration without overwriting the committed defaults. See
+    # ``benchmark_results/REPORT.md`` for which knobs change.
+    # ------------------------------------------------------------------
+    calibration_profile = widgets.Dropdown(
+        options=[
+            ('Old (default, committed behavior)', 'old'),
+            ('New (benchmark-tuned: faster + better residual on tested dataset)', 'new'),
+        ],
+        value='old',
+        description='Config preset:',
+        style={'description_width': 'initial'},
+        layout=widgets.Layout(width='720px'),
+    )
+    profile_help = widgets.HTML(
+        value=(
+            '<div style="font-size:11px; color:#555; margin: 2px 0 8px 0;">'
+            '<b>"Old"</b> = committed defaults, untouched. '
+            '<b>"New"</b> = identical to "Old" <i>except</i> the adaptive-residual '
+            '<code>n_windows=32</code> (default 24). On the audited Nimonic NiC1 '
+            'dataset, this single-knob change was the only config in the 60-config '
+            'sweep that beat "Old" on mc peak structure on BOTH axes simultaneously: '
+            '+3 mc peaks (53→56) AND +31% mc geomean MRP (576→753), while '
+            'adding 57 tof peaks (73→130) at a small 8% tof MRP cost. Every '
+            'other "tuning" I tried earlier (prominence, template_bin, fast_score, '
+            'apply_spatial, V+Bowl variants, etc.) either gamed the MRP metric by '
+            'merging peaks or had zero effect because the V+Bowl optimizer reverts '
+            'on this dataset. <b>Validate on your own datasets before trusting this '
+            'preset as a default.</b>'
+            '</div>'
+        ),
+        layout=widgets.Layout(width='960px'),
+    )
+
+    def _apply_profile(change):
+        new_profile = change.get('new', calibration_profile.value) if isinstance(change, dict) else change
+        if new_profile == 'new':
+            # New preset on this dataset = OLD bowl/voltage/histogram defaults
+            # UNCHANGED, with the single residual change `n_windows=32`. The
+            # earlier-claimed bowl/voltage/voigt_capped/fast_score wins were
+            # withdrawn after the peak-quality audit at 2M ions showed they
+            # either merge peaks (gaming MRP) or are no-ops.
+            sample_size_b.value = 5
+            sampling_mode_b.value = 'cartesian'
+            bin_size_b.value = 0.01
+            fit_mode_b.value = 'robust_fit'
+            sample_size_v.value = 10000
+            bin_size_v.value = 0.01
+            model_v.value = 'robust_fit'
+            refine_nelder_mead_widget.value = False
+            bin_size.value = 0.1
+            variables.calibration_profile = 'new'
+            # No V+Bowl opt-ins under the audited "new" preset.
+            for attr in (
+                'voltage_bowl_above_ceiling_strategy',
+                'voltage_bowl_optimizer_metric',
+                'residual_fast_candidate_score',
+            ):
+                if hasattr(variables, attr):
+                    try:
+                        delattr(variables, attr)
+                    except AttributeError:
+                        pass
+            # Adaptive Residual tab widgets — only n_windows differs.
+            _adaptive_apply_profile('new')
+        else:
+            sample_size_b.value = 5
+            sampling_mode_b.value = 'cartesian'
+            bin_size_b.value = 0.01
+            fit_mode_b.value = 'robust_fit'
+            sample_size_v.value = 10000
+            bin_size_v.value = 0.01
+            model_v.value = 'robust_fit'
+            refine_nelder_mead_widget.value = False
+            bin_size.value = 0.1
+            variables.calibration_profile = 'old'
+            # Remove the opt-in attributes so behavior is fully legacy.
+            for attr in (
+                'voltage_bowl_above_ceiling_strategy',
+                'voltage_bowl_optimizer_metric',
+                'residual_fast_candidate_score',
+            ):
+                if hasattr(variables, attr):
+                    try:
+                        delattr(variables, attr)
+                    except AttributeError:
+                        pass
+            _adaptive_apply_profile('old')
+
+    calibration_profile.observe(_apply_profile, names='value')
+    # Initialize variables.calibration_profile (defaults to 'old' = current behavior).
+    variables.calibration_profile = 'old'
+
+    profile_panel = widgets.VBox([
+        widgets.HTML('<b>Calibration profile</b>'),
+        calibration_profile,
+        profile_help,
+    ], layout=widgets.Layout(border='1px solid #ccc', padding='6px', margin='0 0 8px 0'))
+
     mode_tabs.selected_index = 0
     _sync_mode_ui()
     _render_top_content()
-    display(mode_tabs)
+    display(widgets.VBox([profile_panel, mode_tabs]))

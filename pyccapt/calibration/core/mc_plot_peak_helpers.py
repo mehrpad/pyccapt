@@ -458,7 +458,7 @@ def _plotter_peak_window(plotter, peak_array_index):
     return search_left, search_right, center
 
 
-def _recommended_mrp_payload(report):
+def _recommended_mrp_payload(report, above_ceiling_strategy='nan'):
     """Return the recommended robust MRP set from a report.
 
     Priority order: Asymmetric (err*expDecay, APyT-style) > Voigt > Histogram.
@@ -467,6 +467,20 @@ def _recommended_mrp_payload(report):
     the final independent fallback. Gaussian is no longer used in the chain
     (its MRP for tailed APT peaks is systematically biased) but is still
     reported alongside the others for cross-checking.
+
+    Parameters
+    ----------
+    above_ceiling_strategy : {'nan', 'voigt_capped', 'fit_capped'}, default 'nan'
+        Behavior when the histogram-fallback MRP exceeds the physical ceiling
+        (1500). The default 'nan' returns NaN for the recommended MRP (legacy
+        behavior). 'voigt_capped' falls back to the Voigt MRP capped at the
+        ceiling (or asymmetric if voigt unavailable). 'fit_capped' tries
+        asymmetric -> voigt -> histogram, capping each at the ceiling.
+
+        The non-default modes unblock the V+Bowl optimizer on already-well-
+        calibrated data: with the default mode it sees NaN > X = False and
+        reverts every improvement. With capping the optimizer can at least
+        hold steady (ceiling-vs-ceiling tie) rather than reverting.
     """
     if report is None:
         return [float('nan')] * 3, 'unavailable'
@@ -507,10 +521,46 @@ def _recommended_mrp_payload(report):
     if voigt_valid:
         return report['voigt_mrp'], f'Voigt ({report["profile_type"]})'
 
-    # Cap histogram fallback: replace values above the physical ceiling with NaN
+    # Above-physical-ceiling histogram-fallback path. Default keeps the
+    # legacy NaN behavior. Non-default strategies pick the highest-quality
+    # available fit and cap it at the physical ceiling instead, so the
+    # V+Bowl optimizer can rank "very narrow" candidates as ties rather
+    # than reverting them as "worse than baseline".
+    use_strategy = above_ceiling_strategy in ('voigt_capped', 'fit_capped')
     if histogram_valid and histogram_values[0] > _MRP_PHYSICAL_CEILING:
+        if use_strategy:
+            if asym_finite and np.isfinite(asym_values[0]) and asym_values[0] > 0:
+                return _cap_at_ceiling(asym_values), 'Asymmetric (capped at ceiling)'
+            if report.get('voigt_ok') and np.isfinite(voigt_values[0]) and voigt_values[0] > 0:
+                return _cap_at_ceiling(voigt_values), 'Voigt (capped at ceiling)'
+            return _cap_at_ceiling(histogram_values), 'Histogram (capped at ceiling)'
+        # Default: NaN-out for legacy callers.
         return [float('nan')] * 3, 'Histogram (above physical ceiling)'
+
+    # ALSO handle the case where histogram fallback is unusable (e.g. it
+    # returned NaN due to noise around a sub-pixel-narrow peak) but Voigt
+    # is finite and above ceiling -- legacy code falls through to the
+    # NaN histogram below. The 'voigt_capped' strategy promotes the
+    # Voigt-or-asymmetric fit and caps it at the ceiling, which is the
+    # right signal for the optimizer: "the peak is very narrow".
+    if use_strategy and not histogram_valid:
+        if asym_finite and np.isfinite(asym_values[0]) and asym_values[0] > 0:
+            return _cap_at_ceiling(asym_values), 'Asymmetric (capped, no histogram fallback)'
+        if report.get('voigt_ok') and np.isfinite(voigt_values[0]) and voigt_values[0] > 0:
+            return _cap_at_ceiling(voigt_values), 'Voigt (capped, no histogram fallback)'
+
     return histogram_values, 'Histogram'
+
+
+def _cap_at_ceiling(mrp_values):
+    """Cap each MRP value at the physical ceiling; pass NaN through as-is."""
+    out = []
+    for v in mrp_values:
+        if np.isfinite(v) and v > 0:
+            out.append(min(float(v), float(_MRP_PHYSICAL_CEILING)))
+        else:
+            out.append(float(v))
+    return out
 
 
 def _selection_fraction_index(percent):
@@ -997,14 +1047,26 @@ def _fast_mrp_core(data, x1, x2, bin_size):
     return result if any(np.isfinite(v) for v in result) else None
 
 
-def gaussian_mrp_report(calibration_array, x1, x2, bin_size=_MRP_INTERNAL_BIN_SIZE, peak_center=None, _reference_guard=True):
+def gaussian_mrp_report(
+    calibration_array,
+    x1,
+    x2,
+    bin_size=_MRP_INTERNAL_BIN_SIZE,
+    peak_center=None,
+    _reference_guard=True,
+    above_ceiling_strategy='nan',
+):
     """Compute a robust high-resolution MRP report for the selected peak window.
 
     If the requested *bin_size* is too fine to find any peaks, the function
     retries with progressively larger bin sizes before giving up.
+
+    ``above_ceiling_strategy`` is forwarded to ``_recommended_mrp_payload``;
+    see that function's docstring. Default 'nan' preserves legacy behavior.
     """
     report = _gaussian_mrp_report_core(
-        calibration_array, x1, x2, bin_size=bin_size, peak_center=peak_center, _reference_guard=_reference_guard
+        calibration_array, x1, x2, bin_size=bin_size, peak_center=peak_center,
+        _reference_guard=_reference_guard, above_ceiling_strategy=above_ceiling_strategy,
     )
     if report is not None:
         return report
@@ -1018,7 +1080,8 @@ def gaussian_mrp_report(calibration_array, x1, x2, bin_size=_MRP_INTERNAL_BIN_SI
             continue
         seen.add(rounded)
         report = _gaussian_mrp_report_core(
-            calibration_array, x1, x2, bin_size=rounded, peak_center=peak_center, _reference_guard=_reference_guard
+            calibration_array, x1, x2, bin_size=rounded, peak_center=peak_center,
+            _reference_guard=_reference_guard, above_ceiling_strategy=above_ceiling_strategy,
         )
         if report is not None:
             return report
@@ -1026,7 +1089,8 @@ def gaussian_mrp_report(calibration_array, x1, x2, bin_size=_MRP_INTERNAL_BIN_SI
 
 
 def _gaussian_mrp_report_core(
-    calibration_array, x1, x2, bin_size=_MRP_INTERNAL_BIN_SIZE, peak_center=None, _reference_guard=True
+    calibration_array, x1, x2, bin_size=_MRP_INTERNAL_BIN_SIZE, peak_center=None,
+    _reference_guard=True, above_ceiling_strategy='nan',
 ):
     """Single-attempt MRP report computation (inner implementation)."""
     values = np.asarray(calibration_array, dtype=float)
@@ -1142,7 +1206,8 @@ def _gaussian_mrp_report_core(
             'asymmetric_mrp': asym_mrp if asym_ok else [float('nan')] * 3,
             'histogram_mrp': hist_mrp,
             'profile_type': profile_type,
-        }
+        },
+        above_ceiling_strategy=above_ceiling_strategy,
     )
     if recommended_label.startswith('Asymmetric'):
         recommended_peak_sides = asymmetric_peak_sides

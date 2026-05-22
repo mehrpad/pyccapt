@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import io
-import os
 import time
-from contextlib import contextmanager, nullcontext, redirect_stdout
+import traceback
+from contextlib import ExitStack, nullcontext, redirect_stdout
 
 import ipywidgets as widgets
 import numpy as np
@@ -16,67 +16,6 @@ from pyccapt.calibration.core.adaptive_residual_calibration import adaptive_resi
 from pyccapt.calibration.core.mc_plot_peak_helpers import gaussian_mrp_report
 
 _LABEL_LAYOUT = widgets.Layout(width="300px")
-
-_LOG_FILENAME = "adaptive_residual_calibration.log"
-
-
-class _FanoutStream:
-    """Write text to a log file and mirror it to one or more Output widgets."""
-
-    def __init__(self, log_file, output_widgets):
-        self._log_file = log_file
-        self._widgets = [w for w in output_widgets if w is not None]
-
-    def write(self, text):
-        if not text:
-            return len(text) if text is not None else 0
-        if self._log_file is not None:
-            try:
-                self._log_file.write(text)
-                self._log_file.flush()
-            except Exception:
-                pass
-        for widget in self._widgets:
-            try:
-                widget.append_stdout(text)
-            except Exception:
-                pass
-        return len(text)
-
-    def flush(self):
-        if self._log_file is not None:
-            try:
-                self._log_file.flush()
-            except Exception:
-                pass
-
-
-@contextmanager
-def _adaptive_logging(output_widgets):
-    """Redirect stdout to a log file + the given Output widgets.
-
-    Returns the absolute log path so callers can announce where the run was
-    recorded. The file is appended to so successive runs accumulate history.
-    """
-    log_path = os.path.abspath(_LOG_FILENAME)
-    log_file = None
-    try:
-        log_file = open(log_path, "a", encoding="utf-8", buffering=1)
-        header = f"\n===== adaptive residual run @ {time.strftime('%Y-%m-%d %H:%M:%S')} =====\n"
-        log_file.write(header)
-        log_file.flush()
-    except Exception:
-        log_file = None
-    sink = _FanoutStream(log_file, output_widgets)
-    try:
-        with redirect_stdout(sink):
-            yield log_path
-    finally:
-        if log_file is not None:
-            try:
-                log_file.close()
-            except Exception:
-                pass
 
 
 def build_adaptive_residual_calibration_panel(variables, det_diam, flight_path_length, pulse_mode):
@@ -254,22 +193,14 @@ def build_adaptive_residual_calibration_panel(variables, det_diam, flight_path_l
 
     def _run_adaptive(_, mirror_output=None):
         run_button.disabled = True
-        sinks = [out_status]
-        if mirror_output is not None and mirror_output is not out_status:
-            sinks.append(mirror_output)
-        out_status.clear_output()
         try:
-            with _adaptive_logging(sinks) as log_path:
+            with ExitStack() as stack:
+                stack.enter_context(out_status)
+                if mirror_output is not None and mirror_output is not out_status:
+                    stack.enter_context(mirror_output)
+                stack.enter_context(_verbosity_context())
+                out_status.clear_output()
                 print(f"--- Adaptive residual calibration: target={_target_key()} ---")
-                print(f"Log file: {log_path}")
-                print(
-                    f"Params: n_peaks={n_peaks.value}, prominence={prominence.value}, "
-                    f"distance={distance.value}, n_windows={n_windows.value}, "
-                    f"overlap={overlap.value}, template_bin={template_bin.value}, "
-                    f"smoothing={smoothing.value}, apply_spatial={apply_spatial.value}, "
-                    f"spatial_grid={spatial_grid.value}, min_window_ions={min_window_ions.value}, "
-                    f"min_cell_ions={min_cell_ions.value}, verbose={verbose.value}"
-                )
                 start = time.time()
                 try:
                     result = adaptive_residual_calibration(
@@ -287,11 +218,16 @@ def build_adaptive_residual_calibration_panel(variables, det_diam, flight_path_l
                         min_window_ions=min_window_ions.value,
                         min_cell_ions=min_cell_ions.value,
                         verbose=verbose.value,
+                        above_ceiling_strategy=getattr(
+                            variables, "voltage_bowl_above_ceiling_strategy", "nan"
+                        ),
+                        fast_candidate_score=getattr(
+                            variables, "residual_fast_candidate_score", False
+                        ),
                     )
                 except Exception as exc:
                     elapsed = time.time() - start
                     print(f"Adaptive residual calibration FAILED after {elapsed:.1f}s: {exc}")
-                    import traceback
                     traceback.print_exc()
                     return
                 elapsed = time.time() - start
@@ -364,4 +300,30 @@ def build_adaptive_residual_calibration_panel(variables, det_diam, flight_path_l
         finally:
             target.value = previous_target
 
-    return panel, run_for_mode
+    def apply_profile(profile_name):
+        """Apply a named parameter preset to this panel's widgets.
+
+        'old' reverts to the committed defaults. 'new' is identical to
+        'old' except n_windows=32 (was 24) -- the only single-knob change
+        in the audited Nimonic NiC1 sweep that beat OLD on mc peak count
+        AND geomean MRP simultaneously (+3 peaks, +31% MRP) without
+        gaming the metric by merging peaks. Earlier 'new' values
+        (prominence=50, template_bin=0.005, apply_spatial=False) were
+        withdrawn after the peak-quality audit at 2M ions showed they
+        either merged peaks or were no-ops.
+        """
+        # Common defaults (both profiles use these values)
+        n_peaks.value = 6
+        prominence.value = 100
+        distance.value = 10
+        overlap.value = 0.5
+        template_bin.value = 0.01
+        smoothing.value = 0.5
+        apply_spatial.value = True
+        spatial_grid.value = 12
+        min_window_ions.value = 40
+        min_cell_ions.value = 35
+        # Single difference: n_windows
+        n_windows.value = 32 if profile_name == "new" else 24
+
+    return panel, run_for_mode, apply_profile

@@ -481,6 +481,70 @@ def find_consecutive_sequences(start_counter, channel, time_data, high_voltage, 
     return result
 
 
+def iter_consecutive_sequences(start_counter, channel, time_data, high_voltage, pulse, show_progress=False):
+    """Generator version of :func:`find_consecutive_sequences`.
+
+    Yields one pulse-record dict at a time instead of building the full list,
+    so peak memory is O(1) records rather than O(N).  The yielded dicts have
+    the same schema as ``find_consecutive_sequences`` returns.
+    """
+    n = len(start_counter)
+    if n == 0:
+        return
+
+    current_sequence = [start_counter[0]]
+    ch = [channel[0]]
+    time_list = [time_data[0]]
+    current_start = 0
+    current_high_voltage = high_voltage[0]
+    current_pulse = pulse[0]
+
+    iterator = range(1, n)
+    if show_progress:
+        from tqdm.auto import tqdm
+        iterator = tqdm(iterator, desc="Processing", total=n)
+
+    for i in iterator:
+        value = start_counter[i]
+        if current_sequence[-1] == value:
+            current_sequence.append(value)
+            ch.append(channel[i])
+            time_list.append(time_data[i])
+        else:
+            length = len(current_sequence)
+            ch_norm, time_norm, sc_norm, valid_event = _normalize_sequence(current_sequence, ch, time_list)
+            yield {
+                'channels': ch_norm,
+                'time_data': time_norm,
+                'start_counter': sc_norm,
+                'valid_event': valid_event,
+                'high_voltage': current_high_voltage,
+                'pulse': current_pulse,
+                'indices': (current_start, i - 1),
+                'length': length,
+            }
+            current_sequence = [value]
+            ch = [channel[i]]
+            time_list = [time_data[i]]
+            current_start = i
+            current_high_voltage = high_voltage[i]
+            current_pulse = pulse[i]
+
+    # Emit the last pulse group
+    length = len(current_sequence)
+    ch_norm, time_norm, sc_norm, valid_event = _normalize_sequence(current_sequence, ch, time_list)
+    yield {
+        'channels': ch_norm,
+        'time_data': time_norm,
+        'start_counter': sc_norm,
+        'valid_event': valid_event,
+        'high_voltage': current_high_voltage,
+        'pulse': current_pulse,
+        'indices': (current_start, n - 1),
+        'length': length,
+    }
+
+
 def find_nth_max_repeated_indices(nums, n):
     """
     Find the start/end indices of the ``n``-th longest repeated run (1-based).

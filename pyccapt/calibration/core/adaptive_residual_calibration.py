@@ -9,7 +9,7 @@ from scipy.interpolate import RegularGridInterpolator, UnivariateSpline
 from scipy.ndimage import gaussian_filter, gaussian_filter1d
 
 from pyccapt.calibration.core.exceptions import CalibrationInputError
-from pyccapt.calibration.core.mc_plot_peak_helpers import gaussian_mrp_report
+from pyccapt.calibration.core.mc_plot_peak_helpers import fast_mrp, gaussian_mrp_report
 
 
 def _mode_aware_defaults(calibration_array, calibration_mode, user_template_bin_size, user_hist_bin_size=None):
@@ -92,14 +92,43 @@ def _combined_quality_score(quality):
     return float("nan")
 
 
-def _peak_quality_score(calibration_array, peak):
+def _peak_quality_score(calibration_array, peak, above_ceiling_strategy='nan', fast_score=False):
+    """Score a single peak.
+
+    Parameters
+    ----------
+    above_ceiling_strategy : {'nan', 'voigt_capped', 'fit_capped'}, default 'nan'
+        See ``gaussian_mrp_report``. Default preserves legacy behavior.
+    fast_score : bool, default False
+        When True, use the histogram-based ``fast_mrp`` (no Voigt curve_fit)
+        instead of the full ``gaussian_mrp_report``. ~50 us per call vs ~2 s.
+        Use for candidate ranking inside the residual loop; the final
+        accepted state can still be scored with the full ``gaussian_mrp_report``.
+    """
     local_bin_size = max(1e-4, min(0.02, (peak["x2"] - peak["x1"]) / 80.0))
-    report = gaussian_mrp_report(calibration_array, peak["x1"], peak["x2"], bin_size=local_bin_size)
-    if report is None:
-        return float("nan")
-    # Use recommended_mrp which applies the physical ceiling and cross-checks
-    # Voigt/Gaussian/histogram values, preventing absurd scores.
-    mrp_values = report["recommended_mrp"]
+    if fast_score:
+        mrp_values = fast_mrp(
+            np.asarray(calibration_array, dtype=float),
+            peak["x1"], peak["x2"],
+            bin_size=local_bin_size,
+        )
+        # Cap at physical ceiling so the ranking never blows up on noise.
+        _CEILING = 1500.0
+        mrp_values = [
+            min(float(v), _CEILING) if np.isfinite(v) and v > 0 else float("nan")
+            for v in mrp_values
+        ]
+    else:
+        report = gaussian_mrp_report(
+            calibration_array, peak["x1"], peak["x2"],
+            bin_size=local_bin_size,
+            above_ceiling_strategy=above_ceiling_strategy,
+        )
+        if report is None:
+            return float("nan")
+        # Use recommended_mrp which applies the physical ceiling and cross-checks
+        # Voigt/Gaussian/histogram values, preventing absurd scores.
+        mrp_values = report["recommended_mrp"]
     weights = (0.6, 0.3, 0.1)
     score = 0.0
     weight_sum = 0.0
@@ -110,10 +139,14 @@ def _peak_quality_score(calibration_array, peak):
     return float("nan") if weight_sum == 0 else score / weight_sum
 
 
-def _evaluate_peak_group(calibration_array, peaks):
+def _evaluate_peak_group(calibration_array, peaks, above_ceiling_strategy='nan', fast_score=False):
     weighted_scores = []
     for peak in peaks:
-        score = _peak_quality_score(calibration_array, peak)
+        score = _peak_quality_score(
+            calibration_array, peak,
+            above_ceiling_strategy=above_ceiling_strategy,
+            fast_score=fast_score,
+        )
         if np.isfinite(score):
             weight = float(peak.get("weight", 1.0))
             weighted_scores.append((score, weight))
@@ -141,10 +174,18 @@ def _split_reference_peaks(calibration_array, peaks, holdout_count=2):
     return {"train": enriched[:-holdout_n], "holdout": enriched[-holdout_n:]}
 
 
-def _evaluate_quality(calibration_array, reference_peaks):
+def _evaluate_quality(calibration_array, reference_peaks, above_ceiling_strategy='nan', fast_score=False):
     return {
-        "train_score": _evaluate_peak_group(calibration_array, reference_peaks["train"]),
-        "holdout_score": _evaluate_peak_group(calibration_array, reference_peaks["holdout"]),
+        "train_score": _evaluate_peak_group(
+            calibration_array, reference_peaks["train"],
+            above_ceiling_strategy=above_ceiling_strategy,
+            fast_score=fast_score,
+        ),
+        "holdout_score": _evaluate_peak_group(
+            calibration_array, reference_peaks["holdout"],
+            above_ceiling_strategy=above_ceiling_strategy,
+            fast_score=fast_score,
+        ),
     }
 
 
@@ -398,8 +439,29 @@ def adaptive_residual_calibration(
     min_cell_ions=35,
     max_rounds=8,
     verbose=True,
+    above_ceiling_strategy='nan',
+    fast_candidate_score=False,
 ):
-    """Apply adaptive residual calibration using learned peak templates."""
+    """Apply adaptive residual calibration using learned peak templates.
+
+    Parameters
+    ----------
+    above_ceiling_strategy : {'nan', 'voigt_capped', 'fit_capped'}, default 'nan'
+        How per-candidate scoring handles histogram MRP exceeding the
+        physical ceiling. Default preserves legacy behavior; 'voigt_capped'
+        makes the score saturate at the ceiling so the round-acceptance
+        logic doesn't revert genuinely-narrow candidates as 'worse than
+        baseline'.
+    fast_candidate_score : bool, default False
+        When True, score per-candidate fits via ``fast_mrp`` (histogram
+        FWHM only, ~50 us per call) instead of the full ``gaussian_mrp_report``
+        with Voigt curve_fit (~2 s per call). The final ``baseline_quality`` /
+        ``final_quality`` returned to the caller are still computed with
+        the full path so user-facing numbers are unchanged. Profile shows
+        this should give ~5-10x speedup on adaptive residual; safe to set
+        because Voigt-fit MRP is highly correlated with histogram MRP for
+        well-formed peaks.
+    """
     from pyccapt.calibration.core import calibration as calibration_core
 
     calibration_key = "tof" if calibration_mode == "tof" else "mc"
@@ -418,7 +480,13 @@ def adaptive_residual_calibration(
     reference_peaks = _split_reference_peaks(initial_array, peaks)
     if len(reference_peaks["train"]) < 2:
         raise CalibrationInputError("Adaptive residual calibration needs at least two training peaks")
-    baseline_quality = _evaluate_quality(initial_array, reference_peaks)
+    baseline_quality = _evaluate_quality(initial_array, reference_peaks, above_ceiling_strategy=above_ceiling_strategy)
+    if verbose:
+        print(
+            f"[Adaptive residual] start: mode={calibration_key}, train_peaks={len(reference_peaks['train'])}, "
+            f"holdout_peaks={len(reference_peaks.get('holdout', []))}, "
+            f"baseline train={baseline_quality['train_score']:.3f}, holdout={baseline_quality['holdout_score']:.3f}"
+        )
     current_array = initial_array.copy()
     temporal_info = {"n_observations": 0}
     spatial_info = {"n_cells": 0}
@@ -432,17 +500,37 @@ def adaptive_residual_calibration(
             current_array, n_peaks=max(3, int(n_peaks)), prominence=prominence, distance=distance, hist_bin_size=hist_bin_size
         )
         round_reference_peaks = _split_reference_peaks(current_array, round_peaks)
+        if verbose:
+            print(
+                f"[Adaptive residual] round {round_index + 1}: detected_peaks={len(round_peaks)}, "
+                f"train={len(round_reference_peaks['train'])}, holdout={len(round_reference_peaks.get('holdout', []))}"
+            )
         if len(round_reference_peaks["train"]) < 2:
             stop_reason = "insufficient_peaks"
+            if verbose:
+                print(f"[Adaptive residual] round {round_index + 1}: stopping -- insufficient training peaks")
             break
 
-        round_baseline_quality = _evaluate_quality(current_array, round_reference_peaks)
+        round_baseline_quality = _evaluate_quality(
+            current_array, round_reference_peaks,
+            above_ceiling_strategy=above_ceiling_strategy,
+            fast_score=fast_candidate_score,
+        )
         round_quality = dict(round_baseline_quality)
+        if verbose:
+            print(
+                f"[Adaptive residual] round {round_index + 1} baseline: "
+                f"train={round_baseline_quality['train_score']:.3f}, holdout={round_baseline_quality['holdout_score']:.3f}"
+            )
         round_steps = []
         templates = [_build_peak_template(current_array, peak, template_bin_size) for peak in round_reference_peaks["train"]]
         peak_template_pairs = [(p, t) for p, t in zip(round_reference_peaks["train"], templates) if t is not None]
+        if verbose:
+            print(f"[Adaptive residual] round {round_index + 1}: built {len(peak_template_pairs)} usable templates")
         if not peak_template_pairs:
             stop_reason = "insufficient_template_ions"
+            if verbose:
+                print(f"[Adaptive residual] round {round_index + 1}: stopping -- no usable templates")
             break
         temporal_candidates = []
         for peak, template in peak_template_pairs:
@@ -455,13 +543,30 @@ def adaptive_residual_calibration(
                 smoothing=temporal_smoothing,
             )
             if candidate_info.get("n_observations", 0) < 4:
+                if verbose:
+                    print(
+                        f"[Adaptive residual]   temporal@{peak['position']:.4f} skipped: "
+                        f"only {candidate_info.get('n_observations', 0)} windows usable"
+                    )
                 continue
             temporal_candidate = current_array - temporal_correction
+            cand_quality = _evaluate_quality(
+                temporal_candidate, round_reference_peaks,
+                above_ceiling_strategy=above_ceiling_strategy,
+                fast_score=fast_candidate_score,
+            )
+            if verbose:
+                print(
+                    f"[Adaptive residual]   temporal@{peak['position']:.4f}: "
+                    f"obs={candidate_info.get('n_observations', 0)}, "
+                    f"train {round_baseline_quality['train_score']:.3f}->{cand_quality['train_score']:.3f}, "
+                    f"holdout {round_baseline_quality['holdout_score']:.3f}->{cand_quality['holdout_score']:.3f}"
+                )
             temporal_candidates.append(
                 {
                     "label": f"temporal@{peak['position']:.4f}",
                     "correction": temporal_correction,
-                    "quality": _evaluate_quality(temporal_candidate, round_reference_peaks),
+                    "quality": cand_quality,
                     "info": candidate_info,
                 }
             )
@@ -471,6 +576,13 @@ def adaptive_residual_calibration(
             round_quality = dict(best_temporal["quality"])
             temporal_info = best_temporal["info"]
             round_steps.append(best_temporal["label"])
+            if verbose:
+                print(f"[Adaptive residual] round {round_index + 1}: accepted {best_temporal['label']}")
+        elif verbose:
+            print(
+                f"[Adaptive residual] round {round_index + 1}: no temporal candidate improved over baseline "
+                f"({len(temporal_candidates)} evaluated)"
+            )
 
         spatial_quality = None
         if apply_spatial:
@@ -489,13 +601,30 @@ def adaptive_residual_calibration(
                     min_cell_ions=min_cell_ions,
                 )
                 if candidate_info.get("n_cells", 0) < 4:
+                    if verbose:
+                        print(
+                            f"[Adaptive residual]   spatial@{peak['position']:.4f} skipped: "
+                            f"only {candidate_info.get('n_cells', 0)} cells usable"
+                        )
                     continue
                 spatial_candidate = current_array - spatial_correction
+                cand_quality = _evaluate_quality(
+                    spatial_candidate, round_reference_peaks,
+                    above_ceiling_strategy=above_ceiling_strategy,
+                    fast_score=fast_candidate_score,
+                )
+                if verbose:
+                    print(
+                        f"[Adaptive residual]   spatial@{peak['position']:.4f}: "
+                        f"cells={candidate_info.get('n_cells', 0)}, "
+                        f"train {round_quality['train_score']:.3f}->{cand_quality['train_score']:.3f}, "
+                        f"holdout {round_quality['holdout_score']:.3f}->{cand_quality['holdout_score']:.3f}"
+                    )
                 spatial_candidates.append(
                     {
                         "label": f"spatial@{peak['position']:.4f}",
                         "correction": spatial_correction,
-                        "quality": _evaluate_quality(spatial_candidate, round_reference_peaks),
+                        "quality": cand_quality,
                         "info": candidate_info,
                     }
                 )
@@ -506,6 +635,13 @@ def adaptive_residual_calibration(
                 spatial_quality = best_spatial["quality"]
                 spatial_info = best_spatial["info"]
                 round_steps.append(best_spatial["label"])
+                if verbose:
+                    print(f"[Adaptive residual] round {round_index + 1}: accepted {best_spatial['label']}")
+            elif verbose:
+                print(
+                    f"[Adaptive residual] round {round_index + 1}: no spatial candidate improved over baseline "
+                    f"({len(spatial_candidates)} evaluated)"
+                )
 
         iteration_history.append(
             {
@@ -517,15 +653,83 @@ def adaptive_residual_calibration(
         )
         if not round_steps:
             stop_reason = "no_improvement"
+            if verbose:
+                print(f"[Adaptive residual] round {round_index + 1}: no improvement -- stopping")
             break
         accepted_steps.extend(round_steps)
+
+    # B3+ refinement: when fast_candidate_score=True the loop is cheap but
+    # may miss small sub-pixel improvements because fast_mrp is histogram-
+    # binned. After the cheap loop converges, do ONE more pass with the
+    # full Voigt-fit score (fast_score=False). If this pass finds an
+    # accepted improvement we keep it; the spectrum has already been
+    # cheaply optimized so the Voigt-fit cost is bounded to a single pass.
+    if fast_candidate_score and accepted_steps:
+        if verbose:
+            print(f"[Adaptive residual] B3+ refinement pass with full Voigt scoring")
+        refinement_round_index = len(iteration_history)
+        round_peaks = calibration_core.auto_detect_reference_peaks(
+            current_array, n_peaks=max(3, int(n_peaks)),
+            prominence=prominence, distance=distance, hist_bin_size=hist_bin_size,
+        )
+        round_reference_peaks = _split_reference_peaks(current_array, round_peaks)
+        if len(round_reference_peaks["train"]) >= 2:
+            templates = [_build_peak_template(current_array, peak, template_bin_size)
+                         for peak in round_reference_peaks["train"]]
+            peak_template_pairs = [(p, t) for p, t in zip(round_reference_peaks["train"], templates) if t is not None]
+            if peak_template_pairs:
+                # Use FULL Voigt scoring (fast_score=False) for this refinement pass
+                round_baseline_quality = _evaluate_quality(
+                    current_array, round_reference_peaks,
+                    above_ceiling_strategy=above_ceiling_strategy,
+                    fast_score=False,
+                )
+                round_quality = dict(round_baseline_quality)
+                round_steps = []
+                temporal_candidates = []
+                for peak, template in peak_template_pairs:
+                    temporal_correction, candidate_info = _fit_temporal_residual(
+                        current_array, template,
+                        n_windows=n_windows, overlap=overlap,
+                        min_window_ions=min_window_ions,
+                        smoothing=temporal_smoothing,
+                    )
+                    if candidate_info.get("n_observations", 0) < 4:
+                        continue
+                    temporal_candidate = current_array - temporal_correction
+                    cand_quality = _evaluate_quality(
+                        temporal_candidate, round_reference_peaks,
+                        above_ceiling_strategy=above_ceiling_strategy,
+                        fast_score=False,
+                    )
+                    temporal_candidates.append({
+                        "label": f"temporal-refine@{peak['position']:.4f}",
+                        "correction": temporal_correction,
+                        "quality": cand_quality,
+                        "info": candidate_info,
+                    })
+                best_temporal = _best_candidate(temporal_candidates, round_quality)
+                if best_temporal is not None:
+                    current_array = current_array - best_temporal["correction"]
+                    round_steps.append(best_temporal["label"])
+                    accepted_steps.extend(round_steps)
+                    iteration_history.append({
+                        "round": refinement_round_index + 1,
+                        "baseline_quality": round_baseline_quality,
+                        "final_quality": best_temporal["quality"],
+                        "accepted_steps": list(round_steps),
+                    })
+                    if verbose:
+                        print(f"[Adaptive residual] refinement accepted {best_temporal['label']}")
+                elif verbose:
+                    print(f"[Adaptive residual] refinement found no Voigt-validated improvement")
 
     if calibration_key == "tof":
         variables.dld_t_calib = current_array
     else:
         variables.mc_calib = current_array
 
-    final_quality = _evaluate_quality(current_array, reference_peaks)
+    final_quality = _evaluate_quality(current_array, reference_peaks, above_ceiling_strategy=above_ceiling_strategy)
     result = {
         "reference_peaks": reference_peaks,
         "baseline_quality": baseline_quality,

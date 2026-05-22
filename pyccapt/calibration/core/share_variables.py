@@ -358,7 +358,13 @@ class Variables(SharedVariablesBase):
         self.animation_detector_html = None
         self.calibration_selection_masks = {}
         self.calibration_peak_ranges = {}
-        self.bowl_sampling_mode = "polar"
+        self.bowl_sampling_mode = "cartesian"
+        # Tracks whether the per-mode initial calibration has been run on the
+        # current dataset, so the various auto-calibration buttons can
+        # transparently do it first if needed (mc and tof have different
+        # initial calibrations and are tracked independently).
+        self.initial_calibration_done_mc = False
+        self.initial_calibration_done_tof = False
 
     @property
     def dld_highVoltage(self):

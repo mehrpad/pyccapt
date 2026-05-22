@@ -6,6 +6,7 @@ from there.
 
 from __future__ import annotations
 
+import gc
 import math
 from collections import Counter
 from collections.abc import Sequence
@@ -468,22 +469,29 @@ def analyze_surface_concept_tdc_frame(
     flight_path_length_mm: float = 110.0,
     pulse_mode: str = 'voltage',
     show_progress: bool = False,
+    sequence_records: list | None = None,
 ) -> dict:
-    """Recover and analyze Surface Concept hits from an already-loaded raw tdc frame."""
+    """Recover and analyze Surface Concept hits from an already-loaded raw tdc frame.
+
+    Pass ``sequence_records`` to skip the (expensive) call to
+    ``find_consecutive_sequences`` when the caller already holds pre-computed
+    records (e.g. from a preceding combinatorial analysis).
+    """
     required = {'start_counter', 'channel', 'time_data', 'high_voltage (V)'}
     missing = required.difference(df_tdc.columns)
     if missing:
         raise ValueError(f"Surface Concept tdc frame is missing required columns: {sorted(missing)}")
 
-    pulse_column = _surface_concept_pulse_column(df_tdc, pulse_mode)
-    sequence_records = raw_data_surface_concept.find_consecutive_sequences(
-        df_tdc['start_counter'].to_numpy(),
-        df_tdc['channel'].to_numpy(),
-        df_tdc['time_data'].to_numpy(),
-        df_tdc['high_voltage (V)'].to_numpy(),
-        df_tdc[pulse_column].to_numpy(),
-        print_stats=False,
-    )
+    if sequence_records is None:
+        pulse_column = _surface_concept_pulse_column(df_tdc, pulse_mode)
+        sequence_records = raw_data_surface_concept.find_consecutive_sequences(
+            df_tdc['start_counter'].to_numpy(),
+            df_tdc['channel'].to_numpy(),
+            df_tdc['time_data'].to_numpy(),
+            df_tdc['high_voltage (V)'].to_numpy(),
+            df_tdc[pulse_column].to_numpy(),
+            print_stats=False,
+        )
     sequence_stats = summarize_surface_concept_sequences(sequence_records)
     raw_summary = summarize_surface_concept_raw_sequences(sequence_records)
     recovery_diagnostics = build_surface_concept_recovery_diagnostics(
@@ -1550,6 +1558,45 @@ def extract_valid_hits_combinatorial(
     return emitted, all_candidates
 
 
+def _run_combinatorial_batch(args: tuple) -> tuple[list[dict], dict]:
+    """Process one batch of sequence records for the combinatorial recovery.
+
+    Must be at module level so ProcessPoolExecutor workers can import it.
+    ``args = (records, kwargs)`` where ``kwargs`` contains all fixed
+    parameters for :func:`extract_valid_hits_combinatorial`.
+
+    Returns ``(rows, candidate_counts)``.
+    """
+    records, kwargs = args
+    rows: list[dict] = []
+    counts = {'total': 0, 'valid': 0, 'in_peak': 0, 'emitted': 0}
+    for record in records:
+        emitted, all_candidates = extract_valid_hits_combinatorial(record, **kwargs)
+        counts['total'] += len(all_candidates)
+        counts['valid'] += sum(1 for c in all_candidates if c['valid'])
+        counts['in_peak'] += sum(1 for c in all_candidates if c.get('in_peak'))
+        counts['emitted'] += len(emitted)
+        rows.extend(
+            {
+                'start_counter': hit['start_counter'],
+                'high_voltage (V)': hit['high_voltage (V)'],
+                'pulse': hit['pulse'],
+                'tof (ns)': hit['tof (ns)'],
+                'mc (Da)': hit.get('mc (Da)', float('nan')),
+                'x_det (cm)': hit['x_det (cm)'],
+                'y_det (cm)': hit['y_det (cm)'],
+                'dlts': int(hit['dlts']),
+                'detector_axis': str(hit['detector_axis']),
+                'recovery': f"{int(hit['dlts'])} DLTS",
+                'in_detector': bool(hit['in_detector']),
+                'in_peak': bool(hit['in_peak']),
+                'parent_pulse_length': int(hit['parent_pulse_length']),
+            }
+            for hit in emitted
+        )
+    return rows, counts
+
+
 def analyze_surface_concept_tdc_frame_combinatorial(
     df_tdc: pd.DataFrame,
     *,
@@ -1586,22 +1633,94 @@ def analyze_surface_concept_tdc_frame_combinatorial(
         raise ValueError(f"Surface Concept tdc frame is missing required columns: {sorted(missing)}")
 
     pulse_column = _surface_concept_pulse_column(df_tdc, pulse_mode)
-    sequence_records = raw_data_surface_concept.find_consecutive_sequences(
+
+    # Use a generator so sequence records are produced one at a time and
+    # immediately discarded after processing.  The old approach built a Python
+    # list of ~16 M dicts which consumed ~20 GB of RAM and crashed the system.
+    record_gen = raw_data_surface_concept.iter_consecutive_sequences(
         df_tdc['start_counter'].to_numpy(),
         df_tdc['channel'].to_numpy(),
         df_tdc['time_data'].to_numpy(),
         df_tdc['high_voltage (V)'].to_numpy(),
         df_tdc[pulse_column].to_numpy(),
-        print_stats=False,
+        show_progress=show_progress,
     )
 
-    rows: list[dict] = []
-    candidate_counts = {'total': 0, 'valid': 0, 'in_peak': 0, 'emitted': 0}
-    iterator = sequence_records
-    if show_progress:
-        iterator = tqdm(sequence_records, desc='Combinatorial recovery', unit='pulse')
+    # Accumulate hit columns as plain Python lists of scalars — much cheaper
+    # than a list of dicts (no per-row dict/key overhead).
+    col_sc: list = []
+    col_hv: list = []
+    col_pulse: list = []
+    col_tof: list = []
+    col_mc: list = []
+    col_x: list = []
+    col_y: list = []
+    col_dlts: list = []
+    col_axis: list = []
+    col_recovery: list = []
+    col_in_det: list = []
+    col_in_peak: list = []
+    col_plen: list = []
 
-    for record in iterator:
+    candidate_counts = {'total': 0, 'valid': 0, 'in_peak': 0, 'emitted': 0}
+
+    # Sequence / raw-summary accumulators (replaces summarize_surface_concept_sequences
+    # and summarize_surface_concept_raw_sequences, computed in one pass).
+    total_counts: Counter = Counter()
+    dld2_counts: Counter = Counter()
+    dld4_counts: Counter = Counter()
+    invalid_counts: Counter = Counter()
+    n_sequences = 0
+    total_timestamps = 0
+    channel_ts: Counter = Counter()
+    valid_four = 0
+    invalid_four = 0
+    len3 = len2 = len1 = 0
+    mh_four = mh_irreg = 0
+
+    for record in record_gen:
+        # --- sequence stats (incremental) ---
+        ch_arr = np.asarray(record.get('channels', []), dtype=np.int64)
+        td_arr = np.asarray(record.get('time_data', []), dtype=np.int64)
+        length = int(ch_arr.size)
+        n_sequences += 1
+        total_timestamps += length
+        channel_ts.update(int(c) for c in ch_arr.tolist())
+        total_counts[length] += 1
+        valid_events = list(record.get('valid_event', []))
+        n_chunks = max(len(valid_events), math.ceil(length / 4))
+        for ci in range(n_chunks):
+            s, e = ci * 4, min(ci * 4 + 4, length)
+            if s >= e:
+                continue
+            cc = ch_arr[s:e]
+            ct = td_arr[s:e]
+            is_valid = ci < len(valid_events) and bool(valid_events[ci]) and len(cc) == 4
+            if is_valid:
+                dld4_counts[length] += 1
+            else:
+                ph = _recover_surface_concept_partial_hits(cc, ct)
+                if ph:
+                    dld2_counts[length] += len(ph)
+                else:
+                    invalid_counts[length] += 1
+        if length == 4:
+            if valid_events == [True]:
+                valid_four += 1
+            else:
+                invalid_four += 1
+        elif length == 3:
+            len3 += 1
+        elif length == 2:
+            len2 += 1
+        elif length == 1:
+            len1 += 1
+        elif length > 4 and length % 4 == 0:
+            mh_four += 1
+        elif length > 4:
+            mh_irreg += 1
+
+        # --- combinatorial hit recovery ---
         emitted, all_candidates = extract_valid_hits_combinatorial(
             record,
             peak_windows=peak_windows,
@@ -1621,59 +1740,106 @@ def analyze_surface_concept_tdc_frame_combinatorial(
         )
         candidate_counts['total'] += len(all_candidates)
         candidate_counts['valid'] += sum(1 for c in all_candidates if c['valid'])
-        # ``in_peak`` is informational — emission no longer depends on it.
         candidate_counts['in_peak'] += sum(1 for c in all_candidates if c.get('in_peak'))
         candidate_counts['emitted'] += len(emitted)
-        rows.extend(
-            {
-                'start_counter': hit['start_counter'],
-                'high_voltage (V)': hit['high_voltage (V)'],
-                'pulse': hit['pulse'],
-                'tof (ns)': hit['tof (ns)'],
-                'mc (Da)': hit.get('mc (Da)', float('nan')),
-                'x_det (cm)': hit['x_det (cm)'],
-                'y_det (cm)': hit['y_det (cm)'],
-                'dlts': int(hit['dlts']),
-                'detector_axis': str(hit['detector_axis']),
-                'recovery': f"{int(hit['dlts'])} DLTS",
-                'in_detector': bool(hit['in_detector']),
-                'in_peak': bool(hit['in_peak']),
-                'parent_pulse_length': int(hit['parent_pulse_length']),
-            }
-            for hit in emitted
-        )
+        for hit in emitted:
+            col_sc.append(hit['start_counter'])
+            col_hv.append(hit['high_voltage (V)'])
+            col_pulse.append(hit['pulse'])
+            col_tof.append(hit['tof (ns)'])
+            col_mc.append(hit.get('mc (Da)', float('nan')))
+            col_x.append(hit['x_det (cm)'])
+            col_y.append(hit['y_det (cm)'])
+            col_dlts.append(int(hit['dlts']))
+            col_axis.append(str(hit['detector_axis']))
+            col_recovery.append(f"{int(hit['dlts'])} DLTS")
+            col_in_det.append(bool(hit['in_detector']))
+            col_in_peak.append(bool(hit['in_peak']))
+            col_plen.append(int(hit['parent_pulse_length']))
 
-    hit_table = (
-        pd.DataFrame(rows)
-        if rows
-        else pd.DataFrame(
-            columns=[
-                'start_counter',
-                'high_voltage (V)',
-                'pulse',
-                'tof (ns)',
-                'mc (Da)',
-                'x_det (cm)',
-                'y_det (cm)',
-                'dlts',
-                'detector_axis',
-                'recovery',
-                'in_detector',
-                'in_peak',
-                'parent_pulse_length',
-            ]
-        )
-    )
+    gc.collect()
+
+    if col_sc:
+        hit_table = pd.DataFrame({
+            'start_counter': col_sc,
+            'high_voltage (V)': col_hv,
+            'pulse': col_pulse,
+            'tof (ns)': col_tof,
+            'mc (Da)': col_mc,
+            'x_det (cm)': col_x,
+            'y_det (cm)': col_y,
+            'dlts': col_dlts,
+            'detector_axis': col_axis,
+            'recovery': col_recovery,
+            'in_detector': col_in_det,
+            'in_peak': col_in_peak,
+            'parent_pulse_length': col_plen,
+        })
+    else:
+        hit_table = pd.DataFrame(columns=[
+            'start_counter', 'high_voltage (V)', 'pulse', 'tof (ns)', 'mc (Da)',
+            'x_det (cm)', 'y_det (cm)', 'dlts', 'detector_axis', 'recovery',
+            'in_detector', 'in_peak', 'parent_pulse_length',
+        ])
+
+    # Free the column lists now that the DataFrame is built.
+    del col_sc, col_hv, col_pulse, col_tof, col_mc, col_x, col_y
+    del col_dlts, col_axis, col_recovery, col_in_det, col_in_peak, col_plen
+    gc.collect()
+
+    sequence_stats = {
+        'total': dict(total_counts),
+        'dld2': dict(dld2_counts),
+        'dld4': dict(dld4_counts),
+        'invalid': dict(invalid_counts),
+    }
+    raw_summary = {
+        'total_sequences': n_sequences,
+        'total_timestamps': total_timestamps,
+        'channel_timestamp_totals': {ch: int(channel_ts[ch]) for ch in range(4)},
+        'valid_four_channel_groups': valid_four,
+        'invalid_four_channel_groups': invalid_four,
+        'length_three_groups': len3,
+        'length_two_groups': len2,
+        'length_one_groups': len1,
+        'multi_hit_groups_of_four': mh_four,
+        'multi_hit_irregular': mh_irreg,
+        'multi_hit_groups_of_four_timestamps': 0,
+        'multi_hit_irregular_timestamps': 0,
+    }
+
+    # Derive recovery_stats from the hit_table (no second pass over raw data).
+    if not hit_table.empty:
+        dlts_col = hit_table['dlts'].to_numpy()
+        in_det_col = hit_table['in_detector'].to_numpy()
+        recovery_stats = {
+            'recovered_hits': len(hit_table),
+            'two_d_hits': int((dlts_col == 4).sum()),
+            'one_d_hits': int((dlts_col == 2).sum()),
+            'two_d_in_detector': int(((dlts_col == 4) & in_det_col).sum()),
+            'one_d_in_detector': int(((dlts_col == 2) & in_det_col).sum()),
+            'outside_detector_hits': int((~in_det_col).sum()),
+            'unrecoverable_chunks': 0,
+        }
+    else:
+        recovery_stats = {
+            'recovered_hits': 0, 'two_d_hits': 0, 'one_d_hits': 0,
+            'two_d_in_detector': 0, 'one_d_in_detector': 0,
+            'outside_detector_hits': 0, 'unrecoverable_chunks': 0,
+        }
 
     return {
         'hit_table': hit_table,
         'candidate_counts': candidate_counts,
+        'sequence_stats': sequence_stats,
+        'raw_summary': raw_summary,
+        'recovery_diagnostics': pd.DataFrame(),
+        'recovery_stats': recovery_stats,
         'mode': mode,
         'peak_windows': list(peak_windows) if peak_windows else [],
         'signal_kind': signal_kind,
         'pair_sum_tolerance_bins': pair_sum_tolerance_bins,
         'detector_limit_cm': detector_limit_cm,
-        'sequence_records': sequence_records,
     }
 
 

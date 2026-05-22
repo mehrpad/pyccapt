@@ -324,6 +324,19 @@
                             <item>
                                 <layout class="QHBoxLayout" name="horizontalLayout">
                                     <item>
+                                        <widget class="QLabel" name="led_auto_exposure">
+                                            <property name="maximumSize">
+                                                <size>
+                                                    <width>50</width>
+                                                    <height>50</height>
+                                                </size>
+                                            </property>
+                                            <property name="text">
+                                                <string/>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item>
                                         <widget class="QPushButton" name="auto_exposure_time">
                                             <property name="sizePolicy">
                                                 <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
@@ -456,7 +469,7 @@
                                                 </string>
                                             </property>
                                             <property name="text">
-                                                <string>400000</string>
+                                                <string>2000000</string>
                                             </property>
                                         </widget>
                                     </item>
@@ -494,7 +507,7 @@
                                                 </string>
                                             </property>
                                             <property name="text">
-                                                <string>1000000</string>
+                                                <string>2000000</string>
                                             </property>
                                         </widget>
                                     </item>
@@ -519,7 +532,7 @@
                                                 </string>
                                             </property>
                                             <property name="text">
-                                                <string>400000</string>
+                                                <string>2000000</string>
                                             </property>
                                         </widget>
                                     </item>

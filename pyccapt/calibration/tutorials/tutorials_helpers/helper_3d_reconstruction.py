@@ -17,8 +17,8 @@ def call_x_y_z_calculation(variables, flight_path_length, element_selected, cola
 
     # For demonstration purposes, I'm just printing the inputs
     out = Output()
-    avg_dens = element_selected.value[2]
-    field_evap = element_selected.value[3]
+    avg_dens = element_selected.value[1]
+    field_evap = element_selected.value[2]
 
     if variables.range_data.empty or variables.range_data['ion'].iloc[0] == 'unranged':
         element_percentage = str({'unranged': 0.01})
@@ -40,7 +40,7 @@ def call_x_y_z_calculation(variables, flight_path_length, element_selected, cola
     avg_dens_widget = widgets.FloatText(value=avg_dens)
     element_percentage_widget = widgets.Textarea(value=element_percentage)
     figname_widget = widgets.Text(value='3d')
-    mode_widget = widgets.Dropdown(options=[('Gault', 'Gault'), ('Bas', 'Bas')])
+    mode_widget = widgets.Dropdown(options=[('Geiser', 'Geiser'), ('Bas', 'Bas')])
     opacity_widget = widgets.FloatText(value=0.5, min=0, max=1, step=0.1)
     save_widget = widgets.Dropdown(options=[('True', True), ('False', False)], value=False)
     cluster_enabled_widget = widgets.Dropdown(options=[('False', False), ('True', True)], value=False)

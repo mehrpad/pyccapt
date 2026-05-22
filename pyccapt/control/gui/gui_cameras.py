@@ -24,7 +24,11 @@ class Ui_Cameras_Alignment(object):
                 conf: Configuration data.
                 SignalEmitter: Signal emitter for communication.
         """
-        self.auto_exposure_time_flag = False
+        # Cameras default to auto-exposure (Continuous) on startup; the
+        # button text describes the action it performs ("Auto Exposure
+        # Time Off" → click to switch into manual mode). The flag mirrors
+        # the worker's `exposure_auto` state.
+        self.auto_exposure_time_flag = True
         self.conf = conf
         self.emitter = SignalEmitter
         self.variables = variables
@@ -263,6 +267,13 @@ class Ui_Cameras_Alignment(object):
         self.verticalLayout_2.setObjectName("verticalLayout_2")
         self.horizontalLayout = QtWidgets.QHBoxLayout()
         self.horizontalLayout.setObjectName("horizontalLayout")
+        # LED indicator that sits directly to the left of the
+        # auto-exposure button. Green = auto on, red = manual. Mirrors
+        # the light button / led_light pair just to the right.
+        self.led_auto_exposure = QtWidgets.QLabel(parent=Cameras_Alignment)
+        self.led_auto_exposure.setMaximumSize(QtCore.QSize(50, 50))
+        self.led_auto_exposure.setObjectName("led_auto_exposure")
+        self.horizontalLayout.addWidget(self.led_auto_exposure)
         self.auto_exposure_time = QtWidgets.QPushButton(parent=Cameras_Alignment)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Fixed)
         sizePolicy.setHorizontalStretch(0)
@@ -459,6 +470,9 @@ class Ui_Cameras_Alignment(object):
         self.led_red = QPixmap('./files/led-red-on.png')
         self.led_green = QPixmap('./files/green-led-on.png')
         self.led_light.setPixmap(self.led_red)
+        # Auto-exposure starts in 'Continuous' (see __init__), so light
+        # the LED green to match.
+        self.led_auto_exposure.setPixmap(self.led_green)
 
         # bottom camera (x, y)
         # arrow1 = pg.ArrowItem(pos=(925, 770), angle=0)
@@ -495,6 +509,12 @@ class Ui_Cameras_Alignment(object):
         self.exposure_time_cam_3.editingFinished.connect(self.update_exposure_time)
 
         self.original_button_style = self.auto_exposure_time.styleSheet()
+        # Manual exposure controls only make sense when the camera is
+        # not running its own auto-exposure loop, so the "Default
+        # Exposure Time" button and the three per-camera µs fields are
+        # disabled while auto-exposure is on. Cameras start in auto, so
+        # initialise these as disabled.
+        self._set_manual_exposure_widgets_enabled(not self.auto_exposure_time_flag)
 
         self.emitter.cams_exposure_time_default.connect(self.set_default_exposure_time)
         # switch off the light if it is one before opening the window
@@ -529,9 +549,9 @@ class Ui_Cameras_Alignment(object):
         self.led_light.setText(_translate("Cameras_Alignment", "Light"))
         self.light.setText(_translate("Cameras_Alignment", "Light"))
         self.led_light_2.setText(_translate("Cameras_Alignment", "Exposure Time Side (us)"))
-        self.exposure_time_cam_1.setText(_translate("Cameras_Alignment", "400000"))
-        self.exposure_time_cam_2.setText(_translate("Cameras_Alignment", "1000000"))
-        self.exposure_time_cam_3.setText(_translate("Cameras_Alignment", "400000"))
+        self.exposure_time_cam_1.setText(_translate("Cameras_Alignment", "2000000"))
+        self.exposure_time_cam_2.setText(_translate("Cameras_Alignment", "2000000"))
+        self.exposure_time_cam_3.setText(_translate("Cameras_Alignment", "2000000"))
         self.led_light_3.setText(_translate("Cameras_Alignment", "Exposure Time Top (us)"))
         self.default_exposure_time.setText(_translate("Cameras_Alignment", "Default Exposure Time"))
         self.led_light_4.setText(_translate("Cameras_Alignment", "Exposure Time Angle (us)"))
@@ -585,31 +605,35 @@ class Ui_Cameras_Alignment(object):
             print('type the exposure time in microseconds')
 
     def update_cam_s_o(self, img):
-        self.cam_s_o.setImage(img, autoRange=False)
+        # autoLevels=True stretches the per-frame intensity range to fill
+        # the display, which is the most visible quality improvement for
+        # alignment: dark "light off" frames stop looking nearly black
+        # and bright "light on" frames stop saturating.
+        self.cam_s_o.setImage(img, autoRange=False, autoLevels=True)
         roi_coords = self.roi_s.getArraySlice(img, self.cam_s_o.imageItem, axes=(0, 1))
 
         # Extract the region and update the second image view
         if roi_coords is not None:
             region = img[roi_coords[0][0], roi_coords[0][1]]
-            self.cam_s_d.setImage(region, autoRange=False)
+            self.cam_s_d.setImage(region, autoRange=False, autoLevels=True)
 
     def update_cam_b_o(self, img):
-        self.cam_b_o.setImage(img, autoRange=False)
+        self.cam_b_o.setImage(img, autoRange=False, autoLevels=True)
         roi_coords = self.roi_b.getArraySlice(img, self.cam_b_o.imageItem, axes=(0, 1))
 
         # Extract the region and update the second image view
         if roi_coords is not None:
             region = img[roi_coords[0][0], roi_coords[0][1]]
-            self.cam_b_d.setImage(region, autoRange=False)
+            self.cam_b_d.setImage(region, autoRange=False, autoLevels=True)
 
     def update_cam_angle_o(self, img):
-        self.cam_angle_o.setImage(img, autoRange=False)
+        self.cam_angle_o.setImage(img, autoRange=False, autoLevels=True)
         roi_coords = self.roi_angle.getArraySlice(img, self.cam_angle_o.imageItem, axes=(0, 1))
 
         # Extract the region and update the second image view
         if roi_coords is not None:
             region = img[roi_coords[0][0], roi_coords[0][1]]
-            self.cam_angle_d.setImage(region, autoRange=False)
+            self.cam_angle_d.setImage(region, autoRange=False, autoLevels=True)
 
     def light_switch(self):
         """
@@ -646,11 +670,30 @@ class Ui_Cameras_Alignment(object):
         None
         """
         self.auto_exposure_time_flag = not self.auto_exposure_time_flag
+        # LED mirrors the auto-exposure state: green = auto on, red = manual.
         if self.auto_exposure_time_flag:
-            self.auto_exposure_time.setStyleSheet("QPushButton{\nbackground: rgb(0, 255, 26)\n}")
+            self.led_auto_exposure.setPixmap(self.led_green)
         else:
-            self.auto_exposure_time.setStyleSheet(self.original_button_style)
+            self.led_auto_exposure.setPixmap(self.led_red)
+        # Manual fields are only meaningful in manual mode.
+        self._set_manual_exposure_widgets_enabled(not self.auto_exposure_time_flag)
         self.emitter.auto_exposure_time.emit(True)
+
+    def _set_manual_exposure_widgets_enabled(self, enabled):
+        """Enable/disable the manual exposure inputs as a group.
+
+        Disabled in auto mode because the camera firmware owns
+        ExposureTime there — typing into the µs fields or hitting
+        "Default Exposure Time" would have no effect and only confuse
+        the user.
+        """
+        for widget in (
+            self.default_exposure_time,
+            self.exposure_time_cam_1,
+            self.exposure_time_cam_2,
+            self.exposure_time_cam_3,
+        ):
+            widget.setEnabled(enabled)
 
     def default_exposure_time_switch(self):
         """

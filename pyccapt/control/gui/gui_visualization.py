@@ -69,8 +69,14 @@ class Ui_Visualization(object):
 
         self.bins_mc = np.arange(0, self.conf["max_mass"] + self.conf['bin_size'], self.conf['bin_size'])
         self.bins_tof = np.arange(0, self.conf["max_tof"] + self.conf['bin_size'], self.conf['bin_size'])
+        # Two parallel cumulative histograms per axis: one binned with
+        # the live calibration applied, one with raw values. We always
+        # update both so that toggling the "Uncalibrate" button is
+        # purely a display swap and never loses prior events.
         self.hist_mc = np.zeros(len(self.bins_mc) - 1)
         self.hist_tof = np.zeros(len(self.bins_tof) - 1)
+        self.hist_mc_uncalib = np.zeros(len(self.bins_mc) - 1)
+        self.hist_tof_uncalib = np.zeros(len(self.bins_tof) - 1)
 
         self.update_timer = QTimer()  # Create a QTimer for updating graphs
         self.update_timer.timeout.connect(self.update_graphs)  # Connect it to the update_graphs slot
@@ -924,15 +930,15 @@ class Ui_Visualization(object):
                 elif self.variables.pulse_mode == 'Laser' or self.variables.pulse_mode == 'VoltageLaser':
                     t_0 = self.conf["t_0_laser"]
 
-                # Decide whether to apply cached live-calibration parameters.
-                # - "Uncalibrate" toggle pressed         -> always raw
-                # - calibrated mode + params available   -> apply
-                # - calibrated mode + no params yet      -> raw fallback
-                use_calibration = not self.uncalibrated_mode and self._calib_params is not None
+                # The toggle only chooses which histogram is *displayed*.
+                # Both calibrated and uncalibrated accumulators are
+                # updated below so flipping the button never loses prior
+                # events.
+                use_calibration_display = not self.uncalibrated_mode and self._calib_params is not None
 
-                def _get_tof_mc(t_arr, v_arr, x_arr, y_arr):
-                    """Return (tof, mc) arrays honouring the current calibration mode."""
-                    if use_calibration:
+                def _get_tof_mc(t_arr, v_arr, x_arr, y_arr, use_cal):
+                    """Return (tof, mc) arrays. ``use_cal`` applies live cal if available."""
+                    if use_cal and self._calib_params is not None:
                         corrected = live_calibration.apply_corrections(
                             t_arr,
                             v_arr,
@@ -958,7 +964,7 @@ class Ui_Visualization(object):
                     v_le = self.last_100_thousand_v[-self.num_event_mc_tof :]
                     x_le = self.last_100_thousand_det_x[-self.num_event_mc_tof :]
                     y_le = self.last_100_thousand_det_y[-self.num_event_mc_tof :]
-                    tt_last_events, _ = _get_tof_mc(t_le, v_le, x_le, y_le)
+                    tt_last_events, _ = _get_tof_mc(t_le, v_le, x_le, y_le, use_calibration_display)
                     hist_tof_last_events, _ = np.histogram(tt_last_events, bins=self.bins_tof)
 
                 elif self.mc_tof_last_events_flag and self.conf["visualization"] == "mc":
@@ -966,25 +972,44 @@ class Ui_Visualization(object):
                     v_le = self.last_100_thousand_v[-self.num_event_mc_tof :]
                     x_le = self.last_100_thousand_det_x[-self.num_event_mc_tof :]
                     y_le = self.last_100_thousand_det_y[-self.num_event_mc_tof :]
-                    _, mc_last_events = _get_tof_mc(t_le, v_le, x_le, y_le)
+                    _, mc_last_events = _get_tof_mc(t_le, v_le, x_le, y_le, use_calibration_display)
                     hist_mc_last_events, _ = np.histogram(mc_last_events, bins=self.bins_mc)
 
-                # Cumulative histograms always come from the new tick's events
-                # only -- no need to re-bin the whole ring buffer.
-                tof_evt, mc_evt = _get_tof_mc(
-                    tt[mask_t],
-                    main_v_dc_dld[mask_t],
-                    xx[mask_t],
-                    yy[mask_t],
-                )
-                hist_tof, _ = np.histogram(tof_evt, bins=self.bins_tof)
-                self.hist_tof += hist_tof
-                hist_mc, _ = np.histogram(mc_evt, bins=self.bins_mc)
-                self.hist_mc += hist_mc
+                # Cumulative histograms always come from the new tick's
+                # events only -- no need to re-bin the whole ring
+                # buffer. We bin the same events *twice* (once with the
+                # live calibration applied, once raw) so each
+                # accumulator independently holds the complete history
+                # of every event in its own bin space. When no
+                # calibration params have arrived yet, the two outputs
+                # are identical and we reuse the result.
+                batch_t = tt[mask_t]
+                batch_v = main_v_dc_dld[mask_t]
+                batch_x = xx[mask_t]
+                batch_y = yy[mask_t]
+                tof_evt_calib, mc_evt_calib = _get_tof_mc(batch_t, batch_v, batch_x, batch_y, True)
+                if self._calib_params is None:
+                    tof_evt_uncalib, mc_evt_uncalib = tof_evt_calib, mc_evt_calib
+                else:
+                    tof_evt_uncalib, mc_evt_uncalib = _get_tof_mc(
+                        batch_t, batch_v, batch_x, batch_y, False
+                    )
+                hist_tof_calib_batch, _ = np.histogram(tof_evt_calib, bins=self.bins_tof)
+                self.hist_tof += hist_tof_calib_batch
+                hist_mc_calib_batch, _ = np.histogram(mc_evt_calib, bins=self.bins_mc)
+                self.hist_mc += hist_mc_calib_batch
+                hist_tof_uncalib_batch, _ = np.histogram(tof_evt_uncalib, bins=self.bins_tof)
+                self.hist_tof_uncalib += hist_tof_uncalib_batch
+                hist_mc_uncalib_batch, _ = np.histogram(mc_evt_uncalib, bins=self.bins_mc)
+                self.hist_mc_uncalib += hist_mc_uncalib_batch
+
+                # Pick which cumulative series to display this tick.
+                cumul_hist_tof = self.hist_tof_uncalib if self.uncalibrated_mode else self.hist_tof
+                cumul_hist_mc = self.hist_mc_uncalib if self.uncalibrated_mode else self.hist_mc
 
                 self.histogram.clear()
                 if self.conf["visualization"] == "tof" and not self.mc_tof_last_events_flag:
-                    hist = np.copy(self.hist_tof[: self.index_hist_tof])
+                    hist = np.copy(cumul_hist_tof[: self.index_hist_tof])
                     hist[hist == 0] = 1  # Avoid log(0) error
                     bins = self.bins_tof[: self.index_hist_tof + 1]
                     self.histogram.plot(
@@ -997,7 +1022,7 @@ class Ui_Visualization(object):
                         name="num events: %s" % self.length_events,
                     )
                 elif self.conf["visualization"] == "mc" and not self.mc_tof_last_events_flag:
-                    hist = np.copy(self.hist_mc[: self.index_hist_mc])
+                    hist = np.copy(cumul_hist_mc[: self.index_hist_mc])
                     hist[hist == 0] = 1  # Avoid log(0) error
                     bins = self.bins_mc[: self.index_hist_mc + 1]
                     self.histogram.plot(
@@ -1182,6 +1207,8 @@ class Ui_Visualization(object):
             self.fdm_count.setText("0")
             self.hist_mc = np.zeros(len(self.bins_mc) - 1)
             self.hist_tof = np.zeros(len(self.bins_tof) - 1)
+            self.hist_mc_uncalib = np.zeros(len(self.bins_mc) - 1)
+            self.hist_tof_uncalib = np.zeros(len(self.bins_tof) - 1)
 
         if self.index_auto_scale_graph == 30:
             self.vdc_time.enableAutoRange(axis='x')
@@ -1310,17 +1337,29 @@ class Ui_Visualization(object):
             self.uncalibrate_switch.setStyleSheet("QPushButton{background: rgb(0, 255, 26)}")
         else:
             self.uncalibrate_switch.setStyleSheet(self.original_button_style)
-        # The cumulative histograms hold values that were computed
-        # under the *previous* mode; mixing calibrated and uncalibrated
-        # bins would produce garbage. Reset so the display rebuilds in
-        # the new mode from the next tick onwards.
-        self._reset_cumulative_histograms()
+        # NOTE: we deliberately do NOT clear the cumulative histograms
+        # here. Both calibrated and uncalibrated accumulators are kept
+        # in parallel by the update loop, so toggling the button just
+        # swaps the displayed series — every event hit so far stays
+        # visible. Only "Last Events" (and a session restart) prunes
+        # what's shown.
 
-    def _reset_cumulative_histograms(self):
-        """Clear hist_tof / hist_mc so a calibration mode change starts fresh."""
+    def _reset_cumulative_histograms(self, *, calib=True, uncalib=True):
+        """Clear cumulative histograms.
+
+        ``calib`` clears the calibrated series; ``uncalib`` the raw
+        series. By default both are cleared, which is what callers like
+        the TOF↔MC switch and the session re-init want. The
+        new-calibration-parameters callback passes ``uncalib=False``
+        because the raw bins are unaffected by parameter changes.
+        """
         try:
-            self.hist_tof.fill(0)
-            self.hist_mc.fill(0)
+            if calib:
+                self.hist_tof.fill(0)
+                self.hist_mc.fill(0)
+            if uncalib:
+                self.hist_tof_uncalib.fill(0)
+                self.hist_mc_uncalib.fill(0)
         except Exception:
             pass
 
@@ -1391,10 +1430,13 @@ class Ui_Visualization(object):
                 f"calibrated (R²={params.fit_quality:.2f}, n={params.num_events_used})",
                 ok=True,
             )
-            # Old cumulative bins were computed under the previous
-            # parameters; clear them so the displayed spectrum reflects
-            # only events binned with the new calibration.
-            self._reset_cumulative_histograms()
+            # Old calibrated bins were computed under the previous
+            # parameters; clear *only* the calibrated accumulator so
+            # the displayed spectrum reflects events binned with the
+            # new calibration. The uncalibrated accumulator's bin
+            # meanings don't depend on calibration params, so it keeps
+            # the full event history.
+            self._reset_cumulative_histograms(uncalib=False)
 
     def _on_calibration_status_changed(self, text):
         """GUI-thread slot for the worker's human-readable status."""

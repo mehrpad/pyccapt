@@ -268,17 +268,24 @@ def density_field_selection():
         except Exception as e:
             print("Error: ", e)
 
-    elementsAtomicNumber = dataframe['atomic_number']
-    elementsList = dataframe['element']
-    elementDensityList = dataframe['atom_density']
-    elementFieldList = dataframe['field_evaporation']
+    elementsList = dataframe['element'].tolist()
+    elementDensityList = dataframe['atom_density'].tolist()
+    elementFieldList = dataframe['field_evaporation'].tolist()
 
-    elementsAtomicNumber.to_numpy()
-    elements = list(zip(elementsAtomicNumber, elementsList, elementDensityList, elementFieldList))
-    dropdownList = []
-    for index, element in enumerate(elements):
-        tupleElement = ("{} - {} - Density({}) - FieldEva({})".format(element[0], element[1], element[2], element[3]),)
-        dropdownList.append(tupleElement)
+    # Each option is (label, value). Label starts with the element name so the
+    # built-in Dropdown type-ahead lets the user search by typing the symbol
+    # (e.g. press "F" then "e" to jump to Fe). Value is (name, density, field);
+    # consumers read .value[1] for density and .value[2] for field.
+    options = sorted(
+        (
+            (
+                "{} - Density({}) - FieldEva({})".format(name, density, field),
+                (name, density, field),
+            )
+            for name, density, field in zip(elementsList, elementDensityList, elementFieldList)
+        ),
+        key=lambda opt: opt[0].lower(),
+    )
 
-    element = widgets.Dropdown(options=elements, description='Element')
+    element = widgets.Dropdown(options=options, description='Element')
     return element

@@ -4,7 +4,7 @@ import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib import rcParams, colors
+from matplotlib import colors
 from matplotlib.patches import Circle, Rectangle
 from matplotlib.widgets import RectangleSelector, EllipseSelector
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
@@ -21,7 +21,6 @@ EXTRACT_MODE_ALIASES = {
     "tdc_ro": "tdc_ro",
 }
 
-
 def _normalize_extract_mode(extract_mode: str) -> str:
     """Normalize legacy and modern extract mode names."""
     mode = EXTRACT_MODE_ALIASES.get(extract_mode)
@@ -30,10 +29,8 @@ def _normalize_extract_mode(extract_mode: str) -> str:
         raise ValueError(f"Unsupported extract_mode {extract_mode!r}. Supported modes: {supported}")
     return mode
 
-
 EVENT_GROUP_ID_COLUMN = "event_group_id"
 TDC_HAS_DLD_MATCH_COLUMN = "has_dld_match"
-
 
 def _run_starts(values: np.ndarray) -> np.ndarray:
     """Index boundaries of consecutive equal-value runs.
@@ -44,7 +41,6 @@ def _run_starts(values: np.ndarray) -> np.ndarray:
     if values.size == 0:
         return np.array([0], dtype=np.int64)
     return np.r_[0, np.where(np.diff(values) != 0)[0] + 1, values.size].astype(np.int64)
-
 
 def build_event_group_mapping(
     dld_start_counter: np.ndarray,
@@ -108,7 +104,6 @@ def build_event_group_mapping(
         )
     return dld_gid, tdc_gid, tdc_has_match
 
-
 def fetch_dataset_with_tdc(
     filename: str,
     tdc_extract_mode: str = "tdc_sc",
@@ -137,7 +132,6 @@ def fetch_dataset_with_tdc(
     tdc_df[TDC_HAS_DLD_MATCH_COLUMN] = tdc_has_match
     return dld_df, tdc_df
 
-
 def filter_tdc_by_dld(dld_df: pd.DataFrame, tdc_df: pd.DataFrame) -> pd.DataFrame:
     """Return tdc rows whose dld counterpart still exists, plus all orphan rows.
 
@@ -152,7 +146,6 @@ def filter_tdc_by_dld(dld_df: pd.DataFrame, tdc_df: pd.DataFrame) -> pd.DataFram
     surviving_groups = pd.unique(dld_df[EVENT_GROUP_ID_COLUMN].to_numpy())
     keep = (~tdc_df[TDC_HAS_DLD_MATCH_COLUMN].to_numpy()) | (tdc_df[EVENT_GROUP_ID_COLUMN].isin(surviving_groups).to_numpy())
     return tdc_df.loc[keep].reset_index(drop=True).copy()
-
 
 def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld', *, lazy: bool = False):
     """
@@ -261,7 +254,6 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld', *, lazy: bool 
             print("[*] HDF5 file not found")
     return None
 
-
 def _fetch_dataset_from_dld_grp_lazy(filename: str, extract_mode: str):
     """Return a memory-mapped :class:`LazyTable` view of one group.
 
@@ -316,7 +308,6 @@ def _fetch_dataset_from_dld_grp_lazy(filename: str, extract_mode: str):
         close=raw.close,
     )
 
-
 def concatenate_dataframes_of_dld_grp(dataframe_list: list) -> pd.DataFrame:
     """
     Concatenates dataframes into a single dataframe.
@@ -329,7 +320,6 @@ def concatenate_dataframes_of_dld_grp(dataframe_list: list) -> pd.DataFrame:
     """
     dld_master_dataframe = pd.concat(dataframe_list, axis=1)
     return dld_master_dataframe
-
 
 def plot_crop_experiment_history(
     data: pd.DataFrame,
@@ -475,19 +465,16 @@ def plot_crop_experiment_history(
         ax1.add_patch(rect)
 
     if save:
-        # Enable rendering for text elements
-        rcParams['svg.fonttype'] = 'none'
         save_figure(
             fig1,
             directory=variables.result_path,
             stem=figname or "experiment_history",
-            formats=("png", "svg"),
+            formats=("png", "pdf"),
             dpi=600,
             bbox_inches='tight',
         )
 
     plt.show()
-
 
 def plot_crop_fdm(
     x,
@@ -648,11 +635,8 @@ def plot_crop_fdm(
         ax1.set_ylabel(r"$Y_{det} (cm)$", fontsize=10)
 
     if save and variables is not None:
-        # Enable rendering for text elements
-        rcParams['svg.fonttype'] = 'none'
-        save_figure(fig1, directory=variables.result_path, stem=figname or "FDM", formats=("png", "svg"), dpi=600)
+        save_figure(fig1, directory=variables.result_path, stem=figname or "FDM", formats=("png", "pdf"), dpi=600)
     plt.show()
-
 
 def _legacy_extract_xy(data) -> tuple[np.ndarray, np.ndarray]:
     """Extract detector x/y from legacy ndarray inputs."""
@@ -664,7 +648,6 @@ def _legacy_extract_xy(data) -> tuple[np.ndarray, np.ndarray]:
     if arr.shape[1] >= 2:
         return arr[:, 0], arr[:, 1]
     raise ValueError("Expected at least 2 columns for legacy FDM plotting")
-
 
 def plot_crop_FDM(ax, fig, data, bins=(256, 256), save_name=None):
     """
@@ -692,7 +675,6 @@ def plot_crop_FDM(ax, fig, data, bins=(256, 256), save_name=None):
         figname=save_name or "FDM",
     )
 
-
 def plot_FDM(ax, fig, data, bins=(256, 256), save_name=None):
     """Backward-compatible wrapper for legacy `plot_FDM` API."""
     x, y = _legacy_extract_xy(data)
@@ -701,7 +683,6 @@ def plot_FDM(ax, fig, data, bins=(256, 256), save_name=None):
     if save_name:
         plt.savefig(f"{save_name}.png", format="png", dpi=600)
     plt.show()
-
 
 def rectangle_box_selector(axisObject, variables):
     """
@@ -724,7 +705,6 @@ def rectangle_box_selector(axisObject, variables):
         spancoords='pixels',
         interactive=True,
     )
-
 
 def crop_dataset(dld_master_dataframe, variables):
     """
@@ -754,7 +734,6 @@ def crop_dataset(dld_master_dataframe, variables):
     data_crop = dld_master_dataframe.iloc[left : right + 1, :].copy()
     data_crop.reset_index(inplace=True, drop=True)
     return data_crop
-
 
 def elliptical_shape_selector(axisObject, figureObject, variables, mode='circle'):
     """
@@ -793,7 +772,6 @@ def elliptical_shape_selector(axisObject, figureObject, variables, mode='circle'
         )
 
     figureObject.canvas.mpl_connect('key_press_event', selectors_data.toggle_selector)
-
 
 def crop_data_after_selection(data_crop, variables):
     """
@@ -836,7 +814,6 @@ def crop_data_after_selection(data_crop, variables):
     cropped = data_crop.loc[mask_fdm].copy()
     cropped.reset_index(inplace=True, drop=True)
     return cropped
-
 
 def create_pandas_dataframe(data_crop, mode='dld', flag_old_pyccpat_data=False):
     """
@@ -894,7 +871,6 @@ def create_pandas_dataframe(data_crop, mode='dld', flag_old_pyccpat_data=False):
         raise ValueError(f"Unsupported mode: {mode!r}")
 
     return hdf_dataframe
-
 
 def calculate_ppi_and_ipp(data, max_start_counter):
     """

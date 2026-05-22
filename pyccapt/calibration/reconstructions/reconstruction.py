@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import plotly.graph_objects as go
 import plotly.io as pio
-from matplotlib import rcParams, colors
+from matplotlib import colors
 from matplotlib.animation import FuncAnimation
 from plotly.subplots import make_subplots
 
@@ -26,7 +26,6 @@ from pyccapt.calibration.reconstructions.rotation_tools import (
     rotate_z,
 )
 
-
 def _normalize_plotly_color(value):
     """Return a Plotly-safe color string from stored range colors."""
     value = str(value).strip()
@@ -34,11 +33,9 @@ def _normalize_plotly_color(value):
         return f'#{value}'
     return value
 
-
 def _normalize_plotly_colors(values):
     """Normalize a sequence of stored range colors for Plotly usage."""
     return [_normalize_plotly_color(value) for value in values]
-
 
 def cart2pol(x, y):
     """
@@ -56,7 +53,6 @@ def cart2pol(x, y):
     phi = np.arctan2(y, x)
     return rho, phi
 
-
 def pol2cart(rho, phi):
     """
     Convert polar coordinates to Cartesian coordinates.
@@ -73,8 +69,7 @@ def pol2cart(rho, phi):
     y = rho * np.sin(phi)
     return x, y
 
-
-def atom_probe_recons_from_detector_Gault_et_al(detx, dety, hv, flight_path_length, kf, det_eff, icf, field_evap, avg_dens):
+def atom_probe_recons_from_detector_Geiser_et_al(detx, dety, hv, flight_path_length, kf, det_eff, icf, field_evap, avg_dens):
     """
     Perform atom probe reconstruction using Geiser et al.'s method.
 
@@ -144,7 +139,6 @@ def atom_probe_recons_from_detector_Gault_et_al(detx, dety, hv, flight_path_leng
 
     return x, y, z
 
-
 def atom_probe_recons_Bas_et_al(detx, dety, hv, flight_path_length, kf, det_eff, icf, field_evap, avg_dens):
     """
     Perform atom probe reconstruction using Bas et al.'s method.
@@ -182,7 +176,6 @@ def atom_probe_recons_Bas_et_al(detx, dety, hv, flight_path_length, kf, det_eff,
     z = np.cumsum(dz) + dz_p
 
     return x * 1e9, y * 1e9, z * 1e9
-
 
 def draw_qube(fig, range, col=None, row=None):
     x_range = range[0]
@@ -249,7 +242,6 @@ def draw_qube(fig, range, col=None, row=None):
     fig.update_scenes(zaxis_autorange="reversed")
     fig.update_layout(legend_title="", legend={'itemsizing': 'constant'}, font=dict(size=8))
     return fig
-
 
 def reconstruction_plot(
     variables,
@@ -490,39 +482,41 @@ def reconstruction_plot(
             print('Rotary figure is not available for ions_individually_plots=True')
 
     if make_evaporation_gif:
+        from tqdm.auto import tqdm
+
         num_events = len(variables.dld_t)
-        figures = []
-        for k in range(0, num_events, 100_000):
-            rotated_fig = go.Figure()
-            rotated_fig = draw_qube(rotated_fig, range_cube)
-            rotated_fig.update_layout(showlegend=False)
+        event_index = np.arange(num_events)
+        rng = np.random.default_rng(0)
 
-            if k + 100_000 > num_events:
-                q = num_events - 1
-            else:
-                q = k + 100_000
-            mask_evap = (variables.dld_t > variables.dld_t[k]) & (variables.dld_t < variables.dld_t[q])
+        # Cumulative growth: each frame shows every event evaporated up to q.
+        # The old code masked on variables.dld_t (time-of-flight per hit), which
+        # is not a wall-clock evaporation time and produced an incorrect subset.
+        chunk = 100_000
+        boundaries = list(range(chunk, num_events, chunk)) + [num_events]
+        images = []
+        for q in tqdm(boundaries, desc="Evaporation GIF frames", unit="frame"):
+            mask_evap = event_index < q
 
-            for index, elemen in enumerate(ion):
+            frame_fig = go.Figure()
+            frame_fig = draw_qube(frame_fig, range_cube)
+            frame_fig.update_layout(showlegend=False)
+            frame_fig.update_layout(margin=go.layout.Margin(l=0, r=0, b=0, t=0))
+
+            for index, _elem in enumerate(ion):
                 mask = (variables.mc > mc_low[index]) & (variables.mc < mc_up[index])
                 mask = mask & mask_f & mask_evap
-                size = int(len(mask[mask == True]) * float(element_percentage[index]))
-                # Find indices where the original mask is True
                 true_indices = np.where(mask)[0]
-                # Randomly choose 100 indices from the true indices
-                random_true_indices = np.random.choice(true_indices, size=size, replace=False)
-                # Create a new mask with the same length as the original, initialized with False
-                new_mask = np.full(len(variables.dld_t), False)
-                # Set the selected indices to True in the new mask
-                new_mask[random_true_indices] = True
-                # Apply the new mask to the original mask
-                mask = mask & new_mask
+                size = int(len(true_indices) * float(element_percentage[index]))
+                if size > 0:
+                    sampled = rng.choice(true_indices, size=size, replace=False)
+                else:
+                    sampled = true_indices[:0]
 
-                rotated_fig.add_trace(
+                frame_fig.add_trace(
                     go.Scatter3d(
-                        x=variables.x[mask],
-                        y=variables.y[mask],
-                        z=variables.z[mask],
+                        x=variables.x[sampled],
+                        y=variables.y[sampled],
+                        z=variables.z[sampled],
                         mode='markers',
                         name=ion[index],
                         showlegend=True,
@@ -533,16 +527,7 @@ def reconstruction_plot(
                         ),
                     )
                 )
-            print(' Plotted the ions up to the event:', q)
-            figures.append(rotated_fig)
-
-        images = []
-        print('Starting to process the frames for the GIF')
-        print('The total number of frames is:', len(figures))
-        for index, frame in enumerate(figures):
-            images.append(plotly_fig2array(frame))
-            print('frame', index, 'is being processed')
-        print('The images are ready for the GIF')
+            images.append(plotly_fig2array(frame_fig))
 
         # Save the images as a GIF using imageio
         save_gif(images, variables, f"rota_evaporation_{figname}.gif", fps=2)
@@ -612,7 +597,6 @@ def reconstruction_plot(
             print('The figure could not be saved')
             print(e)
 
-
 def scatter_plot(data, range_data, variables, element_percentage, selected_area, x_or_y, figname, figure_size, save=False):
     """
     Generate a scatter plot based on the provided data.
@@ -673,11 +657,8 @@ def scatter_plot(data, range_data, variables, element_percentage, selected_area,
     plt.legend(loc='upper right')
 
     if save:
-        # Enable rendering for text elements
-        rcParams['svg.fonttype'] = 'none'
-        save_matplotlib_figure(fig, variables, stem=f"projection_{figname}", formats=("png", "svg"), dpi=600)
+        save_matplotlib_figure(fig, variables, stem=f"projection_{figname}", formats=("png", "pdf"), dpi=600)
     plt.show()
-
 
 def projection(
     variables,
@@ -798,11 +779,8 @@ def projection(
     plt.legend(loc='upper right')
 
     if save:
-        # Enable rendering for text elements
-        rcParams['svg.fonttype'] = 'none'
-        save_matplotlib_figure(fig, variables, stem=f"projection_{figname}", formats=("png", "svg"), dpi=600)
+        save_matplotlib_figure(fig, variables, stem=f"projection_{figname}", formats=("png", "pdf"), dpi=600)
     plt.show()
-
 
 def heatmap(
     variables,
@@ -926,11 +904,8 @@ def heatmap(
         plt.legend(loc='upper right')
 
     if save:
-        # Enable rendering for text elements
-        rcParams['svg.fonttype'] = 'none'
-        save_matplotlib_figure(fig, variables, stem=f"{figure_name}heatmap", formats=("png", "svg"), dpi=600)
+        save_matplotlib_figure(fig, variables, stem=f"{figure_name}heatmap", formats=("png", "pdf"), dpi=600)
     plt.show()
-
 
 def reconstruction_2d_histogram(
     variables,
@@ -1047,12 +1022,9 @@ def reconstruction_2d_histogram(
     plt.ylabel(ylabel)
 
     if save:
-        # Enable rendering for text elements
-        rcParams['svg.fonttype'] = 'none'
-        save_matplotlib_figure(fig, variables, stem=figure_name, formats=("png", "svg"), dpi=600)
+        save_matplotlib_figure(fig, variables, stem=figure_name, formats=("png", "pdf"), dpi=600)
     # Show the plot
     plt.show()
-
 
 def detector_animation(
     variables, points_per_frame, ranged, selected_area_specially, selected_area_temporally, figure_name, figure_sie, save
@@ -1152,11 +1124,25 @@ def detector_animation(
     variables.animation_detector_html = animation.to_jshtml()
 
     if save:
-        # Enable rendering for text elements
-        rcParams['svg.fonttype'] = 'none'
-        animation.save(resolve_result_file(variables, f"{figure_name}.gif"), writer='imagemagick')
-    plt.close()
+        from tqdm.auto import tqdm
 
+        pbar = tqdm(total=total_frames, desc="Animated heatmap GIF frames", unit="frame")
+
+        def _progress(current_frame, total):
+            pbar.update(current_frame + 1 - pbar.n)
+
+        try:
+            # 'pillow' is a pure-Python writer; faster and more portable than
+            # 'imagemagick' (which requires an external binary) while keeping
+            # full matplotlib-rendered resolution.
+            animation.save(
+                resolve_result_file(variables, f"{figure_name}.gif"),
+                writer='pillow',
+                progress_callback=_progress,
+            )
+        finally:
+            pbar.close()
+    plt.close()
 
 def x_y_z_calculation_and_plot(
     variables,
@@ -1206,8 +1192,8 @@ def x_y_z_calculation_and_plot(
         dld_Voltage = variables.dld_high_voltage + variables.dld_pulse_v
     dld_x = variables.dld_x_det
     dld_y = variables.dld_y_det
-    if mode == 'Gault':
-        px, py, pz = atom_probe_recons_from_detector_Gault_et_al(
+    if mode == 'Geiser':
+        px, py, pz = atom_probe_recons_from_detector_Geiser_et_al(
             dld_x, dld_y, dld_Voltage, flight_path_length, kf, det_eff, icf, field_evap, avg_dens
         )
     elif mode == 'Bas':

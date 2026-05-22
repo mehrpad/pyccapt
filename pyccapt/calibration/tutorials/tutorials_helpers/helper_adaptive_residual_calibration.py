@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import io
-from contextlib import nullcontext, redirect_stdout
+import time
+import traceback
+from contextlib import ExitStack, nullcontext, redirect_stdout
 
 import ipywidgets as widgets
 import numpy as np
@@ -64,7 +66,7 @@ def build_adaptive_residual_calibration_panel(variables, det_diam, flight_path_l
     back_button = widgets.Button(description="Back to saved", layout=_LABEL_LAYOUT)
     reset_button = widgets.Button(description="Reset correction", layout=_LABEL_LAYOUT)
     clear_button = widgets.Button(description="Clear plots", layout=_LABEL_LAYOUT)
-    gaussian_button = widgets.Button(description="Gaussian MRP", layout=_LABEL_LAYOUT)
+    gaussian_button = widgets.Button(description="MRP", layout=_LABEL_LAYOUT)
     stat_button = widgets.Button(description="Plot stat", layout=_LABEL_LAYOUT)
 
     def _verbosity_context():
@@ -149,7 +151,7 @@ def build_adaptive_residual_calibration_panel(variables, det_diam, flight_path_l
                 fig_size=(fig_w.value, fig_h.value),
                 fast_calibration=False,
                 bin_size=max(0.01, min(float(bin_size.value), 0.05)),
-                sampling_mode=getattr(variables, "bowl_sampling_mode", "polar"),
+                sampling_mode=getattr(variables, "bowl_sampling_mode", "cartesian"),
             )
             if target.value == "tof_calib":
                 print("Initial ToF calibration + bowl correction is done")
@@ -189,27 +191,47 @@ def build_adaptive_residual_calibration_panel(variables, det_diam, flight_path_l
                 save=True,
             )
 
-    def _run_adaptive(_):
+    def _run_adaptive(_, mirror_output=None):
         run_button.disabled = True
         try:
-            with out_status, _verbosity_context():
+            with ExitStack() as stack:
+                stack.enter_context(out_status)
+                if mirror_output is not None and mirror_output is not out_status:
+                    stack.enter_context(mirror_output)
+                stack.enter_context(_verbosity_context())
                 out_status.clear_output()
-                result = adaptive_residual_calibration(
-                    variables,
-                    calibration_mode=_target_key(),
-                    n_peaks=n_peaks.value,
-                    prominence=prominence.value,
-                    distance=distance.value,
-                    n_windows=n_windows.value,
-                    overlap=overlap.value,
-                    template_bin_size=template_bin.value,
-                    temporal_smoothing=smoothing.value,
-                    apply_spatial=apply_spatial.value,
-                    spatial_grid=spatial_grid.value,
-                    min_window_ions=min_window_ions.value,
-                    min_cell_ions=min_cell_ions.value,
-                    verbose=verbose.value,
-                )
+                print(f"--- Adaptive residual calibration: target={_target_key()} ---")
+                start = time.time()
+                try:
+                    result = adaptive_residual_calibration(
+                        variables,
+                        calibration_mode=_target_key(),
+                        n_peaks=n_peaks.value,
+                        prominence=prominence.value,
+                        distance=distance.value,
+                        n_windows=n_windows.value,
+                        overlap=overlap.value,
+                        template_bin_size=template_bin.value,
+                        temporal_smoothing=smoothing.value,
+                        apply_spatial=apply_spatial.value,
+                        spatial_grid=spatial_grid.value,
+                        min_window_ions=min_window_ions.value,
+                        min_cell_ions=min_cell_ions.value,
+                        verbose=verbose.value,
+                        above_ceiling_strategy=getattr(
+                            variables, "voltage_bowl_above_ceiling_strategy", "nan"
+                        ),
+                        fast_candidate_score=getattr(
+                            variables, "residual_fast_candidate_score", False
+                        ),
+                    )
+                except Exception as exc:
+                    elapsed = time.time() - start
+                    print(f"Adaptive residual calibration FAILED after {elapsed:.1f}s: {exc}")
+                    traceback.print_exc()
+                    return
+                elapsed = time.time() - start
+                print(f"Adaptive residual calibration finished in {elapsed:.1f}s")
                 print(f"Accepted steps: {result['accepted_steps'] or ['none']}")
                 print(f"Iterations: {result['n_iterations']} ({result['stop_reason']})")
                 print(
@@ -218,10 +240,6 @@ def build_adaptive_residual_calibration_panel(variables, det_diam, flight_path_l
                 print(
                     f"Holdout score: {result['baseline_quality']['holdout_score']:.2f} -> {result['final_quality']['holdout_score']:.2f}"
                 )
-        except Exception as exc:
-            with out_status:
-                out_status.clear_output()
-                print(f"Adaptive residual calibration failed: {exc}")
         finally:
             run_button.disabled = False
 
@@ -263,4 +281,49 @@ def build_adaptive_residual_calibration_panel(variables, det_diam, flight_path_l
             stat_button,
         ]
     )
-    return widgets.VBox([description, widgets.HBox([left, center, right]), widgets.VBox([out, out_status])])
+    panel = widgets.VBox([description, widgets.HBox([left, center, right]), widgets.VBox([out, out_status])])
+
+    def run_for_mode(mode_key, mirror_output=None):
+        """Programmatically run the adaptive residual button for one mode.
+
+        Switches the panel's target dropdown to ``mode_key`` ("mc" or "tof")
+        and invokes the same click handler the user would trigger manually.
+        ``mirror_output``, when given, receives the same prints the adaptive
+        tab's status area sees -- so callers on another tab (e.g. the mc+tof
+        BEST button) still get live progress and the log file path.
+        """
+        target_value = "tof_calib" if mode_key == "tof" else "mc_calib"
+        previous_target = target.value
+        target.value = target_value
+        try:
+            _run_adaptive(None, mirror_output=mirror_output)
+        finally:
+            target.value = previous_target
+
+    def apply_profile(profile_name):
+        """Apply a named parameter preset to this panel's widgets.
+
+        'old' reverts to the committed defaults. 'new' is identical to
+        'old' except n_windows=32 (was 24) -- the only single-knob change
+        in the audited Nimonic NiC1 sweep that beat OLD on mc peak count
+        AND geomean MRP simultaneously (+3 peaks, +31% MRP) without
+        gaming the metric by merging peaks. Earlier 'new' values
+        (prominence=50, template_bin=0.005, apply_spatial=False) were
+        withdrawn after the peak-quality audit at 2M ions showed they
+        either merged peaks or were no-ops.
+        """
+        # Common defaults (both profiles use these values)
+        n_peaks.value = 6
+        prominence.value = 100
+        distance.value = 10
+        overlap.value = 0.5
+        template_bin.value = 0.01
+        smoothing.value = 0.5
+        apply_spatial.value = True
+        spatial_grid.value = 12
+        min_window_ions.value = 40
+        min_cell_ions.value = 35
+        # Single difference: n_windows
+        n_windows.value = 32 if profile_name == "new" else 24
+
+    return panel, run_for_mode, apply_profile

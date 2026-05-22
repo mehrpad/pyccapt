@@ -1,10 +1,9 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib import rcParams
+
 from scipy.spatial import cKDTree
 
 from pyccapt.calibration.reconstructions.io_utils import save_matplotlib_figure
-
 
 def rdf(
     particles,
@@ -140,8 +139,8 @@ def rdf(
         ax.set_ylabel('g(r)' if normalize else 'Counts')
         ax.grid(alpha=0.3, linestyle='-.', linewidth=0.4)
         if save and variables is not None:
-            rcParams['svg.fonttype'] = 'none'
-            save_matplotlib_figure(fig, variables, stem=f"rdf_{figname}", formats=("png", "svg"), dpi=600)
+
+            save_matplotlib_figure(fig, variables, stem=f"rdf_{figname}", formats=("png", "pdf"), dpi=600)
         if plot:
             plt.show()
 

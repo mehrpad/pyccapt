@@ -1110,19 +1110,8 @@ def _auto_detect_peaks(calibration_array, n_peaks=3, prominence=100, distance=50
     arr = arr[np.isfinite(arr)]
     if arr.size < 50:
         raise CalibrationInputError("Not enough valid ions for multi-peak calibration")
-    # Trim-percentile approximation: full ``np.percentile`` on 2M ions does a
-    # partial sort costing ~50ms per call (called once per residual round x
-    # n_peaks). For 0.1 / 99.9 percentiles we only need accuracy to ~0.5% of
-    # the dynamic range, so stride-subsample first. Deterministic; no random
-    # seed; trimming bounds change by < 0.1% on the audit dataset.
-    if arr.size > 250_000:
-        stride = max(1, arr.size // 250_000)
-        sub = arr[::stride]
-        mc_min = float(np.percentile(sub, 0.1))
-        mc_max = float(np.percentile(sub, 99.9))
-    else:
-        mc_min = float(np.percentile(arr, 0.1))
-        mc_max = float(np.percentile(arr, 99.9))
+    mc_min = float(np.percentile(arr, 0.1))
+    mc_max = float(np.percentile(arr, 99.9))
     trimmed = arr[(arr >= mc_min) & (arr <= mc_max)]
     if trimmed.size < 50:
         raise CalibrationInputError("Not enough ions remain after trimming for multi-peak calibration")

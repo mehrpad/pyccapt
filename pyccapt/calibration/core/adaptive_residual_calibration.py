@@ -378,6 +378,8 @@ def _fit_spatial_residual(calibration_array, template, x_det_cm, y_det_cm, grid_
     n_cells = nx * ny
 
     calib = np.asarray(calibration_array, dtype=float)
+    # Pre-compute TOTAL ion count per cell (independent of scale).
+    cell_total_count = np.bincount(cell_id_of_ion, minlength=n_cells)
 
     for threshold in [max(8, int(min_cell_ions)), max(8, int(min_cell_ions * 0.6)), max(6, int(min_cell_ions * 0.35))]:
         for scale in [1.0, 1.5, 2.0, 3.0]:
@@ -389,15 +391,19 @@ def _fit_spatial_residual(calibration_array, template, x_det_cm, y_det_cm, grid_
             if not np.any(in_peak):
                 continue
             in_idx = np.where(in_peak)[0]
-            # Cell occupancy (in-peak ions only)
-            cell_count_per = np.bincount(cell_id_of_ion[in_idx], minlength=n_cells)
-            eligible = cell_count_per >= threshold
+            # In-peak ion count per cell.
+            cell_inpeak_count = np.bincount(cell_id_of_ion[in_idx], minlength=n_cells)
+            # MATCH ORIGINAL: a cell is eligible if it has BOTH enough total
+            # ions AND enough in-peak ions. The original loop applied these
+            # as two sequential gates. Both gates required.
+            eligible = (cell_total_count >= threshold) & (cell_inpeak_count >= threshold)
             if not np.any(eligible):
                 continue
-            # Restrict in-peak ions to those in eligible cells (skip ions
-            # whose cell is too small -- they won't influence selection).
+            # Restrict in-peak ions to those in eligible cells.
             ion_eligible = eligible[cell_id_of_ion[in_idx]]
             in_idx = in_idx[ion_eligible]
+            # Re-use cell_inpeak_count for downstream weighting.
+            cell_count_per = cell_inpeak_count
             if in_idx.size == 0:
                 continue
             # Vectorised template log-likelihood lookup.

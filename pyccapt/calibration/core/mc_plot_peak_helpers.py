@@ -1055,6 +1055,7 @@ def gaussian_mrp_report(
     peak_center=None,
     _reference_guard=True,
     above_ceiling_strategy='nan',
+    event_mask=None,
 ):
     """Compute a robust high-resolution MRP report for the selected peak window.
 
@@ -1063,7 +1064,19 @@ def gaussian_mrp_report(
 
     ``above_ceiling_strategy`` is forwarded to ``_recommended_mrp_payload``;
     see that function's docstring. Default 'nan' preserves legacy behavior.
+
+    ``event_mask`` (optional) is a boolean array of the same length as
+    ``calibration_array``: True keeps the ion, False ignores it. Use this
+    to score MRP on calibration-trustworthy ions only (single-hit /
+    excluded-correlations subsets from
+    ``pyccapt.calibration.core.event_filters``). Default ``None``
+    preserves legacy behavior (every ion contributes).
     """
+    if event_mask is not None:
+        mask = np.asarray(event_mask, dtype=bool)
+        arr = np.asarray(calibration_array)
+        if mask.size == arr.size:
+            calibration_array = arr[mask]
     report = _gaussian_mrp_report_core(
         calibration_array, x1, x2, bin_size=bin_size, peak_center=peak_center,
         _reference_guard=_reference_guard, above_ceiling_strategy=above_ceiling_strategy,
@@ -1071,7 +1084,9 @@ def gaussian_mrp_report(
     if report is not None:
         return report
 
-    # Retry with coarser bin sizes when the fine resolution fails
+    # Retry with coarser bin sizes when the fine resolution fails. The
+    # event_mask, if any, was already applied above, so the retry uses
+    # the same filtered array.
     _candidates = [bin_size * 3, bin_size * 10, _MRP_REFERENCE_BIN_SIZE, 0.05, 0.1]
     seen = {round(bin_size, 8)}
     for candidate in _candidates:

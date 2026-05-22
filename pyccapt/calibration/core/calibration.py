@@ -14,6 +14,7 @@ from pyccapt.calibration.core.parallel import parallel_map
 from pyccapt.calibration.core.validation import (
     BOWL_FIT_MODES,
     BOWL_SAMPLE_METHODS,
+    CALIBRATION_MODES,
     SAMPLE_METHODS,
     VOLTAGE_MODES,
     ensure_choice,
@@ -1182,15 +1183,125 @@ def _auto_detect_peaks(calibration_array, n_peaks=3, prominence=100, distance=50
         raise CalibrationInputError("Peak windows could not be resolved for multi-peak calibration")
     return results
 
-def auto_detect_reference_peaks(calibration_array, n_peaks=6, prominence=100, distance=500, hist_bin_size=0.1):
-    """Public helper for stable multi-peak evaluation windows used by auto calibration."""
+def auto_detect_reference_peaks(
+    calibration_array, n_peaks=6, prominence=100, distance=500, hist_bin_size=0.1,
+    event_mask=None,
+):
+    """Public helper for stable multi-peak evaluation windows used by auto calibration.
+
+    ``event_mask`` (optional) is a boolean array the same length as
+    ``calibration_array``: True keeps the ion, False ignores it. Use this
+    to detect peaks on calibration-trustworthy ions only (single-hit /
+    excluded-correlations subsets from
+    ``pyccapt.calibration.core.event_filters``). Default ``None``
+    preserves legacy behavior.
+    """
+    arr = calibration_array
+    if event_mask is not None:
+        mask = np.asarray(event_mask, dtype=bool)
+        arr_np = np.asarray(arr)
+        if mask.size == arr_np.size:
+            arr = arr_np[mask]
     return _auto_detect_peaks(
-        calibration_array,
+        arr,
         n_peaks=n_peaks,
         prominence=prominence,
         distance=distance,
         hist_bin_size=hist_bin_size,
     )
+
+
+def recompute_peak_window(
+    variables,
+    calibration_mode: str = 'mc',
+    *,
+    prominence: float = 100,
+    distance: int = 10,
+    hist_bin_size: float = 0.05,
+    lim: float | None = None,
+    window_inflate: float = 2.0,
+    target_position: float | None = None,
+) -> tuple:
+    """Lightweight peak-window recompute. NO Matplotlib.
+
+    Detects peaks via ``auto_detect_reference_peaks`` on the currently
+    calibrated array and updates ``variables.selected_x1/x2`` to the
+    dominant peak (or, if ``target_position`` is set, the peak closest
+    to that mass).
+
+    This is the headless equivalent of ``mc_plot.hist_plot(...,
+    plot_show=False)`` for use inside auto-calibration loops where the
+    Matplotlib stack adds significant per-iteration overhead.
+
+    Parameters
+    ----------
+    variables : Variables
+        Calibration state container.
+    calibration_mode : {'mc', 'tof'}
+    prominence, distance, hist_bin_size : passed to peak detection.
+    lim : float, optional
+        Upper limit on values considered. Defaults to ``variables.max_tof``
+        for 'tof' and 400.0 for 'mc'.
+    window_inflate : float
+        Multiplier on the FWHM-based window width. 2.0 keeps the window
+        wide enough for stable MRP scoring on tight peaks.
+    target_position : float, optional
+        If supplied, pick the peak nearest this m/c instead of the most
+        prominent one. Useful for keeping the same physical peak window
+        across calibration iterations as the peak drifts.
+
+    Returns
+    -------
+    (x1, x2, position) : tuple of floats
+    """
+    mode = ensure_choice(calibration_mode, field_name='calibration_mode',
+                         allowed=CALIBRATION_MODES)
+    arr = np.asarray(variables.get_calibration_array(mode), dtype=float)
+    arr = arr[np.isfinite(arr) & (arr > 0)]
+    if lim is None:
+        lim = float(variables.max_tof) if mode == 'tof' else 400.0
+    arr = arr[arr < lim]
+    if arr.size < 50:
+        raise CalibrationInputError(
+            "Not enough ions for recompute_peak_window"
+        )
+
+    try:
+        peaks = auto_detect_reference_peaks(
+            arr, n_peaks=8, prominence=float(prominence),
+            distance=int(distance), hist_bin_size=float(hist_bin_size),
+        )
+    except CalibrationInputError:
+        peaks = []
+
+    if not peaks:
+        # Fallback: histogram-max
+        hist, edges = np.histogram(arr, bins=1000)
+        idx = int(np.argmax(hist))
+        center = 0.5 * (edges[idx] + edges[idx + 1])
+        width = (edges[-1] - edges[0]) * 0.02
+        x1, x2 = center - width, center + width
+        position = center
+    else:
+        if target_position is not None:
+            best = min(peaks, key=lambda p: abs(float(p['position']) - float(target_position)))
+        else:
+            best = max(peaks, key=lambda p: float(p.get('prominence', 0.0)))
+        x1 = float(best['x1'])
+        x2 = float(best['x2'])
+        position = float(best['position'])
+        if window_inflate != 1.0:
+            half = (x2 - x1) * 0.5 * float(window_inflate)
+            x1 = position - half
+            x2 = position + half
+
+    variables.selected_x1 = float(x1)
+    variables.selected_x2 = float(x2)
+    try:
+        variables.set_calibration_peak_range(mode, float(x1), float(x2))
+    except Exception:
+        pass
+    return float(x1), float(x2), float(position)
 
 def multi_peak_voltage_corr_main(
     dld_highVoltage,

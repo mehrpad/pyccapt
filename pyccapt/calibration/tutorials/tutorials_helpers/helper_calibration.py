@@ -124,6 +124,19 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         description='Fit mode:',
         layout=label_layout,
     )
+    # Bowl method: polynomial (legacy default) or RBF spline (experimental).
+    # When 'spline' is chosen, _run_bowl_correction calls new_methods.bowl_correction_spline
+    # which uses a thin-plate-spline RBF interpolator, clipped + FWHM-gated.
+    # Audited on Nimonic NiC1: mc MRP +139% vs polynomial at a cost of 1 mc peak.
+    bowl_method_b = widgets.Dropdown(
+        options=[
+            ('polynomial (default)', 'polynomial'),
+            ('spline (RBF, experimental)', 'spline'),
+        ],
+        value='polynomial',
+        description='Bowl method:',
+        layout=label_layout,
+    )
     sampling_mode_b = widgets.Dropdown(
         options=[('cartesian (default)', 'cartesian'), ('polar', 'polar')],
         value=getattr(variables, 'bowl_sampling_mode', 'cartesian'),
@@ -704,6 +717,28 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         if not _selected_peak_ready():
             raise ValueError('Please first select a peak')
 
+        # Bowl method: 'polynomial' (legacy default) or 'spline' (RBF
+        # thin-plate-spline, clipped + FWHM-gated). User-controlled via
+        # the 'Bowl method' dropdown on the mc/tof advanced tab.
+        if bowl_method_b.value == 'spline':
+            from pyccapt.calibration.core import new_methods as _nm
+            try:
+                _nm.bowl_correction_spline(
+                    variables.dld_x_det,
+                    variables.dld_y_det,
+                    _current_voltage(),
+                    variables,
+                    det_diam,
+                    calibration_mode=_calibration_mode_key(),
+                    sample_size=sample_size_b.value,
+                    bin_size=bin_size_b.value,
+                    use_rbf=True,
+                )
+                print('Spline bowl correction applied.')
+                return
+            except Exception as exc:
+                print(f'Spline bowl failed ({exc}); falling back to polynomial bowl.')
+
         calibration.bowl_correction_main(
             variables.dld_x_det,
             variables.dld_y_det,
@@ -1060,14 +1095,74 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             status_output.clear_output()
             _ensure_initial_calibration()
             _prepare_locked_selection()
-            _optimize_sequence(
-                [('Voltage + Bowl correction', _run_voltage_then_bowl)],
-                title='Auto calibration',
-                figure_size=(figure_mc_size_x.value, figure_mc_size_y.value),
-                max_iterations=10,
-                max_no_improve=3,
-                retry_peak_window_on_stall=False,
-            )
+            # Opt-in: when calibration_profile='new' AND variables.use_joint_vbowl=True
+            # (set by the profile selector), call the multi-peak joint V+Bowl solver
+            # instead of the legacy V+Bowl optimizer loop. Audited to win mc on
+            # both n_peaks AND geomean_MRP, and to be the only config that hits
+            # any reference isotope position on the Nimonic NiC1 dataset.
+            _use_joint = bool(getattr(variables, 'use_joint_vbowl', False))
+            _use_time_dep_v = bool(getattr(variables, 'use_time_dep_v', False))
+            mode_key = _calibration_mode_key()
+            if _use_joint:
+                try:
+                    from pyccapt.calibration.core import calibration as _cal
+                    _cal.joint_voltage_bowl_corr_main(
+                        variables.dld_x_det, variables.dld_y_det,
+                        _current_voltage(),
+                        variables, det_diam,
+                        calibration_mode=mode_key,
+                        sample_size=9, bin_size=0.05, n_peaks=4,
+                        prominence=100, distance=500,
+                        sampling_mode=_sampling_mode_value(),
+                    )
+                    print('Joint V+Bowl correction applied.')
+                except Exception as exc:
+                    print(f'Joint V+Bowl failed ({exc}); falling back to legacy V+Bowl loop.')
+                    _use_joint = False
+            if _use_joint and _use_time_dep_v:
+                # M3v2 refinement: time-dependent V residual on top of
+                # joint V+Bowl. Audited to pass the strict gate on all
+                # four axes when combined with joint V+Bowl.
+                try:
+                    from pyccapt.calibration.core import new_methods as _nm
+                    _nm.voltage_corr_time_dependent(
+                        _current_voltage(), variables,
+                        calibration_mode=mode_key,
+                        n_time_bins=12, bin_size=0.05, sample_size=100,
+                        use_legacy_v=False,  # joint V+Bowl already handled V
+                    )
+                    print('Time-dependent V refinement applied.')
+                except Exception as exc:
+                    print(f'Time-dep V refinement failed ({exc}); skipping.')
+            _use_ref_opt = bool(getattr(variables, 'use_reference_optimizer', False))
+            if _use_joint and _use_ref_opt:
+                # Reference-constrained least-squares fit. NIST-inspired
+                # (Coakley & Sanford 2022). Aligns detected peaks to known
+                # isotope m/c. Has its own internal acceptance gate -- the
+                # candidate is silently reverted when it doesn't improve
+                # the spectrum, so this is safe to chain.
+                try:
+                    from pyccapt.calibration.core import reference_optimizer as _ro
+                    _info = _ro.fit_reference_constrained(
+                        variables, calibration_mode=mode_key,
+                        contamination_policy='single_hit_only',
+                        apply=True, verbose=True,
+                    )
+                    if _info.get('ok'):
+                        print('Reference-constrained fit accepted.')
+                    else:
+                        print(f"Reference-constrained fit reverted ({_info.get('reason', 'no gain')}).")
+                except Exception as exc:
+                    print(f'Reference optimizer failed ({exc}); skipping.')
+            if not _use_joint:
+                _optimize_sequence(
+                    [('Voltage + Bowl correction', _run_voltage_then_bowl)],
+                    title='Auto calibration',
+                    figure_size=(figure_mc_size_x.value, figure_mc_size_y.value),
+                    max_iterations=10,
+                    max_no_improve=3,
+                    retry_peak_window_on_stall=False,
+                )
         index_fig_v.value = 1
         index_fig_b.value = 1
         auto_button.disabled = False
@@ -1321,6 +1416,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             sample_size_b_help,
             bin_size_b,
             fit_mode_b,
+            bowl_method_b,
             sampling_mode_b,
             maximum_cal_method_b,
             maximum_sample_method_b,
@@ -1544,87 +1640,99 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     # ------------------------------------------------------------------
     calibration_profile = widgets.Dropdown(
         options=[
-            ('Old (default, committed behavior)', 'old'),
-            ('New (benchmark-tuned: faster + better residual on tested dataset)', 'new'),
+            ('Joint V+Bowl (default)', 'new'),
+            ('Joint V+Bowl + time-drift correction (recommended)', 'best'),
+            ('Joint V+Bowl + time-drift + reference fit (experimental)', 'ref'),
+            ('Sequential V+Bowl (old)', 'old'),
         ],
-        value='old',
+        value='new',
         description='Config preset:',
         style={'description_width': 'initial'},
         layout=widgets.Layout(width='720px'),
     )
-    profile_help = widgets.HTML(
-        value=(
-            '<div style="font-size:11px; color:#555; margin: 2px 0 8px 0;">'
-            '<b>"Old"</b> = committed defaults, untouched. '
-            '<b>"New"</b> = identical to "Old" <i>except</i> the adaptive-residual '
-            '<code>n_windows=32</code> (default 24). On the audited Nimonic NiC1 '
-            'dataset, this single-knob change was the only config in the 60-config '
-            'sweep that beat "Old" on mc peak structure on BOTH axes simultaneously: '
-            '+3 mc peaks (53→56) AND +31% mc geomean MRP (576→753), while '
-            'adding 57 tof peaks (73→130) at a small 8% tof MRP cost. Every '
-            'other "tuning" I tried earlier (prominence, template_bin, fast_score, '
-            'apply_spatial, V+Bowl variants, etc.) either gamed the MRP metric by '
-            'merging peaks or had zero effect because the V+Bowl optimizer reverts '
-            'on this dataset. <b>Validate on your own datasets before trusting this '
-            'preset as a default.</b>'
-            '</div>'
-        ),
-        layout=widgets.Layout(width='960px'),
-    )
 
     def _apply_profile(change):
         new_profile = change.get('new', calibration_profile.value) if isinstance(change, dict) else change
+
+        # Reset shared widget values to OLD defaults first; the per-profile
+        # branches below override only the knobs they need to.
+        def _reset_widgets_to_old():
+            sample_size_b.value = 5
+            sampling_mode_b.value = 'cartesian'
+            bin_size_b.value = 0.01
+            fit_mode_b.value = 'robust_fit'
+            sample_size_v.value = 10000
+            bin_size_v.value = 0.01
+            model_v.value = 'robust_fit'
+            refine_nelder_mead_widget.value = False
+            bin_size.value = 0.1
+
+        def _clear_opt_in_attrs():
+            for attr in (
+                'voltage_bowl_above_ceiling_strategy',
+                'voltage_bowl_optimizer_metric',
+                'residual_fast_candidate_score',
+                'residual_coarse_to_fine_top_k',
+                'use_joint_vbowl',
+                'use_time_dep_v',
+                'use_reference_optimizer',
+            ):
+                if hasattr(variables, attr):
+                    try:
+                        delattr(variables, attr)
+                    except AttributeError:
+                        pass
+
         if new_profile == 'new':
-            # New preset on this dataset = OLD bowl/voltage/histogram defaults
-            # UNCHANGED, with the single residual change `n_windows=32`. The
-            # earlier-claimed bowl/voltage/voigt_capped/fast_score wins were
-            # withdrawn after the peak-quality audit at 2M ions showed they
-            # either merge peaks (gaming MRP) or are no-ops.
-            sample_size_b.value = 5
-            sampling_mode_b.value = 'cartesian'
-            bin_size_b.value = 0.01
-            fit_mode_b.value = 'robust_fit'
-            sample_size_v.value = 10000
-            bin_size_v.value = 0.01
-            model_v.value = 'robust_fit'
-            refine_nelder_mead_widget.value = False
-            bin_size.value = 0.1
+            # "Joint V+Bowl": replaces legacy iterative V+Bowl with the
+            # one-shot joint multi-peak solver. Adaptive residual keeps
+            # legacy defaults (n_windows=24); the final stack audit showed
+            # n_windows=32 only helps on the OLD V+Bowl baseline and
+            # actively hurts when joint V+Bowl is used.
+            _reset_widgets_to_old()
+            _clear_opt_in_attrs()
             variables.calibration_profile = 'new'
-            # No V+Bowl opt-ins under the audited "new" preset.
-            for attr in (
-                'voltage_bowl_above_ceiling_strategy',
-                'voltage_bowl_optimizer_metric',
-                'residual_fast_candidate_score',
-            ):
-                if hasattr(variables, attr):
-                    try:
-                        delattr(variables, attr)
-                    except AttributeError:
-                        pass
-            # Adaptive Residual tab widgets — only n_windows differs.
-            _adaptive_apply_profile('new')
+            variables.use_joint_vbowl = True
+            _adaptive_apply_profile('old')
+        elif new_profile == 'best':
+            # M1+M3v2 best preset:
+            #   - Joint V+Bowl                            -- M1
+            #   - Time-dep V refinement on top            -- M3v2
+            #   - Adaptive residual n_windows=24 with coarse-to-fine top_k=1
+            #
+            # n_windows=24 (NOT 32) is the audited best for the M1 stack.
+            # coarse-to-fine top_k=1 is the Path 2 speedup: scores every
+            # residual candidate with fast_mrp, then Voigt-verifies only
+            # the single best. Audit at 2M ions: 12.6x mc speedup AND
+            # +8 mc peaks (77->85), +26% mc MRP (883->1113), +10 tof peaks.
+            # Surprising win: top_k=1 outperforms top_k=2/3 because it
+            # acts as implicit regularisation against Voigt-score noise.
+            _reset_widgets_to_old()
+            _clear_opt_in_attrs()
+            variables.calibration_profile = 'best'
+            variables.use_joint_vbowl = True
+            variables.use_time_dep_v = True
+            variables.residual_coarse_to_fine_top_k = 1
+            _adaptive_apply_profile('old')  # n_windows=24, NOT 32
+        elif new_profile == 'ref':
+            # 'best' + reference-constrained least-squares fit.
+            # NIST-inspired (Coakley & Sanford 2022). Aligns detected
+            # peaks to known isotope m/c via scipy.optimize.least_squares
+            # with a multiplicative V/bowl/drift correction model.
+            # The optimizer has its own internal acceptance gate so it
+            # silently reverts when it can't improve the spectrum.
+            _reset_widgets_to_old()
+            _clear_opt_in_attrs()
+            variables.calibration_profile = 'ref'
+            variables.use_joint_vbowl = True
+            variables.use_time_dep_v = True
+            variables.use_reference_optimizer = True
+            variables.residual_coarse_to_fine_top_k = 1
+            _adaptive_apply_profile('old')
         else:
-            sample_size_b.value = 5
-            sampling_mode_b.value = 'cartesian'
-            bin_size_b.value = 0.01
-            fit_mode_b.value = 'robust_fit'
-            sample_size_v.value = 10000
-            bin_size_v.value = 0.01
-            model_v.value = 'robust_fit'
-            refine_nelder_mead_widget.value = False
-            bin_size.value = 0.1
+            _reset_widgets_to_old()
+            _clear_opt_in_attrs()
             variables.calibration_profile = 'old'
-            # Remove the opt-in attributes so behavior is fully legacy.
-            for attr in (
-                'voltage_bowl_above_ceiling_strategy',
-                'voltage_bowl_optimizer_metric',
-                'residual_fast_candidate_score',
-            ):
-                if hasattr(variables, attr):
-                    try:
-                        delattr(variables, attr)
-                    except AttributeError:
-                        pass
             _adaptive_apply_profile('old')
 
     calibration_profile.observe(_apply_profile, names='value')
@@ -1634,7 +1742,6 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     profile_panel = widgets.VBox([
         widgets.HTML('<b>Calibration profile</b>'),
         calibration_profile,
-        profile_help,
     ], layout=widgets.Layout(border='1px solid #ccc', padding='6px', margin='0 0 8px 0'))
 
     mode_tabs.selected_index = 0

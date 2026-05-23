@@ -1097,13 +1097,13 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             print(f"[Auto calibration] start (mode={calibration_mode_widget.value})")
             _ensure_initial_calibration()
             _prepare_locked_selection()
-            # Opt-in: when calibration_profile='new' AND variables.use_joint_vbowl=True
-            # (set by the profile selector), call the multi-peak joint V+Bowl solver
-            # instead of the legacy V+Bowl optimizer loop. Audited to win mc on
-            # both n_peaks AND geomean_MRP, and to be the only config that hits
-            # any reference isotope position on the Nimonic NiC1 dataset.
+            # Auto button = V+Bowl warm-start ONLY. Time-dep V and the
+            # reference optimizer are NOT applied here because they
+            # depend on adaptive-residual cleanup afterwards; running
+            # them without residual leaves the spectrum in a worse state
+            # than legacy V+Bowl alone (chunk-to-chunk drift). They live
+            # in the Hybrid button which always pairs them with residual.
             _use_joint = bool(getattr(variables, 'use_joint_vbowl', False))
-            _use_time_dep_v = bool(getattr(variables, 'use_time_dep_v', False))
             mode_key = _calibration_mode_key()
             if _use_joint:
                 try:
@@ -1121,41 +1121,6 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                 except Exception as exc:
                     print(f'Joint V+Bowl failed ({exc}); falling back to legacy V+Bowl loop.')
                     _use_joint = False
-            if _use_joint and _use_time_dep_v:
-                # M3v2 refinement: time-dependent V residual on top of
-                # joint V+Bowl. Audited to pass the strict gate on all
-                # four axes when combined with joint V+Bowl.
-                try:
-                    from pyccapt.calibration.core import new_methods as _nm
-                    _nm.voltage_corr_time_dependent(
-                        _current_voltage(), variables,
-                        calibration_mode=mode_key,
-                        n_time_bins=12, bin_size=0.05, sample_size=100,
-                        use_legacy_v=False,  # joint V+Bowl already handled V
-                    )
-                    print('Time-dependent V refinement applied.')
-                except Exception as exc:
-                    print(f'Time-dep V refinement failed ({exc}); skipping.')
-            _use_ref_opt = bool(getattr(variables, 'use_reference_optimizer', False))
-            if _use_joint and _use_ref_opt:
-                # Reference-constrained least-squares fit. NIST-inspired
-                # (Coakley & Sanford 2022). Aligns detected peaks to known
-                # isotope m/c. Has its own internal acceptance gate -- the
-                # candidate is silently reverted when it doesn't improve
-                # the spectrum, so this is safe to chain.
-                try:
-                    from pyccapt.calibration.core import reference_optimizer as _ro
-                    _info = _ro.fit_reference_constrained(
-                        variables, calibration_mode=mode_key,
-                        contamination_policy='single_hit_only',
-                        apply=True, verbose=True,
-                    )
-                    if _info.get('ok'):
-                        print('Reference-constrained fit accepted.')
-                    else:
-                        print(f"Reference-constrained fit reverted ({_info.get('reason', 'no gain')}).")
-                except Exception as exc:
-                    print(f'Reference optimizer failed ({exc}); skipping.')
             if not _use_joint:
                 _optimize_sequence(
                     [('Voltage + Bowl correction', _run_voltage_then_bowl)],
@@ -1203,21 +1168,55 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                 print(f"[Hybrid auto + residual] start (mode={calibration_mode.value})")
                 _ensure_initial_calibration()
                 _prepare_locked_selection()
-                # Voltage + Bowl bundled as a single atomic action so the
-                # optimizer accepts/reverts the pair on its combined effect
-                # (matches the manual workflow; fixes ToF where Vol alone
-                # often regresses before Bowl recovers it).
-                _optimize_sequence(
-                    [('Voltage + Bowl correction', _run_voltage_then_bowl)],
-                    title='Hybrid auto + residual',
-                    figure_size=(figure_mc_size_x.value, figure_mc_size_y.value),
-                    max_iterations=10,
-                    max_no_improve=3,
-                    retry_peak_window_on_stall=False,
-                )
+                _use_joint = bool(getattr(variables, 'use_joint_vbowl', False))
+                _use_time_dep_v = bool(getattr(variables, 'use_time_dep_v', False))
+                mode_key = _calibration_mode_key()
+                if _use_joint:
+                    try:
+                        from pyccapt.calibration.core import calibration as _cal
+                        _cal.joint_voltage_bowl_corr_main(
+                            variables.dld_x_det, variables.dld_y_det,
+                            _current_voltage(),
+                            variables, det_diam,
+                            calibration_mode=mode_key,
+                            sample_size=9, bin_size=0.05, n_peaks=4,
+                            prominence=100, distance=500,
+                            sampling_mode=_sampling_mode_value(),
+                        )
+                        print('Joint V+Bowl correction applied.')
+                    except Exception as exc:
+                        print(f'Joint V+Bowl failed ({exc}); falling back to legacy V+Bowl loop.')
+                        _use_joint = False
+                if _use_joint and _use_time_dep_v:
+                    # M3v2 refinement: time-dependent V residual on top of
+                    # joint V+Bowl. Safe here because the adaptive residual
+                    # below cleans up any chunk-to-chunk drift it introduces.
+                    try:
+                        from pyccapt.calibration.core import new_methods as _nm
+                        _nm.voltage_corr_time_dependent(
+                            _current_voltage(), variables,
+                            calibration_mode=mode_key,
+                            n_time_bins=12, bin_size=0.05, sample_size=100,
+                            use_legacy_v=False,
+                        )
+                        print('Time-dependent V refinement applied.')
+                    except Exception as exc:
+                        print(f'Time-dep V refinement failed ({exc}); skipping.')
+                if not _use_joint:
+                    # Legacy iterative V+Bowl loop (atomic Voltage+Bowl step
+                    # so the optimizer accepts/reverts the pair on its
+                    # combined effect; needed in ToF where Vol alone often
+                    # regresses before Bowl recovers it).
+                    _optimize_sequence(
+                        [('Voltage + Bowl correction', _run_voltage_then_bowl)],
+                        title='Hybrid auto + residual',
+                        figure_size=(figure_mc_size_x.value, figure_mc_size_y.value),
+                        max_iterations=10,
+                        max_no_improve=3,
+                        retry_peak_window_on_stall=False,
+                    )
                 post_auto_state = _capture_state()
                 post_auto_selection = _capture_selection()
-                mode_key = _calibration_mode_key()
                 print('-------------------------------------------------------')
                 print(
                     f'Running adaptive residual refinement on {mode_key} '
@@ -1240,6 +1239,10 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                     temporal_smoothing=0.5, apply_spatial=True,
                     spatial_grid=12, min_window_ions=40, min_cell_ions=35,
                     max_rounds=8,
+                    # 'best' / 'ref' presets set residual_coarse_to_fine_top_k=1
+                    # which makes the residual ~12x faster on mc at audit-equivalent
+                    # quality (rank candidates by fast_mrp, Voigt-verify only top 1).
+                    coarse_to_fine_top_k=getattr(variables, 'residual_coarse_to_fine_top_k', None),
                 )
                 try:
                     result = adaptive_residual_calibration(
@@ -1256,6 +1259,26 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                     _restore_selection(post_auto_selection)
                     print(f'Adaptive residual refinement failed; restored the auto-calibration result: {exc}')
                     return
+
+                # Reference-constrained least-squares fit (NIST-inspired).
+                # Applied AFTER residual so the warm-start is fully
+                # converged. Has its own internal acceptance gate -- the
+                # candidate is silently reverted when it doesn't improve
+                # the spectrum, so this is safe to chain.
+                if bool(getattr(variables, 'use_reference_optimizer', False)):
+                    try:
+                        from pyccapt.calibration.core import reference_optimizer as _ro
+                        _info = _ro.fit_reference_constrained(
+                            variables, calibration_mode=mode_key,
+                            contamination_policy='single_hit_only',
+                            apply=True, verbose=True,
+                        )
+                        if _info.get('ok'):
+                            print('Reference-constrained fit accepted.')
+                        else:
+                            print(f"Reference-constrained fit reverted ({_info.get('reason', 'no gain')}).")
+                    except Exception as exc:
+                        print(f'Reference optimizer failed ({exc}); skipping.')
 
                 print(
                     'Hybrid final weighted Gaussian score '

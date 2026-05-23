@@ -1224,9 +1224,9 @@ def recompute_peak_window(
     prominence: float = 100,
     distance: int = 10,
     hist_bin_size: float = 0.05,
-    lim: float | None = None,
+    lim=None,
     window_inflate: float = 2.0,
-    target_position: float | None = None,
+    target_position=None,
 ) -> tuple:
     """Lightweight peak-window recompute. NO Matplotlib.
 

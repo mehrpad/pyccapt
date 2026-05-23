@@ -1089,6 +1089,11 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         _run_bowl_correction(plot_override=False, save_override=False)
 
     def automatic_calibration(_, variables, output, status_output, calibration_mode_widget, pulse_mode_value):
+        # Auto / FAST button = the legacy iterative Voltage + Bowl
+        # optimizer. Same behavior across every preset. The fancy
+        # joint V+Bowl, time-dep V, reference-optimizer pipeline lives
+        # ONLY in the Hybrid (BEST) button because each of those stages
+        # depends on the adaptive-residual cleanup that follows.
         auto_button.disabled = True
         simple_auto_button.disabled = True
         _t_auto_start = time.perf_counter()
@@ -1097,39 +1102,14 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             print(f"[Auto calibration] start (mode={calibration_mode_widget.value})")
             _ensure_initial_calibration()
             _prepare_locked_selection()
-            # Auto button = V+Bowl warm-start ONLY. Time-dep V and the
-            # reference optimizer are NOT applied here because they
-            # depend on adaptive-residual cleanup afterwards; running
-            # them without residual leaves the spectrum in a worse state
-            # than legacy V+Bowl alone (chunk-to-chunk drift). They live
-            # in the Hybrid button which always pairs them with residual.
-            _use_joint = bool(getattr(variables, 'use_joint_vbowl', False))
-            mode_key = _calibration_mode_key()
-            if _use_joint:
-                try:
-                    from pyccapt.calibration.core import calibration as _cal
-                    _cal.joint_voltage_bowl_corr_main(
-                        variables.dld_x_det, variables.dld_y_det,
-                        _current_voltage(),
-                        variables, det_diam,
-                        calibration_mode=mode_key,
-                        sample_size=9, bin_size=0.05, n_peaks=4,
-                        prominence=100, distance=500,
-                        sampling_mode=_sampling_mode_value(),
-                    )
-                    print('Joint V+Bowl correction applied.')
-                except Exception as exc:
-                    print(f'Joint V+Bowl failed ({exc}); falling back to legacy V+Bowl loop.')
-                    _use_joint = False
-            if not _use_joint:
-                _optimize_sequence(
-                    [('Voltage + Bowl correction', _run_voltage_then_bowl)],
-                    title='Auto calibration',
-                    figure_size=(figure_mc_size_x.value, figure_mc_size_y.value),
-                    max_iterations=10,
-                    max_no_improve=3,
-                    retry_peak_window_on_stall=False,
-                )
+            _optimize_sequence(
+                [('Voltage + Bowl correction', _run_voltage_then_bowl)],
+                title='Auto calibration',
+                figure_size=(figure_mc_size_x.value, figure_mc_size_y.value),
+                max_iterations=10,
+                max_no_improve=3,
+                retry_peak_window_on_stall=False,
+            )
             print(f"[Auto calibration] finished in {time.perf_counter() - _t_auto_start:.1f}s")
         index_fig_v.value = 1
         index_fig_b.value = 1

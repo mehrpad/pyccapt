@@ -1091,8 +1091,10 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     def automatic_calibration(_, variables, output, status_output, calibration_mode_widget, pulse_mode_value):
         auto_button.disabled = True
         simple_auto_button.disabled = True
+        _t_auto_start = time.perf_counter()
         with status_output, _verbosity_context():
             status_output.clear_output()
+            print(f"[Auto calibration] start (mode={calibration_mode_widget.value})")
             _ensure_initial_calibration()
             _prepare_locked_selection()
             # Opt-in: when calibration_profile='new' AND variables.use_joint_vbowl=True
@@ -1163,6 +1165,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                     max_no_improve=3,
                     retry_peak_window_on_stall=False,
                 )
+            print(f"[Auto calibration] finished in {time.perf_counter() - _t_auto_start:.1f}s")
         index_fig_v.value = 1
         index_fig_b.value = 1
         auto_button.disabled = False
@@ -1190,12 +1193,14 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     def on_hybrid_auto_residual(_):
         hybrid_button.disabled = True
         simple_hybrid_button.disabled = True
+        _t_hybrid_start = time.perf_counter()
         try:
             with out_status, _verbosity_context():
                 out_status.clear_output()
                 if not _selected_peak_ready():
                     print('Please first select a peak')
                     return
+                print(f"[Hybrid auto + residual] start (mode={calibration_mode.value})")
                 _ensure_initial_calibration()
                 _prepare_locked_selection()
                 # Voltage + Bowl bundled as a single atomic action so the
@@ -1262,6 +1267,11 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                 else:
                     print('Adaptive residual accepted no additional steps; auto-calibration result was kept.')
         finally:
+            try:
+                with out_status:
+                    print(f"[Hybrid auto + residual] finished in {time.perf_counter() - _t_hybrid_start:.1f}s")
+            except Exception:
+                pass
             hybrid_button.disabled = False
             simple_hybrid_button.disabled = False
             try:

@@ -1,5 +1,4 @@
 import functools
-import re
 
 import ipywidgets as widgets
 import numpy as np
@@ -11,28 +10,6 @@ from pyccapt.calibration.core import mc_plot, widgets as wd
 from pyccapt.calibration.data_tools import data_tools
 
 
-def _build_reference_lines_from_list_material(list_material, default_tolerance=0.15):
-    """Convert ``variables.list_material`` (list of ideal m/c floats added via
-    the ADD button) into a list of ``ReferenceLine`` objects for the NIST
-    optimizer. Each entry gets a tolerance window (default 0.15 Da).
-
-    The user already supplied the expected elements via the isotope-table
-    dropdown + ADD button, so the reference list is intrinsically
-    sample-specific -- no Nimonic-default fallback is needed here.
-    """
-    from pyccapt.calibration.core.reference_optimizer import ReferenceLine
-    refs = []
-    for idx, mz in enumerate(list_material or []):
-        try:
-            mz_f = float(mz)
-        except (TypeError, ValueError):
-            continue
-        refs.append(
-            ReferenceLine(label=f"user[{idx}]@{mz_f:.4f}",
-                          mz=mz_f,
-                          tolerance=float(default_tolerance))
-        )
-    return refs
 
 # Define a layout for labels to make them a fixed width
 label_layout = widgets.Layout(width='200px')
@@ -161,14 +138,19 @@ def call_ion_list(variables, selector, path='../../../files/'):
     fit_method_help = widgets.HTML(
         value=(
             '<div style="font-size:11px; color:#555; max-width:600px;">'
-            '<b>Parametric</b>: fits a small polynomial (2- or 3-parameter, '
-            'mc or tof variant) using the peaks you click in the plot.'
-            ' Requires manual peak picking.<br>'
-            '<b>NIST reference</b>: scipy.optimize.least_squares fit of a '
-            'tightly-clipped multiplicative correction f(V, x, y, t). Uses '
-            'the ideal m/c list you added via ADD to auto-match detected '
-            'peaks &mdash; no clicking. Internal accept/revert gate. '
-            'mc only (tof not supported here yet).'
+            '<b>Parametric</b>: fits the polynomial <code>mc<sup>a</sup> + b&middot;mc + c</code> '
+            '(or the 2-parameter variant) using the peaks you <i>click</i> in the plot. '
+            'Requires manual peak picking.<br>'
+            '<b>NIST reference</b>: the <b>same polynomial</b> but with '
+            '<i>automatic</i> peak matching &mdash; greedy nearest-neighbour '
+            'between detected peaks and the ideal m/c values you added via ADD '
+            '(0.3 Da tolerance). No peak clicking needed.<br>'
+            'Both methods only rescale m/c &mdash; they do <b>not</b> redo V / '
+            'Bowl / drift correction, so they are safe to run on a fully '
+            'calibrated spectrum without undoing the V+Bowl pipeline. '
+            'Includes NaN / collapsed-spread sanity check that reverts if the '
+            'fit destroys the spectrum. mc only (tof has no universal '
+            'reference table).'
             '</div>'
         )
     )
@@ -316,57 +298,155 @@ def call_ion_list(variables, selector, path='../../../files/'):
         button_plot.disabled = False
 
     def nist_fit(variables, calibration_mode_widget, out_mc):
-        """NIST-inspired reference-constrained fit.
+        """Auto-matching version of the parametric m/c shift fit.
 
-        Uses ``variables.list_material`` (the ideal m/c values the user
-        added via ADD) as the reference list; auto-detects peaks; runs
-        scipy.optimize.least_squares with adaptive model complexity and
-        a hard-clipped correction factor in [0.99, 1.01]. Has its own
-        internal accept/revert gate -- the candidate is silently
-        reverted when it would lose peaks or drop MRP.
+        Mirrors the existing ``parametric_fit`` exactly -- same 2-/3-
+        parameter polynomial ``mc_ideal = mc^a + b*mc + c`` (or the
+        2-parameter variant), applied to ``variables.mc_calib_backup`` --
+        but **auto-matches** detected peaks to the ideal m/c values the
+        user added via the ADD button, so the user doesn't have to
+        click each peak.
+
+        IMPORTANT: this DOES NOT redo V / bowl / drift correction. The
+        risk of running ``fit_reference_constrained`` on a fully-calibrated
+        spectrum is exactly that -- it would try to re-fit V(x,y,t) on
+        residuals and could undo the joint-V+Bowl + time-drift work that
+        the Hybrid button just finished. This simpler version only nudges
+        the m/c axis to absolute truth and is therefore safe on top of
+        the calibrated pipeline.
+
+        tof is not supported because there is no universal tof reference
+        table -- tof in ns depends on the instrument's flight path,
+        voltage scale, and t0 calibration. Use mc mode instead.
         """
         button_fit.disabled = True
         try:
             with out_mc:
                 if calibration_mode_widget.value == 'tof_calib':
-                    print('NIST fit currently supports mc mode only. '
-                          'Switch to mass_to_charge or use the parametric fit.')
+                    print('NIST fit is mc-only. tof has no universal '
+                          'reference table (depends on instrument geometry / '
+                          'voltage / t0). Switch to mass_to_charge.')
                     return
-                refs = _build_reference_lines_from_list_material(
-                    variables.list_material
-                )
-                if not refs:
-                    print('No expected m/c values found in '
-                          'variables.list_material. Add at least one '
-                          'element via the ADD button first.')
+
+                ideal_list = list(variables.list_material or [])
+                if len(ideal_list) < 2:
+                    print(f'NIST fit needs at least 2 expected m/c values '
+                          f'(got {len(ideal_list)}). Add more elements via '
+                          f'the ADD button first.')
                     return
-                print(f'NIST fit: using {len(refs)} reference line(s) from '
-                      f'list_material (tolerance 0.15 Da each).')
                 try:
-                    from pyccapt.calibration.core import reference_optimizer as _ro
-                except Exception as exc:
-                    print(f'reference_optimizer import failed: {exc}')
+                    ideal_arr = np.asarray([float(v) for v in ideal_list], dtype=float)
+                except (TypeError, ValueError) as exc:
+                    print(f'NIST fit: list_material contains non-numeric '
+                          f'entries: {exc}')
                     return
-                # Snapshot mc_calib so we can roll back if the optimizer's
-                # acceptance gate doesn't trip but the user dislikes the
-                # result -- the existing 'Reset back correction' button
-                # uses mc_calib_backup, which is unchanged by this fit.
+
+                # --- Auto-detect peaks in CURRENT mc_calib ---
+                from pyccapt.calibration.core import calibration as _cal
+                arr = np.asarray(variables.mc_calib, dtype=float)
+                arr = arr[(arr > 0) & np.isfinite(arr)]
                 try:
-                    info = _ro.fit_reference_constrained(
-                        variables,
-                        calibration_mode='mc',
-                        reference_lines=refs,
-                        contamination_policy='single_hit_only',
-                        apply=True,
-                        verbose=True,
+                    peaks = _cal.auto_detect_reference_peaks(
+                        arr,
+                        n_peaks=max(len(ideal_arr) * 2, 8),
+                        prominence=25,
+                        distance=10,
+                        hist_bin_size=0.05,
                     )
                 except Exception as exc:
-                    print(f'NIST fit failed: {exc}')
+                    print(f'NIST fit: peak detection failed: {exc}')
                     return
-                if info.get('ok'):
-                    print('NIST fit accepted. Press "Plot result" to view.')
-                else:
-                    print(f'NIST fit reverted: {info.get("reason", "no gain")}.')
+                if not peaks:
+                    print('NIST fit: no peaks detected. Adjust prominence / '
+                          'distance or use the parametric fit with manual '
+                          'peak picks.')
+                    return
+                observed_arr = np.asarray(
+                    [float(p['position']) for p in peaks], dtype=float
+                )
+
+                # --- Greedy nearest-neighbour match: each ideal m/c
+                # paired with at most one observed peak within tolerance ---
+                tolerance = 0.30  # Da; intentionally a bit wide to handle
+                                  # slightly-off post-calibration centres.
+                ideal_pairs = []
+                observed_pairs = []
+                used_obs = set()
+                # Iterate ideal values in order so the printed match list is
+                # predictable.
+                for ideal in ideal_arr:
+                    best_idx = -1
+                    best_dist = float('inf')
+                    for i, obs in enumerate(observed_arr):
+                        if i in used_obs:
+                            continue
+                        d = abs(obs - ideal)
+                        if d < best_dist and d <= tolerance:
+                            best_dist = d
+                            best_idx = i
+                    if best_idx >= 0:
+                        used_obs.add(best_idx)
+                        ideal_pairs.append(float(ideal))
+                        observed_pairs.append(float(observed_arr[best_idx]))
+
+                n_matched = len(ideal_pairs)
+                if n_matched < 2:
+                    print(f'NIST fit: only {n_matched} of {len(ideal_arr)} '
+                          f'expected m/c values matched a detected peak '
+                          f'within {tolerance} Da. Either the spectrum is '
+                          f'badly calibrated (peaks too far from ideal) or '
+                          f'the expected list does not match the data.')
+                    return
+                observed_pairs = np.asarray(observed_pairs)
+                ideal_pairs = np.asarray(ideal_pairs)
+                print(f'NIST auto-match found {n_matched} pair(s):')
+                for obs, ideal in zip(observed_pairs, ideal_pairs):
+                    print(f'  observed {obs:.4f} -> ideal {ideal:.4f} '
+                          f'(d={obs - ideal:+.4f} Da)')
+
+                # --- Fit the SAME 2-/3-parameter polynomial as parametric_fit ---
+                # NO V, no bowl, no drift -- only m/c rescaling, so this
+                # cannot undo the Hybrid V+Bowl+drift pipeline.
+                if n_matched >= 3:
+                    def shift_3(mc, a, b, c):
+                        return mc**a + b * mc + c
+                    try:
+                        popt, _ = curve_fit(shift_3, observed_pairs, ideal_pairs, maxfev=2000)
+                        corrected = shift_3(variables.mc_calib_backup, *popt)
+                    except Exception as exc:
+                        print(f'NIST fit (3-param) failed: {exc}')
+                        return
+                    print(f'NIST fit (3-param) popt = {popt}')
+                else:  # exactly 2
+                    def shift_2(mc, a, b):
+                        return mc**a + b
+                    try:
+                        popt, _ = curve_fit(shift_2, observed_pairs, ideal_pairs, maxfev=2000)
+                        corrected = shift_2(variables.mc_calib_backup, *popt)
+                    except Exception as exc:
+                        print(f'NIST fit (2-param) failed: {exc}')
+                        return
+                    print(f'NIST fit (2-param) popt = {popt}')
+
+                # --- Sanity check: did the fit blow up the spectrum? ---
+                # Reject if NaN/inf appeared, or the variance collapsed
+                # (i.e. all ions mapped to a tiny range, the classic
+                # 'one giant peak' failure mode).
+                finite = corrected[np.isfinite(corrected)]
+                pre_std = float(np.nanstd(variables.mc_calib_backup))
+                post_std = float(np.nanstd(finite)) if finite.size else 0.0
+                if finite.size < len(corrected) * 0.95:
+                    print(f'NIST fit reverted: {len(corrected) - finite.size} '
+                          f'NaN/inf values introduced.')
+                    return
+                if post_std < pre_std * 0.5:
+                    print(f'NIST fit reverted: m/c spread collapsed '
+                          f'({pre_std:.2f} -> {post_std:.2f}). The fit '
+                          f'mapped too many ions on top of each other.')
+                    return
+
+                variables.mc_calib = corrected
+                print(f'NIST mc-shift accepted. Press "Plot result" to view.')
         finally:
             button_fit.disabled = False
 

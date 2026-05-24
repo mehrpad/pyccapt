@@ -10,6 +10,14 @@ from scipy.ndimage import gaussian_filter, gaussian_filter1d
 
 from pyccapt.calibration.core.exceptions import CalibrationInputError
 from pyccapt.calibration.core.mc_plot_peak_helpers import fast_mrp, gaussian_mrp_report
+from pyccapt.calibration.core.parallel import parallel_map, ParallelConfig
+
+# Per-peak temporal / spatial scoring inside one residual round has at most
+# ~6 candidates (one per training peak), well below the default thread
+# threshold of 32. The work per candidate is ~0.5-2s of NumPy/SciPy that
+# releases the GIL, so threading is profitable -- but we must override
+# min_items=1 to opt in.
+_RES_PARALLEL_CFG = ParallelConfig(backend="thread", min_items=1)
 
 
 def _mode_aware_defaults(calibration_array, calibration_mode, user_template_bin_size, user_hist_bin_size=None):
@@ -659,9 +667,17 @@ def adaptive_residual_calibration(
             break
         # Coarse-to-fine: build all candidate corrections first WITHOUT
         # full Voigt scoring; the two-pass selector handles ranking.
-        temporal_specs = []
-        for peak, template in peak_template_pairs:
-            temporal_correction, candidate_info = _fit_temporal_residual(
+        # Per-peak _fit_temporal_residual calls are independent (each
+        # consumes the same read-only current_array + its own template
+        # and produces an independent correction vector + info dict),
+        # so we parallelise across peaks via the thread-backend
+        # parallel_map. Each call spends most of its time in numpy
+        # (np.interp / np.argmax) and scipy.UnivariateSpline -- both
+        # release the GIL -- so threads give close to linear speedup
+        # without process startup / serialization cost.
+        def _one_temporal(pair):
+            peak, template = pair
+            correction, info = _fit_temporal_residual(
                 current_array,
                 template,
                 n_windows=n_windows,
@@ -669,6 +685,14 @@ def adaptive_residual_calibration(
                 min_window_ions=min_window_ions,
                 smoothing=temporal_smoothing,
             )
+            return peak, template, correction, info
+
+        temporal_results = parallel_map(
+            _one_temporal, peak_template_pairs,
+            config=_RES_PARALLEL_CFG, gil_releasing=True,
+        )
+        temporal_specs = []
+        for peak, template, temporal_correction, candidate_info in temporal_results:
             if candidate_info.get("n_observations", 0) < 4:
                 if verbose:
                     print(
@@ -730,16 +754,33 @@ def adaptive_residual_calibration(
                 _build_peak_template(current_array, peak, template_bin_size) for peak in round_reference_peaks["train"]
             ]
             peak_template_pairs = [(p, t) for p, t in zip(round_reference_peaks["train"], templates) if t is not None]
-            spatial_specs = []
-            for peak, template in peak_template_pairs:
-                spatial_correction, candidate_info = _fit_spatial_residual(
+
+            # Per-peak _fit_spatial_residual calls are independent: each
+            # one bins ions by (x,y) once, then estimates shifts per cell.
+            # Parallelise across peaks via the thread backend; the inner
+            # work is numpy-heavy (digitize / bincount / interp) and
+            # releases the GIL, so threads give near-linear scaling.
+            _x_det = variables.dld_x_det
+            _y_det = variables.dld_y_det
+
+            def _one_spatial(pair):
+                peak, template = pair
+                correction, info = _fit_spatial_residual(
                     current_array,
                     template,
-                    variables.dld_x_det,
-                    variables.dld_y_det,
+                    _x_det,
+                    _y_det,
                     grid_size=spatial_grid,
                     min_cell_ions=min_cell_ions,
                 )
+                return peak, template, correction, info
+
+            spatial_results = parallel_map(
+                _one_spatial, peak_template_pairs,
+                config=_RES_PARALLEL_CFG, gil_releasing=True,
+            )
+            spatial_specs = []
+            for peak, template, spatial_correction, candidate_info in spatial_results:
                 if candidate_info.get("n_cells", 0) < 4:
                     if verbose:
                         print(

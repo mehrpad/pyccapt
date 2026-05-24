@@ -1240,25 +1240,11 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                     print(f'Adaptive residual refinement failed; restored the auto-calibration result: {exc}')
                     return
 
-                # Reference-constrained least-squares fit (NIST-inspired).
-                # Applied AFTER residual so the warm-start is fully
-                # converged. Has its own internal acceptance gate -- the
-                # candidate is silently reverted when it doesn't improve
-                # the spectrum, so this is safe to chain.
-                if bool(getattr(variables, 'use_reference_optimizer', False)):
-                    try:
-                        from pyccapt.calibration.core import reference_optimizer as _ro
-                        _info = _ro.fit_reference_constrained(
-                            variables, calibration_mode=mode_key,
-                            contamination_policy='single_hit_only',
-                            apply=True, verbose=True,
-                        )
-                        if _info.get('ok'):
-                            print('Reference-constrained fit accepted.')
-                        else:
-                            print(f"Reference-constrained fit reverted ({_info.get('reason', 'no gain')}).")
-                    except Exception as exc:
-                        print(f'Reference optimizer failed ({exc}); skipping.')
+                # Reference-fit calibration was moved out of the
+                # V+Bowl pipeline. It now lives in the ion-list step
+                # (helper_ion_list.call_ion_list) where the user has
+                # already supplied an expected-element list -- that's
+                # the right place for absolute-m/c alignment.
 
                 print(
                     'Hybrid final weighted Gaussian score '
@@ -1655,7 +1641,6 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         options=[
             ('Joint V+Bowl (default)', 'new'),
             ('Joint V+Bowl + time-drift correction (recommended)', 'best'),
-            ('Joint V+Bowl + time-drift + reference fit (experimental)', 'ref'),
             ('Sequential V+Bowl (old)', 'old'),
         ],
         value='new',
@@ -1688,7 +1673,6 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                 'residual_coarse_to_fine_top_k',
                 'use_joint_vbowl',
                 'use_time_dep_v',
-                'use_reference_optimizer',
             ):
                 if hasattr(variables, attr):
                     try:
@@ -1727,21 +1711,6 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             variables.use_time_dep_v = True
             variables.residual_coarse_to_fine_top_k = 1
             _adaptive_apply_profile('old')  # n_windows=24, NOT 32
-        elif new_profile == 'ref':
-            # 'best' + reference-constrained least-squares fit.
-            # NIST-inspired (Coakley & Sanford 2022). Aligns detected
-            # peaks to known isotope m/c via scipy.optimize.least_squares
-            # with a multiplicative V/bowl/drift correction model.
-            # The optimizer has its own internal acceptance gate so it
-            # silently reverts when it can't improve the spectrum.
-            _reset_widgets_to_old()
-            _clear_opt_in_attrs()
-            variables.calibration_profile = 'ref'
-            variables.use_joint_vbowl = True
-            variables.use_time_dep_v = True
-            variables.use_reference_optimizer = True
-            variables.residual_coarse_to_fine_top_k = 1
-            _adaptive_apply_profile('old')
         else:
             _reset_widgets_to_old()
             _clear_opt_in_attrs()
@@ -1778,10 +1747,6 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             'a per-ion-index voltage residual after joint V+Bowl. Cancels '
             'voltage / temperature drift that leaves residual mass shifts '
             'in long runs. See explanation below the tabs.</li>'
-            '<li><b>+ reference fit</b> (experimental): Hybrid also runs a '
-            'scipy least-squares fit that nudges detected peaks toward '
-            'known isotope m/c values with a safety gate. See explanation '
-            'below the tabs.</li>'
             '</ul>'
             'Switch any time; widget settings are not touched.'
             '</div>'
@@ -1811,25 +1776,10 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             'adaptive residual stage cleans up any residual chunk-to-chunk '
             'wobble.'
             '<br><br>'
-            '<b>Reference-fit calibration (NIST-inspired)</b><br>'
-            'After everything else has converged the detected peaks should '
-            'sit on known isotope m/c values (Ni-58 at 57.94, Cr-52 at 51.94, '
-            '&hellip;). In practice they\'re slightly off &mdash; ~0.05 to '
-            '0.2 Da depending on the dataset.'
-            '<br><br>'
-            'This step detects the strongest peaks in the spectrum, matches '
-            'each to its nearest reference within a tolerance window, then '
-            'runs a constrained <code>scipy.optimize.least_squares</code> '
-            'fit of a small multiplicative correction factor '
-            '<code>f(V, x, y, t)</code>. The factor is hard-clipped to a '
-            'narrow band (e.g.&nbsp;0.99&ndash;1.01) so it can only nudge, '
-            'never warp. Adaptive model complexity: only the parameters '
-            'that have enough reference matches actually get fit '
-            '(scale-only &rarr; +V &rarr; +bowl &rarr; +drift). The whole '
-            'step has an internal acceptance gate &mdash; if it would lose '
-            'peaks or drop MRP it silently reverts itself. Experimental '
-            'because the bundled default reference list is tuned for the '
-            'Nimonic test dataset.'
+            'Reference-fit (NIST) is no longer a calibration preset &mdash; '
+            'it now lives in the ion-list cell as a second "Fit method" '
+            'option alongside the existing parametric fit. That cell is '
+            'the natural place for peak labelling + absolute m/c alignment.'
             '</div>'
         ),
         layout=widgets.Layout(width='720px'),

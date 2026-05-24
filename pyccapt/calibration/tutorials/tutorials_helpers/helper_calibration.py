@@ -1752,9 +1752,94 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     # Initialize variables.calibration_profile (defaults to 'old' = current behavior).
     variables.calibration_profile = 'old'
 
+    # User-facing summary of what each preset actually changes. Kept in sync
+    # with _apply_profile above and the per-button code paths
+    # (automatic_calibration, on_hybrid_auto_residual, initial_calibration).
+    profile_note = widgets.HTML(
+        value=(
+            '<div style="font-size:11px; color:#444; '
+            'background:#f7f7f7; border:1px solid #ddd; padding:6px 8px; '
+            'border-radius:4px; max-width:720px; line-height:1.45;">'
+            '<b>What this preset changes</b><br>'
+            'The preset only affects the <b>Hybrid auto + residual</b> button '
+            '(and the combined <b>BEST</b> button which delegates to it). '
+            'All other buttons &mdash; <b>Initial calibration</b>, '
+            '<b>Voltage correction</b>, <b>Bowl correction</b>, '
+            '<b>Auto calibration</b>, <b>Auto bowl calibration</b>, '
+            '<b>FAST</b>, <b>Adaptive residual</b> &mdash; always run the '
+            'legacy sequential V+Bowl path and ignore this dropdown.'
+            '<ul style="margin:4px 0 4px 16px;">'
+            '<li><b>Sequential V+Bowl (old)</b>: legacy iterative '
+            'Voltage&rarr;Bowl optimiser. Used by every button.</li>'
+            '<li><b>Joint V+Bowl (default)</b>: Hybrid replaces its '
+            'V+Bowl stage with one joint multi-peak constrained fit. '
+            'Other buttons unchanged.</li>'
+            '<li><b>+ time-drift correction</b> (recommended): Hybrid adds '
+            'a per-ion-index voltage residual after joint V+Bowl. Cancels '
+            'voltage / temperature drift that leaves residual mass shifts '
+            'in long runs. See explanation below the tabs.</li>'
+            '<li><b>+ reference fit</b> (experimental): Hybrid also runs a '
+            'scipy least-squares fit that nudges detected peaks toward '
+            'known isotope m/c values with a safety gate. See explanation '
+            'below the tabs.</li>'
+            '</ul>'
+            'Switch any time; widget settings are not touched.'
+            '</div>'
+        ),
+        layout=widgets.Layout(width='720px'),
+    )
+
+    method_help = widgets.HTML(
+        value=(
+            '<div style="font-size:11px; color:#444; '
+            'background:#fafcff; border:1px solid #d6e3f3; padding:6px 8px; '
+            'border-radius:4px; max-width:720px; line-height:1.5;">'
+            '<b>Time-drift correction (M3v2)</b><br>'
+            'Atom-probe runs are long (hours). The HV supply, laser power, '
+            'and specimen temperature drift slowly during a run, which '
+            'shifts the reference peak position as a function of acquisition '
+            'time (ion index). The classical V correction fits ONE global '
+            'voltage&ndash;m/c scaling for the whole dataset, so this slow '
+            'drift leaks into the calibrated spectrum and broadens peaks.'
+            '<br><br>'
+            'This step splits the run into ~12 equal time bins, measures '
+            'the dominant peak\'s centre in each bin, and fits a smooth '
+            'low-degree polynomial of <i>time-index &rarr; multiplicative '
+            'correction</i>. The correction is then applied per ion, on top '
+            'of joint V+Bowl. Safe to apply because (a) the polynomial is '
+            'low-degree and gently regularised, and (b) the subsequent '
+            'adaptive residual stage cleans up any residual chunk-to-chunk '
+            'wobble.'
+            '<br><br>'
+            '<b>Reference-fit calibration (NIST-inspired)</b><br>'
+            'After everything else has converged the detected peaks should '
+            'sit on known isotope m/c values (Ni-58 at 57.94, Cr-52 at 51.94, '
+            '&hellip;). In practice they\'re slightly off &mdash; ~0.05 to '
+            '0.2 Da depending on the dataset.'
+            '<br><br>'
+            'This step detects the strongest peaks in the spectrum, matches '
+            'each to its nearest reference within a tolerance window, then '
+            'runs a constrained <code>scipy.optimize.least_squares</code> '
+            'fit of a small multiplicative correction factor '
+            '<code>f(V, x, y, t)</code>. The factor is hard-clipped to a '
+            'narrow band (e.g.&nbsp;0.99&ndash;1.01) so it can only nudge, '
+            'never warp. Adaptive model complexity: only the parameters '
+            'that have enough reference matches actually get fit '
+            '(scale-only &rarr; +V &rarr; +bowl &rarr; +drift). The whole '
+            'step has an internal acceptance gate &mdash; if it would lose '
+            'peaks or drop MRP it silently reverts itself. Experimental '
+            'because the bundled default reference list is tuned for the '
+            'Nimonic test dataset.'
+            '</div>'
+        ),
+        layout=widgets.Layout(width='720px'),
+    )
+
     profile_panel = widgets.VBox([
         widgets.HTML('<b>Calibration profile</b>'),
         calibration_profile,
+        profile_note,
+        method_help,
     ], layout=widgets.Layout(border='1px solid #ccc', padding='6px', margin='0 0 8px 0'))
 
     mode_tabs.selected_index = 0

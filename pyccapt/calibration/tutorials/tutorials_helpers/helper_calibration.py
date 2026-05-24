@@ -1690,6 +1690,12 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             _clear_opt_in_attrs()
             variables.calibration_profile = 'new'
             variables.use_joint_vbowl = True
+            # Coarse-to-fine residual: rank candidates with cheap fast_mrp,
+            # Voigt-verify only the top 1. Audited Path 2 at 2M ions on the
+            # joint-V+Bowl warm-start gave 12.6x mc / 2.8x tof speedup AND
+            # +8 mc peaks, +26% mc MRP. Same speedup applies here because
+            # 'new' uses the same joint V+Bowl warm-start.
+            variables.residual_coarse_to_fine_top_k = 1
             _adaptive_apply_profile('old')
         elif new_profile == 'best':
             # M1+M3v2 best preset:
@@ -1712,9 +1718,18 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             variables.residual_coarse_to_fine_top_k = 1
             _adaptive_apply_profile('old')  # n_windows=24, NOT 32
         else:
+            # Sequential V+Bowl (old): legacy iterative V+Bowl + adaptive
+            # residual. Coarse-to-fine top_k=1 is enabled here too because
+            # it speeds the residual ~3x on the legacy warm-start as well
+            # (the c2f trick is warm-start-agnostic: it just replaces the
+            # all-candidate Voigt scoring with fast_mrp ranking + 1-of-K
+            # Voigt verification). If quality regresses on this preset for
+            # a given dataset, unset variables.residual_coarse_to_fine_top_k
+            # before pressing Hybrid.
             _reset_widgets_to_old()
             _clear_opt_in_attrs()
             variables.calibration_profile = 'old'
+            variables.residual_coarse_to_fine_top_k = 1
             _adaptive_apply_profile('old')
 
     calibration_profile.observe(_apply_profile, names='value')

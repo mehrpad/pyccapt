@@ -1148,53 +1148,41 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                 print(f"[Hybrid auto + residual] start (mode={calibration_mode.value})")
                 _ensure_initial_calibration()
                 _prepare_locked_selection()
-                _use_joint = bool(getattr(variables, 'use_joint_vbowl', False))
                 _use_time_dep_v = bool(getattr(variables, 'use_time_dep_v', False))
                 mode_key = _calibration_mode_key()
-                if _use_joint:
-                    try:
-                        from pyccapt.calibration.core import calibration as _cal
-                        _cal.joint_voltage_bowl_corr_main(
-                            variables.dld_x_det, variables.dld_y_det,
-                            _current_voltage(),
-                            variables, det_diam,
-                            calibration_mode=mode_key,
-                            sample_size=9, bin_size=0.05, n_peaks=4,
-                            prominence=100, distance=500,
-                            sampling_mode=_sampling_mode_value(),
-                        )
-                        print('Joint V+Bowl correction applied.')
-                    except Exception as exc:
-                        print(f'Joint V+Bowl failed ({exc}); falling back to legacy V+Bowl loop.')
-                        _use_joint = False
-                if _use_joint and _use_time_dep_v:
-                    # M3v2 refinement: time-dependent V residual on top of
-                    # joint V+Bowl. Safe here because the adaptive residual
-                    # below cleans up any chunk-to-chunk drift it introduces.
+                # Hybrid V+Bowl stage: ALWAYS the legacy iterative loop now.
+                # Joint V+Bowl was removed because _ensure_initial_calibration
+                # already runs the legacy V+Bowl path inside its body, and
+                # then calling joint V+Bowl on top double-corrected the
+                # spectrum -- on the user's data this collapsed mc to one
+                # giant peak and broke tof. FAST works because it doesn't
+                # add a second V+Bowl on top; Hybrid now follows the same
+                # principle. Time-drift correction (M3v2) still runs when
+                # the preset enables it, applied on top of the same
+                # well-behaved legacy V+Bowl result that FAST produces.
+                _optimize_sequence(
+                    [('Voltage + Bowl correction', _run_voltage_then_bowl)],
+                    title='Hybrid auto + residual',
+                    figure_size=(figure_mc_size_x.value, figure_mc_size_y.value),
+                    max_iterations=10,
+                    max_no_improve=3,
+                    retry_peak_window_on_stall=False,
+                )
+                if _use_time_dep_v:
+                    # M3v2: time-dependent V refinement. Applied on top of
+                    # the legacy V+Bowl. The subsequent adaptive residual
+                    # cleans up any chunk-to-chunk drift this introduces.
                     try:
                         from pyccapt.calibration.core import new_methods as _nm
                         _nm.voltage_corr_time_dependent(
                             _current_voltage(), variables,
                             calibration_mode=mode_key,
                             n_time_bins=12, bin_size=0.05, sample_size=100,
-                            use_legacy_v=False,
+                            use_legacy_v=False,  # legacy V already applied
                         )
                         print('Time-dependent V refinement applied.')
                     except Exception as exc:
                         print(f'Time-dep V refinement failed ({exc}); skipping.')
-                if not _use_joint:
-                    # Legacy iterative V+Bowl loop (atomic Voltage+Bowl step
-                    # so the optimizer accepts/reverts the pair on its
-                    # combined effect; needed in ToF where Vol alone often
-                    # regresses before Bowl recovers it).
-                    _optimize_sequence(
-                        [('Voltage + Bowl correction', _run_voltage_then_bowl)],
-                        title='Hybrid auto + residual',
-                        figure_size=(figure_mc_size_x.value, figure_mc_size_y.value),
-                        max_iterations=10,
-                        max_no_improve=3,
-                        retry_peak_window_on_stall=False,
-                    )
                 post_auto_state = _capture_state()
                 post_auto_selection = _capture_selection()
                 print('-------------------------------------------------------')
@@ -1639,9 +1627,9 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     # ------------------------------------------------------------------
     calibration_profile = widgets.Dropdown(
         options=[
-            ('Joint V+Bowl (default)', 'new'),
-            ('Joint V+Bowl + time-drift correction (recommended)', 'best'),
-            ('Sequential V+Bowl (old)', 'old'),
+            ('Adaptive residual (default)', 'new'),
+            ('+ time-drift correction (recommended)', 'best'),
+            ('Legacy adaptive residual (no c2f speedup)', 'old'),
         ],
         value='new',
         description='Config preset:',
@@ -1671,7 +1659,6 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                 'voltage_bowl_optimizer_metric',
                 'residual_fast_candidate_score',
                 'residual_coarse_to_fine_top_k',
-                'use_joint_vbowl',
                 'use_time_dep_v',
             ):
                 if hasattr(variables, attr):
@@ -1681,42 +1668,24 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                         pass
 
         if new_profile == 'new':
-            # "Joint V+Bowl": replaces legacy iterative V+Bowl with the
-            # one-shot joint multi-peak solver. Adaptive residual keeps
-            # legacy defaults (n_windows=24); the final stack audit showed
-            # n_windows=32 only helps on the OLD V+Bowl baseline and
-            # actively hurts when joint V+Bowl is used.
+            # 'new' = default Hybrid: legacy iterative V+Bowl + adaptive
+            # residual with coarse-to-fine top_k=1 (audited safe at 2M).
+            # Identical V+Bowl path as FAST -- no double-correction risk.
             _reset_widgets_to_old()
             _clear_opt_in_attrs()
             variables.calibration_profile = 'new'
-            variables.use_joint_vbowl = True
-            # Coarse-to-fine residual: rank candidates with cheap fast_mrp,
-            # Voigt-verify only the top 1. Audited Path 2 at 2M ions on the
-            # joint-V+Bowl warm-start gave 12.6x mc / 2.8x tof speedup AND
-            # +8 mc peaks, +26% mc MRP. Same speedup applies here because
-            # 'new' uses the same joint V+Bowl warm-start.
             variables.residual_coarse_to_fine_top_k = 1
             _adaptive_apply_profile('old')
         elif new_profile == 'best':
-            # M1+M3v2 best preset:
-            #   - Joint V+Bowl                            -- M1
-            #   - Time-dep V refinement on top            -- M3v2
-            #   - Adaptive residual n_windows=24 with coarse-to-fine top_k=1
-            #
-            # n_windows=24 (NOT 32) is the audited best for the M1 stack.
-            # coarse-to-fine top_k=1 is the Path 2 speedup: scores every
-            # residual candidate with fast_mrp, then Voigt-verifies only
-            # the single best. Audit at 2M ions: 12.6x mc speedup AND
-            # +8 mc peaks (77->85), +26% mc MRP (883->1113), +10 tof peaks.
-            # Surprising win: top_k=1 outperforms top_k=2/3 because it
-            # acts as implicit regularisation against Voigt-score noise.
+            # 'best' = 'new' + time-dep V refinement (M3v2). The V+Bowl
+            # path is the same legacy iterative loop as FAST and 'new';
+            # time-drift correction sits between V+Bowl and the residual.
             _reset_widgets_to_old()
             _clear_opt_in_attrs()
             variables.calibration_profile = 'best'
-            variables.use_joint_vbowl = True
             variables.use_time_dep_v = True
             variables.residual_coarse_to_fine_top_k = 1
-            _adaptive_apply_profile('old')  # n_windows=24, NOT 32
+            _adaptive_apply_profile('old')
         else:
             # Sequential V+Bowl (old): legacy iterative V+Bowl + adaptive
             # residual. Coarse-to-fine top_k=1 is enabled here too because
@@ -1745,24 +1714,30 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             'background:#f7f7f7; border:1px solid #ddd; padding:6px 8px; '
             'border-radius:4px; max-width:720px; line-height:1.45;">'
             '<b>What this preset changes</b><br>'
-            'The preset only affects the <b>Hybrid auto + residual</b> button '
-            '(and the combined <b>BEST</b> button which delegates to it). '
-            'All other buttons &mdash; <b>Initial calibration</b>, '
-            '<b>Voltage correction</b>, <b>Bowl correction</b>, '
-            '<b>Auto calibration</b>, <b>Auto bowl calibration</b>, '
-            '<b>FAST</b>, <b>Adaptive residual</b> &mdash; always run the '
-            'legacy sequential V+Bowl path and ignore this dropdown.'
+            'Every button now uses the same well-behaved <b>legacy '
+            'sequential V+Bowl</b> path (Voltage&rarr;Bowl iterative '
+            'optimiser). The preset only changes what <b>Hybrid auto + '
+            'residual</b> (and the combined <b>BEST</b>) does <i>after</i> '
+            'the V+Bowl stage:'
             '<ul style="margin:4px 0 4px 16px;">'
-            '<li><b>Sequential V+Bowl (old)</b>: legacy iterative '
-            'Voltage&rarr;Bowl optimiser. Used by every button.</li>'
-            '<li><b>Joint V+Bowl (default)</b>: Hybrid replaces its '
-            'V+Bowl stage with one joint multi-peak constrained fit. '
-            'Other buttons unchanged.</li>'
-            '<li><b>+ time-drift correction</b> (recommended): Hybrid adds '
-            'a per-ion-index voltage residual after joint V+Bowl. Cancels '
-            'voltage / temperature drift that leaves residual mass shifts '
-            'in long runs. See explanation below the tabs.</li>'
+            '<li><b>Adaptive residual (default)</b>: V+Bowl &rarr; '
+            'adaptive residual with coarse-to-fine top_k=1 (audited '
+            'safe; ~3x faster residual than legacy).</li>'
+            '<li><b>+ time-drift correction</b> (recommended): V+Bowl '
+            '&rarr; per-ion-index time-drift correction (M3v2) &rarr; '
+            'adaptive residual. Cancels HV / temperature drift that '
+            'leaves residual mass shifts in long runs. See explanation '
+            'below.</li>'
+            '<li><b>Legacy adaptive residual</b>: V+Bowl &rarr; adaptive '
+            'residual without the coarse-to-fine speedup. Slower but '
+            'matches the pre-2026 reference behaviour exactly if you '
+            'need bit-identical results.</li>'
             '</ul>'
+            '<i>Joint V+Bowl was removed</i> because it ran on top of '
+            'the already-corrected spectrum from <b>Initial calibration</b> '
+            'and double-corrected, collapsing peaks on some datasets. '
+            'FAST and Hybrid now share the same V+Bowl path so they can '
+            'never disagree on the V+Bowl result.<br>'
             'Switch any time; widget settings are not touched.'
             '</div>'
         ),
@@ -1786,8 +1761,8 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             'the dominant peak\'s centre in each bin, and fits a smooth '
             'low-degree polynomial of <i>time-index &rarr; multiplicative '
             'correction</i>. The correction is then applied per ion, on top '
-            'of joint V+Bowl. Safe to apply because (a) the polynomial is '
-            'low-degree and gently regularised, and (b) the subsequent '
+            'of the legacy V+Bowl. Safe to apply because (a) the polynomial '
+            'is low-degree and gently regularised, and (b) the subsequent '
             'adaptive residual stage cleans up any residual chunk-to-chunk '
             'wobble.'
             '<br><br>'

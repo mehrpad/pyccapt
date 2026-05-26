@@ -1732,45 +1732,6 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             'residual without the coarse-to-fine speedup. Slower but '
             'matches the pre-2026 reference behaviour exactly if you '
             'need bit-identical results.</li>'
-            '</ul>'
-            '<i>Joint V+Bowl was removed</i> because it ran on top of '
-            'the already-corrected spectrum from <b>Initial calibration</b> '
-            'and double-corrected, collapsing peaks on some datasets. '
-            'FAST and Hybrid now share the same V+Bowl path so they can '
-            'never disagree on the V+Bowl result.<br>'
-            'Switch any time; widget settings are not touched.'
-            '</div>'
-        ),
-        layout=widgets.Layout(width='720px'),
-    )
-
-    method_help = widgets.HTML(
-        value=(
-            '<div style="font-size:11px; color:#444; '
-            'background:#fafcff; border:1px solid #d6e3f3; padding:6px 8px; '
-            'border-radius:4px; max-width:720px; line-height:1.5;">'
-            '<b>Time-drift correction (M3v2)</b><br>'
-            'Atom-probe runs are long (hours). The HV supply, laser power, '
-            'and specimen temperature drift slowly during a run, which '
-            'shifts the reference peak position as a function of acquisition '
-            'time (ion index). The classical V correction fits ONE global '
-            'voltage&ndash;m/c scaling for the whole dataset, so this slow '
-            'drift leaks into the calibrated spectrum and broadens peaks.'
-            '<br><br>'
-            'This step splits the run into ~12 equal time bins, measures '
-            'the dominant peak\'s centre in each bin, and fits a smooth '
-            'low-degree polynomial of <i>time-index &rarr; multiplicative '
-            'correction</i>. The correction is then applied per ion, on top '
-            'of the legacy V+Bowl. Safe to apply because (a) the polynomial '
-            'is low-degree and gently regularised, and (b) the subsequent '
-            'adaptive residual stage cleans up any residual chunk-to-chunk '
-            'wobble.'
-            '<br><br>'
-            'Reference-fit (NIST) is no longer a calibration preset &mdash; '
-            'it now lives in the ion-list cell as a second "Fit method" '
-            'option alongside the existing parametric fit. That cell is '
-            'the natural place for peak labelling + absolute m/c alignment.'
-            '</div>'
         ),
         layout=widgets.Layout(width='720px'),
     )
@@ -1779,7 +1740,6 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         widgets.HTML('<b>Calibration profile</b>'),
         calibration_profile,
         profile_note,
-        method_help,
     ], layout=widgets.Layout(border='1px solid #ccc', padding='6px', margin='0 0 8px 0'))
 
     mode_tabs.selected_index = 0

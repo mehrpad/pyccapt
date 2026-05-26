@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from contextlib import contextmanager
 
 import ipywidgets as widgets
@@ -153,8 +154,11 @@ def build_combined_mc_tof_calibration_panel(
         tof_lim = next(spec[2] for spec in mode_specs if spec[0] == 'tof_calib')
 
         with _lock_buttons():
+            _t_fast_start = time.perf_counter()
+            out_status.append_stdout('\n=== FAST: starting (mc -> tof Auto calibration) ===\n')
             previous_mode = calibration_mode.value
             try:
+                _t_mc_start = time.perf_counter()
                 out_status.append_stdout('\n=== FAST: m/c (Auto calibration) ===\n')
                 calibration_mode.value = 'mc_calib'
                 try:
@@ -166,7 +170,11 @@ def build_combined_mc_tof_calibration_panel(
                     run_mc_auto_calibration()
                 except Exception as exc:
                     out_status.append_stdout(f'm/c auto calibration failed: {exc}\n')
+                out_status.append_stdout(
+                    f'=== FAST: m/c done in {time.perf_counter() - _t_mc_start:.1f}s ===\n'
+                )
 
+                _t_tof_start = time.perf_counter()
                 out_status.append_stdout('\n=== FAST: ToF (Auto calibration) ===\n')
                 calibration_mode.value = 'tof_calib'
                 try:
@@ -178,8 +186,14 @@ def build_combined_mc_tof_calibration_panel(
                     run_tof_auto_calibration()
                 except Exception as exc:
                     out_status.append_stdout(f'ToF auto calibration failed: {exc}\n')
+                out_status.append_stdout(
+                    f'=== FAST: ToF done in {time.perf_counter() - _t_tof_start:.1f}s ===\n'
+                )
             finally:
                 calibration_mode.value = previous_mode
+                out_status.append_stdout(
+                    f'\n=== FAST: total {time.perf_counter() - _t_fast_start:.1f}s ===\n'
+                )
         try:
             _plot_histograms()
         except Exception:
@@ -204,8 +218,11 @@ def build_combined_mc_tof_calibration_panel(
         tof_lim = next(spec[2] for spec in mode_specs if spec[0] == 'tof_calib')
 
         with _lock_buttons():
+            _t_best_start = time.perf_counter()
+            out_status.append_stdout('\n=== BEST: starting (mc -> tof Hybrid auto + residual) ===\n')
             previous_mode = calibration_mode.value
             try:
+                _t_mc_start = time.perf_counter()
                 out_status.append_stdout('\n=== BEST: m/c (Hybrid auto + residual) ===\n')
                 calibration_mode.value = 'mc_calib'
                 try:
@@ -217,7 +234,11 @@ def build_combined_mc_tof_calibration_panel(
                     run_mc_hybrid_auto_residual()
                 except Exception as exc:
                     out_status.append_stdout(f'm/c best calibration failed: {exc}\n')
+                out_status.append_stdout(
+                    f'=== BEST: m/c done in {time.perf_counter() - _t_mc_start:.1f}s ===\n'
+                )
 
+                _t_tof_start = time.perf_counter()
                 out_status.append_stdout('\n=== BEST: ToF (Hybrid auto + residual) ===\n')
                 calibration_mode.value = 'tof_calib'
                 try:
@@ -229,8 +250,14 @@ def build_combined_mc_tof_calibration_panel(
                     run_tof_hybrid_auto_residual()
                 except Exception as exc:
                     out_status.append_stdout(f'ToF best calibration failed: {exc}\n')
+                out_status.append_stdout(
+                    f'=== BEST: ToF done in {time.perf_counter() - _t_tof_start:.1f}s ===\n'
+                )
             finally:
                 calibration_mode.value = previous_mode
+                out_status.append_stdout(
+                    f'\n=== BEST: total {time.perf_counter() - _t_best_start:.1f}s ===\n'
+                )
         try:
             _plot_histograms()
         except Exception:

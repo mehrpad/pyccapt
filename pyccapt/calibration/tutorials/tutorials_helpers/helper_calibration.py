@@ -124,6 +124,19 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         description='Fit mode:',
         layout=label_layout,
     )
+    # Bowl method: polynomial (legacy default) or RBF spline (experimental).
+    # When 'spline' is chosen, _run_bowl_correction calls new_methods.bowl_correction_spline
+    # which uses a thin-plate-spline RBF interpolator, clipped + FWHM-gated.
+    # Audited on Nimonic NiC1: mc MRP +139% vs polynomial at a cost of 1 mc peak.
+    bowl_method_b = widgets.Dropdown(
+        options=[
+            ('polynomial (default)', 'polynomial'),
+            ('spline (RBF, experimental)', 'spline'),
+        ],
+        value='polynomial',
+        description='Bowl method:',
+        layout=label_layout,
+    )
     sampling_mode_b = widgets.Dropdown(
         options=[('cartesian (default)', 'cartesian'), ('polar', 'polar')],
         value=getattr(variables, 'bowl_sampling_mode', 'cartesian'),
@@ -704,6 +717,28 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         if not _selected_peak_ready():
             raise ValueError('Please first select a peak')
 
+        # Bowl method: 'polynomial' (legacy default) or 'spline' (RBF
+        # thin-plate-spline, clipped + FWHM-gated). User-controlled via
+        # the 'Bowl method' dropdown on the mc/tof advanced tab.
+        if bowl_method_b.value == 'spline':
+            from pyccapt.calibration.core import new_methods as _nm
+            try:
+                _nm.bowl_correction_spline(
+                    variables.dld_x_det,
+                    variables.dld_y_det,
+                    _current_voltage(),
+                    variables,
+                    det_diam,
+                    calibration_mode=_calibration_mode_key(),
+                    sample_size=sample_size_b.value,
+                    bin_size=bin_size_b.value,
+                    use_rbf=True,
+                )
+                print('Spline bowl correction applied.')
+                return
+            except Exception as exc:
+                print(f'Spline bowl failed ({exc}); falling back to polynomial bowl.')
+
         calibration.bowl_correction_main(
             variables.dld_x_det,
             variables.dld_y_det,
@@ -1054,10 +1089,17 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         _run_bowl_correction(plot_override=False, save_override=False)
 
     def automatic_calibration(_, variables, output, status_output, calibration_mode_widget, pulse_mode_value):
+        # Auto / FAST button = the legacy iterative Voltage + Bowl
+        # optimizer. Same behavior across every preset. The fancy
+        # joint V+Bowl, time-dep V, reference-optimizer pipeline lives
+        # ONLY in the Hybrid (BEST) button because each of those stages
+        # depends on the adaptive-residual cleanup that follows.
         auto_button.disabled = True
         simple_auto_button.disabled = True
+        _t_auto_start = time.perf_counter()
         with status_output, _verbosity_context():
             status_output.clear_output()
+            print(f"[Auto calibration] start (mode={calibration_mode_widget.value})")
             _ensure_initial_calibration()
             _prepare_locked_selection()
             _optimize_sequence(
@@ -1068,6 +1110,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                 max_no_improve=3,
                 retry_peak_window_on_stall=False,
             )
+            print(f"[Auto calibration] finished in {time.perf_counter() - _t_auto_start:.1f}s")
         index_fig_v.value = 1
         index_fig_b.value = 1
         auto_button.disabled = False
@@ -1095,18 +1138,28 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     def on_hybrid_auto_residual(_):
         hybrid_button.disabled = True
         simple_hybrid_button.disabled = True
+        _t_hybrid_start = time.perf_counter()
         try:
             with out_status, _verbosity_context():
                 out_status.clear_output()
                 if not _selected_peak_ready():
                     print('Please first select a peak')
                     return
+                print(f"[Hybrid auto + residual] start (mode={calibration_mode.value})")
                 _ensure_initial_calibration()
                 _prepare_locked_selection()
-                # Voltage + Bowl bundled as a single atomic action so the
-                # optimizer accepts/reverts the pair on its combined effect
-                # (matches the manual workflow; fixes ToF where Vol alone
-                # often regresses before Bowl recovers it).
+                _use_time_dep_v = bool(getattr(variables, 'use_time_dep_v', False))
+                mode_key = _calibration_mode_key()
+                # Hybrid V+Bowl stage: ALWAYS the legacy iterative loop now.
+                # Joint V+Bowl was removed because _ensure_initial_calibration
+                # already runs the legacy V+Bowl path inside its body, and
+                # then calling joint V+Bowl on top double-corrected the
+                # spectrum -- on the user's data this collapsed mc to one
+                # giant peak and broke tof. FAST works because it doesn't
+                # add a second V+Bowl on top; Hybrid now follows the same
+                # principle. Time-drift correction (M3v2) still runs when
+                # the preset enables it, applied on top of the same
+                # well-behaved legacy V+Bowl result that FAST produces.
                 _optimize_sequence(
                     [('Voltage + Bowl correction', _run_voltage_then_bowl)],
                     title='Hybrid auto + residual',
@@ -1115,9 +1168,23 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                     max_no_improve=3,
                     retry_peak_window_on_stall=False,
                 )
+                if _use_time_dep_v:
+                    # M3v2: time-dependent V refinement. Applied on top of
+                    # the legacy V+Bowl. The subsequent adaptive residual
+                    # cleans up any chunk-to-chunk drift this introduces.
+                    try:
+                        from pyccapt.calibration.core import new_methods as _nm
+                        _nm.voltage_corr_time_dependent(
+                            _current_voltage(), variables,
+                            calibration_mode=mode_key,
+                            n_time_bins=12, bin_size=0.05, sample_size=100,
+                            use_legacy_v=False,  # legacy V already applied
+                        )
+                        print('Time-dependent V refinement applied.')
+                    except Exception as exc:
+                        print(f'Time-dep V refinement failed ({exc}); skipping.')
                 post_auto_state = _capture_state()
                 post_auto_selection = _capture_selection()
-                mode_key = _calibration_mode_key()
                 print('-------------------------------------------------------')
                 print(
                     f'Running adaptive residual refinement on {mode_key} '
@@ -1140,6 +1207,10 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                     temporal_smoothing=0.5, apply_spatial=True,
                     spatial_grid=12, min_window_ions=40, min_cell_ions=35,
                     max_rounds=8,
+                    # 'best' / 'ref' presets set residual_coarse_to_fine_top_k=1
+                    # which makes the residual ~12x faster on mc at audit-equivalent
+                    # quality (rank candidates by fast_mrp, Voigt-verify only top 1).
+                    coarse_to_fine_top_k=getattr(variables, 'residual_coarse_to_fine_top_k', None),
                 )
                 try:
                     result = adaptive_residual_calibration(
@@ -1157,6 +1228,12 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                     print(f'Adaptive residual refinement failed; restored the auto-calibration result: {exc}')
                     return
 
+                # Reference-fit calibration was moved out of the
+                # V+Bowl pipeline. It now lives in the ion-list step
+                # (helper_ion_list.call_ion_list) where the user has
+                # already supplied an expected-element list -- that's
+                # the right place for absolute-m/c alignment.
+
                 print(
                     'Hybrid final weighted Gaussian score '
                     f"(train={result['final_quality']['train_score']:.2f}, "
@@ -1167,6 +1244,11 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                 else:
                     print('Adaptive residual accepted no additional steps; auto-calibration result was kept.')
         finally:
+            try:
+                with out_status:
+                    print(f"[Hybrid auto + residual] finished in {time.perf_counter() - _t_hybrid_start:.1f}s")
+            except Exception:
+                pass
             hybrid_button.disabled = False
             simple_hybrid_button.disabled = False
             try:
@@ -1321,6 +1403,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             sample_size_b_help,
             bin_size_b,
             fit_mode_b,
+            bowl_method_b,
             sampling_mode_b,
             maximum_cal_method_b,
             maximum_sample_method_b,
@@ -1544,97 +1627,119 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     # ------------------------------------------------------------------
     calibration_profile = widgets.Dropdown(
         options=[
-            ('Old (default, committed behavior)', 'old'),
-            ('New (benchmark-tuned: faster + better residual on tested dataset)', 'new'),
+            ('Adaptive residual (default)', 'new'),
+            ('+ time-drift correction (recommended)', 'best'),
+            ('Legacy adaptive residual (no c2f speedup)', 'old'),
         ],
-        value='old',
+        value='new',
         description='Config preset:',
         style={'description_width': 'initial'},
         layout=widgets.Layout(width='720px'),
     )
-    profile_help = widgets.HTML(
-        value=(
-            '<div style="font-size:11px; color:#555; margin: 2px 0 8px 0;">'
-            '<b>"Old"</b> = committed defaults, untouched. '
-            '<b>"New"</b> = identical to "Old" <i>except</i> the adaptive-residual '
-            '<code>n_windows=32</code> (default 24). On the audited Nimonic NiC1 '
-            'dataset, this single-knob change was the only config in the 60-config '
-            'sweep that beat "Old" on mc peak structure on BOTH axes simultaneously: '
-            '+3 mc peaks (53→56) AND +31% mc geomean MRP (576→753), while '
-            'adding 57 tof peaks (73→130) at a small 8% tof MRP cost. Every '
-            'other "tuning" I tried earlier (prominence, template_bin, fast_score, '
-            'apply_spatial, V+Bowl variants, etc.) either gamed the MRP metric by '
-            'merging peaks or had zero effect because the V+Bowl optimizer reverts '
-            'on this dataset. <b>Validate on your own datasets before trusting this '
-            'preset as a default.</b>'
-            '</div>'
-        ),
-        layout=widgets.Layout(width='960px'),
-    )
 
     def _apply_profile(change):
         new_profile = change.get('new', calibration_profile.value) if isinstance(change, dict) else change
+
+        # Reset shared widget values to OLD defaults first; the per-profile
+        # branches below override only the knobs they need to.
+        def _reset_widgets_to_old():
+            sample_size_b.value = 5
+            sampling_mode_b.value = 'cartesian'
+            bin_size_b.value = 0.01
+            fit_mode_b.value = 'robust_fit'
+            sample_size_v.value = 10000
+            bin_size_v.value = 0.01
+            model_v.value = 'robust_fit'
+            refine_nelder_mead_widget.value = False
+            bin_size.value = 0.1
+
+        def _clear_opt_in_attrs():
+            for attr in (
+                'voltage_bowl_above_ceiling_strategy',
+                'voltage_bowl_optimizer_metric',
+                'residual_fast_candidate_score',
+                'residual_coarse_to_fine_top_k',
+                'use_time_dep_v',
+            ):
+                if hasattr(variables, attr):
+                    try:
+                        delattr(variables, attr)
+                    except AttributeError:
+                        pass
+
         if new_profile == 'new':
-            # New preset on this dataset = OLD bowl/voltage/histogram defaults
-            # UNCHANGED, with the single residual change `n_windows=32`. The
-            # earlier-claimed bowl/voltage/voigt_capped/fast_score wins were
-            # withdrawn after the peak-quality audit at 2M ions showed they
-            # either merge peaks (gaming MRP) or are no-ops.
-            sample_size_b.value = 5
-            sampling_mode_b.value = 'cartesian'
-            bin_size_b.value = 0.01
-            fit_mode_b.value = 'robust_fit'
-            sample_size_v.value = 10000
-            bin_size_v.value = 0.01
-            model_v.value = 'robust_fit'
-            refine_nelder_mead_widget.value = False
-            bin_size.value = 0.1
+            # 'new' = default Hybrid: legacy iterative V+Bowl + adaptive
+            # residual with coarse-to-fine top_k=1 (audited safe at 2M).
+            # Identical V+Bowl path as FAST -- no double-correction risk.
+            _reset_widgets_to_old()
+            _clear_opt_in_attrs()
             variables.calibration_profile = 'new'
-            # No V+Bowl opt-ins under the audited "new" preset.
-            for attr in (
-                'voltage_bowl_above_ceiling_strategy',
-                'voltage_bowl_optimizer_metric',
-                'residual_fast_candidate_score',
-            ):
-                if hasattr(variables, attr):
-                    try:
-                        delattr(variables, attr)
-                    except AttributeError:
-                        pass
-            # Adaptive Residual tab widgets — only n_windows differs.
-            _adaptive_apply_profile('new')
+            variables.residual_coarse_to_fine_top_k = 1
+            _adaptive_apply_profile('old')
+        elif new_profile == 'best':
+            # 'best' = 'new' + time-dep V refinement (M3v2). The V+Bowl
+            # path is the same legacy iterative loop as FAST and 'new';
+            # time-drift correction sits between V+Bowl and the residual.
+            _reset_widgets_to_old()
+            _clear_opt_in_attrs()
+            variables.calibration_profile = 'best'
+            variables.use_time_dep_v = True
+            variables.residual_coarse_to_fine_top_k = 1
+            _adaptive_apply_profile('old')
         else:
-            sample_size_b.value = 5
-            sampling_mode_b.value = 'cartesian'
-            bin_size_b.value = 0.01
-            fit_mode_b.value = 'robust_fit'
-            sample_size_v.value = 10000
-            bin_size_v.value = 0.01
-            model_v.value = 'robust_fit'
-            refine_nelder_mead_widget.value = False
-            bin_size.value = 0.1
+            # Sequential V+Bowl (old): legacy iterative V+Bowl + adaptive
+            # residual. Coarse-to-fine top_k=1 is enabled here too because
+            # it speeds the residual ~3x on the legacy warm-start as well
+            # (the c2f trick is warm-start-agnostic: it just replaces the
+            # all-candidate Voigt scoring with fast_mrp ranking + 1-of-K
+            # Voigt verification). If quality regresses on this preset for
+            # a given dataset, unset variables.residual_coarse_to_fine_top_k
+            # before pressing Hybrid.
+            _reset_widgets_to_old()
+            _clear_opt_in_attrs()
             variables.calibration_profile = 'old'
-            # Remove the opt-in attributes so behavior is fully legacy.
-            for attr in (
-                'voltage_bowl_above_ceiling_strategy',
-                'voltage_bowl_optimizer_metric',
-                'residual_fast_candidate_score',
-            ):
-                if hasattr(variables, attr):
-                    try:
-                        delattr(variables, attr)
-                    except AttributeError:
-                        pass
+            variables.residual_coarse_to_fine_top_k = 1
             _adaptive_apply_profile('old')
 
     calibration_profile.observe(_apply_profile, names='value')
     # Initialize variables.calibration_profile (defaults to 'old' = current behavior).
     variables.calibration_profile = 'old'
 
+    # User-facing summary of what each preset actually changes. Kept in sync
+    # with _apply_profile above and the per-button code paths
+    # (automatic_calibration, on_hybrid_auto_residual, initial_calibration).
+    profile_note = widgets.HTML(
+        value=(
+            '<div style="font-size:11px; color:#444; '
+            'background:#f7f7f7; border:1px solid #ddd; padding:6px 8px; '
+            'border-radius:4px; max-width:720px; line-height:1.45;">'
+            '<b>What this preset changes</b><br>'
+            'Every button now uses the same well-behaved <b>legacy '
+            'sequential V+Bowl</b> path (Voltage&rarr;Bowl iterative '
+            'optimiser). The preset only changes what <b>Hybrid auto + '
+            'residual</b> (and the combined <b>BEST</b>) does <i>after</i> '
+            'the V+Bowl stage:'
+            '<ul style="margin:4px 0 4px 16px;">'
+            '<li><b>Adaptive residual (default)</b>: V+Bowl &rarr; '
+            'adaptive residual with coarse-to-fine top_k=1 (audited '
+            'safe; ~3x faster residual than legacy).</li>'
+            '<li><b>+ time-drift correction</b> (recommended): V+Bowl '
+            '&rarr; per-ion-index time-drift correction (M3v2) &rarr; '
+            'adaptive residual. Cancels HV / temperature drift that '
+            'leaves residual mass shifts in long runs. See explanation '
+            'below.</li>'
+            '<li><b>Legacy adaptive residual</b>: V+Bowl &rarr; adaptive '
+            'residual without the coarse-to-fine speedup. Slower but '
+            'matches the pre-2026 reference behaviour exactly if you '
+            'need bit-identical results.</li>'
+        ),
+        layout=widgets.Layout(width='720px'),
+    )
+
     profile_panel = widgets.VBox([
         widgets.HTML('<b>Calibration profile</b>'),
         calibration_profile,
-        profile_help,
+        profile_note,
     ], layout=widgets.Layout(border='1px solid #ccc', padding='6px', margin='0 0 8px 0'))
 
     mode_tabs.selected_index = 0

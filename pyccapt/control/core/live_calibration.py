@@ -508,8 +508,11 @@ class LiveCalibrationWorker(QtCore.QThread):
         )
         while not self._stop_event.is_set():
             # Sleep first so the very first tick has events to look at.
-            deadline = time.time() + self._refit_interval_s
-            while time.time() < deadline:
+            # Use monotonic clock for elapsed-time math; otherwise an NTP
+            # adjustment / manual time change can either skip a refit
+            # entirely or fire many in a row.
+            deadline = time.monotonic() + self._refit_interval_s
+            while time.monotonic() < deadline:
                 if self._stop_event.is_set():
                     return
                 self.msleep(200)

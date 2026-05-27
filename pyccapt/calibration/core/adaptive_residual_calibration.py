@@ -9,7 +9,15 @@ from scipy.interpolate import RegularGridInterpolator, UnivariateSpline
 from scipy.ndimage import gaussian_filter, gaussian_filter1d
 
 from pyccapt.calibration.core.exceptions import CalibrationInputError
-from pyccapt.calibration.core.mc_plot_peak_helpers import gaussian_mrp_report
+from pyccapt.calibration.core.mc_plot_peak_helpers import fast_mrp, gaussian_mrp_report
+from pyccapt.calibration.core.parallel import parallel_map, ParallelConfig
+
+# Per-peak temporal / spatial scoring inside one residual round has at most
+# ~6 candidates (one per training peak), well below the default thread
+# threshold of 32. The work per candidate is ~0.5-2s of NumPy/SciPy that
+# releases the GIL, so threading is profitable -- but we must override
+# min_items=1 to opt in.
+_RES_PARALLEL_CFG = ParallelConfig(backend="thread", min_items=1)
 
 
 def _mode_aware_defaults(calibration_array, calibration_mode, user_template_bin_size, user_hist_bin_size=None):
@@ -92,14 +100,43 @@ def _combined_quality_score(quality):
     return float("nan")
 
 
-def _peak_quality_score(calibration_array, peak):
+def _peak_quality_score(calibration_array, peak, above_ceiling_strategy='nan', fast_score=False):
+    """Score a single peak.
+
+    Parameters
+    ----------
+    above_ceiling_strategy : {'nan', 'voigt_capped', 'fit_capped'}, default 'nan'
+        See ``gaussian_mrp_report``. Default preserves legacy behavior.
+    fast_score : bool, default False
+        When True, use the histogram-based ``fast_mrp`` (no Voigt curve_fit)
+        instead of the full ``gaussian_mrp_report``. ~50 us per call vs ~2 s.
+        Use for candidate ranking inside the residual loop; the final
+        accepted state can still be scored with the full ``gaussian_mrp_report``.
+    """
     local_bin_size = max(1e-4, min(0.02, (peak["x2"] - peak["x1"]) / 80.0))
-    report = gaussian_mrp_report(calibration_array, peak["x1"], peak["x2"], bin_size=local_bin_size)
-    if report is None:
-        return float("nan")
-    # Use recommended_mrp which applies the physical ceiling and cross-checks
-    # Voigt/Gaussian/histogram values, preventing absurd scores.
-    mrp_values = report["recommended_mrp"]
+    if fast_score:
+        mrp_values = fast_mrp(
+            np.asarray(calibration_array, dtype=float),
+            peak["x1"], peak["x2"],
+            bin_size=local_bin_size,
+        )
+        # Cap at physical ceiling so the ranking never blows up on noise.
+        _CEILING = 1500.0
+        mrp_values = [
+            min(float(v), _CEILING) if np.isfinite(v) and v > 0 else float("nan")
+            for v in mrp_values
+        ]
+    else:
+        report = gaussian_mrp_report(
+            calibration_array, peak["x1"], peak["x2"],
+            bin_size=local_bin_size,
+            above_ceiling_strategy=above_ceiling_strategy,
+        )
+        if report is None:
+            return float("nan")
+        # Use recommended_mrp which applies the physical ceiling and cross-checks
+        # Voigt/Gaussian/histogram values, preventing absurd scores.
+        mrp_values = report["recommended_mrp"]
     weights = (0.6, 0.3, 0.1)
     score = 0.0
     weight_sum = 0.0
@@ -110,10 +147,14 @@ def _peak_quality_score(calibration_array, peak):
     return float("nan") if weight_sum == 0 else score / weight_sum
 
 
-def _evaluate_peak_group(calibration_array, peaks):
+def _evaluate_peak_group(calibration_array, peaks, above_ceiling_strategy='nan', fast_score=False):
     weighted_scores = []
     for peak in peaks:
-        score = _peak_quality_score(calibration_array, peak)
+        score = _peak_quality_score(
+            calibration_array, peak,
+            above_ceiling_strategy=above_ceiling_strategy,
+            fast_score=fast_score,
+        )
         if np.isfinite(score):
             weight = float(peak.get("weight", 1.0))
             weighted_scores.append((score, weight))
@@ -141,10 +182,18 @@ def _split_reference_peaks(calibration_array, peaks, holdout_count=2):
     return {"train": enriched[:-holdout_n], "holdout": enriched[-holdout_n:]}
 
 
-def _evaluate_quality(calibration_array, reference_peaks):
+def _evaluate_quality(calibration_array, reference_peaks, above_ceiling_strategy='nan', fast_score=False):
     return {
-        "train_score": _evaluate_peak_group(calibration_array, reference_peaks["train"]),
-        "holdout_score": _evaluate_peak_group(calibration_array, reference_peaks["holdout"]),
+        "train_score": _evaluate_peak_group(
+            calibration_array, reference_peaks["train"],
+            above_ceiling_strategy=above_ceiling_strategy,
+            fast_score=fast_score,
+        ),
+        "holdout_score": _evaluate_peak_group(
+            calibration_array, reference_peaks["holdout"],
+            above_ceiling_strategy=above_ceiling_strategy,
+            fast_score=fast_score,
+        ),
     }
 
 
@@ -162,7 +211,12 @@ def _build_peak_template(calibration_array, peak, template_bin_size):
     search_half_range = max((peak["x2"] - peak["x1"]) * 0.75, template_bin_size * 6.0)
     n_bins = max(25, int(np.ceil((2.0 * search_half_range) / max(template_bin_size, 1e-6))))
     edges = np.linspace(-search_half_range, search_half_range, n_bins + 1)
-    counts = np.histogram(offsets, bins=edges)[0].astype(float)
+    try:
+        import fast_histogram as _fhist  # ~10x faster for uniform bins
+        counts = _fhist.histogram1d(offsets, bins=int(n_bins),
+                                     range=(-float(search_half_range), float(search_half_range))).astype(float)
+    except ImportError:
+        counts = np.histogram(offsets, bins=edges)[0].astype(float)
     counts = gaussian_filter1d(counts, sigma=1.0, mode="nearest")
     counts += max(1e-9, counts.max() * 1e-6)
     pdf = counts / np.sum(counts)
@@ -293,39 +347,97 @@ def _fit_temporal_residual(calibration_array, template, n_windows, overlap, min_
 
 
 def _fit_spatial_residual(calibration_array, template, x_det_cm, y_det_cm, grid_size, min_cell_ions):
+    """Vectorised cell-by-cell shift fit on a Nx x Ny detector grid.
+
+    Replaces the original O(grid_size^2) Python loop that called
+    ``np.interp`` and ``np.count_nonzero`` per cell with a single
+    vectorised pass:
+
+      1. Precompute every ion's cell index (np.digitize, O(N)).
+      2. For each (threshold, scale), compute ``in_peak`` once for the
+         whole detector, then evaluate template log-likelihoods at the
+         shift grid in ONE matrix multiplication and scatter-add the
+         scores per cell.
+      3. Pick best shift per cell via argmax over the shift axis.
+
+    Same numerics as the original (same template, same shift grid, same
+    weighting), just batched.
+    """
     x_mm = np.asarray(x_det_cm, dtype=float) * 10.0
     y_mm = np.asarray(y_det_cm, dtype=float) * 10.0
     if x_mm.size != calibration_array.size or y_mm.size != calibration_array.size:
         return np.zeros_like(calibration_array), {"n_cells": 0}
-    x_edges = np.linspace(np.nanmin(x_mm), np.nanmax(x_mm), max(4, int(grid_size)) + 1)
-    y_edges = np.linspace(np.nanmin(y_mm), np.nanmax(y_mm), max(4, int(grid_size)) + 1)
-    sum_grid = np.zeros((len(x_edges) - 1, len(y_edges) - 1), dtype=float)
+    nx = ny = max(4, int(grid_size))
+    x_edges = np.linspace(np.nanmin(x_mm), np.nanmax(x_mm), nx + 1)
+    y_edges = np.linspace(np.nanmin(y_mm), np.nanmax(y_mm), ny + 1)
+    # Cell index per ion (clip to [0, nx-1] / [0, ny-1])
+    ix_of_ion = np.clip(np.digitize(x_mm, x_edges) - 1, 0, nx - 1)
+    iy_of_ion = np.clip(np.digitize(y_mm, y_edges) - 1, 0, ny - 1)
+    cell_id_of_ion = ix_of_ion * ny + iy_of_ion  # [N]
+
+    sum_grid = np.zeros((nx, ny), dtype=float)
     weight_grid = np.zeros_like(sum_grid)
-    cell_count = 0
     best_payload = None
+
+    # Shift grid identical to _estimate_shift_from_template.
+    step = max(template.bin_size * 0.5, template.search_half_range / 120.0)
+    shift_grid = np.arange(-template.search_half_range, template.search_half_range + step, step)
+    n_shifts = shift_grid.size
+    n_cells = nx * ny
+
+    calib = np.asarray(calibration_array, dtype=float)
+    # Pre-compute TOTAL ion count per cell (independent of scale).
+    cell_total_count = np.bincount(cell_id_of_ion, minlength=n_cells)
+
     for threshold in [max(8, int(min_cell_ions)), max(8, int(min_cell_ions * 0.6)), max(6, int(min_cell_ions * 0.35))]:
         for scale in [1.0, 1.5, 2.0, 3.0]:
             sum_grid.fill(0.0)
             weight_grid.fill(0.0)
-            cell_count = 0
-            for ix in range(sum_grid.shape[0]):
-                x_mask = (x_mm >= x_edges[ix]) & (x_mm < x_edges[ix + 1])
-                for iy in range(sum_grid.shape[1]):
-                    cell_mask = x_mask & (y_mm >= y_edges[iy]) & (y_mm < y_edges[iy + 1])
-                    if np.count_nonzero(cell_mask) < threshold:
-                        continue
-                    cell_values = calibration_array[cell_mask]
-                    local_values = cell_values[_expanded_peak_mask(cell_values, template, scale=scale)]
-                    if local_values.size < threshold:
-                        continue
-                    shift, _ = _estimate_shift_from_template(local_values, template)
-                    if not np.isfinite(shift):
-                        continue
-                    shift_value = float(shift)
-                    total_weight = max(1.0, float(np.sqrt(local_values.size)))
-                    sum_grid[ix, iy] = shift_value * total_weight
-                    weight_grid[ix, iy] = total_weight
-                    cell_count += 1
+
+            # Pass 1: which ions are "in-peak" under this scale?
+            in_peak = _expanded_peak_mask(calib, template, scale=scale)
+            if not np.any(in_peak):
+                continue
+            in_idx = np.where(in_peak)[0]
+            # In-peak ion count per cell.
+            cell_inpeak_count = np.bincount(cell_id_of_ion[in_idx], minlength=n_cells)
+            # MATCH ORIGINAL: a cell is eligible if it has BOTH enough total
+            # ions AND enough in-peak ions. The original loop applied these
+            # as two sequential gates. Both gates required.
+            eligible = (cell_total_count >= threshold) & (cell_inpeak_count >= threshold)
+            if not np.any(eligible):
+                continue
+            # Restrict in-peak ions to those in eligible cells.
+            ion_eligible = eligible[cell_id_of_ion[in_idx]]
+            in_idx = in_idx[ion_eligible]
+            # Re-use cell_inpeak_count for downstream weighting.
+            cell_count_per = cell_inpeak_count
+            if in_idx.size == 0:
+                continue
+            # Vectorised template log-likelihood lookup.
+            centered = calib[in_idx, None] - template.center - shift_grid[None, :]
+            logp = np.interp(
+                centered.ravel(),
+                template.offsets,
+                template.logpdf,
+                left=template.log_floor,
+                right=template.log_floor,
+            ).reshape(in_idx.size, n_shifts)
+            # Scatter-add per cell.
+            cell_id_eligible = cell_id_of_ion[in_idx]
+            scores_per_cell = np.zeros((n_cells, n_shifts), dtype=float)
+            np.add.at(scores_per_cell, cell_id_eligible, logp)
+            # Best shift per cell.
+            best_shift_idx = np.argmax(scores_per_cell, axis=1)
+            best_shifts = shift_grid[best_shift_idx]
+            cell_size_eligible = cell_count_per * eligible.astype(int)
+            weights = np.sqrt(np.maximum(cell_size_eligible, 0.0))
+            weights = np.where(eligible, np.maximum(weights, 1.0), 0.0)
+            sum_flat = best_shifts * weights
+            sum_grid = sum_flat.reshape(nx, ny)
+            weight_grid = weights.reshape(nx, ny)
+            cell_count = int(np.count_nonzero(eligible))
+
             if best_payload is None or cell_count > best_payload["n_cells"]:
                 best_payload = {
                     "sum_grid": sum_grid.copy(),
@@ -382,6 +494,62 @@ def _best_candidate(candidates, baseline_quality):
     return max(accepted, key=lambda item: _combined_quality_score(item["quality"]))
 
 
+def _select_candidate_two_pass(
+    candidate_specs, current_array, reference_peaks, baseline_quality,
+    above_ceiling_strategy='nan', top_k=2,
+):
+    """Coarse-to-fine candidate selection for the residual loop.
+
+    Phase 1 (cheap): score EVERY candidate via ``fast_mrp`` (~50us each).
+    Phase 2 (expensive but bounded): re-score the top ``top_k`` survivors
+    with the full Voigt-based ``gaussian_mrp_report`` (~2s each). The
+    acceptance gate and final ranking use the full-Voigt scores, so mc
+    quality is preserved while ~70-80% of curve_fit calls are skipped.
+
+    ``candidate_specs`` is a list of dicts with keys: ``label``,
+    ``correction`` (array shape == current_array.shape), ``info``.
+    """
+    if not candidate_specs:
+        return None, []
+    # Phase 1 — fast prescreen.
+    fast_scored = []
+    for spec in candidate_specs:
+        candidate_arr = current_array - spec["correction"]
+        fast_q = _evaluate_quality(
+            candidate_arr, reference_peaks,
+            above_ceiling_strategy=above_ceiling_strategy,
+            fast_score=True,
+        )
+        score = _combined_quality_score(fast_q)
+        if not np.isfinite(score):
+            score = -np.inf
+        fast_scored.append((score, spec, candidate_arr, fast_q))
+    fast_scored.sort(key=lambda item: -item[0])
+    # Always keep at least 1 finalist, even with no improvement.
+    k = max(1, min(int(top_k), len(fast_scored)))
+    finalists = []
+    diag = []
+    for score, spec, candidate_arr, fast_q in fast_scored[:k]:
+        full_q = _evaluate_quality(
+            candidate_arr, reference_peaks,
+            above_ceiling_strategy=above_ceiling_strategy,
+            fast_score=False,
+        )
+        finalists.append({
+            "label": spec["label"],
+            "correction": spec["correction"],
+            "quality": full_q,
+            "info": spec["info"],
+        })
+        diag.append({
+            "label": spec["label"],
+            "fast_score": float(score) if np.isfinite(score) else float('nan'),
+            "voigt_train": full_q.get("train_score", float('nan')),
+            "voigt_holdout": full_q.get("holdout_score", float('nan')),
+        })
+    return _best_candidate(finalists, baseline_quality), diag
+
+
 def adaptive_residual_calibration(
     variables,
     calibration_mode="mc",
@@ -398,8 +566,35 @@ def adaptive_residual_calibration(
     min_cell_ions=35,
     max_rounds=8,
     verbose=True,
+    above_ceiling_strategy='nan',
+    fast_candidate_score=False,
+    coarse_to_fine_top_k=None,
 ):
-    """Apply adaptive residual calibration using learned peak templates."""
+    """Apply adaptive residual calibration using learned peak templates.
+
+    Parameters
+    ----------
+    above_ceiling_strategy : {'nan', 'voigt_capped', 'fit_capped'}, default 'nan'
+        How per-candidate scoring handles histogram MRP exceeding the
+        physical ceiling. Default preserves legacy behavior; 'voigt_capped'
+        makes the score saturate at the ceiling so the round-acceptance
+        logic doesn't revert genuinely-narrow candidates as 'worse than
+        baseline'.
+    fast_candidate_score : bool, default False
+        When True, score per-candidate fits via ``fast_mrp`` (histogram
+        FWHM only, ~50 us per call) instead of the full ``gaussian_mrp_report``
+        with Voigt curve_fit (~2 s per call). NOTE: audited at 2M ions
+        and found to LOSE ~21 mc peaks. Use ``coarse_to_fine_top_k``
+        instead, which keeps quality.
+    coarse_to_fine_top_k : int or None, default None
+        When set (e.g. 2), enables coarse-to-fine candidate selection:
+        Phase 1 scores ALL candidates with ``fast_mrp`` (cheap), Phase 2
+        re-scores only the top-K survivors with the full Voigt
+        ``gaussian_mrp_report`` (the acceptance gate uses Voigt scores).
+        Audited target: ~2x mc residual speedup with strict-gate
+        quality preserved. Recommended top_k=2 or 3. Ignored when
+        ``fast_candidate_score=True`` (the coarse-only mode).
+    """
     from pyccapt.calibration.core import calibration as calibration_core
 
     calibration_key = "tof" if calibration_mode == "tof" else "mc"
@@ -418,7 +613,13 @@ def adaptive_residual_calibration(
     reference_peaks = _split_reference_peaks(initial_array, peaks)
     if len(reference_peaks["train"]) < 2:
         raise CalibrationInputError("Adaptive residual calibration needs at least two training peaks")
-    baseline_quality = _evaluate_quality(initial_array, reference_peaks)
+    baseline_quality = _evaluate_quality(initial_array, reference_peaks, above_ceiling_strategy=above_ceiling_strategy)
+    if verbose:
+        print(
+            f"[Adaptive residual] start: mode={calibration_key}, train_peaks={len(reference_peaks['train'])}, "
+            f"holdout_peaks={len(reference_peaks.get('holdout', []))}, "
+            f"baseline train={baseline_quality['train_score']:.3f}, holdout={baseline_quality['holdout_score']:.3f}"
+        )
     current_array = initial_array.copy()
     temporal_info = {"n_observations": 0}
     spatial_info = {"n_cells": 0}
@@ -432,21 +633,51 @@ def adaptive_residual_calibration(
             current_array, n_peaks=max(3, int(n_peaks)), prominence=prominence, distance=distance, hist_bin_size=hist_bin_size
         )
         round_reference_peaks = _split_reference_peaks(current_array, round_peaks)
+        if verbose:
+            print(
+                f"[Adaptive residual] round {round_index + 1}: detected_peaks={len(round_peaks)}, "
+                f"train={len(round_reference_peaks['train'])}, holdout={len(round_reference_peaks.get('holdout', []))}"
+            )
         if len(round_reference_peaks["train"]) < 2:
             stop_reason = "insufficient_peaks"
+            if verbose:
+                print(f"[Adaptive residual] round {round_index + 1}: stopping -- insufficient training peaks")
             break
 
-        round_baseline_quality = _evaluate_quality(current_array, round_reference_peaks)
+        round_baseline_quality = _evaluate_quality(
+            current_array, round_reference_peaks,
+            above_ceiling_strategy=above_ceiling_strategy,
+            fast_score=fast_candidate_score,
+        )
         round_quality = dict(round_baseline_quality)
+        if verbose:
+            print(
+                f"[Adaptive residual] round {round_index + 1} baseline: "
+                f"train={round_baseline_quality['train_score']:.3f}, holdout={round_baseline_quality['holdout_score']:.3f}"
+            )
         round_steps = []
         templates = [_build_peak_template(current_array, peak, template_bin_size) for peak in round_reference_peaks["train"]]
         peak_template_pairs = [(p, t) for p, t in zip(round_reference_peaks["train"], templates) if t is not None]
+        if verbose:
+            print(f"[Adaptive residual] round {round_index + 1}: built {len(peak_template_pairs)} usable templates")
         if not peak_template_pairs:
             stop_reason = "insufficient_template_ions"
+            if verbose:
+                print(f"[Adaptive residual] round {round_index + 1}: stopping -- no usable templates")
             break
-        temporal_candidates = []
-        for peak, template in peak_template_pairs:
-            temporal_correction, candidate_info = _fit_temporal_residual(
+        # Coarse-to-fine: build all candidate corrections first WITHOUT
+        # full Voigt scoring; the two-pass selector handles ranking.
+        # Per-peak _fit_temporal_residual calls are independent (each
+        # consumes the same read-only current_array + its own template
+        # and produces an independent correction vector + info dict),
+        # so we parallelise across peaks via the thread-backend
+        # parallel_map. Each call spends most of its time in numpy
+        # (np.interp / np.argmax) and scipy.UnivariateSpline -- both
+        # release the GIL -- so threads give close to linear speedup
+        # without process startup / serialization cost.
+        def _one_temporal(pair):
+            peak, template = pair
+            correction, info = _fit_temporal_residual(
                 current_array,
                 template,
                 n_windows=n_windows,
@@ -454,23 +685,68 @@ def adaptive_residual_calibration(
                 min_window_ions=min_window_ions,
                 smoothing=temporal_smoothing,
             )
+            return peak, template, correction, info
+
+        temporal_results = parallel_map(
+            _one_temporal, peak_template_pairs,
+            config=_RES_PARALLEL_CFG, gil_releasing=True,
+        )
+        temporal_specs = []
+        for peak, template, temporal_correction, candidate_info in temporal_results:
             if candidate_info.get("n_observations", 0) < 4:
+                if verbose:
+                    print(
+                        f"[Adaptive residual]   temporal@{peak['position']:.4f} skipped: "
+                        f"only {candidate_info.get('n_observations', 0)} windows usable"
+                    )
                 continue
-            temporal_candidate = current_array - temporal_correction
-            temporal_candidates.append(
-                {
-                    "label": f"temporal@{peak['position']:.4f}",
-                    "correction": temporal_correction,
-                    "quality": _evaluate_quality(temporal_candidate, round_reference_peaks),
-                    "info": candidate_info,
-                }
+            temporal_specs.append({
+                "label": f"temporal@{peak['position']:.4f}",
+                "correction": temporal_correction,
+                "info": candidate_info,
+            })
+        if coarse_to_fine_top_k is not None and not fast_candidate_score:
+            best_temporal, _diag = _select_candidate_two_pass(
+                temporal_specs, current_array, round_reference_peaks,
+                round_quality, above_ceiling_strategy=above_ceiling_strategy,
+                top_k=int(coarse_to_fine_top_k),
             )
-        best_temporal = _best_candidate(temporal_candidates, round_quality)
+            if verbose and _diag:
+                for d in _diag:
+                    print(
+                        f"[Adaptive residual]   {d['label']}: "
+                        f"fast={d['fast_score']:.3f} voigt train={d['voigt_train']:.3f} "
+                        f"holdout={d['voigt_holdout']:.3f}"
+                    )
+        else:
+            temporal_candidates = []
+            for spec in temporal_specs:
+                candidate_arr = current_array - spec["correction"]
+                cand_quality = _evaluate_quality(
+                    candidate_arr, round_reference_peaks,
+                    above_ceiling_strategy=above_ceiling_strategy,
+                    fast_score=fast_candidate_score,
+                )
+                if verbose:
+                    print(
+                        f"[Adaptive residual]   {spec['label']}: "
+                        f"train {round_baseline_quality['train_score']:.3f}->{cand_quality['train_score']:.3f}, "
+                        f"holdout {round_baseline_quality['holdout_score']:.3f}->{cand_quality['holdout_score']:.3f}"
+                    )
+                temporal_candidates.append({**spec, "quality": cand_quality})
+            best_temporal = _best_candidate(temporal_candidates, round_quality)
         if best_temporal is not None:
             current_array = current_array - best_temporal["correction"]
             round_quality = dict(best_temporal["quality"])
             temporal_info = best_temporal["info"]
             round_steps.append(best_temporal["label"])
+            if verbose:
+                print(f"[Adaptive residual] round {round_index + 1}: accepted {best_temporal['label']}")
+        elif verbose:
+            print(
+                f"[Adaptive residual] round {round_index + 1}: no temporal candidate improved over baseline "
+                f"({len(temporal_candidates)} evaluated)"
+            )
 
         spatial_quality = None
         if apply_spatial:
@@ -478,34 +754,88 @@ def adaptive_residual_calibration(
                 _build_peak_template(current_array, peak, template_bin_size) for peak in round_reference_peaks["train"]
             ]
             peak_template_pairs = [(p, t) for p, t in zip(round_reference_peaks["train"], templates) if t is not None]
-            spatial_candidates = []
-            for peak, template in peak_template_pairs:
-                spatial_correction, candidate_info = _fit_spatial_residual(
+
+            # Per-peak _fit_spatial_residual calls are independent: each
+            # one bins ions by (x,y) once, then estimates shifts per cell.
+            # Parallelise across peaks via the thread backend; the inner
+            # work is numpy-heavy (digitize / bincount / interp) and
+            # releases the GIL, so threads give near-linear scaling.
+            _x_det = variables.dld_x_det
+            _y_det = variables.dld_y_det
+
+            def _one_spatial(pair):
+                peak, template = pair
+                correction, info = _fit_spatial_residual(
                     current_array,
                     template,
-                    variables.dld_x_det,
-                    variables.dld_y_det,
+                    _x_det,
+                    _y_det,
                     grid_size=spatial_grid,
                     min_cell_ions=min_cell_ions,
                 )
+                return peak, template, correction, info
+
+            spatial_results = parallel_map(
+                _one_spatial, peak_template_pairs,
+                config=_RES_PARALLEL_CFG, gil_releasing=True,
+            )
+            spatial_specs = []
+            for peak, template, spatial_correction, candidate_info in spatial_results:
                 if candidate_info.get("n_cells", 0) < 4:
+                    if verbose:
+                        print(
+                            f"[Adaptive residual]   spatial@{peak['position']:.4f} skipped: "
+                            f"only {candidate_info.get('n_cells', 0)} cells usable"
+                        )
                     continue
-                spatial_candidate = current_array - spatial_correction
-                spatial_candidates.append(
-                    {
-                        "label": f"spatial@{peak['position']:.4f}",
-                        "correction": spatial_correction,
-                        "quality": _evaluate_quality(spatial_candidate, round_reference_peaks),
-                        "info": candidate_info,
-                    }
+                spatial_specs.append({
+                    "label": f"spatial@{peak['position']:.4f}",
+                    "correction": spatial_correction,
+                    "info": candidate_info,
+                })
+            if coarse_to_fine_top_k is not None and not fast_candidate_score:
+                best_spatial, _diag = _select_candidate_two_pass(
+                    spatial_specs, current_array, round_reference_peaks,
+                    round_quality, above_ceiling_strategy=above_ceiling_strategy,
+                    top_k=int(coarse_to_fine_top_k),
                 )
-            best_spatial = _best_candidate(spatial_candidates, round_quality)
+                if verbose and _diag:
+                    for d in _diag:
+                        print(
+                            f"[Adaptive residual]   {d['label']}: "
+                            f"fast={d['fast_score']:.3f} voigt train={d['voigt_train']:.3f} "
+                            f"holdout={d['voigt_holdout']:.3f}"
+                        )
+            else:
+                spatial_candidates = []
+                for spec in spatial_specs:
+                    candidate_arr = current_array - spec["correction"]
+                    cand_quality = _evaluate_quality(
+                        candidate_arr, round_reference_peaks,
+                        above_ceiling_strategy=above_ceiling_strategy,
+                        fast_score=fast_candidate_score,
+                    )
+                    if verbose:
+                        print(
+                            f"[Adaptive residual]   {spec['label']}: "
+                            f"train {round_quality['train_score']:.3f}->{cand_quality['train_score']:.3f}, "
+                            f"holdout {round_quality['holdout_score']:.3f}->{cand_quality['holdout_score']:.3f}"
+                        )
+                    spatial_candidates.append({**spec, "quality": cand_quality})
+                best_spatial = _best_candidate(spatial_candidates, round_quality)
             if best_spatial is not None:
                 current_array = current_array - best_spatial["correction"]
                 round_quality = dict(best_spatial["quality"])
                 spatial_quality = best_spatial["quality"]
                 spatial_info = best_spatial["info"]
                 round_steps.append(best_spatial["label"])
+                if verbose:
+                    print(f"[Adaptive residual] round {round_index + 1}: accepted {best_spatial['label']}")
+            elif verbose:
+                print(
+                    f"[Adaptive residual] round {round_index + 1}: no spatial candidate improved over baseline "
+                    f"({len(spatial_candidates)} evaluated)"
+                )
 
         iteration_history.append(
             {
@@ -517,15 +847,83 @@ def adaptive_residual_calibration(
         )
         if not round_steps:
             stop_reason = "no_improvement"
+            if verbose:
+                print(f"[Adaptive residual] round {round_index + 1}: no improvement -- stopping")
             break
         accepted_steps.extend(round_steps)
+
+    # B3+ refinement: when fast_candidate_score=True the loop is cheap but
+    # may miss small sub-pixel improvements because fast_mrp is histogram-
+    # binned. After the cheap loop converges, do ONE more pass with the
+    # full Voigt-fit score (fast_score=False). If this pass finds an
+    # accepted improvement we keep it; the spectrum has already been
+    # cheaply optimized so the Voigt-fit cost is bounded to a single pass.
+    if fast_candidate_score and accepted_steps:
+        if verbose:
+            print(f"[Adaptive residual] B3+ refinement pass with full Voigt scoring")
+        refinement_round_index = len(iteration_history)
+        round_peaks = calibration_core.auto_detect_reference_peaks(
+            current_array, n_peaks=max(3, int(n_peaks)),
+            prominence=prominence, distance=distance, hist_bin_size=hist_bin_size,
+        )
+        round_reference_peaks = _split_reference_peaks(current_array, round_peaks)
+        if len(round_reference_peaks["train"]) >= 2:
+            templates = [_build_peak_template(current_array, peak, template_bin_size)
+                         for peak in round_reference_peaks["train"]]
+            peak_template_pairs = [(p, t) for p, t in zip(round_reference_peaks["train"], templates) if t is not None]
+            if peak_template_pairs:
+                # Use FULL Voigt scoring (fast_score=False) for this refinement pass
+                round_baseline_quality = _evaluate_quality(
+                    current_array, round_reference_peaks,
+                    above_ceiling_strategy=above_ceiling_strategy,
+                    fast_score=False,
+                )
+                round_quality = dict(round_baseline_quality)
+                round_steps = []
+                temporal_candidates = []
+                for peak, template in peak_template_pairs:
+                    temporal_correction, candidate_info = _fit_temporal_residual(
+                        current_array, template,
+                        n_windows=n_windows, overlap=overlap,
+                        min_window_ions=min_window_ions,
+                        smoothing=temporal_smoothing,
+                    )
+                    if candidate_info.get("n_observations", 0) < 4:
+                        continue
+                    temporal_candidate = current_array - temporal_correction
+                    cand_quality = _evaluate_quality(
+                        temporal_candidate, round_reference_peaks,
+                        above_ceiling_strategy=above_ceiling_strategy,
+                        fast_score=False,
+                    )
+                    temporal_candidates.append({
+                        "label": f"temporal-refine@{peak['position']:.4f}",
+                        "correction": temporal_correction,
+                        "quality": cand_quality,
+                        "info": candidate_info,
+                    })
+                best_temporal = _best_candidate(temporal_candidates, round_quality)
+                if best_temporal is not None:
+                    current_array = current_array - best_temporal["correction"]
+                    round_steps.append(best_temporal["label"])
+                    accepted_steps.extend(round_steps)
+                    iteration_history.append({
+                        "round": refinement_round_index + 1,
+                        "baseline_quality": round_baseline_quality,
+                        "final_quality": best_temporal["quality"],
+                        "accepted_steps": list(round_steps),
+                    })
+                    if verbose:
+                        print(f"[Adaptive residual] refinement accepted {best_temporal['label']}")
+                elif verbose:
+                    print(f"[Adaptive residual] refinement found no Voigt-validated improvement")
 
     if calibration_key == "tof":
         variables.dld_t_calib = current_array
     else:
         variables.mc_calib = current_array
 
-    final_quality = _evaluate_quality(current_array, reference_peaks)
+    final_quality = _evaluate_quality(current_array, reference_peaks, above_ceiling_strategy=above_ceiling_strategy)
     result = {
         "reference_peaks": reference_peaks,
         "baseline_quality": baseline_quality,

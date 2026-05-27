@@ -135,8 +135,15 @@ def hist_plot(
 
     variables.AptHistPlotter = mc_hist
 
+    no_peak_warning = None
+
     if ranging_mode:
-        mc_hist.plot_peaks(range_data=None, mode="range")
+        try:
+            mc_hist.plot_peaks(range_data=None, mode="range")
+        except (TypeError, ValueError, IndexError) as exc:
+            no_peak_warning = (
+                f'ranging-mode peak overlay failed: {type(exc).__name__}: {exc}'
+            )
         peaks = None
         peak_widths = None
         prominences = None
@@ -147,11 +154,32 @@ def hist_plot(
             distance=distance,
             percent=percent,
         )
-        if draw_calib_rect:
-            mc_hist.draw_rectangle(initial=initial_peak_selection)
-        if peaks_find_plot:
-            mc_hist.plot_peaks()
-        mc_hist.plot_hist_info_legend(label=label, mrp_all=mrp_all, background=None, legend_mode=legend_mode, loc="right")
+        peaks_available = peaks is not None and len(peaks) > 0
+        if not peaks_available:
+            no_peak_warning = (
+                f'no peaks satisfy prominence={prominence} and distance={distance}'
+            )
+        if draw_calib_rect and peaks_available:
+            try:
+                mc_hist.draw_rectangle(initial=initial_peak_selection)
+            except (TypeError, ValueError, IndexError) as exc:
+                no_peak_warning = (
+                    f'draw_rectangle failed: {type(exc).__name__}: {exc}'
+                )
+        if peaks_find_plot and peaks_available:
+            try:
+                mc_hist.plot_peaks()
+            except (TypeError, ValueError, IndexError) as exc:
+                no_peak_warning = f'plot_peaks failed: {type(exc).__name__}: {exc}'
+        if peaks_available:
+            try:
+                mc_hist.plot_hist_info_legend(
+                    label=label, mrp_all=mrp_all, background=None, legend_mode=legend_mode, loc="right"
+                )
+            except (TypeError, ValueError, IndexError) as exc:
+                no_peak_warning = (
+                    f'plot_hist_info_legend failed: {type(exc).__name__}: {exc}'
+                )
 
     elif plot_ranged_colors and not plot_ranged_peak:
         mc_hist.plot_range(range_data=variables.range_data, legend=True, legend_loc="upper right")
@@ -192,15 +220,31 @@ def hist_plot(
         mrp_list, mrp_list_all_peak = mc_hist.mrp_calculation()
 
     if background is not None:
-        if background in ["aspls", "fabc", "manual@4", "manual@100"]:
+        if background in [
+            "pchip_valley", "decay_inv_x", "decay_inv_sqrt", "decay_exp",
+            "aspls", "fabc", "manual@4", "manual@100",
+        ]:
             mc_hist.plot_background(mode=background)
         elif background == "user":
             mc_hist.manual_background_fit()
 
     if plot_show:
-        mc_hist.selector(selector=selector)
+        try:
+            mc_hist.selector(selector=selector)
+        except (TypeError, ValueError, IndexError) as exc:
+            if no_peak_warning is None:
+                no_peak_warning = (
+                    f'selector "{selector}" failed: {type(exc).__name__}: {exc}'
+                )
 
-    if peaks is not None and print_info and compute_mrp:
+    if no_peak_warning is not None:
+        print('=============================')
+        print('Histogram was plotted, but peak finding did not succeed.')
+        print(f'Reason: {no_peak_warning}.')
+        print('No peaks are available. Try lowering the Peak prominence / Peak distance and plot again.')
+        print('=============================')
+
+    if peaks is not None and len(peaks) > 0 and print_info and compute_mrp:
         x_axis = mc_hist.x_centers if getattr(mc_hist, 'x_centers', None) is not None else x_values[:-1]
         auto_selection = _auto_peak_selection(mc_hist)
         if auto_selection is not None:

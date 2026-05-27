@@ -19,8 +19,13 @@ def reset_on_click(variables, calibration_mode):
     """Restore the active calibration array to the dataframe's untouched values."""
     if calibration_mode.value == 'tof_calib':
         variables.dld_t_calib = variables.data['t (ns)'].to_numpy()
+        # Reset clears every correction back to raw data, so the previously
+        # applied initial calibration is no longer in place. Clearing the
+        # flag means the next auto-* button will re-run it.
+        variables.initial_calibration_done_tof = False
     elif calibration_mode.value == 'mc_calib':
         variables.mc_calib = variables.data['mc_uc (Da)'].to_numpy()
+        variables.initial_calibration_done_mc = False
     variables.clear_calibration_selection_mask()
     variables.clear_calibration_peak_range()
 

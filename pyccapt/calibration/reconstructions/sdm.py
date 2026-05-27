@@ -2,13 +2,12 @@ from copy import copy
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib import colors, rcParams
+from matplotlib import colors
 from matplotlib import cm
 from scipy.signal import find_peaks
 
 from pyccapt.calibration.data_tools.merge_range import merge_by_range
 from pyccapt.calibration.reconstructions.io_utils import save_matplotlib_figure
-
 
 def sdm(
     particles,
@@ -456,9 +455,7 @@ def sdm(
             print('3D histogram is not supported yet.')
 
         if save and variables is not None:
-            # Enable rendering for text elements
-            rcParams['svg.fonttype'] = 'none'
-            save_matplotlib_figure(fig, variables, stem=f"sdm_{figname}", formats=("png", "svg"), dpi=600)
+            save_matplotlib_figure(fig, variables, stem=f"sdm_{figname}", formats=("png", "pdf"), dpi=600)
 
         if plot:
             plt.show()
@@ -486,20 +483,17 @@ def sdm(
             circle = plt.Circle((roi[0], roi[1]), roi[2], color='white', fill=False, linewidth=1.5)
             ax1.add_artist(circle)
             if save and variables is not None:
-                # Enable rendering for text elements
-                rcParams['svg.fonttype'] = 'none'
                 save_matplotlib_figure(
                     fig1,
                     variables,
                     stem=f"disparity_roi_{figname}",
-                    formats=("png", "svg"),
+                    formats=("png", "pdf"),
                     dpi=600,
                 )
             if plot:
                 plt.show()
 
     return histograms, edges_list
-
 
 # def sdm_background(res, limit):
 #     """

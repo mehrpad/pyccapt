@@ -44,13 +44,8 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     vol_button = widgets.Button(description='Voltage correction', layout=label_layout)
     auto_button = widgets.Button(description='Auto calibration', layout=label_layout)
     auto_button_bowl = widgets.Button(description='Auto bowl calibration', layout=label_layout)
-    gaussian_mrp_button = widgets.Button(description='Gaussian MRP', layout=label_layout)
-    multi_peak_button = widgets.Button(description='Auto multi-peak calibration', layout=label_layout)
+    gaussian_mrp_button = widgets.Button(description='MRP', layout=label_layout)
     hybrid_button = widgets.Button(description='Hybrid auto + residual', layout=label_layout)
-    auto_optimize_button = widgets.Button(
-        description='Auto Optimize MRP',
-        layout=label_layout,
-    )
     initial_calib_button = widgets.Button(description='Initial calibration', layout=label_layout)
     clear_plot = widgets.Button(description="Clear plots", layout=label_layout)
 
@@ -129,9 +124,22 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         description='Fit mode:',
         layout=label_layout,
     )
+    # Bowl method: polynomial (legacy default) or RBF spline (experimental).
+    # When 'spline' is chosen, _run_bowl_correction calls new_methods.bowl_correction_spline
+    # which uses a thin-plate-spline RBF interpolator, clipped + FWHM-gated.
+    # Audited on Nimonic NiC1: mc MRP +139% vs polynomial at a cost of 1 mc peak.
+    bowl_method_b = widgets.Dropdown(
+        options=[
+            ('polynomial (default)', 'polynomial'),
+            ('spline (RBF, experimental)', 'spline'),
+        ],
+        value='polynomial',
+        description='Bowl method:',
+        layout=label_layout,
+    )
     sampling_mode_b = widgets.Dropdown(
-        options=[('polar (default)', 'polar'), ('cartesian (legacy)', 'cartesian')],
-        value=getattr(variables, 'bowl_sampling_mode', 'polar'),
+        options=[('cartesian (default)', 'cartesian'), ('polar', 'polar')],
+        value=getattr(variables, 'bowl_sampling_mode', 'cartesian'),
         description='Sampling mode:',
         layout=label_layout,
     )
@@ -157,24 +165,49 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         description='Save fig:',
         layout=label_layout,
     )
+    # Widgets in the right-most advanced column have longer labels (e.g.
+    # "Auto window update", "Refine NM (FWHM)"). The default description_width
+    # truncates them, so use a wider layout + 'initial' description width so
+    # the full text is visible.
+    wide_label_layout = widgets.Layout(width='320px')
+    wide_label_style = {'description_width': 'initial'}
+
     fast_calibration = widgets.Dropdown(
         options=[('False', False), ('True', True)],
         description='Fast calibration:',
-        layout=label_layout,
+        layout=wide_label_layout,
+        style=wide_label_style,
     )
-    automatic_window_update = widgets.Dropdown(
+    # Per-stage Nelder-Mead FWHM refinement (adapted from APyT's
+    # apyt/spectrum/align.py `optimize_correction`). Off by default so the
+    # baseline polynomial fit remains the reference behaviour.
+    refine_nelder_mead_widget = widgets.Dropdown(
         options=[('False', False), ('True', True)],
         value=False,
+        description='Refine NM (FWHM):',
+        layout=wide_label_layout,
+        style=wide_label_style,
+    )
+    automatic_window_update = widgets.Dropdown(
+        options=[('True', True), ('False', False)],
+        value=True,
         description='Auto window update:',
-        layout=label_layout,
+        layout=wide_label_layout,
+        style=wide_label_style,
     )
     lock_peak_selection = widgets.Dropdown(
         options=[('False', False), ('True', True)],
         value=False,
         description='Lock peak ions:',
-        layout=label_layout,
+        layout=wide_label_layout,
+        style=wide_label_style,
     )
-    peak_val = widgets.FloatText(value=0, description='Peak value:', layout=label_layout)
+    peak_val = widgets.FloatText(
+        value=0,
+        description='Peak value:',
+        layout=wide_label_layout,
+        style=wide_label_style,
+    )
     figure_b_size_x = widgets.FloatText(value=5.0, description="Fig. size W:", layout=label_layout)
     figure_b_size_y = widgets.FloatText(value=5.0, description="Fig. size H:", layout=label_layout)
 
@@ -345,11 +378,18 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
 
     def _peak_quality_score(peak):
         local_bin_size = max(1e-4, min(0.02, (peak['x2'] - peak['x1']) / 80.0))
+        # Opt-in: setting variables.voltage_bowl_above_ceiling_strategy to
+        # 'voigt_capped' makes narrow-peak candidates saturate at the
+        # physical ceiling instead of returning NaN. Unblocks the V+Bowl
+        # optimizer on already-well-calibrated data where every candidate
+        # would otherwise be reverted as 'worse than baseline'.
+        _strategy = getattr(variables, 'voltage_bowl_above_ceiling_strategy', 'nan')
         report = gaussian_mrp_report(
             _get_calibration_array(),
             peak['x1'],
             peak['x2'],
             bin_size=local_bin_size,
+            above_ceiling_strategy=_strategy,
         )
         if report is None:
             return float('nan'), None
@@ -528,6 +568,10 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     def _reset_both_corrections():
         variables.dld_t_calib = variables.data['t (ns)'].to_numpy()
         variables.mc_calib = variables.data['mc_uc (Da)'].to_numpy()
+        # Both calibrations are back to raw data; clear the per-mode initial
+        # calibration flags so the next auto-* button re-runs initial.
+        variables.initial_calibration_done_tof = False
+        variables.initial_calibration_done_mc = False
 
     def _auto_select_peak_for_mode(mode_value, lim_value_override, initial_peak_selection=False):
         _run_with_mode(
@@ -666,11 +710,34 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             model=model_v.value,
             bin_size=bin_size_v.value,
             peak_maximum=peak_val.value,
+            refine_nelder_mead=refine_nelder_mead_widget.value,
         )
 
     def _run_bowl_correction(plot_override=None, save_override=None):
         if not _selected_peak_ready():
             raise ValueError('Please first select a peak')
+
+        # Bowl method: 'polynomial' (legacy default) or 'spline' (RBF
+        # thin-plate-spline, clipped + FWHM-gated). User-controlled via
+        # the 'Bowl method' dropdown on the mc/tof advanced tab.
+        if bowl_method_b.value == 'spline':
+            from pyccapt.calibration.core import new_methods as _nm
+            try:
+                _nm.bowl_correction_spline(
+                    variables.dld_x_det,
+                    variables.dld_y_det,
+                    _current_voltage(),
+                    variables,
+                    det_diam,
+                    calibration_mode=_calibration_mode_key(),
+                    sample_size=sample_size_b.value,
+                    bin_size=bin_size_b.value,
+                    use_rbf=True,
+                )
+                print('Spline bowl correction applied.')
+                return
+            except Exception as exc:
+                print(f'Spline bowl failed ({exc}); falling back to polynomial bowl.')
 
         calibration.bowl_correction_main(
             variables.dld_x_det,
@@ -691,41 +758,8 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             bin_size=bin_size_b.value,
             peak_maximum=peak_val.value,
             sampling_mode=_sampling_mode_value(),
+            refine_nelder_mead=refine_nelder_mead_widget.value,
         )
-
-    def _run_multi_peak_calibration():
-        fit_v, peak_info_v = calibration.multi_peak_voltage_corr_main(
-            _current_voltage(),
-            variables,
-            calibration_mode=_calibration_mode_key(),
-            model=model_v.value,
-            bin_size=bin_size_v.value,
-            n_peaks=3,
-            prominence=prominence.value,
-            distance=distance.value,
-        )
-        print(f'Used {len(peak_info_v)} peaks for voltage correction:')
-        for peak in peak_info_v:
-            print(f'  Peak at {peak["position"]:.2f}, {peak["n_ions"]:,} ions')
-        print('Voltage fit parameters:', fit_v)
-
-        fit_b, n_peaks_b = calibration.multi_peak_bowl_corr_main(
-            variables.dld_x_det,
-            variables.dld_y_det,
-            _current_voltage(),
-            variables,
-            det_diam,
-            calibration_mode=_calibration_mode_key(),
-            fit_mode=fit_mode_b.value,
-            sample_size=max(1, int(sample_size_b.value)),
-            bin_size=bin_size_b.value,
-            n_peaks=3,
-            prominence=prominence.value,
-            distance=distance.value,
-            sampling_mode=_sampling_mode_value(),
-        )
-        print(f'Used {n_peaks_b} peaks for bowl correction')
-        print('Bowl fit parameters:', fit_b)
 
     def vol_correction(_, variables, output, status_output, calibration_mode_widget, pulse_mode_value):
         vol_button.disabled = True
@@ -761,9 +795,19 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             pb_bowl.value = "<b>Finished</b>"
         bowl_button.disabled = False
 
+    def _mark_initial_done(mode_value):
+        if mode_value == 'tof_calib':
+            variables.initial_calibration_done_tof = True
+        else:
+            variables.initial_calibration_done_mc = True
+
+    def _initial_done(mode_value):
+        if mode_value == 'tof_calib':
+            return bool(getattr(variables, 'initial_calibration_done_tof', False))
+        return bool(getattr(variables, 'initial_calibration_done_mc', False))
+
     def initial_calibration(_, variables, calibration_mode_widget, flight_path_length_value):
         initial_calib_button.disabled = True
-        simple_initial_button.disabled = True
         with out, _verbosity_context():
             out.clear_output()
             if calibration_mode_widget.value == 'tof_calib':
@@ -785,11 +829,47 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                 _run_bowl_correction(plot_override=False, save_override=False)
                 print('Initial ToF calibration + bowl correction is done')
             else:
+                # Always re-pick the peak window for *this* mode before
+                # running bowl correction. Otherwise, when called from the
+                # combined mc+tof FAST/BEST flow, variables.selected_x1/x2
+                # may still hold the previous mode's window (e.g. tof units
+                # while we're now in mc), and the bowl fit would run on the
+                # wrong slice of the data.
+                _force_reselect_peak_window()
                 _prepare_locked_selection()
                 _run_bowl_correction(plot_override=False, save_override=False)
                 print('Initial m/c tab action applied bowl correction')
+        _mark_initial_done(calibration_mode_widget.value)
         initial_calib_button.disabled = False
-        simple_initial_button.disabled = False
+
+    def _ensure_initial_calibration():
+        """Run the per-mode initial calibration if it hasn't been done yet,
+        then refresh the auto-picked peak window from the current histogram.
+
+        Used by every auto-* button so users don't need to remember to click
+        "Initial calibration" first. Tracking is per-mode (mc vs tof) because
+        the two have different initial-calibration steps.
+
+        The trailing ``_force_reselect_peak_window()`` always re-runs peak
+        detection on the post-calibration data, so the auto routine starts
+        from a fresh peak window regardless of whether we just ran the
+        initial calibration or skipped it.
+        """
+        if not _initial_done(calibration_mode.value):
+            mode_label = 'ToF' if calibration_mode.value == 'tof_calib' else 'm/c'
+            print(f'Auto-running initial calibration for {mode_label} (had not been done yet).')
+            initial_calibration(None, variables, calibration_mode, flight_path_length)
+        # Always recompute the peak window after initial calibration so the
+        # auto routine starts from a freshly-detected dominant peak. Use
+        # initial_peak_selection=False so the resulting window matches what
+        # the manual workflow produces when the user presses the "Plot"
+        # button between Initial calibration and Auto calibration. With
+        # initial_peak_selection=True the rectangle is intentionally widened,
+        # which changes the optimizer trajectory and yields a different MRP.
+        try:
+            _force_reselect_peak_window(initial_peak_selection=False)
+        except Exception as exc:
+            print(f'Peak window refresh after initial calibration skipped: {exc}')
 
     def stat_plot(_, variables, calibration_mode_widget, output):
         calibration_mode_t = 'tof' if calibration_mode_widget.value == 'tof_calib' else 'mc'
@@ -842,12 +922,32 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                         print(f'{action_name} produced an invalid calibration state; reverted this step.')
                         continue
                     _update_peak_window(figure_size)
-                    quality = _evaluate_quality(reference_peaks)
+                    candidate_selection = _capture_selection()
+                    candidate_quality = _evaluate_quality(reference_peaks)
+
+                    # Re-evaluate the pre-action state using the SAME post-action
+                    # peak window. Critical in ToF: after Vol+Bowl the dominant
+                    # peak can shift by several ns; ``_update_peak_window``
+                    # refreshes ``variables.selected_x1/x2`` to the new peak
+                    # position, but ``best_selected_score`` was scored on the
+                    # OLD window. Comparing those two scores compared peaks at
+                    # different positions and routinely rejected real
+                    # improvements in ToF (where the peak moves more than in
+                    # m/c). Now both sides of the comparison are scored on the
+                    # same window for an apples-to-apples decision.
+                    _restore_state(before_state)
+                    before_quality_on_new_window = _evaluate_quality(reference_peaks)
+                    _restore_state(candidate_state)
+                    _restore_selection(candidate_selection)
+                    quality = candidate_quality
+
                     print(
                         f'After {action_name}: '
                         f'train={quality["train_score"]:.2f}, '
                         f'holdout={quality["holdout_score"]:.2f}, '
-                        f'selected={quality["selected_score"]:.2f}'
+                        f'selected={quality["selected_score"]:.2f} '
+                        f'(baseline on same window: '
+                        f'selected={before_quality_on_new_window["selected_score"]:.2f})'
                     )
 
                     has_valid_signal = (np.isfinite(quality['train_score']) and quality['train_score'] > 0) or (
@@ -859,39 +959,65 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                         print(f'{action_name} produced an invalid quality score; reverted this step.')
                         continue
 
-                    train_improved = _score_improved(quality['train_score'], best_train_score)
-                    selected_improved = _score_improved(quality['selected_score'], best_selected_score)
-                    holdout_improved = _score_improved(quality['holdout_score'], best_holdout_score)
-                    holdout_stable = _score_not_worse(quality['holdout_score'], best_holdout_score, tolerance_ratio=0.01)
-                    train_stable = _score_not_worse(quality['train_score'], best_train_score, tolerance_ratio=0.01)
+                    # Acceptance is gated by the SELECTED (dominant) peak only.
+                    # Train / holdout scores are still computed and printed for
+                    # diagnostics, but they no longer veto a step -- a low-
+                    # intensity held-out peak that wiggles by a few percent
+                    # was previously discarding real improvements on the main
+                    # peak. The held-out tolerance is also loosened from
+                    # 0.01 -> 0.05 so the diagnostic "unstable on held-out
+                    # peaks" message only fires for genuinely large regressions.
+                    baseline_selected = before_quality_on_new_window['selected_score']
+                    baseline_train = before_quality_on_new_window['train_score']
+                    baseline_holdout = before_quality_on_new_window['holdout_score']
+                    selected_improved = _score_improved(quality['selected_score'], baseline_selected)
+                    holdout_stable = _score_not_worse(
+                        quality['holdout_score'], baseline_holdout, tolerance_ratio=0.05
+                    )
 
-                    accepted = False
-                    if train_improved and holdout_stable:
-                        accepted = True
-                    elif holdout_improved and train_stable:
-                        accepted = True
-                    elif not np.isfinite(best_train_score) and selected_improved and holdout_stable:
-                        accepted = True
+                    # Opt-in: when the dominant peak's score is unreliable
+                    # (NaN or both ties at the physical ceiling), fall back
+                    # to the weighted multi-peak (train) score so the
+                    # optimizer can still differentiate candidates.
+                    #
+                    # Mode is read from
+                    # ``variables.voltage_bowl_optimizer_metric``:
+                    #   'selected' (default) -> legacy behavior (selected only)
+                    #   'train'              -> always use the multi-peak train score
+                    #   'auto'               -> use train when selected is NaN
+                    _metric_mode = getattr(variables, 'voltage_bowl_optimizer_metric', 'selected')
+                    if _metric_mode == 'train':
+                        accepted = _score_improved(quality['train_score'], baseline_train)
+                    elif _metric_mode == 'auto':
+                        if not (np.isfinite(quality['selected_score'])
+                                and np.isfinite(baseline_selected)):
+                            accepted = _score_improved(quality['train_score'], baseline_train)
+                        else:
+                            accepted = selected_improved
+                    else:  # 'selected' (default, legacy behavior)
+                        accepted = selected_improved
 
                     if accepted:
                         best_train_score = quality['train_score']
                         best_holdout_score = quality['holdout_score']
                         best_selected_score = quality['selected_score']
-                        best_state = _capture_state()
-                        best_selection = _capture_selection()
+                        best_state = candidate_state
+                        best_selection = candidate_selection
                         improved_this_round = True
+                        warn = (
+                            ' (note: held-out score regressed by >5%)'
+                            if reference_peaks['holdout'] and not holdout_stable
+                            else ''
+                        )
                         print(
                             f'Accepted {action_name}; best scores are now '
                             f'train={best_train_score:.2f}, holdout={best_holdout_score:.2f}, '
-                            f'selected={best_selected_score:.2f}'
+                            f'selected={best_selected_score:.2f}{warn}'
                         )
                     else:
                         _restore_state(before_state)
                         _restore_selection(before_selection)
-                        if reference_peaks['holdout'] and not holdout_stable:
-                            print(f'{action_name} looked unstable on held-out peaks; reverted this step.')
-                        else:
-                            print(f'No stable improvement after {action_name}; reverted this step.')
+                        print(f'No MRP improvement on the dominant peak after {action_name}; reverted this step.')
                 except Exception as exc:
                     _restore_state(before_state)
                     _restore_selection(before_selection)
@@ -928,6 +1054,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         auto_button_bowl.disabled = True
         with status_output, _verbosity_context():
             status_output.clear_output()
+            _ensure_initial_calibration()
             _prepare_locked_selection()
             _optimize_sequence(
                 [('Bowl correction', lambda: _run_bowl_correction(plot_override=False, save_override=False))],
@@ -940,81 +1067,172 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         index_fig_v.value = 1
         index_fig_b.value = 1
         auto_button_bowl.disabled = False
+        # Auto-plot the result so the user can see the corrected histogram
+        # without having to click Plot.
+        try:
+            plot_button.click()
+        except Exception:
+            pass
+
+    def _run_voltage_then_bowl():
+        """Run voltage correction followed by bowl correction as one atomic step.
+
+        Treating (Voltage, Bowl) as a single action lets ``_optimize_sequence``
+        accept or reject the pair on the combined effect, matching the manual
+        workflow (the user always presses Vol then Bowl together, even when
+        Vol alone temporarily worsens the peak before Bowl compensates).
+        Splitting them into two separate actions made the loop revert the
+        voltage half before the bowl half had a chance to recover it,
+        especially in ToF mode.
+        """
+        _run_voltage_correction(plot_override=False, save_override=False)
+        _run_bowl_correction(plot_override=False, save_override=False)
 
     def automatic_calibration(_, variables, output, status_output, calibration_mode_widget, pulse_mode_value):
+        # Auto / FAST button = the legacy iterative Voltage + Bowl
+        # optimizer. Same behavior across every preset. The fancy
+        # joint V+Bowl, time-dep V, reference-optimizer pipeline lives
+        # ONLY in the Hybrid (BEST) button because each of those stages
+        # depends on the adaptive-residual cleanup that follows.
         auto_button.disabled = True
         simple_auto_button.disabled = True
+        _t_auto_start = time.perf_counter()
         with status_output, _verbosity_context():
             status_output.clear_output()
+            print(f"[Auto calibration] start (mode={calibration_mode_widget.value})")
+            _ensure_initial_calibration()
             _prepare_locked_selection()
             _optimize_sequence(
-                [
-                    ('Voltage correction', lambda: _run_voltage_correction(plot_override=False, save_override=False)),
-                    ('Bowl correction', lambda: _run_bowl_correction(plot_override=False, save_override=False)),
-                ],
+                [('Voltage + Bowl correction', _run_voltage_then_bowl)],
                 title='Auto calibration',
                 figure_size=(figure_mc_size_x.value, figure_mc_size_y.value),
                 max_iterations=10,
                 max_no_improve=3,
                 retry_peak_window_on_stall=False,
             )
+            print(f"[Auto calibration] finished in {time.perf_counter() - _t_auto_start:.1f}s")
         index_fig_v.value = 1
         index_fig_b.value = 1
         auto_button.disabled = False
         simple_auto_button.disabled = False
+        try:
+            plot_button.click()
+        except Exception:
+            pass
+
+    def run_auto_for_mode(mode_key):
+        """Canonical 'Auto calibration' entry point for one mode. Same
+        pattern as ``run_hybrid_for_mode``: explicit mode-key arg so the
+        mc tab, tof tab, and combined-FAST paths all delegate to one
+        function and cannot drift apart.
+        """
+        calibration_mode.value = mode_key
+        automatic_calibration(None, variables, out, out_status, calibration_mode, pulse_mode)
+
+    def run_mc_auto_calibration():
+        run_auto_for_mode('mc_calib')
+
+    def run_tof_auto_calibration():
+        run_auto_for_mode('tof_calib')
 
     def on_hybrid_auto_residual(_):
         hybrid_button.disabled = True
         simple_hybrid_button.disabled = True
+        _t_hybrid_start = time.perf_counter()
         try:
             with out_status, _verbosity_context():
                 out_status.clear_output()
                 if not _selected_peak_ready():
                     print('Please first select a peak')
                     return
+                print(f"[Hybrid auto + residual] start (mode={calibration_mode.value})")
+                _ensure_initial_calibration()
                 _prepare_locked_selection()
+                _use_time_dep_v = bool(getattr(variables, 'use_time_dep_v', False))
+                mode_key = _calibration_mode_key()
+                # Hybrid V+Bowl stage: ALWAYS the legacy iterative loop now.
+                # Joint V+Bowl was removed because _ensure_initial_calibration
+                # already runs the legacy V+Bowl path inside its body, and
+                # then calling joint V+Bowl on top double-corrected the
+                # spectrum -- on the user's data this collapsed mc to one
+                # giant peak and broke tof. FAST works because it doesn't
+                # add a second V+Bowl on top; Hybrid now follows the same
+                # principle. Time-drift correction (M3v2) still runs when
+                # the preset enables it, applied on top of the same
+                # well-behaved legacy V+Bowl result that FAST produces.
                 _optimize_sequence(
-                    [
-                        ('Voltage correction', lambda: _run_voltage_correction(plot_override=False, save_override=False)),
-                        ('Bowl correction', lambda: _run_bowl_correction(plot_override=False, save_override=False)),
-                    ],
+                    [('Voltage + Bowl correction', _run_voltage_then_bowl)],
                     title='Hybrid auto + residual',
                     figure_size=(figure_mc_size_x.value, figure_mc_size_y.value),
                     max_iterations=10,
                     max_no_improve=3,
                     retry_peak_window_on_stall=False,
                 )
+                if _use_time_dep_v:
+                    # M3v2: time-dependent V refinement. Applied on top of
+                    # the legacy V+Bowl. The subsequent adaptive residual
+                    # cleans up any chunk-to-chunk drift this introduces.
+                    try:
+                        from pyccapt.calibration.core import new_methods as _nm
+                        _nm.voltage_corr_time_dependent(
+                            _current_voltage(), variables,
+                            calibration_mode=mode_key,
+                            n_time_bins=12, bin_size=0.05, sample_size=100,
+                            use_legacy_v=False,  # legacy V already applied
+                        )
+                        print('Time-dependent V refinement applied.')
+                    except Exception as exc:
+                        print(f'Time-dep V refinement failed ({exc}); skipping.')
                 post_auto_state = _capture_state()
                 post_auto_selection = _capture_selection()
-                mode_key = _calibration_mode_key()
                 print('-------------------------------------------------------')
                 print(
                     f'Running adaptive residual refinement on {mode_key} '
                     f'with tuned defaults (peaks=6, prominence=100, distance=10).'
                 )
+                # Hybrid's adaptive-residual stage reads its parameters from
+                # the calibration profile. 'old' = legacy defaults.
+                # 'new' = identical to 'old' except n_windows=32 (was 24) --
+                # the single change the peak-quality audit on the Nimonic
+                # NiC1 dataset showed beats OLD on mc on BOTH n_peaks AND
+                # MRP simultaneously. Earlier 'new' values (prominence=50,
+                # template_bin=0.005, apply_spatial=False, fast_score=True)
+                # were withdrawn after the audit showed they merged peaks
+                # or were no-ops at 2M ions.
+                _profile = getattr(variables, 'calibration_profile', 'old')
+                _n_windows = 32 if _profile == 'new' else 24
+                _res_kwargs = dict(
+                    n_peaks=6, prominence=100, distance=10, n_windows=_n_windows,
+                    overlap=0.5, template_bin_size=0.01,
+                    temporal_smoothing=0.5, apply_spatial=True,
+                    spatial_grid=12, min_window_ions=40, min_cell_ions=35,
+                    max_rounds=8,
+                    # 'best' / 'ref' presets set residual_coarse_to_fine_top_k=1
+                    # which makes the residual ~12x faster on mc at audit-equivalent
+                    # quality (rank candidates by fast_mrp, Voigt-verify only top 1).
+                    coarse_to_fine_top_k=getattr(variables, 'residual_coarse_to_fine_top_k', None),
+                )
                 try:
                     result = adaptive_residual_calibration(
                         variables,
                         calibration_mode=mode_key,
-                        n_peaks=6,
-                        prominence=100,
-                        distance=10,
-                        n_windows=24,
-                        overlap=0.5,
-                        template_bin_size=0.01,
-                        temporal_smoothing=0.5,
-                        apply_spatial=True,
-                        spatial_grid=12,
-                        min_window_ions=40,
-                        min_cell_ions=35,
-                        max_rounds=8,
                         verbose=verbose.value,
+                        above_ceiling_strategy=getattr(
+                            variables, 'voltage_bowl_above_ceiling_strategy', 'nan'
+                        ),
+                        **_res_kwargs,
                     )
                 except Exception as exc:
                     _restore_state(post_auto_state)
                     _restore_selection(post_auto_selection)
                     print(f'Adaptive residual refinement failed; restored the auto-calibration result: {exc}')
                     return
+
+                # Reference-fit calibration was moved out of the
+                # V+Bowl pipeline. It now lives in the ion-list step
+                # (helper_ion_list.call_ion_list) where the user has
+                # already supplied an expected-element list -- that's
+                # the right place for absolute-m/c alignment.
 
                 print(
                     'Hybrid final weighted Gaussian score '
@@ -1026,8 +1244,42 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                 else:
                     print('Adaptive residual accepted no additional steps; auto-calibration result was kept.')
         finally:
+            try:
+                with out_status:
+                    print(f"[Hybrid auto + residual] finished in {time.perf_counter() - _t_hybrid_start:.1f}s")
+            except Exception:
+                pass
             hybrid_button.disabled = False
             simple_hybrid_button.disabled = False
+            try:
+                plot_button.click()
+            except Exception:
+                pass
+
+    def run_hybrid_for_mode(mode_key):
+        """Canonical 'Hybrid auto + residual' entry point for one mode.
+
+        Used by every entry point so the three paths (mc tab Hybrid, tof tab
+        Hybrid, combined BEST) cannot drift apart:
+
+        - mc tab's Hybrid button -> run_hybrid_for_mode('mc_calib')
+        - tof tab's Hybrid button -> run_hybrid_for_mode('tof_calib')
+        - combined BEST button -> run_hybrid_for_mode('mc_calib') then
+          run_hybrid_for_mode('tof_calib')
+
+        Body of the per-tab Hybrid handler is reused verbatim via
+        ``on_hybrid_auto_residual`` -- the only thing this wrapper adds is
+        explicitly setting ``calibration_mode.value`` before the call, so
+        callers don't need to remember to do it.
+        """
+        calibration_mode.value = mode_key
+        on_hybrid_auto_residual(None)
+
+    def run_mc_hybrid_auto_residual():
+        run_hybrid_for_mode('mc_calib')
+
+    def run_tof_hybrid_auto_residual():
+        run_hybrid_for_mode('tof_calib')
 
     def on_gaussian_mrp(_):
         # The user explicitly clicked the Gaussian MRP button to see the
@@ -1077,61 +1329,23 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                     else:
                         print('Voigt fit FAILED')
                     print()
+                    if result.get('asymmetric_ok'):
+                        print('Asymmetric (err*expDecay) fit MRP:')
+                        print(f'  MRP(0.5)  = {result["formatted_asymmetric_mrp"][0]}')
+                        print(f'  MRP(0.1)  = {result["formatted_asymmetric_mrp"][1]}')
+                        print(f'  MRP(0.01) = {result["formatted_asymmetric_mrp"][2]}')
+                        asym_fwhm = result.get('asymmetric_fwhm', float('nan'))
+                        if np.isfinite(asym_fwhm):
+                            print(f'  Asymmetric FWHM = {asym_fwhm:.6f}')
+                    else:
+                        print('Asymmetric (err*expDecay) fit FAILED')
+                    print()
                     print('Histogram-based MRP (for comparison):')
                     print(f'  MRP(0.5)  = {result["formatted_histogram_mrp"][0]}')
                     print(f'  MRP(0.1)  = {result["formatted_histogram_mrp"][1]}')
                     print(f'  MRP(0.01) = {result["formatted_histogram_mrp"][2]}')
                     print('=' * 60)
         gaussian_mrp_button.disabled = False
-
-    def on_multi_peak_calibrate(_):
-        multi_peak_button.disabled = True
-        simple_multi_peak_button.disabled = True
-        with out_status, _verbosity_context():
-            out_status.clear_output()
-            print('=' * 60)
-            print('AUTO MULTI-PEAK CALIBRATION')
-            print('=' * 60)
-            try:
-                _prepare_locked_selection()
-                _optimize_sequence(
-                    [('Auto multi-peak calibration', _run_multi_peak_calibration)],
-                    title='Auto multi-peak calibration',
-                    figure_size=(figure_mc_size_x.value, figure_mc_size_y.value),
-                    max_iterations=10,
-                    max_no_improve=3,
-                    retry_peak_window_on_stall=False,
-                )
-                print('=' * 60)
-                print('Auto multi-peak calibration complete!')
-            except Exception as exc:
-                print(f'Auto multi-peak calibration error: {exc}')
-                print('=' * 60)
-        multi_peak_button.disabled = False
-        simple_multi_peak_button.disabled = False
-
-    def on_auto_optimize(_):
-        auto_optimize_button.disabled = True
-        simple_auto_optimize_button.disabled = True
-        try:
-            with out_status, _verbosity_context():
-                out_status.clear_output()
-                _prepare_locked_selection()
-                _optimize_sequence(
-                    [
-                        ('Voltage correction', lambda: _run_voltage_correction(plot_override=False, save_override=False)),
-                        ('Bowl correction', lambda: _run_bowl_correction(plot_override=False, save_override=False)),
-                        ('Auto multi-peak calibration', _run_multi_peak_calibration),
-                    ],
-                    title='Auto optimize MRP',
-                    figure_size=(figure_mc_size_x.value, figure_mc_size_y.value),
-                    max_iterations=20,
-                    max_no_improve=3,
-                    retry_peak_window_on_stall=True,
-                )
-        finally:
-            auto_optimize_button.disabled = False
-            simple_auto_optimize_button.disabled = False
 
     plot_button.on_click(lambda b: hist_plot(b, variables, out, calibration_mode))
     plot_stat_button.on_click(lambda b: stat_plot(b, variables, calibration_mode, out))
@@ -1141,15 +1355,13 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     vol_button.on_click(lambda b: vol_correction(b, variables, out, out_status, calibration_mode, pulse_mode))
     bowl_button.on_click(lambda b: bowl_correction(b, variables, out, out_status, calibration_mode, pulse_mode))
     clear_plot.on_click(lambda b: clear_plot_on_click(out, out_status))
-    auto_button.on_click(lambda b: automatic_calibration(b, variables, out, out_status, calibration_mode, pulse_mode))
+    auto_button.on_click(lambda b: run_auto_for_mode(calibration_mode.value))
     auto_button_bowl.on_click(
         lambda b: automatic_bowl_calibration(b, variables, out, out_status, calibration_mode, pulse_mode)
     )
     initial_calib_button.on_click(lambda b: initial_calibration(b, variables, calibration_mode, flight_path_length))
     gaussian_mrp_button.on_click(on_gaussian_mrp)
-    multi_peak_button.on_click(on_multi_peak_calibrate)
-    hybrid_button.on_click(on_hybrid_auto_residual)
-    auto_optimize_button.on_click(on_auto_optimize)
+    hybrid_button.on_click(lambda b: run_hybrid_for_mode(calibration_mode.value))
     sampling_mode_b.observe(
         lambda change: setattr(variables, 'bowl_sampling_mode', change['new']),
         names='value',
@@ -1191,6 +1403,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             sample_size_b_help,
             bin_size_b,
             fit_mode_b,
+            bowl_method_b,
             sampling_mode_b,
             maximum_cal_method_b,
             maximum_sample_method_b,
@@ -1217,19 +1430,32 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             figure_v_size_y,
         ]
     )
-    column32 = widgets.VBox([vol_button, pb_vol])
-    column34 = widgets.VBox([fast_calibration, automatic_window_update, lock_peak_selection, peak_val])
+    initial_calib_hint = widgets.HTML(
+        value=(
+            '<span style="font-size:11px; color:#a00;">'
+            'Note: <b>Initial calibration</b> must be run before <b>Voltage correction</b>. '
+            'The auto-* buttons below will run it for you automatically if it has not been done.'
+            '</span>'
+        ),
+        layout=widgets.Layout(width='420px'),
+    )
+    column32 = widgets.HBox(
+        [
+            widgets.VBox([vol_button, pb_vol]),
+            widgets.VBox([initial_calib_button, initial_calib_hint]),
+        ]
+    )
+    column34 = widgets.VBox(
+        [fast_calibration, refine_nelder_mead_widget, automatic_window_update, lock_peak_selection, peak_val]
+    )
 
     layout1 = widgets.HBox([column11, column22, column33, column34])
     layout2 = widgets.HBox([column12, column21, column32])
     advanced_action_row = widgets.HBox(
         [
-            initial_calib_button,
             auto_button,
             auto_button_bowl,
-            multi_peak_button,
             hybrid_button,
-            auto_optimize_button,
         ]
     )
     advanced_panel = widgets.VBox([layout1, layout2, advanced_action_row, widgets.VBox([out, out_status])])
@@ -1261,13 +1487,10 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     simple_reset_back_button = widgets.Button(description='Back to saved', layout=label_layout)
     simple_reset_button = widgets.Button(description='Reset correction', layout=label_layout)
     simple_clear_button = widgets.Button(description='Clear plots', layout=label_layout)
-    simple_gaussian_button = widgets.Button(description='Gaussian MRP', layout=label_layout)
+    simple_gaussian_button = widgets.Button(description='MRP', layout=label_layout)
     simple_plot_stat_button = widgets.Button(description='Plot stat', layout=label_layout)
-    simple_initial_button = widgets.Button(description='Initial calibration', layout=label_layout)
     simple_auto_button = widgets.Button(description='Auto calibration', layout=label_layout)
-    simple_multi_peak_button = widgets.Button(description='Auto multi-peak calibration', layout=label_layout)
     simple_hybrid_button = widgets.Button(description='Hybrid auto + residual', layout=label_layout)
-    simple_auto_optimize_button = widgets.Button(description='Auto Optimize MRP', layout=label_layout)
 
     simple_plot_button.on_click(lambda _: hist_plot(None, variables, out, calibration_mode))
     simple_save_button.on_click(lambda _: save_on_click(variables, calibration_mode))
@@ -1276,11 +1499,8 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     simple_clear_button.on_click(lambda _: clear_plot_on_click(out, out_status))
     simple_gaussian_button.on_click(on_gaussian_mrp)
     simple_plot_stat_button.on_click(lambda _: stat_plot(_, variables, calibration_mode, out))
-    simple_initial_button.on_click(lambda _: initial_calibration(_, variables, calibration_mode, flight_path_length))
-    simple_auto_button.on_click(lambda _: automatic_calibration(_, variables, out, out_status, calibration_mode, pulse_mode))
-    simple_multi_peak_button.on_click(on_multi_peak_calibrate)
-    simple_hybrid_button.on_click(on_hybrid_auto_residual)
-    simple_auto_optimize_button.on_click(on_auto_optimize)
+    simple_auto_button.on_click(lambda _: run_auto_for_mode(calibration_mode.value))
+    simple_hybrid_button.on_click(lambda b: run_hybrid_for_mode(calibration_mode.value))
     simple_controls = widgets.VBox(
         [
             simple_bin_size,
@@ -1331,15 +1551,15 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         calibration_mode.value = mode_key
         lim_tof.value = variables.max_tof if mode_key == 'tof_calib' else 400
         simple_mode_actions.children = (
-            simple_initial_button,
             simple_auto_button,
-            simple_multi_peak_button,
             simple_hybrid_button,
-            simple_auto_optimize_button,
         )
         _render_subtab_content()
         _render_top_content()
 
+    adaptive_panel, run_adaptive_for_mode, _adaptive_apply_profile = build_adaptive_residual_calibration_panel(
+        variables, det_diam, flight_path_length, pulse_mode
+    )
     combined_panel = build_combined_mc_tof_calibration_panel(
         variables,
         out,
@@ -1367,8 +1587,13 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         _reset_both_corrections,
         lambda: clear_plot_on_click(out, out_status),
         _print_gaussian_for_current_mode,
+        run_adaptive_for_mode,
+        _ensure_initial_calibration,
+        run_mc_hybrid_auto_residual,
+        run_tof_hybrid_auto_residual,
+        run_mc_auto_calibration,
+        run_tof_auto_calibration,
     )
-    adaptive_panel = build_adaptive_residual_calibration_panel(variables, det_diam, flight_path_length, pulse_mode)
 
     top_placeholders = [widgets.VBox(), widgets.VBox(), widgets.VBox(), widgets.VBox()]
     mode_tabs = widgets.Tab(children=top_placeholders)
@@ -1384,7 +1609,140 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
 
     mode_tabs.observe(_sync_mode_ui, names='selected_index')
     sub_tabs.observe(lambda change: _render_subtab_content(), names='selected_index')
+
+    def _sync_lim_to_mode(change):
+        # Keep lim_tof aligned with the current calibration mode so callers
+        # that switch calibration_mode programmatically (e.g. the combined
+        # mc+tof tab's fast / best buttons looping over both modes) don't
+        # plot tof with the m/c limit or vice versa.
+        new_value = change.get('new', calibration_mode.value)
+        lim_tof.value = variables.max_tof if new_value == 'tof_calib' else 400
+
+    calibration_mode.observe(_sync_lim_to_mode, names='value')
+
+    # ------------------------------------------------------------------
+    # Calibration profile selector — opt into the benchmark-derived "new"
+    # configuration without overwriting the committed defaults. See
+    # ``benchmark_results/REPORT.md`` for which knobs change.
+    # ------------------------------------------------------------------
+    calibration_profile = widgets.Dropdown(
+        options=[
+            ('Adaptive residual (default)', 'new'),
+            ('+ time-drift correction (recommended)', 'best'),
+            ('Legacy adaptive residual (no c2f speedup)', 'old'),
+        ],
+        value='new',
+        description='Config preset:',
+        style={'description_width': 'initial'},
+        layout=widgets.Layout(width='720px'),
+    )
+
+    def _apply_profile(change):
+        new_profile = change.get('new', calibration_profile.value) if isinstance(change, dict) else change
+
+        # Reset shared widget values to OLD defaults first; the per-profile
+        # branches below override only the knobs they need to.
+        def _reset_widgets_to_old():
+            sample_size_b.value = 5
+            sampling_mode_b.value = 'cartesian'
+            bin_size_b.value = 0.01
+            fit_mode_b.value = 'robust_fit'
+            sample_size_v.value = 10000
+            bin_size_v.value = 0.01
+            model_v.value = 'robust_fit'
+            refine_nelder_mead_widget.value = False
+            bin_size.value = 0.1
+
+        def _clear_opt_in_attrs():
+            for attr in (
+                'voltage_bowl_above_ceiling_strategy',
+                'voltage_bowl_optimizer_metric',
+                'residual_fast_candidate_score',
+                'residual_coarse_to_fine_top_k',
+                'use_time_dep_v',
+            ):
+                if hasattr(variables, attr):
+                    try:
+                        delattr(variables, attr)
+                    except AttributeError:
+                        pass
+
+        if new_profile == 'new':
+            # 'new' = default Hybrid: legacy iterative V+Bowl + adaptive
+            # residual with coarse-to-fine top_k=1 (audited safe at 2M).
+            # Identical V+Bowl path as FAST -- no double-correction risk.
+            _reset_widgets_to_old()
+            _clear_opt_in_attrs()
+            variables.calibration_profile = 'new'
+            variables.residual_coarse_to_fine_top_k = 1
+            _adaptive_apply_profile('old')
+        elif new_profile == 'best':
+            # 'best' = 'new' + time-dep V refinement (M3v2). The V+Bowl
+            # path is the same legacy iterative loop as FAST and 'new';
+            # time-drift correction sits between V+Bowl and the residual.
+            _reset_widgets_to_old()
+            _clear_opt_in_attrs()
+            variables.calibration_profile = 'best'
+            variables.use_time_dep_v = True
+            variables.residual_coarse_to_fine_top_k = 1
+            _adaptive_apply_profile('old')
+        else:
+            # Sequential V+Bowl (old): legacy iterative V+Bowl + adaptive
+            # residual. Coarse-to-fine top_k=1 is enabled here too because
+            # it speeds the residual ~3x on the legacy warm-start as well
+            # (the c2f trick is warm-start-agnostic: it just replaces the
+            # all-candidate Voigt scoring with fast_mrp ranking + 1-of-K
+            # Voigt verification). If quality regresses on this preset for
+            # a given dataset, unset variables.residual_coarse_to_fine_top_k
+            # before pressing Hybrid.
+            _reset_widgets_to_old()
+            _clear_opt_in_attrs()
+            variables.calibration_profile = 'old'
+            variables.residual_coarse_to_fine_top_k = 1
+            _adaptive_apply_profile('old')
+
+    calibration_profile.observe(_apply_profile, names='value')
+    # Initialize variables.calibration_profile (defaults to 'old' = current behavior).
+    variables.calibration_profile = 'old'
+
+    # User-facing summary of what each preset actually changes. Kept in sync
+    # with _apply_profile above and the per-button code paths
+    # (automatic_calibration, on_hybrid_auto_residual, initial_calibration).
+    profile_note = widgets.HTML(
+        value=(
+            '<div style="font-size:11px; color:#444; '
+            'background:#f7f7f7; border:1px solid #ddd; padding:6px 8px; '
+            'border-radius:4px; max-width:720px; line-height:1.45;">'
+            '<b>What this preset changes</b><br>'
+            'Every button now uses the same well-behaved <b>legacy '
+            'sequential V+Bowl</b> path (Voltage&rarr;Bowl iterative '
+            'optimiser). The preset only changes what <b>Hybrid auto + '
+            'residual</b> (and the combined <b>BEST</b>) does <i>after</i> '
+            'the V+Bowl stage:'
+            '<ul style="margin:4px 0 4px 16px;">'
+            '<li><b>Adaptive residual (default)</b>: V+Bowl &rarr; '
+            'adaptive residual with coarse-to-fine top_k=1 (audited '
+            'safe; ~3x faster residual than legacy).</li>'
+            '<li><b>+ time-drift correction</b> (recommended): V+Bowl '
+            '&rarr; per-ion-index time-drift correction (M3v2) &rarr; '
+            'adaptive residual. Cancels HV / temperature drift that '
+            'leaves residual mass shifts in long runs. See explanation '
+            'below.</li>'
+            '<li><b>Legacy adaptive residual</b>: V+Bowl &rarr; adaptive '
+            'residual without the coarse-to-fine speedup. Slower but '
+            'matches the pre-2026 reference behaviour exactly if you '
+            'need bit-identical results.</li>'
+        ),
+        layout=widgets.Layout(width='720px'),
+    )
+
+    profile_panel = widgets.VBox([
+        widgets.HTML('<b>Calibration profile</b>'),
+        calibration_profile,
+        profile_note,
+    ], layout=widgets.Layout(border='1px solid #ccc', padding='6px', margin='0 0 8px 0'))
+
     mode_tabs.selected_index = 0
     _sync_mode_ui()
     _render_top_content()
-    display(mode_tabs)
+    display(widgets.VBox([profile_panel, mode_tabs]))

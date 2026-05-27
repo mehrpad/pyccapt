@@ -1,9 +1,10 @@
+from collections.abc import Mapping
 from copy import copy
 
 import fast_histogram
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib import colors, rcParams
+from matplotlib import colors
 from matplotlib.tri import Triangulation
 from scipy.optimize import curve_fit
 from scipy.signal import find_peaks, peak_prominences, peak_widths
@@ -13,6 +14,7 @@ from pyccapt.calibration.core.parallel import parallel_map
 from pyccapt.calibration.core.validation import (
     BOWL_FIT_MODES,
     BOWL_SAMPLE_METHODS,
+    CALIBRATION_MODES,
     SAMPLE_METHODS,
     VOLTAGE_MODES,
     ensure_choice,
@@ -28,6 +30,7 @@ from pyccapt.calibration.core.correction_models import (
     _predict_voltage_model,
     bowl_corr,
     hybrid_calibration_model,
+    refine_correction_nelder_mead,
     robust_fit,
     robust_voltage_fit,
     voltage_corr,
@@ -38,13 +41,11 @@ from pyccapt.calibration.core.diagnostics import (
     plot_selected_statistic,
 )
 
-
 def _extract_peak_mask_and_values(variables, calibration_mode):
     """Return the selected peak mask and values for the requested calibration mode."""
     mask = variables.build_calibration_mask(calibration_mode)
     values = variables.get_calibration_array(calibration_mode)[mask]
     return mask, values
-
 
 def _resolve_sample_size(sample_size, population_size):
     """Resolve a valid sample size, auto-scaling down if needed."""
@@ -55,7 +56,6 @@ def _resolve_sample_size(sample_size, population_size):
         return max(1, population_size // 10)
     return requested
 
-
 def _build_histogram_bins(values, bin_size):
     """Build stable histogram bin edges/count from the actual data span."""
     data = ensure_non_empty_array(values, field_name="histogram_values")
@@ -65,7 +65,6 @@ def _build_histogram_bins(values, bin_size):
     n_bins = max(10, int(np.ceil(span / float(bin_size))))
     edges = np.linspace(lower, upper, n_bins + 1)
     return edges, n_bins
-
 
 def _resolve_peak_location(values, method, bin_size, fast_calibration=False):
     """Resolve the reference peak location by histogram/mean/median."""
@@ -91,14 +90,12 @@ def _resolve_peak_location(values, method, bin_size, fast_calibration=False):
     index_peak_max_ini = np.argmax(properties["peak_heights"])
     return float(bins[peaks[index_peak_max_ini]])
 
-
 def _radial_bowl_corr(data_xy, a, b, c, d, e):
     """Radial-dominant bowl model where r^2 drives the primary curvature."""
     x = np.asarray(data_xy[0], dtype=float)
     y = np.asarray(data_xy[1], dtype=float)
     r2 = x**2 + y**2
     return a + b * r2 + c * (r2**2) + d * x + e * y
-
 
 def voltage_correction(
     dld_highVoltage_peak,
@@ -267,13 +264,11 @@ def voltage_correction(
         plt.legend(handles=[x, y[0]], loc='lower left', markerscale=5.0, prop={'size': 10})
 
         if save:
-            # Enable rendering for text elements
-            rcParams['svg.fonttype'] = 'none'
             save_figure(
                 fig1,
                 directory=variables.result_path,
                 stem=f"vol_corr_{figname}_{index_fig}",
-                formats=("svg", "png"),
+                formats=("pdf", "png"),
                 dpi=600,
             )
 
@@ -281,7 +276,6 @@ def voltage_correction(
             plt.show()
 
     return fitresult
-
 
 def voltage_corr_main(
     dld_highVoltage,
@@ -300,6 +294,7 @@ def voltage_corr_main(
     model='curve_fit',
     peak_maximum=0,
     calibration_apply=True,
+    refine_nelder_mead=False,
 ):
     """
     Perform voltage correction on the given data.
@@ -377,6 +372,42 @@ def voltage_corr_main(
 
     calibration_mc_tof = np.copy(variables.dld_t_calib) if calibration_mode == 'tof' else np.copy(variables.mc_calib)
     print('The fit result is:', fitresult)
+
+    # Optional per-stage Nelder-Mead refinement of the voltage polynomial,
+    # adapted from APyT's `optimize_correction(mode='voltage')`
+    # (sebi-85/apyt: apyt/spectrum/align.py). Only the curve_fit model exposes
+    # interpretable polynomial coefficients; for other models the flag is a
+    # no-op and a notice is printed.
+    if refine_nelder_mead:
+        if model == 'curve_fit':
+            voltage_peak = np.asarray(dld_highVoltage_peak_v, dtype=float)
+            peak_raw = np.asarray(dld_peak_b, dtype=float)
+            sqrt_cal = calibration_mode == 'tof'
+
+            def _apply_voltage_correction(coeffs):
+                factor = voltage_corr(voltage_peak, *coeffs)
+                factor = np.where(factor > 0, factor, np.nan)
+                if sqrt_cal:
+                    factor = np.sqrt(factor)
+                return peak_raw / factor
+
+            fitresult, refine_info = refine_correction_nelder_mead(
+                np.asarray(fitresult, dtype=float),
+                _apply_voltage_correction,
+                peak_raw,
+                fwhm_bin_size=float(bin_size) if float(bin_size) > 0 else 0.01,
+            )
+            print(
+                'Nelder-Mead voltage refine: status=%s baseline_FWHM=%.6f refined_FWHM=%.6f'
+                % (refine_info['status'], refine_info['baseline_fwhm'], refine_info['refined_fwhm'])
+            )
+            if refine_info['accepted']:
+                print('Refined voltage coefficients:', fitresult)
+        else:
+            print(
+                f"Nelder-Mead voltage refine requested but model='{model}' has no polynomial coefficients; skipping."
+            )
+
     mask_fv = np.ones_like(dld_highVoltage, dtype=bool)
 
     f_v = _predict_voltage_model(model, fitresult, np.asarray(dld_highVoltage)[mask_fv])
@@ -418,13 +449,11 @@ def voltage_corr_main(
         plt.legend(handles=[x, y[0]], loc='upper left', markerscale=5.0, prop={'size': 10})
 
         if save:
-            # Enable rendering for text elements
-            rcParams['svg.fonttype'] = 'none'
             save_figure(
                 fig1,
                 directory=variables.result_path,
                 stem=f"vol_corr_{index_fig}",
-                formats=("svg", "png"),
+                formats=("pdf", "png"),
                 dpi=600,
             )
         plt.show()
@@ -447,13 +476,11 @@ def voltage_corr_main(
         plt.legend(handles=[x, y], loc='upper right', markerscale=5.0, prop={'size': 10})
 
         if save:
-            # Enable rendering for text elements
-            rcParams['svg.fonttype'] = 'none'
             save_figure(
                 fig1,
                 directory=variables.result_path,
                 stem=f"peak_tof_V_corr_{index_fig}",
-                formats=("svg", "png"),
+                formats=("pdf", "png"),
                 dpi=600,
             )
         if plot:
@@ -468,7 +495,6 @@ def voltage_corr_main(
             variables.mc_calib = calibration_mc_tof
     return f_v
 
-
 def _resolve_sampling_mode(sampling_mode, variables=None):
     """Resolve sampling mode with a variable-level default fallback."""
     configured = sampling_mode
@@ -478,7 +504,6 @@ def _resolve_sampling_mode(sampling_mode, variables=None):
     if variables is not None and hasattr(variables, "bowl_sampling_mode"):
         variables.bowl_sampling_mode = mode
     return mode
-
 
 def _cell_peak_value(values, maximum_location, sample_range_max, bin_size):
     if sample_range_max == 'mean':
@@ -501,7 +526,6 @@ def _cell_peak_value(values, maximum_location, sample_range_max, bin_size):
     index_peak_max_ini = np.argmax(properties['peak_heights'])
     return float(bins[peaks[index_peak_max_ini]]) / maximum_location
 
-
 def _iter_polar_cells(radial_distance, sample_size, det_diam):
     r_max_data = float(np.max(radial_distance)) if len(radial_distance) else 0.0
     r_max_detector = max(0.0, float(det_diam) / 2.0)
@@ -519,7 +543,6 @@ def _iter_polar_cells(radial_distance, sample_size, det_diam):
             theta_min = float(theta_idx * 2.0 * np.pi / n_sectors)
             theta_max = float((theta_idx + 1) * 2.0 * np.pi / n_sectors)
             yield r_min_i, r_max_i, theta_min, theta_max
-
 
 def _collect_spatial_samples(
     dld_x,
@@ -632,7 +655,6 @@ def _collect_spatial_samples(
     if dld_v is not None:
         result['v'] = np.asarray(v_samples, dtype=float)
     return result
-
 
 def bowl_correction(
     dld_x_bowl,
@@ -786,13 +808,11 @@ def bowl_correction(
         ax.view_init(elev=7, azim=-41)
 
         if save:
-            # Enable rendering for text elements
-            rcParams['svg.fonttype'] = 'none'
             save_figure(
                 fig,
                 directory=variables.result_path,
                 stem=f"bowl_corr_{index_fig}",
-                formats=("svg", "png"),
+                formats=("pdf", "png"),
                 dpi=600,
             )
         if plot:
@@ -800,7 +820,6 @@ def bowl_correction(
 
     print('The parameters of the bowl correction are:', parameters)
     return parameters
-
 
 def bowl_correction_main(
     dld_x,
@@ -822,6 +841,7 @@ def bowl_correction_main(
     peak_maximum=0,
     calibration_apply=True,
     sampling_mode='polar',
+    refine_nelder_mead=False,
 ):
     """
     Perform bowl correction on the input data and plot the results.
@@ -909,6 +929,41 @@ def bowl_correction_main(
     )
     print('The fit result is:', parameters)
 
+    # Optional per-stage Nelder-Mead refinement of the bowl polynomial,
+    # adapted from APyT's `optimize_correction(mode='flight')`
+    # (sebi-85/apyt: apyt/spectrum/align.py). Only the standard 6-parameter
+    # curve_fit model is refined here; radial/RANSAC/ML variants are skipped
+    # with a notice.
+    if refine_nelder_mead:
+        coeffs_array = np.asarray(parameters, dtype=float).ravel() if not isinstance(parameters, Mapping) else None
+        if fit_mode == 'curve_fit' and coeffs_array is not None and coeffs_array.size == 6:
+            x_peak = np.asarray(dld_x_peak, dtype=float)
+            y_peak = np.asarray(dld_y_peak, dtype=float)
+            peak_raw = np.asarray(dld_peak, dtype=float)
+
+            def _apply_bowl_correction(coeffs):
+                factor = bowl_corr([x_peak, y_peak], *coeffs)
+                factor = np.where(factor > 0, factor, np.nan)
+                return peak_raw / factor
+
+            refined_coeffs, refine_info = refine_correction_nelder_mead(
+                coeffs_array,
+                _apply_bowl_correction,
+                peak_raw,
+                fwhm_bin_size=float(bin_size) if float(bin_size) > 0 else 0.01,
+            )
+            print(
+                'Nelder-Mead bowl refine: status=%s baseline_FWHM=%.6f refined_FWHM=%.6f'
+                % (refine_info['status'], refine_info['baseline_fwhm'], refine_info['refined_fwhm'])
+            )
+            if refine_info['accepted']:
+                parameters = refined_coeffs
+                print('Refined bowl coefficients:', parameters)
+        else:
+            print(
+                f"Nelder-Mead bowl refine requested but fit_mode='{fit_mode}' has no 6-param polynomial coefficients; skipping."
+            )
+
     mask_fv = np.ones_like(dld_x, dtype=bool)
 
     f_bowl = _predict_bowl_model(fit_mode, parameters, dld_x[mask_fv], dld_y[mask_fv])
@@ -947,13 +1002,11 @@ def bowl_correction_main(
         plt.legend(handles=[x, y], loc='upper right', markerscale=5.0, prop={'size': 10})
 
         if save:
-            # Enable rendering for text elements
-            rcParams['svg.fonttype'] = 'none'
             save_figure(
                 fig1,
                 directory=variables.result_path,
                 stem=f"peak_tof_bowl_corr_{index_fig}",
-                formats=("svg", "png"),
+                formats=("pdf", "png"),
                 dpi=600,
             )
 
@@ -978,13 +1031,11 @@ def bowl_correction_main(
         plt.legend(handles=[x, y], loc='upper right', markerscale=5.0, prop={'size': 10})
 
         if save:
-            # Enable rendering for text elements
-            rcParams['svg.fonttype'] = 'none'
             save_figure(
                 fig1,
                 directory=variables.result_path,
                 stem=f"peak_tof_bowl_corr_p_x_det_{index_fig}",
-                formats=("svg", "png"),
+                formats=("pdf", "png"),
                 dpi=600,
             )
         if plot:
@@ -1008,13 +1059,11 @@ def bowl_correction_main(
         plt.legend(handles=[x, y], loc='upper right', markerscale=5.0, prop={'size': 10})
 
         if save:
-            # Enable rendering for text elements
-            rcParams['svg.fonttype'] = 'none'
             save_figure(
                 fig1,
                 directory=variables.result_path,
                 stem=f"peak_tof_bowl_corr_p_y_det_{index_fig}",
-                formats=("svg", "png"),
+                formats=("pdf", "png"),
                 dpi=600,
             )
         if plot:
@@ -1038,13 +1087,11 @@ def bowl_correction_main(
         ax.view_init(elev=7, azim=-41)
 
         if save:
-            # Enable rendering for text elements
-            rcParams['svg.fonttype'] = 'none'
             save_figure(
                 fig,
                 directory=variables.result_path,
                 stem=f"peak_tof_bowl_corr_3d_{index_fig}",
-                formats=("svg", "png"),
+                formats=("pdf", "png"),
                 dpi=600,
             )
         if plot:
@@ -1057,7 +1104,6 @@ def bowl_correction_main(
             variables.mc_calib = calibration_mc_tof
     return f_bowl
 
-
 def _auto_detect_peaks(calibration_array, n_peaks=3, prominence=100, distance=500, hist_bin_size=0.1):
     """Auto-detect the top N prominent peaks in the calibration spectrum."""
     arr = np.asarray(calibration_array, dtype=float)
@@ -1069,8 +1115,14 @@ def _auto_detect_peaks(calibration_array, n_peaks=3, prominence=100, distance=50
     trimmed = arr[(arr >= mc_min) & (arr <= mc_max)]
     if trimmed.size < 50:
         raise CalibrationInputError("Not enough ions remain after trimming for multi-peak calibration")
-    hist_edges, _ = _build_histogram_bins(trimmed, max(hist_bin_size, 1e-6))
-    hist_y = np.histogram(trimmed, bins=hist_edges)[0]
+    hist_edges, _n_bins = _build_histogram_bins(trimmed, max(hist_bin_size, 1e-6))
+    # fast_histogram.histogram1d is ~10x faster than np.histogram for
+    # evenly-spaced bins and dominates a large fraction of peak-detection
+    # time when ``calibration_array`` is in the millions.
+    hist_y = fast_histogram.histogram1d(
+        trimmed, bins=int(_n_bins),
+        range=(float(hist_edges[0]), float(hist_edges[-1])),
+    )
     hist_x = (hist_edges[:-1] + hist_edges[1:]) / 2
     if hist_y.size >= 5:
         kernel_size = min(9, hist_y.size if hist_y.size % 2 == 1 else hist_y.size - 1)
@@ -1137,17 +1189,125 @@ def _auto_detect_peaks(calibration_array, n_peaks=3, prominence=100, distance=50
         raise CalibrationInputError("Peak windows could not be resolved for multi-peak calibration")
     return results
 
+def auto_detect_reference_peaks(
+    calibration_array, n_peaks=6, prominence=100, distance=500, hist_bin_size=0.1,
+    event_mask=None,
+):
+    """Public helper for stable multi-peak evaluation windows used by auto calibration.
 
-def auto_detect_reference_peaks(calibration_array, n_peaks=6, prominence=100, distance=500, hist_bin_size=0.1):
-    """Public helper for stable multi-peak evaluation windows used by auto calibration."""
+    ``event_mask`` (optional) is a boolean array the same length as
+    ``calibration_array``: True keeps the ion, False ignores it. Use this
+    to detect peaks on calibration-trustworthy ions only (single-hit /
+    excluded-correlations subsets from
+    ``pyccapt.calibration.core.event_filters``). Default ``None``
+    preserves legacy behavior.
+    """
+    arr = calibration_array
+    if event_mask is not None:
+        mask = np.asarray(event_mask, dtype=bool)
+        arr_np = np.asarray(arr)
+        if mask.size == arr_np.size:
+            arr = arr_np[mask]
     return _auto_detect_peaks(
-        calibration_array,
+        arr,
         n_peaks=n_peaks,
         prominence=prominence,
         distance=distance,
         hist_bin_size=hist_bin_size,
     )
 
+
+def recompute_peak_window(
+    variables,
+    calibration_mode: str = 'mc',
+    *,
+    prominence: float = 100,
+    distance: int = 10,
+    hist_bin_size: float = 0.05,
+    lim=None,
+    window_inflate: float = 2.0,
+    target_position=None,
+) -> tuple:
+    """Lightweight peak-window recompute. NO Matplotlib.
+
+    Detects peaks via ``auto_detect_reference_peaks`` on the currently
+    calibrated array and updates ``variables.selected_x1/x2`` to the
+    dominant peak (or, if ``target_position`` is set, the peak closest
+    to that mass).
+
+    This is the headless equivalent of ``mc_plot.hist_plot(...,
+    plot_show=False)`` for use inside auto-calibration loops where the
+    Matplotlib stack adds significant per-iteration overhead.
+
+    Parameters
+    ----------
+    variables : Variables
+        Calibration state container.
+    calibration_mode : {'mc', 'tof'}
+    prominence, distance, hist_bin_size : passed to peak detection.
+    lim : float, optional
+        Upper limit on values considered. Defaults to ``variables.max_tof``
+        for 'tof' and 400.0 for 'mc'.
+    window_inflate : float
+        Multiplier on the FWHM-based window width. 2.0 keeps the window
+        wide enough for stable MRP scoring on tight peaks.
+    target_position : float, optional
+        If supplied, pick the peak nearest this m/c instead of the most
+        prominent one. Useful for keeping the same physical peak window
+        across calibration iterations as the peak drifts.
+
+    Returns
+    -------
+    (x1, x2, position) : tuple of floats
+    """
+    mode = ensure_choice(calibration_mode, field_name='calibration_mode',
+                         allowed=CALIBRATION_MODES)
+    arr = np.asarray(variables.get_calibration_array(mode), dtype=float)
+    arr = arr[np.isfinite(arr) & (arr > 0)]
+    if lim is None:
+        lim = float(variables.max_tof) if mode == 'tof' else 400.0
+    arr = arr[arr < lim]
+    if arr.size < 50:
+        raise CalibrationInputError(
+            "Not enough ions for recompute_peak_window"
+        )
+
+    try:
+        peaks = auto_detect_reference_peaks(
+            arr, n_peaks=8, prominence=float(prominence),
+            distance=int(distance), hist_bin_size=float(hist_bin_size),
+        )
+    except CalibrationInputError:
+        peaks = []
+
+    if not peaks:
+        # Fallback: histogram-max
+        hist, edges = np.histogram(arr, bins=1000)
+        idx = int(np.argmax(hist))
+        center = 0.5 * (edges[idx] + edges[idx + 1])
+        width = (edges[-1] - edges[0]) * 0.02
+        x1, x2 = center - width, center + width
+        position = center
+    else:
+        if target_position is not None:
+            best = min(peaks, key=lambda p: abs(float(p['position']) - float(target_position)))
+        else:
+            best = max(peaks, key=lambda p: float(p.get('prominence', 0.0)))
+        x1 = float(best['x1'])
+        x2 = float(best['x2'])
+        position = float(best['position'])
+        if window_inflate != 1.0:
+            half = (x2 - x1) * 0.5 * float(window_inflate)
+            x1 = position - half
+            x2 = position + half
+
+    variables.selected_x1 = float(x1)
+    variables.selected_x2 = float(x2)
+    try:
+        variables.set_calibration_peak_range(mode, float(x1), float(x2))
+    except Exception:
+        pass
+    return float(x1), float(x2), float(position)
 
 def multi_peak_voltage_corr_main(
     dld_highVoltage,
@@ -1241,7 +1401,6 @@ def multi_peak_voltage_corr_main(
         variables.mc_calib = calibration_mc_tof
 
     return fitresult, peak_info
-
 
 def multi_peak_bowl_corr_main(
     dld_x,
@@ -1376,7 +1535,6 @@ def multi_peak_bowl_corr_main(
 
     return parameters, n_used
 
-
 def _joint_feature_matrix(voltage_values, x_values, y_values, voltage_center, voltage_scale, spatial_scale):
     """Build a smooth joint voltage-plus-detector feature matrix."""
     v = (np.asarray(voltage_values, dtype=float) - float(voltage_center)) / float(voltage_scale)
@@ -1400,7 +1558,6 @@ def _joint_feature_matrix(voltage_values, x_values, y_values, voltage_center, vo
         ]
     )
 
-
 def _robust_joint_linear_fit(feature_matrix, target):
     """Fit a smooth joint correction surface while rejecting large residual outliers."""
     x_data = np.asarray(feature_matrix, dtype=float)
@@ -1417,7 +1574,6 @@ def _robust_joint_linear_fit(feature_matrix, target):
             break
         params, *_ = np.linalg.lstsq(x_data[good], y_data[good], rcond=None)
     return params
-
 
 def joint_voltage_bowl_corr_main(
     dld_x,

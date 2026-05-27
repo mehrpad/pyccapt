@@ -146,3 +146,18 @@ dmypy.json
 /pyccapt/files/email_credentials.toml
 /pyccapt/files/email_pass.txt
 
+
+# Session / scratch / large data — never commit
+.claude/
+.tmp_paper/
+.tmp_test/
+*.h5
+analysis_outputs/
+auto_ranging/
+# Local benchmark / audit work — kept outside the distributed package,
+# never part of the repo. The src code these scripts validate lives in
+# pyccapt/calibration/core/.
+scripts/
+benchmark_results/
+# User personal scratch notebooks
+pyccapt/calibration/tutorials/jupyter_files/*-Copy*.ipynb

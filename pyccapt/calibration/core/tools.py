@@ -3,7 +3,7 @@ import numpy as np
 import pybaselines
 import re
 from adjustText import adjust_text
-from matplotlib import rcParams
+
 from pybaselines import Baseline
 from scipy.optimize import curve_fit
 from scipy.signal import find_peaks, peak_widths
@@ -15,7 +15,6 @@ from pyccapt.calibration.core.validation import ensure_positive
 from pyccapt.calibration.data_tools import data_loadcrop, plot_vline_draw, selectors_data
 from pyccapt.calibration.path_utils import save_figure
 
-
 def _normalize_range_colors(values):
     """Normalize stored range colors for matplotlib usage."""
     normalized = []
@@ -25,7 +24,6 @@ def _normalize_range_colors(values):
             value = f'#{value}'
         normalized.append(value)
     return normalized
-
 
 def _plain_range_label(value):
     """Convert stored ion/range labels into plain text safe for matplotlib."""
@@ -39,7 +37,6 @@ def _plain_range_label(value):
     text = text.replace("^", "").strip()
     return text
 
-
 def _resolve_range_display_labels(range_data):
     """Return plain-text labels for ranged overlays and legends."""
     for column in ("name", "ion_name", "ion"):
@@ -48,7 +45,6 @@ def _resolve_range_display_labels(range_data):
             if any(label for label in labels):
                 return labels
     return [_plain_range_label(value) for value in range(len(range_data))]
-
 
 def hist_plot(
     mc_tof,
@@ -412,15 +408,13 @@ def hist_plot(
         plt.tight_layout()
         if fig_name is not None:
             if label == 'mc':
-                # Enable rendering for text elements
-                rcParams['svg.fonttype'] = 'none'
-                save_figure(fig1, directory=variables.result_path, stem=f"mc_{fig_name}", formats=("svg", "png"), dpi=300)
+                save_figure(fig1, directory=variables.result_path, stem=f"mc_{fig_name}", formats=("pdf", "png"), dpi=300)
             elif label == 'tof':
                 save_figure(
                     fig1,
                     directory=variables.result_path,
                     stem=f"tof_{fig_name}",
-                    formats=("svg", "png"),
+                    formats=("pdf", "png"),
                     dpi=300,
                 )
         if ranging and hist_color_range:
@@ -453,7 +447,6 @@ def hist_plot(
         peaks_widths = None
         mask = None
     return x_peaks, y_peaks, peaks_widths, mask
-
 
 def mc_hist_plot(variables, bin_size, mode, prominence, distance, percent, selector, plot, figname, lim, peaks_find_plot):
     """

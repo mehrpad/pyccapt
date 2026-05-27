@@ -2,10 +2,8 @@ from copy import copy
 
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib import colors, rcParams
-
+from matplotlib import colors
 from pyccapt.calibration.reconstructions.io_utils import save_matplotlib_figure
-
 
 def _crop_particles(particles, reference_point=None, box_dimensions=None):
     coords = np.asarray(particles, dtype=float)
@@ -22,10 +20,8 @@ def _crop_particles(particles, reference_point=None, box_dimensions=None):
         raise ValueError("At least two particles are required for FFT analysis")
     return coords
 
-
 def _axis_index(axis_name):
     return {'x': 0, 'y': 1, 'z': 2}[axis_name]
-
 
 def fft(
     particles,
@@ -121,8 +117,8 @@ def fft(
             ax.set_ylabel(f'{axis_y} spatial frequency (1/nm)')
 
         if save and variables is not None:
-            rcParams['svg.fonttype'] = 'none'
-            save_matplotlib_figure(fig, variables, stem=f"fft_{figname}", formats=("png", "svg"), dpi=600)
+
+            save_matplotlib_figure(fig, variables, stem=f"fft_{figname}", formats=("png", "pdf"), dpi=600)
         if plot:
             plt.show()
 

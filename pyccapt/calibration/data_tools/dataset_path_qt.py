@@ -16,7 +16,14 @@ DATASET_FILTER = (
     "CSV (*.csv);;"
     "All Files (*)"
 )
-RANGE_FILTER = "Range files (*.h5 *.rrng *.rng);;PyCCAPT / HDF5 (*.h5);;LEAP RRNG (*.rrng);;LEAP RNG (*.rng);;All Files (*)"
+RANGE_FILTER = (
+    "Range files (*.h5 *.rrng *.rng *.fig);;"
+    "PyCCAPT / HDF5 (*.h5);;"
+    "LEAP RRNG (*.rrng);;"
+    "LEAP RNG (*.rng);;"
+    "MATLAB Atom-Probe-Toolbox figure (*.fig);;"
+    "All Files (*)"
+)
 CAMECA_RAW_FILTER = (
     "LEAP CAMECA raw (*.rhit *.RHIT *.str *.STR *.hits *.HITS *.epos *.EPOS);;"
     "LEAP CAMECA RHIT (*.rhit *.RHIT);;"

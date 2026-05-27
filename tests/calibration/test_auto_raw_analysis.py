@@ -527,7 +527,7 @@ def test_run_analysis_saves_plots_beside_dataset(tmp_path: Path):
     assert save_dir.is_dir()
     for stem in ("tof_histogram", "mc_histogram", "fdm_all", "fdm_species", "multihit_deadzone"):
         assert (save_dir / f"{stem}.png").is_file()
-        assert (save_dir / f"{stem}.svg").is_file()
+        assert (save_dir / f"{stem}.pdf").is_file()
 
 
 def test_run_analysis_handles_roentdek_tdc_bundle():

@@ -21,4 +21,4 @@ def test_plot_fdm_uses_shared_save_helper(tmp_path: Path):
     kwargs = mock_save.call_args.kwargs
     assert kwargs["directory"] == variables.result_path
     assert kwargs["stem"] == "fdm_7"
-    assert kwargs["formats"] == ("png", "svg")
+    assert kwargs["formats"] == ("png", "pdf")

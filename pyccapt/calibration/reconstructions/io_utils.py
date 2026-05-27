@@ -28,7 +28,7 @@ def save_matplotlib_figure(
     variables,
     *,
     stem: str,
-    formats: tuple[str, ...] = ("png", "svg"),
+    formats: tuple[str, ...] = ("png", "pdf"),
     dpi: int = 600,
     **savefig_kwargs,
 ) -> list[Path]:

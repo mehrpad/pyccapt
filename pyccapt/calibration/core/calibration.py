@@ -66,12 +66,23 @@ def _build_histogram_bins(values, bin_size):
     edges = np.linspace(lower, upper, n_bins + 1)
     return edges, n_bins
 
-def _resolve_peak_location(values, method, bin_size, fast_calibration=False):
-    """Resolve the reference peak location by histogram/mean/median."""
+def _resolve_peak_location(values, method, bin_size, fast_calibration=False, rng=None):
+    """Resolve the reference peak location by histogram/mean/median.
+
+    Parameters
+    ----------
+    rng : optional ``numpy.random.Generator``
+        Generator used by the ``fast_calibration`` subsample path. Defaults
+        to a seeded generator so the same input produces the same peak
+        location across runs (the previous implementation used the global
+        ``np.random`` state, making fast-mode calibrations non-reproducible).
+    """
     ensure_choice(method, field_name="maximum_cal_method", allowed=SAMPLE_METHODS)
     data = ensure_non_empty_array(values, field_name="peak_values")
     if fast_calibration and data.size > 10:
-        data = np.random.choice(data, int(data.size * 0.1), replace=False)
+        if rng is None:
+            rng = np.random.default_rng(0)
+        data = rng.choice(data, int(data.size * 0.1), replace=False)
 
     if method == "mean":
         return float(np.mean(data))

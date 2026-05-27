@@ -265,6 +265,12 @@ class SharedVariablesBase:
         self.h_line_pos = []
         self.clear_calibration_selection_mask()
         self.clear_calibration_peak_range()
+        # The "initial calibration has been run" flags are per-dataset; they
+        # MUST be reset on dataset reload, otherwise the auto-calibration
+        # helpers will skip initial calibration on the new dataset and apply
+        # V/Bowl correction on top of uncalibrated t (ns).
+        self.initial_calibration_done_mc = False
+        self.initial_calibration_done_tof = False
         if clear_selection:
             self.clear_peak_range()
             self.selected_x_fdm = 0

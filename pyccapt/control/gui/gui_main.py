@@ -2423,15 +2423,23 @@ class Ui_PyCCAPT(object):
 
         if hasattr(self, "SignalEmitter_Pumps_Vacuum"):
             try:
+                # Legacy emit -- no consumer, kept for back-compat.
                 self.SignalEmitter_Pumps_Vacuum.bool_flag_while_loop.emit(False)
             except Exception:
                 pass
 
-        # Daemon thread - join briefly so it gets a chance to honour the
-        # stop signal, but don't hang if it's wedged on a serial read.
+        # Signal the gauge thread via a real threading.Event (the legacy
+        # pyqtSignal flag is always truthy and never actually stopped the
+        # loop). Give it slightly longer to wake up since the inner sleep
+        # in initialize_devices.state_update can be up to ~1 s.
+        if hasattr(self, 'gui_pumps_vacuum') and hasattr(self.gui_pumps_vacuum, 'gauges_stop_event'):
+            try:
+                self.gui_pumps_vacuum.gauges_stop_event.set()
+            except Exception:
+                pass
         if hasattr(self, 'gui_pumps_vacuum') and hasattr(self.gui_pumps_vacuum, 'gauges_thread'):
             try:
-                self.gui_pumps_vacuum.gauges_thread.join(0.5)
+                self.gui_pumps_vacuum.gauges_thread.join(2.0)
             except Exception:
                 pass
 

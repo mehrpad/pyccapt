@@ -537,7 +537,11 @@ class Ui_Pumps_Vacuum(object):
 
         # Thread for reading gauges
         if self.conf['gauges'] == "on":
-            # Thread for reading gauges
+            # Real threading.Event so cleanup() can actually stop the
+            # gauge polling loop. The legacy ``emitter.bool_flag_while_loop``
+            # is a pyqtSignal -- always truthy -- and never stopped the
+            # thread; the OS held the COM ports until process exit.
+            self.gauges_stop_event = threading.Event()
             self.gauges_thread = threading.Thread(
                 target=initialize_devices.state_update,
                 args=(
@@ -545,8 +549,9 @@ class Ui_Pumps_Vacuum(object):
                     self.variables,
                     self.emitter,
                 ),
+                kwargs={'stop_event': self.gauges_stop_event},
+                daemon=True,
             )
-            self.gauges_thread.setDaemon(True)
             self.gauges_thread.start()
 
         # Create a QTimer to hide the warning message after 8 seconds

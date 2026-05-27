@@ -155,7 +155,22 @@ class AptHistPlotter:
             self.mc_tof = mc_tof_arr[finite_mask]
             if self.mc_tof.size == 0:
                 raise ValueError("mc_tof has no finite values for histogram")
-        self.bins = np.linspace(np.min(self.mc_tof), np.max(self.mc_tof), round(np.max(self.mc_tof) / bin_width))
+        # Build edges anchored to ``bin_width``; using ``np.linspace`` would
+        # silently disagree with the requested width whenever min > 0 (the
+        # actual width becomes (max-min)/(N-1), not bin_width). Use
+        # ``arange`` so each bin has exactly the requested width, then add
+        # one trailing edge so the last bin is closed.
+        lo = float(np.min(self.mc_tof))
+        hi = float(np.max(self.mc_tof))
+        if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo or bin_width <= 0:
+            raise ValueError(
+                "Cannot build histogram bins: invalid mc_tof range "
+                f"[{lo}, {hi}] or bin_width={bin_width}."
+            )
+        self.bins = np.arange(lo, hi + bin_width, bin_width)
+        if self.bins.size < 2:
+            # Degenerate range narrower than one bin; fall back to two edges.
+            self.bins = np.array([lo, lo + bin_width], dtype=float)
 
         # Plot the histogram directly
         self.fig, self.ax = plt.subplots(figsize=fig_size)

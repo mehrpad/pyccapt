@@ -88,7 +88,12 @@ def _resolve_peak_location(values, method, bin_size, fast_calibration=False):
     if len(peaks) == 0:
         return float(np.mean(data))
     index_peak_max_ini = np.argmax(properties["peak_heights"])
-    return float(bins[peaks[index_peak_max_ini]])
+    # ``bins`` is the edges array (length n_bins+1); ``peaks`` indexes the
+    # counts array (length n_bins). bins[peak] returns the LEFT edge of the
+    # bin, biasing the peak location low by half a bin width. Use the bin
+    # center instead.
+    peak_idx = int(peaks[index_peak_max_ini])
+    return float(0.5 * (bins[peak_idx] + bins[peak_idx + 1]))
 
 def _radial_bowl_corr(data_xy, a, b, c, d, e):
     """Radial-dominant bowl model where r^2 drives the primary curvature."""
@@ -193,22 +198,31 @@ def voltage_correction(
                 bins, _ = _build_histogram_bins(t_selected, bin_size)
                 y, x = np.histogram(t_selected, bins=bins)
                 peaks, properties = find_peaks(y, height=0)
+                # find_peaks returns an empty array when no local maxima
+                # exist; np.argmax on the empty 'peak_heights' raises
+                # ValueError. Make this branch explicit so we don't rely on
+                # an exception handler for normal flow.
+                if peaks.size == 0:
+                    raise ValueError("no peaks in segment")
                 index_peak_max_ini = np.argmax(properties['peak_heights'])
-                max_peak = peaks[index_peak_max_ini]
-                t_value = x[max_peak] / maximum_location
+                max_peak = int(peaks[index_peak_max_ini])
+                # ``x`` is the edges array (length n_bins+1); index it via
+                # the bin CENTER, not the left edge.
+                peak_center = 0.5 * (x[max_peak] + x[max_peak + 1])
+                t_value = peak_center / maximum_location
                 mask_v = np.logical_and(
-                    t_selected >= x[max_peak] - bin_size,
-                    t_selected <= x[max_peak] + bin_size,
+                    t_selected >= peak_center - bin_size,
+                    t_selected <= peak_center + bin_size,
                 )
                 if mode == 'ion_seq' and v_selected[mask_v].size == 0:
                     mask_v = np.logical_and(
-                        t_selected >= x[max_peak] - 2 * bin_size,
-                        t_selected <= x[max_peak] + 2 * bin_size,
+                        t_selected >= peak_center - 2 * bin_size,
+                        t_selected <= peak_center + 2 * bin_size,
                     )
                     if v_selected[mask_v].size == 0:
                         mask_v = np.logical_and(
-                            t_selected >= x[max_peak] - 4 * bin_size,
-                            t_selected <= x[max_peak] + 4 * bin_size,
+                            t_selected >= peak_center - 4 * bin_size,
+                            t_selected <= peak_center + 4 * bin_size,
                         )
                 v_value = float(np.mean(v_selected[mask_v]))
             except ValueError:
@@ -524,7 +538,11 @@ def _cell_peak_value(values, maximum_location, sample_range_max, bin_size):
     if len(peaks) == 0:
         return float(np.mean(values)) / maximum_location
     index_peak_max_ini = np.argmax(properties['peak_heights'])
-    return float(bins[peaks[index_peak_max_ini]]) / maximum_location
+    # ``bins`` is the edges array (length n_bins+1); ``peaks`` indexes the
+    # counts array. Use the bin CENTER, not the left edge.
+    peak_idx = int(peaks[index_peak_max_ini])
+    peak_center = 0.5 * (bins[peak_idx] + bins[peak_idx + 1])
+    return float(peak_center) / maximum_location
 
 def _iter_polar_cells(radial_distance, sample_size, det_diam):
     r_max_data = float(np.max(radial_distance)) if len(radial_distance) else 0.0

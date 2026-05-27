@@ -2528,21 +2528,33 @@ class MyPyCCAPT(QtWidgets.QMainWindow):
         )
 
         if reply == QtWidgets.QMessageBox.StandardButton.Yes:
-            # Hard watchdog: fire os._exit after 5 s no matter what.
+            # Hard watchdog: fire os._exit after 10 s no matter what.
             # cleanup() can hang indefinitely if a SmarAct ctl.Close
             # call collides with an in-flight Reference (the SDK is
             # not thread-safe) or if a serial port refuses to release.
             # We can't fix every possible blocker individually, so a
             # daemon thread that calls os._exit is the only guarantee
             # the user's "X" click actually closes the program.
+            #
+            # Raised from 5 s to 10 s so the laser-control safe-off
+            # sequence (AOMDisable -> AOM(0) -> Standby, each followed
+            # by ~100 ms serial sleeps inside origamiClassCLI) has time
+            # to complete before the watchdog kills the process. A laser
+            # left emitting because the safe-off was cut short is a
+            # real safety problem.
             import os as _os
             import threading as _threading
+
+            _WATCHDOG_SECONDS = 10.0
 
             def _force_exit():
                 import time as _time
 
-                _time.sleep(5.0)
-                print("Close watchdog: forcing os._exit after 5 s")
+                _time.sleep(_WATCHDOG_SECONDS)
+                print(
+                    f"Close watchdog: forcing os._exit after "
+                    f"{_WATCHDOG_SECONDS} s"
+                )
                 _os._exit(0)
 
             t = _threading.Thread(target=_force_exit, daemon=True)

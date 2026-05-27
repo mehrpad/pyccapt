@@ -1985,8 +1985,26 @@ class Ui_Laser_Control(object):
             self.stage_device = None
 
         # Close the laser serial port if we still own it.
+        # SAFETY: before closing, force the laser to a known-off state so
+        # it can't continue emitting after the GUI has exited. The
+        # previous code went straight to close_port() and the laser
+        # stayed in whatever state the operator had set (potentially
+        # state 129 = output enabled) until the rig was power-cycled.
+        # We disable the AOM (kills the output gate), set its level to
+        # zero, then issue Standby (firmware moves to state 33). Each
+        # call is wrapped individually so a stuck command doesn't
+        # block the rest of the safe-off sequence.
         laser_dev = getattr(self, 'laser_device', None)
         if laser_dev is not None:
+            for safe_call, label in (
+                (lambda: laser_dev.AOMDisable(), 'AOMDisable'),
+                (lambda: laser_dev.AOM(0), 'AOM(0)'),
+                (lambda: laser_dev.Standby(), 'Standby'),
+            ):
+                try:
+                    safe_call()
+                except Exception as exc:
+                    print(f"laser safe-off: {label} failed (non-fatal): {exc}")
             try:
                 laser_dev.close_port()
             except Exception:

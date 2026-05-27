@@ -102,6 +102,14 @@ def voltage_corr_time_dependent(
     calib = np.asarray(variables.get_calibration_array(calibration_mode), dtype=float).copy()
 
     # --- Stage 2: ion-index drift residual (gated, clipped) ---
+    #
+    # APT drift is physically MULTIPLICATIVE: a voltage drift scales m/c by
+    # a factor (mc proportional to t^2*V), it does not add a constant Da
+    # offset. The previous implementation subtracted a constant ``shift``
+    # computed in-peak (e.g. at 29 Da for Ni-58) from EVERY ion in the
+    # chunk, which biased peaks at 100 Da by ~3x too little correction.
+    # Apply a multiplicative factor (= target / chunk_center) instead so
+    # every peak in the chunk is rescaled proportionally.
     left, right = variables.get_calibration_peak_range(calibration_mode)
     mask = (calib > left) & (calib < right)
     if mask.sum() < gate_min_ions:
@@ -109,7 +117,13 @@ def voltage_corr_time_dependent(
             _write_calib(variables, calibration_mode, calib)
         return calib
     target = _trimmed_mean(calib[mask], trim=0.10)
-    abs_clip = abs(target) * float(max_shift_fraction)
+    if not np.isfinite(target) or target == 0:
+        if apply:
+            _write_calib(variables, calibration_mode, calib)
+        return calib
+    # ``max_shift_fraction`` is interpreted as a bound on |1 - factor|.
+    factor_lo = 1.0 - float(max_shift_fraction)
+    factor_hi = 1.0 + float(max_shift_fraction)
     n_ions = calib.size
 
     edges = np.linspace(0, n_ions, int(n_time_bins) + 1, dtype=int)
@@ -123,21 +137,31 @@ def voltage_corr_time_dependent(
             continue
         chunk_values = calib[lo:hi][m]
         chunk_center = _trimmed_mean(chunk_values, trim=0.10)
-        raw_shift = chunk_center - target
-        # Clip to physical bound
-        shift = float(np.clip(raw_shift, -abs_clip, abs_clip))
-        if abs(shift) < bin_size * 0.25:
-            continue  # below noise floor, skip
-        # Gate: only apply if it would improve the chunk's FWHM
+        if not np.isfinite(chunk_center) or chunk_center == 0:
+            continue
+        raw_factor = target / chunk_center
+        # Clip the multiplicative factor to the physical bound; this maps
+        # to a maximum relative correction of ``max_shift_fraction``.
+        factor = float(np.clip(raw_factor, factor_lo, factor_hi))
+        # Skip when the relative correction is below the noise floor
+        # (translate the original "0.25 * bin_size" gate into a relative
+        # term using the calibration target).
+        if abs((factor - 1.0) * target) < bin_size * 0.25:
+            continue
+        # Gate: only apply if scaling improves the chunk's local FWHM
+        # around ``target`` (the FWHM helper measures spread relative to
+        # the target, so a chunk that drifts off-target shows inflated
+        # FWHM and the multiplicative pull-back tightens it).
         before_fwhm = _local_fwhm(chunk_values, target)
-        candidate = chunk_values - shift
+        candidate = chunk_values * factor
         after_fwhm = _local_fwhm(candidate, target)
         if not (np.isfinite(after_fwhm) and np.isfinite(before_fwhm)):
             continue
         if after_fwhm > before_fwhm * 0.99:  # require >1% improvement
             continue
-        # Apply the shift to ALL ions in the chunk (not just masked ones)
-        calib_out[lo:hi] = calib[lo:hi] - shift
+        # Apply the scaling to ALL ions in the chunk (every peak gets
+        # the same proportional correction).
+        calib_out[lo:hi] = calib[lo:hi] * factor
 
     if apply:
         _write_calib(variables, calibration_mode, calib_out)

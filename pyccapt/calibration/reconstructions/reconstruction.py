@@ -345,10 +345,12 @@ def reconstruction_plot(
     mc_up = variables.range_data['mc_up'].tolist()
     ion = variables.range_data['ion'].tolist()
 
-    # Draw an edge of cube around the 3D plot
-    x_range = [min(variables.x), max(variables.x)]
-    y_range = [min(variables.y), max(variables.y)]
-    z_range = [min(variables.z), max(variables.z)]
+    # Draw an edge of cube around the 3D plot. ``min``/``max`` builtins
+    # propagate NaN; partial-recovered rows have NaN (x, y, z) and would
+    # blank out the cube. Use nanmin/nanmax.
+    x_range = [float(np.nanmin(variables.x)), float(np.nanmax(variables.x))]
+    y_range = [float(np.nanmin(variables.y)), float(np.nanmax(variables.y))]
+    z_range = [float(np.nanmin(variables.z)), float(np.nanmax(variables.z))]
     range_cube = [x_range, y_range, z_range]
     if element_alpha is None:
         element_alpha = [float(opacity)] * len(ion)
@@ -1190,8 +1192,24 @@ def x_y_z_calculation_and_plot(
         dld_Voltage = variables.dld_high_voltage
     elif variables.pulse_mode == 'voltage':
         dld_Voltage = variables.dld_high_voltage + variables.dld_pulse_v
-    dld_x = variables.dld_x_det
-    dld_y = variables.dld_y_det
+    dld_x = np.asarray(variables.dld_x_det, dtype=float)
+    dld_y = np.asarray(variables.dld_y_det, dtype=float)
+    # Partial-recovered rows lack one detector axis -- 3-D reconstruction
+    # is undefined for them (no (x_det, y_det) -> (px, py, pz) mapping).
+    # The element-wise formulas below naturally yield NaN for those rows
+    # (NaN inputs propagate through sqrt/divide/atan2); downstream
+    # clustering / RDF / density-map already filter NaN. Just inform the
+    # user how many ions were excluded so the missing count isn't a
+    # mystery.
+    _finite_xy_recon = np.isfinite(dld_x) & np.isfinite(dld_y)
+    _n_partial = int((~_finite_xy_recon).sum())
+    if _n_partial > 0:
+        print(
+            f'[x_y_z_calculation_and_plot] Excluding {_n_partial} partial-recovered '
+            'rows (NaN x_det / y_det) from 3-D reconstruction; their (x, y, z) will '
+            'be NaN. Downstream analyses (clustering, RDF, density map) drop them.'
+        )
+
     if mode == 'Geiser':
         px, py, pz = atom_probe_recons_from_detector_Geiser_et_al(
             dld_x, dld_y, dld_Voltage, flight_path_length, kf, det_eff, icf, field_evap, avg_dens

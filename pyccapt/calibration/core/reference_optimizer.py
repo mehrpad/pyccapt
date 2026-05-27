@@ -227,11 +227,16 @@ def _cell_observations(
     n_ions = len(calib_array)
     obs_v, obs_x, obs_y, obs_t = [], [], [], []
     obs_centre, target, weight = [], [], []
+    # Partial-recovered rows have NaN x_det / y_det; their np.mean per
+    # chunk would propagate NaN to obs_x/obs_y, blowing up the joint
+    # voltage+spatial least-squares fit. Restrict the in-peak mask to
+    # position-capable rows before chunk aggregation.
+    finite_xy_global = np.isfinite(np.asarray(x_det, dtype=float)) & np.isfinite(np.asarray(y_det, dtype=float))
     for det_idx, ref_idx, _dist in matches:
         peak = detected_peaks[det_idx]
         ref = references[ref_idx]
         x1, x2 = float(peak["x1"]), float(peak["x2"])
-        in_peak = (calib_array > x1) & (calib_array < x2) & mask
+        in_peak = (calib_array > x1) & (calib_array < x2) & mask & finite_xy_global
         idx_in = np.where(in_peak)[0]
         if idx_in.size < 200:
             continue

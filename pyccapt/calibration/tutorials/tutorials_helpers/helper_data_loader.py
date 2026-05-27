@@ -18,7 +18,18 @@ def _loader_progress(*, total: int, enabled: bool, desc: str):
     )
 
 
-def load_data(dataset_path, max_mc, flightPathLength, pulse_mode, tdc, variables, processing_mode=True, load_tdc_raw=False):
+def load_data(
+    dataset_path,
+    max_mc,
+    flightPathLength,
+    pulse_mode,
+    tdc,
+    variables,
+    processing_mode=True,
+    load_tdc_raw=False,
+    merge_partial_tdc=False,
+    detector_kind='surface_concept',
+):
     """Load a calibration dataset and stash it on ``variables``.
 
     Parameters
@@ -28,6 +39,21 @@ def load_data(dataset_path, max_mc, flightPathLength, pulse_mode, tdc, variables
             the h5 file. The dld and tdc dataframes are linked via a shared
             ``event_group_id`` column so dld filtering decisions can later be
             propagated to tdc at save time. Stored on ``variables.data_tdc``.
+    merge_partial_tdc : bool, default False
+            If True (and ``load_tdc_raw`` is True on a pyccapt h5 dataset),
+            after the main DLD frame is loaded, run the partial-hit recovery
+            pipeline: orphan TDC ticks (pulses with 1-3 channels fired) are
+            paired axis-by-axis, gated by the detector-surface constraint,
+            and the physically-valid candidates are merged into
+            ``variables.data`` as additional rows. Partial rows have
+            ``NaN`` on the axis that could not be reconstructed and a
+            ``dlts`` column (``2`` for single-axis, ``4`` for native or
+            recovered xy). Downstream code that needs both detector axes
+            must filter rows with NaN in ``x_det (cm)`` or ``y_det (cm)``.
+    detector_kind : str, default ``'surface_concept'``
+            Detector-geometry key forwarded to the partial-hit recovery.
+            Use ``'roentdek'`` for RoentDek hardware. Ignored when
+            ``merge_partial_tdc=False``.
     """
     if tdc == 'pyccapt':
         # Check that the dataset is a valid pyccapt dataset with .h5 extension
@@ -89,13 +115,31 @@ def load_data(dataset_path, max_mc, flightPathLength, pulse_mode, tdc, variables
                 else:
                     dld_group_storage = loaded
                 print('The data is loaded in processed mode' + (' (with raw tdc)' if tdc_df is not None else ''))
+                if load_tdc_raw and tdc_df is None:
+                    print(
+                        'WARNING: cannot load raw TDC -- the dataset is already processed '
+                        'or does not contain a raw /tdc group. Raw TDC is only available '
+                        'on pyccapt h5 files saved in raw acquisition mode.'
+                    )
                 if 'x (nm)' not in dld_group_storage:
                     mode = 'raw'
                 else:
                     mode = 'processed'
         else:
             if load_tdc_raw:
-                print('Note: load_tdc_raw is only supported for pyccapt h5 datasets; ignoring.')
+                _ext_map = {
+                    'leap_epos': '.epos',
+                    'pos': '.pos',
+                    'leap_pos': '.pos',
+                    'leap_apt': '.apt',
+                    'ato_v6': '.ato',
+                }
+                _fmt = _ext_map.get(tdc, tdc)
+                print(
+                    f'WARNING: cannot load raw TDC -- {_fmt} files do not contain raw '
+                    'TDC data. Raw TDC is only available on pyccapt h5 files saved in '
+                    'raw acquisition mode. Ignoring load_tdc_raw=True.'
+                )
             load_data_type = 'leap_pos' if tdc in {'pos', 'leap_pos'} else tdc
             dld_group_storage = data_tools.load_data(dataset_path, load_data_type)
 
@@ -131,9 +175,27 @@ def load_data(dataset_path, max_mc, flightPathLength, pulse_mode, tdc, variables
                 data, tdc_df = loaded
             else:
                 data = loaded
+            if load_tdc_raw and tdc_df is None:
+                print(
+                    'WARNING: cannot load raw TDC -- the dataset is already processed '
+                    'or does not contain a raw /tdc group. Raw TDC is only available '
+                    'on pyccapt h5 files saved in raw acquisition mode.'
+                )
         else:
             if load_tdc_raw:
-                print('Note: load_tdc_raw is only supported for pyccapt h5 datasets; ignoring.')
+                _ext_map = {
+                    'leap_epos': '.epos',
+                    'pos': '.pos',
+                    'leap_pos': '.pos',
+                    'leap_apt': '.apt',
+                    'ato_v6': '.ato',
+                }
+                _fmt = _ext_map.get(tdc, tdc)
+                print(
+                    f'WARNING: cannot load raw TDC -- {_fmt} files do not contain raw '
+                    'TDC data. Raw TDC is only available on pyccapt h5 files saved in '
+                    'raw acquisition mode. Ignoring load_tdc_raw=True.'
+                )
             load_data_type = 'leap_pos' if tdc in {'pos', 'leap_pos'} else tdc
             data = data_tools.load_data(dataset_path, load_data_type)
 
@@ -149,6 +211,31 @@ def load_data(dataset_path, max_mc, flightPathLength, pulse_mode, tdc, variables
     variables.flight_path_length = flightPathLength
     variables.pulse_mode = pulse_mode
     variables.sync_from_data(update_backups=True)
+
+    if merge_partial_tdc:
+        if tdc != 'pyccapt':
+            print(
+                'WARNING: merge_partial_tdc=True requires a pyccapt h5 dataset; '
+                f'ignoring (tdc={tdc!r}).'
+            )
+        elif not load_tdc_raw or tdc_df is None:
+            print(
+                'WARNING: merge_partial_tdc=True requires load_tdc_raw=True with '
+                'a successful raw /tdc load; ignoring.'
+            )
+        else:
+            from pyccapt.calibration.data_tools.partial_recovery import (
+                merge_partial_tdc_into_dld,
+            )
+
+            try:
+                merge_partial_tdc_into_dld(
+                    variables,
+                    detector_kind=detector_kind,
+                    max_tof_ns=float(max_tof),
+                )
+            except Exception as exc:
+                print(f'WARNING: merge_partial_tdc failed: {exc}')
 
 
 def add_columns(variables, max_mc):
@@ -350,8 +437,15 @@ def load_calibrated_h5(dataset_path, variables, *, range_path=None, show_progres
             progress.set_postfix_str("normalizing loaded data")
             if source in ("raw", "raw_dld_only"):
                 # Apply the standard raw -> processed pipeline so downstream analyses
-                # see the same dataframe schema as a calibrated load.
-                dld_df = data_tools.remove_invalid_data(dld_df, max_tof=100000)
+                # see the same dataframe schema as a calibrated load. The
+                # invalid-row filter is intentionally skipped here: raw-data
+                # analysis is supposed to expose every recorded event, including
+                # the empty (x=y=t=0) buffer entries — and a previously-merged
+                # partial-hit recovery uses NaN on one axis, which the filter
+                # leaves alone but which downstream code now also tolerates.
+                # Keeping the row count untouched also means "raw load" and
+                # "calibrated-bundle load" produce equivalent inputs to the
+                # raw_data_analysis workflow.
                 dld_df = data_tools.pyccapt_raw_to_processed(dld_df)
             progress.update(1)
 
@@ -359,6 +453,27 @@ def load_calibrated_h5(dataset_path, variables, *, range_path=None, show_progres
         variables.data_backup = dld_df.copy()
         variables.data_tdc = tdc_df
         variables.data_tdc_backup = tdc_df.copy() if tdc_df is not None else None
+        # Populate the geometry / pulse fields that raw_data_analysis helpers
+        # read via ``getattr(variables, ..., default)``. Without these set
+        # explicitly, ``load_calibrated_h5`` users hit the 110 mm / 5000 ns /
+        # 'voltage' defaults baked into the helpers. Honour any value already
+        # on the object so a caller can override before invoking the loader.
+        if not getattr(variables, "flight_path_length", None):
+            variables.flight_path_length = 110.0
+        if not getattr(variables, "pulse_mode", None):
+            variables.pulse_mode = "voltage"
+        # Estimate ``max_tof`` from the data so the combinatorial recovery
+        # gate matches the file rather than the 5000 ns default. Add 5 % head
+        # room so the histogram tail isn't clipped.
+        if dld_df is not None and "t (ns)" in dld_df.columns and len(dld_df) > 0:
+            _t_arr = dld_df["t (ns)"].to_numpy(dtype=float)
+            _t_finite = _t_arr[np.isfinite(_t_arr)]
+            if _t_finite.size:
+                estimated_max_tof = float(np.max(_t_finite)) * 1.05
+                if not getattr(variables, "max_tof", None):
+                    variables.max_tof = estimated_max_tof
+                if not getattr(variables, "max_tof_ns", None):
+                    variables.max_tof_ns = estimated_max_tof
 
         # Range table: prefer /range in the same h5, then explicit range_path,
         # then fall back to <dataset>_range.h5 next to the file.

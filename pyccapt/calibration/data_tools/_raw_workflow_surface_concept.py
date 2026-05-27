@@ -47,56 +47,282 @@ def _surface_concept_hit_from_time_data(time_data_chunk: Sequence[int] | np.ndar
     return det_x, det_y, tof
 
 
-def _recover_surface_concept_partial_hits(chunk_channels: np.ndarray, chunk_times: np.ndarray) -> list[dict]:
-    """Recover every (ch0, ch1) and (ch2, ch3) pair as a separate 2-DLTS hit.
+def _enumerate_axis_pairs(
+    chunk_channels: np.ndarray,
+    chunk_times: np.ndarray,
+    first_channel: int,
+    second_channel: int,
+    detector_radius_cm: float,
+    max_tof_ns: float | None,
+) -> list[dict]:
+    """Enumerate every physically-valid (first, second) pair for one axis.
 
-    Each invalid 4-DLTS chunk is scanned for *both* delay-line axes
-    independently. For axis x: every ch-0 timestamp is paired with the next
-    ch-1 timestamp (in TDC arrival order); same for axis y with channels 2
-    and 3. A chunk like ``[0, 0, 1, 1]`` — i.e. two ch-0 and two ch-1
-    timestamps from a multi-hit pulse — emits **two** x-axis partial hits
-    so both physical ions are captured.
+    For a multi-hit pulse with n_A ticks on ``first_channel`` and n_B
+    ticks on ``second_channel`` this returns up to n_A * n_B candidates,
+    pre-filtered against the detector-surface and ToF gates. The caller
+    is responsible for resolving ambiguity via bipartite matching so
+    each tick contributes to at most one accepted hit.
+    """
+    first_indices = np.where(chunk_channels == first_channel)[0]
+    second_indices = np.where(chunk_channels == second_channel)[0]
+    if first_indices.size == 0 or second_indices.size == 0:
+        return []
 
-    Per-hit validity (detector area + peak-window membership) is enforced
-    later in :func:`build_surface_concept_recovery_diagnostics` and the
-    peak-summarizer; this function just enumerates the candidate pairs.
+    candidates: list[dict] = []
+    for i_local, i_global in enumerate(first_indices):
+        t_first = float(chunk_times[int(i_global)])
+        for j_local, j_global in enumerate(second_indices):
+            t_second = float(chunk_times[int(j_global)])
+            position = _surface_concept_position_from_pair(t_first, t_second)
+            if abs(position) > detector_radius_cm:
+                continue
+            tof = (t_first + t_second) * TOF_FACTOR_NS_1D
+            if max_tof_ns is not None and not (0.0 < tof <= max_tof_ns):
+                continue
+            candidates.append(
+                {
+                    'first_local': int(i_local),
+                    'second_local': int(j_local),
+                    'first_global': int(i_global),
+                    'second_global': int(j_global),
+                    'position': float(position),
+                    'tof': float(tof),
+                }
+            )
+    return candidates
+
+
+def _select_axis_assignment(
+    candidates: list[dict],
+    n_first: int,
+    n_second: int,
+) -> list[dict]:
+    """Pick a maximum-cardinality 1-to-1 assignment of candidate pairs.
+
+    Bipartite matching ensures each ``first_channel`` tick and each
+    ``second_channel`` tick participates in at most one selected pair —
+    the physical "each timestamp belongs to exactly one ion" constraint.
+    Among possible maximum matchings, the lowest |position| is preferred
+    so the more central (and more likely physical) ions are chosen first.
+
+    Implemented with ``scipy.optimize.linear_sum_assignment`` over a
+    padded cost matrix: cost = |position| for valid pairs, +inf for
+    invalid (so they are never selected unless forced, which is then
+    rejected by the post-filter).
+    """
+    if not candidates:
+        return []
+
+    # Build a (n_first x n_second) cost matrix; missing pairs get +inf.
+    cost = np.full((n_first, n_second), np.inf, dtype=np.float64)
+    by_position: dict[tuple[int, int], dict] = {}
+    for cand in candidates:
+        key = (cand['first_local'], cand['second_local'])
+        # Prefer the smaller-|position| candidate if duplicates ever
+        # arise (they shouldn't from _enumerate_axis_pairs, but be safe).
+        if key in by_position and abs(by_position[key]['position']) <= abs(cand['position']):
+            continue
+        by_position[key] = cand
+        cost[cand['first_local'], cand['second_local']] = abs(cand['position'])
+
+    # Pad to a square matrix so linear_sum_assignment is happy on
+    # rectangular inputs. The pad rows/cols carry a finite large cost
+    # which is still beaten by any finite real candidate, so they only
+    # fill in when a real candidate cannot be matched.
+    n_dim = max(n_first, n_second)
+    if n_dim == 0:
+        return []
+    PAD_COST = 1e6  # well above any |position| <= 4 cm
+    padded = np.full((n_dim, n_dim), PAD_COST, dtype=np.float64)
+    padded[:n_first, :n_second] = cost
+    # Replace inf with a large but finite value so the solver runs.
+    padded[np.isinf(padded)] = PAD_COST
+
+    from scipy.optimize import linear_sum_assignment
+
+    row_ind, col_ind = linear_sum_assignment(padded)
+    selected: list[dict] = []
+    for r, c in zip(row_ind, col_ind):
+        if r >= n_first or c >= n_second:
+            continue  # padded slot; not a real pair
+        cand = by_position.get((int(r), int(c)))
+        if cand is None:
+            continue  # no real candidate at this slot; padding picked it
+        selected.append(cand)
+    return selected
+
+
+def _combine_axes_into_xy_hits(
+    x_selected: list[dict],
+    y_selected: list[dict],
+    axis_consistency_ns: float | None,
+    max_tof_ns: float | None,
+) -> tuple[list[dict], list[dict], list[dict]]:
+    """Cross-match accepted X-pairs and Y-pairs into full xy hits.
+
+    Two ToFs from the same physical ion (one from each axis) must agree
+    within ``axis_consistency_ns``. Pairs that agree are promoted to
+    full 4-DLTS xy hits; those that do not are returned as leftover
+    single-axis partials.
+
+    Returns ``(xy_hits, x_leftover, y_leftover)``.
+    """
+    if not x_selected or not y_selected:
+        return [], list(x_selected), list(y_selected)
+
+    n_x, n_y = len(x_selected), len(y_selected)
+    # Cost = |tof_x - tof_y|. A large pad keeps non-matches from being
+    # forcibly selected.
+    PAD_COST = 1e9
+    n_dim = max(n_x, n_y)
+    cost = np.full((n_dim, n_dim), PAD_COST, dtype=np.float64)
+    for i, x_hit in enumerate(x_selected):
+        for j, y_hit in enumerate(y_selected):
+            diff = abs(x_hit['tof'] - y_hit['tof'])
+            cost[i, j] = diff
+
+    from scipy.optimize import linear_sum_assignment
+
+    row_ind, col_ind = linear_sum_assignment(cost)
+
+    used_x: set[int] = set()
+    used_y: set[int] = set()
+    xy_hits: list[dict] = []
+    for i, j in zip(row_ind, col_ind):
+        if i >= n_x or j >= n_y:
+            continue
+        x_hit = x_selected[int(i)]
+        y_hit = y_selected[int(j)]
+        diff = abs(x_hit['tof'] - y_hit['tof'])
+        if axis_consistency_ns is not None and diff > axis_consistency_ns:
+            continue
+        combined_tof = 0.5 * (x_hit['tof'] + y_hit['tof'])
+        if max_tof_ns is not None and not (0.0 < combined_tof <= max_tof_ns):
+            continue
+        xy_hits.append(
+            {
+                'x_det (cm)': x_hit['position'],
+                'y_det (cm)': y_hit['position'],
+                'tof (ns)': float(combined_tof),
+                'detector_axis': 'xy',
+                'tof_axis_x_ns': x_hit['tof'],
+                'tof_axis_y_ns': y_hit['tof'],
+            }
+        )
+        used_x.add(int(i))
+        used_y.add(int(j))
+
+    x_leftover = [hit for k, hit in enumerate(x_selected) if k not in used_x]
+    y_leftover = [hit for k, hit in enumerate(y_selected) if k not in used_y]
+    return xy_hits, x_leftover, y_leftover
+
+
+def _recover_surface_concept_partial_hits(
+    chunk_channels: np.ndarray,
+    chunk_times: np.ndarray,
+    *,
+    detector_radius_cm: float = 4.0,
+    max_tof_ns: float | None = None,
+    axis_consistency_ns: float | None = 5.0,
+) -> list[dict]:
+    """Recover every physically-valid hit from a multi-hit pulse.
+
+    For each delay-line axis (x: ch0+ch1, y: ch2+ch3) ALL pairwise
+    combinations of one ch-A timestamp with one ch-B timestamp are
+    enumerated, filtered against the detector-surface and ToF gates,
+    and a maximum-cardinality 1-to-1 bipartite matching selects a
+    consistent subset (each tick used at most once). Across axes, the
+    selected x-pairs and y-pairs are then cross-matched by ToF
+    agreement: a pair agreeing to within ``axis_consistency_ns``
+    becomes a full 4-DLTS xy hit; the remaining unmatched pairs become
+    2-DLTS single-axis partial hits.
+
+    A pulse with 5 ch0, 5 ch1, 4 ch2, 4 ch3 ticks can therefore yield
+    e.g. 3 full xy hits + 2 x-only partials + 1 y-only partial, all
+    physically consistent and emitted as separate dicts.
+
+    Parameters
+    ----------
+    chunk_channels : np.ndarray
+        Per-tick channel ids in arrival order. Channel 0/1 form the
+        x axis; channel 2/3 form the y axis.
+    chunk_times : np.ndarray
+        Per-tick raw TDC timestamps in arrival order.
+    detector_radius_cm : float, default 4.0
+        Pairs reconstructing |position| outside this radius are
+        rejected as unphysical.
+    max_tof_ns : float, optional
+        If given, candidate ToFs outside ``(0, max_tof_ns]`` are
+        rejected.
+    axis_consistency_ns : float or None, default 5.0
+        Maximum ``|tof_x - tof_y|`` permitted when promoting an
+        (x-pair, y-pair) combination to a full xy hit. Set to ``None``
+        to skip this check (any matched pair becomes full xy).
     """
     recovered_hits: list[dict] = []
-    if len(chunk_channels) < 2:
+    if chunk_channels is None or chunk_times is None or len(chunk_channels) < 2:
         return recovered_hits
 
+    chunk_channels = np.asarray(chunk_channels, dtype=np.int64)
+    chunk_times = np.asarray(chunk_times, dtype=np.int64)
+
+    # --- Per-axis enumeration + 1-to-1 matching --------------------------
     pair_definitions = [
         ('x', 0, 1),
         ('y', 2, 3),
     ]
+    per_axis_selected: dict[str, list[dict]] = {'x': [], 'y': []}
     for axis, first_channel, second_channel in pair_definitions:
-        first_indices = list(np.where(chunk_channels == first_channel)[0])
-        second_indices = list(np.where(chunk_channels == second_channel)[0])
-        while first_indices and second_indices:
-            first_index = int(first_indices.pop(0))
-            second_index = int(second_indices.pop(0))
-            first_time = float(chunk_times[first_index])
-            second_time = float(chunk_times[second_index])
-            position = _surface_concept_position_from_pair(first_time, second_time)
-            tof = (first_time + second_time) * TOF_FACTOR_NS_1D
-            if axis == 'x':
-                recovered_hits.append(
-                    {
-                        'x_det (cm)': position,
-                        'y_det (cm)': 0.0,
-                        'tof (ns)': float(tof),
-                        'detector_axis': 'x',
-                    }
-                )
-            else:
-                recovered_hits.append(
-                    {
-                        'x_det (cm)': 0.0,
-                        'y_det (cm)': position,
-                        'tof (ns)': float(tof),
-                        'detector_axis': 'y',
-                    }
-                )
+        candidates = _enumerate_axis_pairs(
+            chunk_channels,
+            chunk_times,
+            first_channel=first_channel,
+            second_channel=second_channel,
+            detector_radius_cm=detector_radius_cm,
+            max_tof_ns=max_tof_ns,
+        )
+        if not candidates:
+            continue
+        n_first = int((chunk_channels == first_channel).sum())
+        n_second = int((chunk_channels == second_channel).sum())
+        per_axis_selected[axis] = _select_axis_assignment(candidates, n_first, n_second)
+
+    # --- Cross-axis ToF agreement → promote to full xy hits --------------
+    xy_hits, x_leftover, y_leftover = _combine_axes_into_xy_hits(
+        per_axis_selected['x'],
+        per_axis_selected['y'],
+        axis_consistency_ns=axis_consistency_ns,
+        max_tof_ns=max_tof_ns,
+    )
+
+    # --- Emit results ----------------------------------------------------
+    # Full xy hits first (more physically informative), then leftover
+    # single-axis partials. Each dict matches the schema the caller in
+    # partial_recovery.py expects: x_det / y_det are NaN on the axis
+    # that was not recovered.
+    recovered_hits.extend(xy_hits)
+    for x_hit in x_leftover:
+        recovered_hits.append(
+            {
+                'x_det (cm)': x_hit['position'],
+                'y_det (cm)': float('nan'),
+                'tof (ns)': float(x_hit['tof']),
+                'detector_axis': 'x',
+                'tof_axis_x_ns': float(x_hit['tof']),
+                'tof_axis_y_ns': float('nan'),
+            }
+        )
+    for y_hit in y_leftover:
+        recovered_hits.append(
+            {
+                'x_det (cm)': float('nan'),
+                'y_det (cm)': y_hit['position'],
+                'tof (ns)': float(y_hit['tof']),
+                'detector_axis': 'y',
+                'tof_axis_x_ns': float('nan'),
+                'tof_axis_y_ns': float(y_hit['tof']),
+            }
+        )
     return recovered_hits
 
 

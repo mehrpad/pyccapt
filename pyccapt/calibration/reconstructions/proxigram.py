@@ -45,12 +45,27 @@ def _interface_vertices_and_normals(
 
 
 def _stack_xyz(x, y, z) -> np.ndarray:
+    """Stack (x, y, z) into an (N, 3) float64 array.
+
+    Partial-recovered rows have NaN coordinates because their detector
+    position was undefined. Proxigram distance computation uses
+    ``cKDTree`` which rejects NaN inputs. Drop NaN rows here so the
+    caller never has to know about the partials.
+    """
     x = np.asarray(x).reshape(-1)
     y = np.asarray(y).reshape(-1)
     z = np.asarray(z).reshape(-1)
     if not (x.shape == y.shape == z.shape):
         raise ValueError("x, y, z must have same length.")
-    return np.column_stack((x, y, z)).astype(np.float64, copy=False)
+    coords = np.column_stack((x, y, z)).astype(np.float64, copy=False)
+    nan_row_mask = np.isnan(coords).any(axis=1)
+    if nan_row_mask.any():
+        print(
+            f'[proxigram._stack_xyz] Dropping {int(nan_row_mask.sum())} rows with '
+            'NaN (x, y, z) (partial-recovered ions) before distance computation.'
+        )
+        coords = coords[~nan_row_mask]
+    return coords
 
 
 def _matlab_bin_centers(dist: np.ndarray, bin_nm: float) -> Tuple[np.ndarray, np.ndarray]:

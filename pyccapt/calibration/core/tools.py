@@ -110,6 +110,19 @@ def hist_plot(
         raise CalibrationInputError("mc_tof cannot be empty")
     bin = ensure_positive(bin, field_name="bin")
 
+    # Defensive NaN/inf handling. After ``merge_partial_tdc`` every row
+    # should have a finite mc/tof (partials get a centred-axis estimate),
+    # but a buggy upstream calibration step could still produce non-finite
+    # values. ``np.min`` / ``np.max`` would propagate NaN and break the
+    # histogram. Filter to the finite subset with a one-line notice.
+    finite_mask = np.isfinite(mc_tof)
+    if not finite_mask.all():
+        n_dropped = int((~finite_mask).sum())
+        print(f'[hist_plot] Skipping {n_dropped} non-finite mc/tof values.')
+        mc_tof = mc_tof[finite_mask]
+        if mc_tof.size == 0:
+            raise CalibrationInputError("mc_tof has no finite values")
+
     bins = np.linspace(np.min(mc_tof), np.max(mc_tof), round(np.max(mc_tof) / bin))
 
     if fast_hist:

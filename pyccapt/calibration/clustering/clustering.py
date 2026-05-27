@@ -96,6 +96,17 @@ def normalize_clustering_method(method: str) -> str:
 
 
 def _resolve_xyz(variables) -> np.ndarray:
+    """Return the (N, 3) reconstruction coordinates.
+
+    Partial-recovered rows have NaN x/y/z because their detector position
+    was incomplete. ``np.column_stack`` happily carries the NaN through,
+    but downstream clustering (DBSCAN / HDBSCAN / MinMax) raises on NaN
+    inputs. The mask is preserved at full length here so downstream
+    consumers like the colour / mc array stay aligned; callers that
+    actually pass the array into clustering must drop NaN rows with
+    ``np.isnan(coords).any(axis=1)``. We surface a clear notice the first
+    time so the omission is obvious.
+    """
     x = np.asarray(getattr(variables, "x", np.zeros(0)))
     y = np.asarray(getattr(variables, "y", np.zeros(0)))
     z = np.asarray(getattr(variables, "z", np.zeros(0)))
@@ -103,7 +114,16 @@ def _resolve_xyz(variables) -> np.ndarray:
         raise ValueError("Reconstruction coordinates are empty. Run the reconstruction first.")
     if not (len(x) == len(y) == len(z)):
         raise ValueError("Reconstruction coordinates must have the same length.")
-    return np.column_stack((x, y, z))
+    coords = np.column_stack((x, y, z))
+    n_nan = int(np.isnan(coords).any(axis=1).sum())
+    if n_nan > 0:
+        print(
+            f'[clustering._resolve_xyz] Note: {n_nan} rows have NaN (x, y, z) '
+            '(partial-recovered ions with undefined detector position). '
+            'Downstream clustering should mask them out with '
+            '``~np.isnan(coords).any(axis=1)``.'
+        )
+    return coords
 
 
 def _resolve_mc(variables) -> np.ndarray:
@@ -389,6 +409,21 @@ def hdbscan_clustering(
         raise ValueError("points must be a (N, 3) array")
     if len(points) == 0:
         raise ValueError("points cannot be empty")
+
+    # Both HDBSCAN and sklearn DBSCAN raise on NaN coordinates. Drop
+    # partial-recovered rows with undefined (x, y, z) before clustering
+    # rather than letting the backend explode. The returned ``labels``
+    # array length matches the filtered input; the caller is responsible
+    # for aligning with original-index arrays if needed.
+    nan_row_mask = np.isnan(points).any(axis=1)
+    if nan_row_mask.any():
+        print(
+            f'[hdbscan_clustering] Dropping {int(nan_row_mask.sum())} rows with NaN '
+            '(x, y, z) (partial-recovered ions) before clustering.'
+        )
+        points = points[~nan_row_mask]
+        if len(points) == 0:
+            raise ValueError("points has no finite rows after dropping NaN coordinates")
 
     n_min = max(2, int(n_min))
     min_samples = max(1, int(min_samples))

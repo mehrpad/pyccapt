@@ -71,6 +71,32 @@ class SharedVariablesBase:
             raise CalibrationStateError(f"{self._CALIBRATION_ATTR[mode]!r} is empty")
         return values
 
+    def position_capable_mask(self) -> np.ndarray:
+        """Boolean mask of rows with both detector axes reconstructed.
+
+        After ``merge_partial_tdc=True`` the DLD frame contains
+        partial-recovered rows with ``NaN`` on ``x_det (cm)`` or
+        ``y_det (cm)``. Any analysis that needs the detector position
+        (bowl correction, adaptive spatial residual, 3-D reconstruction,
+        FDM) MUST filter via this mask first; otherwise the NaN poisons
+        polynomial fits, histogram-bin estimates, and clustering.
+
+        Returns a boolean ndarray aligned with ``self.dld_x_det`` /
+        ``self.dld_y_det``. When neither array is populated the result
+        is an empty bool array.
+        """
+        x_det = np.asarray(getattr(self, "dld_x_det", []), dtype=float)
+        y_det = np.asarray(getattr(self, "dld_y_det", []), dtype=float)
+        if x_det.size == 0 or y_det.size == 0:
+            return np.zeros(max(x_det.size, y_det.size), dtype=bool)
+        if x_det.shape != y_det.shape:
+            return np.zeros(min(x_det.size, y_det.size), dtype=bool)
+        return np.isfinite(x_det) & np.isfinite(y_det)
+
+    def position_capable_count(self) -> int:
+        """Number of rows with both detector axes finite."""
+        return int(self.position_capable_mask().sum())
+
     def set_peak_range(self, left: float, right: float) -> None:
         """Set selected peak window after validating numeric order."""
         try:

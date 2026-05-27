@@ -308,6 +308,15 @@ def calculate_element_isosurface(
     """Create a filtered isosurface mesh for a single interface element."""
     if base_mask is None:
         base_mask = np.ones(len(variables.x), dtype=bool)
+    # Drop partial-recovered rows from the base mask. Their (x, y, z) is
+    # NaN because the detector position was incomplete -- including them
+    # in ``coords`` poisons the voxel-binning / scipy isosurface step.
+    finite_xyz = (
+        np.isfinite(np.asarray(variables.x))
+        & np.isfinite(np.asarray(variables.y))
+        & np.isfinite(np.asarray(variables.z))
+    )
+    base_mask = base_mask & finite_xyz
     if not np.any(base_mask):
         raise ValueError('No ions are available inside the requested plotting range')
 
@@ -453,10 +462,13 @@ def reconstruction_plot(
     else:
         print('element_percentage should be a list')
 
-    # Draw an edge of cube around the 3D plot
-    x_range = [min(variables.x), max(variables.x)]
-    y_range = [min(variables.y), max(variables.y)]
-    z_range = [min(variables.z), max(variables.z)]
+    # Draw an edge of cube around the 3D plot. Use nanmin/nanmax so
+    # partial-recovered rows (NaN x/y/z from undefined reconstruction)
+    # don't poison the cube edges; Python's builtin min/max return NaN
+    # if any element is NaN.
+    x_range = [float(np.nanmin(variables.x)), float(np.nanmax(variables.x))]
+    y_range = [float(np.nanmin(variables.y)), float(np.nanmax(variables.y))]
+    z_range = [float(np.nanmin(variables.z)), float(np.nanmax(variables.z))]
     range_cube = [x_range, y_range, z_range]
 
     def _safe_random_subset(mask_s, fraction):

@@ -172,17 +172,46 @@ def hdf_creator(variables, conf, time_counter, time_ex):
                 _create_dataset(hdf_file, "dld/voltage_pulse", variables.main_v_p_dld, np.float64)
                 _create_dataset(hdf_file, "dld/laser_pulse", variables.main_l_p_dld, np.float64)
                 _create_dataset(hdf_file, "dld/start_counter", variables.time_stamp, np.uint64)
-                _create_dataset(hdf_file, "tdc/ch0", variables.ch0, np.uint64)
-                _create_dataset(hdf_file, "tdc/ch1", variables.ch1, np.uint64)
-                _create_dataset(hdf_file, "tdc/ch2", variables.ch2, np.uint64)
-                _create_dataset(hdf_file, "tdc/ch3", variables.ch3, np.uint64)
-                _create_dataset(hdf_file, "tdc/ch4", variables.ch4, np.uint64)
-                _create_dataset(hdf_file, "tdc/ch5", variables.ch5, np.uint64)
-                _create_dataset(hdf_file, "tdc/ch6", variables.ch6, np.uint64)
-                _create_dataset(hdf_file, "tdc/ch7", variables.ch7, np.uint64)
-                _create_dataset(hdf_file, "tdc/high_voltage", variables.main_v_dc_tdc, np.float64)
-                _create_dataset(hdf_file, "tdc/voltage_pulse", variables.main_v_p_tdc, np.float64)
-                _create_dataset(hdf_file, "tdc/laser_pulse", variables.main_l_p_tdc, np.float64)
+                # RoentDek raw: convert per-channel arrays ch0..ch7 (one entry
+                # per pulse trigger per channel) into the same flat
+                # (channel, time_data, start_counter, ...) layout that
+                # Surface Concept uses, so the calibration loader at
+                # data_loadcrop.fetch_dataset_from_dld_grp(extract_mode='tdc_ro')
+                # can read both detectors with one code path. Each event
+                # contributes 8 rows (one per channel); rows where the
+                # channel did not fire (raw value == 0) are kept so the
+                # per-event grouping by start_counter stays intact, but the
+                # downstream partial-hit recovery can filter them via
+                # ``time_data != 0``.
+                _ch_stack = np.column_stack(
+                    [
+                        np.asarray(variables.ch0, dtype=np.uint64).reshape(-1),
+                        np.asarray(variables.ch1, dtype=np.uint64).reshape(-1),
+                        np.asarray(variables.ch2, dtype=np.uint64).reshape(-1),
+                        np.asarray(variables.ch3, dtype=np.uint64).reshape(-1),
+                        np.asarray(variables.ch4, dtype=np.uint64).reshape(-1),
+                        np.asarray(variables.ch5, dtype=np.uint64).reshape(-1),
+                        np.asarray(variables.ch6, dtype=np.uint64).reshape(-1),
+                        np.asarray(variables.ch7, dtype=np.uint64).reshape(-1),
+                    ]
+                )  # shape (n_events, 8)
+                _n_events = _ch_stack.shape[0]
+                _time_data_flat = _ch_stack.reshape(-1)  # row-major: ev0_ch0..ch7, ev1_ch0..ch7, ...
+                _channel_flat = np.tile(np.arange(8, dtype=np.uint32), _n_events)
+                _start_counter_per_event = np.asarray(variables.time_stamp, dtype=np.uint64).reshape(-1)
+                _start_counter_flat = np.repeat(_start_counter_per_event[:_n_events], 8)
+                _hv_per_event = np.asarray(variables.main_v_dc_tdc, dtype=np.float64).reshape(-1)
+                _vp_per_event = np.asarray(variables.main_v_p_tdc, dtype=np.float64).reshape(-1)
+                _lp_per_event = np.asarray(variables.main_l_p_tdc, dtype=np.float64).reshape(-1)
+                _hv_flat = np.repeat(_hv_per_event[:_n_events], 8)
+                _vp_flat = np.repeat(_vp_per_event[:_n_events], 8)
+                _lp_flat = np.repeat(_lp_per_event[:_n_events], 8)
+                _create_dataset(hdf_file, "tdc/channel", _channel_flat, np.uint32)
+                _create_dataset(hdf_file, "tdc/time_data", _time_data_flat, np.uint64)
+                _create_dataset(hdf_file, "tdc/start_counter", _start_counter_flat, np.uint64)
+                _create_dataset(hdf_file, "tdc/high_voltage", _hv_flat, np.float64)
+                _create_dataset(hdf_file, "tdc/voltage_pulse", _vp_flat, np.float64)
+                _create_dataset(hdf_file, "tdc/laser_pulse", _lp_flat, np.float64)
 
             elif conf["tdc"] == "on" and conf["tdc_model"] == "HSD" and variables.counter_source == "HSD":
                 # DRS readout: GetTime returns ns and GetWave returns mV as

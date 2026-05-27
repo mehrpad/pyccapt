@@ -526,6 +526,25 @@ def plot_crop_fdm(
     Returns:
         None
     """
+    # When the dataset has been merged with recovered partial-hit rows
+    # (``merge_partial_tdc=True``), partials carry NaN on x_det or y_det
+    # because only one delay-line axis was reconstructable. NaNs cannot be
+    # binned into a 2-D histogram (matplotlib silently drops them, but the
+    # length-mismatch with ``mask`` below would then misalign rows). Filter
+    # them up front and emit a one-line notice so the user knows the FDM
+    # was built from the position-capable subset only.
+    x = np.asarray(x)
+    y = np.asarray(y)
+    nan_mask = np.isnan(x) | np.isnan(y)
+    if nan_mask.any():
+        n_dropped = int(nan_mask.sum())
+        print(
+            f'[plot_crop_fdm] Skipping {n_dropped} partial-recovered rows '
+            'with NaN on x_det or y_det (the 2-D histogram requires both axes).'
+        )
+        x = x[~nan_mask]
+        y = y[~nan_mask]
+
     if range_sequence or range_mc or range_detx or range_dety or range_x or range_y or range_z:
         if range_sequence:
             mask_sequence = np.zeros(len(x), dtype=bool)
@@ -799,17 +818,40 @@ def crop_data_after_selection(data_crop, variables):
     x = data_crop['x_det (cm)'].to_numpy()
     y = data_crop['y_det (cm)'].to_numpy()
 
-    x_min, x_max = float(np.min(x)), float(np.max(x))
-    y_min, y_max = float(np.min(y)), float(np.max(y))
+    # Partial-recovered rows (merge_partial_tdc=True) carry NaN on the
+    # delay-line axis that could not be reconstructed. Their detector
+    # position is *unknown*, not "outside the ROI" -- silently dropping
+    # them would throw away ToF / mass / pulse info that is still valid.
+    # Build the in/out mask only from rows where both axes are finite,
+    # and force partials to pass through unconditionally so the spatial
+    # crop is non-destructive to them.
+    finite_mask = np.isfinite(x) & np.isfinite(y)
+    partial_mask = ~finite_mask
+    n_partials = int(partial_mask.sum())
+
+    x_finite = x[finite_mask]
+    y_finite = y[finite_mask]
+    if x_finite.size == 0:
+        raise ValueError('Spatial crop has no rows with both detector axes (only partials present)')
+
+    x_min, x_max = float(np.min(x_finite)), float(np.max(x_finite))
+    y_min, y_max = float(np.min(y_finite)), float(np.max(y_finite))
     if center_x < x_min or center_x > x_max or center_y < y_min or center_y > y_max:
         raise ValueError(
             f'Crop center must stay inside detector bounds: x in [{x_min:.4f}, {x_max:.4f}], y in [{y_min:.4f}, {y_max:.4f}]'
         )
 
-    detector_dist = np.sqrt((x - center_x) ** 2 + (y - center_y) ** 2)
-    mask_fdm = detector_dist <= radius
-    if not np.any(mask_fdm):
-        raise ValueError('Spatial crop does not contain any detector hits')
+    detector_dist = np.full(len(data_crop), np.inf, dtype=np.float64)
+    detector_dist[finite_mask] = np.sqrt((x_finite - center_x) ** 2 + (y_finite - center_y) ** 2)
+    mask_fdm = (detector_dist <= radius) | partial_mask  # keep partials always
+    if not np.any(mask_fdm & finite_mask):
+        raise ValueError('Spatial crop does not contain any position-capable detector hits')
+
+    if n_partials > 0:
+        print(
+            f'[crop_data_after_selection] Keeping {n_partials} partial-recovered rows '
+            '(NaN x_det/y_det) unconditionally; spatial-only analyses must still filter them.'
+        )
 
     cropped = data_crop.loc[mask_fdm].copy()
     cropped.reset_index(inplace=True, drop=True)

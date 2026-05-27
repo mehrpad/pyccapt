@@ -379,12 +379,24 @@ def preview_mass_spectrum_after_t0(
     bin_width: float = 0.1,
 ) -> plt.Figure:
     """Preview the recalculated mass spectrum after applying a candidate t0."""
+    # Partial-recovered rows (NaN x_det / y_det) yield NaN mc here; they
+    # are filtered out of the histogram by ``mask_recalculated`` below.
+    # Surface a notice so the t0-preview's lower count is not a mystery.
+    _x_det = np.asarray(variables.dld_x_det, dtype=float)
+    _y_det = np.asarray(variables.dld_y_det, dtype=float)
+    _n_partial = int(np.sum(~(np.isfinite(_x_det) & np.isfinite(_y_det))))
+    if _n_partial > 0:
+        print(
+            f'[preview_mass_spectrum_after_t0] {_n_partial} partial-recovered rows '
+            'have NaN x_det / y_det and will be excluded from the preview histogram.'
+        )
+
     recalculated = mc_tools.tof2mc(
         np.asarray(variables.dld_t, dtype=float),
         float(t0_ns),
         np.asarray(variables.dld_high_voltage, dtype=float),
-        np.asarray(variables.dld_x_det, dtype=float),
-        np.asarray(variables.dld_y_det, dtype=float),
+        _x_det,
+        _y_det,
         float(flight_path_length_mm),
         np.asarray(getattr(variables, "dld_pulse_v", np.zeros_like(variables.dld_high_voltage)), dtype=float),
         mode=pulse_mode,

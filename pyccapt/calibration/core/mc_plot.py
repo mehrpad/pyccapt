@@ -139,9 +139,22 @@ class AptHistPlotter:
             tuple: A tuple of the y and x values of the histogram.
 
         """
-        # Define the bins
+        # Define the bins. Defensive: filter non-finite values so a
+        # single NaN (e.g. from a partial-recovery row whose centred-axis
+        # mc_uc failed) doesn't poison np.min / np.max and break the
+        # histogram. Non-destructive: ``self.mc_tof`` is overwritten only
+        # with the finite subset; the original array is not stored
+        # elsewhere on the plotter.
         self.bin_width = bin_width
         self.plot_show = plot_show
+        mc_tof_arr = np.asarray(self.mc_tof)
+        finite_mask = np.isfinite(mc_tof_arr)
+        if not finite_mask.all():
+            n_dropped = int((~finite_mask).sum())
+            print(f'[AptHistPlotter] Skipping {n_dropped} non-finite mc/tof values.')
+            self.mc_tof = mc_tof_arr[finite_mask]
+            if self.mc_tof.size == 0:
+                raise ValueError("mc_tof has no finite values for histogram")
         self.bins = np.linspace(np.min(self.mc_tof), np.max(self.mc_tof), round(np.max(self.mc_tof) / bin_width))
 
         # Plot the histogram directly

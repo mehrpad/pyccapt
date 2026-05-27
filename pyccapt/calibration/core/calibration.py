@@ -712,6 +712,22 @@ def bowl_correction(
         field_names=("dld_x_bowl", "dld_y_bowl", "dld_t_bowl"),
     )
 
+    # Drop partial-recovered rows (NaN x_det or y_det). The bowl
+    # polynomial fit cannot ingest NaN coordinates -- a single partial
+    # ion poisons every coefficient. Partials retain their uncorrected
+    # ``t (ns)`` downstream because the apply step uses an array-wise
+    # mask elsewhere.
+    _finite_xy = np.isfinite(np.asarray(dld_x_bowl, dtype=float)) & np.isfinite(np.asarray(dld_y_bowl, dtype=float))
+    if not _finite_xy.all():
+        _n_dropped = int((~_finite_xy).sum())
+        print(
+            f'[bowl_correction] Excluding {_n_dropped} partial-recovered rows '
+            '(NaN x_det / y_det) from the fit; they keep their uncorrected t.'
+        )
+        dld_x_bowl = np.asarray(dld_x_bowl, dtype=float)[_finite_xy]
+        dld_y_bowl = np.asarray(dld_y_bowl, dtype=float)[_finite_xy]
+        dld_t_bowl = np.asarray(dld_t_bowl, dtype=float)[_finite_xy]
+
     sampling_mode = _resolve_sampling_mode(sampling_mode, variables)
     samples = _collect_spatial_samples(
         np.asarray(dld_x_bowl, dtype=float),
@@ -965,6 +981,12 @@ def bowl_correction_main(
             )
 
     mask_fv = np.ones_like(dld_x, dtype=bool)
+    # Partial-recovered rows (NaN x_det / y_det) cannot have a
+    # position-dependent correction applied -- predicting bowl(NaN,NaN)
+    # would return NaN and we'd lose the row's uncalibrated t/mc. Skip
+    # them in the apply step so their value passes through unchanged.
+    _finite_xy_apply = np.isfinite(dld_x) & np.isfinite(dld_y)
+    mask_fv = mask_fv & _finite_xy_apply
 
     f_bowl = _predict_bowl_model(fit_mode, parameters, dld_x[mask_fv], dld_y[mask_fv])
 
@@ -1424,6 +1446,15 @@ def multi_peak_bowl_corr_main(
     dld_x_mm = np.asarray(dld_x) * 10
     dld_y_mm = np.asarray(dld_y) * 10
 
+    # Track partial-recovered rows so the fit excludes them but the
+    # apply step preserves their values.
+    _finite_xy_mp = np.isfinite(dld_x_mm) & np.isfinite(dld_y_mm)
+    if not _finite_xy_mp.all():
+        print(
+            f'[multi_peak_bowl_corr_main] Excluding {int((~_finite_xy_mp).sum())} '
+            'partial-recovered rows (NaN x_det / y_det) from peak-sample collection.'
+        )
+
     detected = _auto_detect_peaks(
         calib_arr,
         n_peaks=n_peaks,
@@ -1438,7 +1469,7 @@ def multi_peak_bowl_corr_main(
 
     for pk in detected:
         x1, x2 = pk['x1'], pk['x2']
-        mask = (calib_arr > x1) & (calib_arr < x2)
+        mask = (calib_arr > x1) & (calib_arr < x2) & _finite_xy_mp
         peak_t = calib_arr[mask]
         peak_x = dld_x_mm[mask]
         peak_y = dld_y_mm[mask]
@@ -1519,14 +1550,17 @@ def multi_peak_bowl_corr_main(
     if not is_finite:
         raise CalibrationInputError("Bowl fit returned invalid parameters")
 
-    f_bowl = np.clip(
-        _predict_bowl_model(fit_mode, parameters, dld_x_mm, dld_y_mm),
-        np.finfo(float).eps,
-        None,
-    )
-
+    # Apply only on position-capable rows. Partials keep their
+    # uncalibrated value rather than being divided by NaN.
     source = variables.dld_t_calib if calibration_mode == 'tof' else variables.mc_calib
-    calibration_mc_tof = source / f_bowl
+    calibration_mc_tof = np.array(source, dtype=float, copy=True)
+    if _finite_xy_mp.any():
+        f_bowl_subset = np.clip(
+            _predict_bowl_model(fit_mode, parameters, dld_x_mm[_finite_xy_mp], dld_y_mm[_finite_xy_mp]),
+            np.finfo(float).eps,
+            None,
+        )
+        calibration_mc_tof[_finite_xy_mp] = calibration_mc_tof[_finite_xy_mp] / f_bowl_subset
 
     if calibration_mode == 'tof':
         variables.dld_t_calib = calibration_mc_tof
@@ -1606,6 +1640,15 @@ def joint_voltage_bowl_corr_main(
     sample_size = int(ensure_positive(sample_size, field_name="sample_size"))
     bin_size = ensure_positive(bin_size, field_name="bin_size")
 
+    # Track partial rows so they're excluded from the joint fit but
+    # their values pass through the apply step unchanged.
+    _finite_xy_jv = np.isfinite(dld_x_mm) & np.isfinite(dld_y_mm)
+    if not _finite_xy_jv.all():
+        print(
+            f'[joint_voltage_bowl_corr_main] Excluding {int((~_finite_xy_jv).sum())} '
+            'partial-recovered rows (NaN x_det / y_det) from peak-sample collection.'
+        )
+
     detected = _auto_detect_peaks(
         calib_arr,
         n_peaks=n_peaks,
@@ -1621,7 +1664,7 @@ def joint_voltage_bowl_corr_main(
     peak_info = []
 
     for peak in detected:
-        mask = (calib_arr > peak['x1']) & (calib_arr < peak['x2'])
+        mask = (calib_arr > peak['x1']) & (calib_arr < peak['x2']) & _finite_xy_jv
         peak_t = calib_arr[mask]
         peak_x = dld_x_mm[mask]
         peak_y = dld_y_mm[mask]
@@ -1685,17 +1728,21 @@ def joint_voltage_bowl_corr_main(
     if not np.all(np.isfinite(parameters)):
         raise CalibrationInputError("Joint voltage/bowl fit returned invalid parameters")
 
-    all_features = _joint_feature_matrix(
-        dld_highVoltage,
-        dld_x_mm,
-        dld_y_mm,
-        voltage_center,
-        voltage_scale,
-        spatial_scale,
-    )
-    correction = np.clip(all_features @ parameters, np.finfo(float).eps, None)
+    # Apply only on position-capable rows. Partials keep their
+    # uncalibrated value rather than being multiplied by NaN features.
     source = variables.dld_t_calib if calibration_mode == 'tof' else variables.mc_calib
-    corrected = source / correction
+    corrected = np.array(source, dtype=float, copy=True)
+    if _finite_xy_jv.any():
+        sub_features = _joint_feature_matrix(
+            dld_highVoltage[_finite_xy_jv],
+            dld_x_mm[_finite_xy_jv],
+            dld_y_mm[_finite_xy_jv],
+            voltage_center,
+            voltage_scale,
+            spatial_scale,
+        )
+        sub_correction = np.clip(sub_features @ parameters, np.finfo(float).eps, None)
+        corrected[_finite_xy_jv] = corrected[_finite_xy_jv] / sub_correction
 
     if calibration_mode == 'tof':
         variables.dld_t_calib = corrected

@@ -621,11 +621,19 @@ def adaptive_residual_gbm(
             if not np.isfinite(observed_centre):
                 continue
             shift = observed_centre - tgt
-            # One feature row per peak per window
+            # One feature row per peak per window.
+            # Use nanmean so partial-recovered rows (NaN x_det / y_det)
+            # don't poison the window-average features. If the entire
+            # window is partial (all NaN), nanmean returns NaN with a
+            # warning; guard so we just skip the row instead.
+            xw = x_det[start:stop]
+            yw = y_det[start:stop]
+            if not np.any(np.isfinite(xw)) or not np.any(np.isfinite(yw)):
+                continue
             feats.append([
                 0.5 * (start + stop - 1) / max(1, n_ions),
-                float(np.mean(x_det[start:stop])),
-                float(np.mean(y_det[start:stop])),
+                float(np.nanmean(xw)),
+                float(np.nanmean(yw)),
                 float(np.mean(voltage[start:stop])),
                 tgt,  # which peak
             ])
@@ -643,15 +651,22 @@ def adaptive_residual_gbm(
     )
     gbm.fit(X, y, sample_weight=w)
 
-    # Predict per-ion shift (use the dominant peak's target as the reference per ion)
+    # Predict per-ion shift (use the dominant peak's target as the reference per ion).
+    # Partial rows have NaN x_det / y_det -> GBM.predict raises on NaN
+    # features. Predict only on position-capable rows; partials get zero
+    # shift so their uncalibrated value passes through unchanged.
     indices = np.arange(n_ions, dtype=float) / max(1.0, n_ions)
+    finite_xy_pred = np.isfinite(x_det) & np.isfinite(y_det)
     X_pred = np.column_stack([
-        indices,
-        x_det, y_det,
-        voltage,
-        np.full(n_ions, target),
+        indices[finite_xy_pred],
+        x_det[finite_xy_pred],
+        y_det[finite_xy_pred],
+        voltage[finite_xy_pred],
+        np.full(int(finite_xy_pred.sum()), target),
     ])
-    per_ion_shift = gbm.predict(X_pred)
+    per_ion_shift = np.zeros(n_ions, dtype=float)
+    if X_pred.size > 0:
+        per_ion_shift[finite_xy_pred] = gbm.predict(X_pred)
     bound = max(float(np.std(y)) * 4.0, 1e-6)
     per_ion_shift = np.clip(per_ion_shift, -bound, bound)
     calib_out = calib - per_ion_shift

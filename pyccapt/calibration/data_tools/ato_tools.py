@@ -96,44 +96,76 @@ def ato_to_ccapt(file_path: str, mode: str) -> pd.DataFrame:
         version = struct.unpack('i', data[4:8])
         num_atoms = struct.unpack('i', data[8:12])
 
-        atom_id = []
-        delta_p = []
-        x = []
-        y = []
-        z = []
-        mc = []
-        tof = []
-        x_det = []
-        y_det = []
-        dc_voltage = []
-        mcp_amp = []
-        num_cluster = []
-        cluster_id = []
-        bias = 12
-
-        for i in range(num_atoms[0]):
-            atom_id.append(struct.unpack('I', data[bias : bias + 4])[0])
-            delta_p.append(struct.unpack('i', data[bias + 4 : bias + 8])[0])
-            x.append(struct.unpack('h', data[bias + 8 : bias + 10])[0])
-            y.append(struct.unpack('h', data[bias + 10 : bias + 12])[0])
-            z.append(struct.unpack('f', data[bias + 12 : bias + 16])[0] * 0.1)
-            mc.append(struct.unpack('f', data[bias + 16 : bias + 20])[0])
-            tof.append(struct.unpack('f', data[bias + 20 : bias + 24])[0] * 1000)
-            x_det.append(struct.unpack('h', data[bias + 24 : bias + 26])[0] * 0.01)
-            y_det.append(struct.unpack('h', data[bias + 26 : bias + 28])[0] * 0.01)
-            dc_voltage.append(struct.unpack('H', data[bias + 28 : bias + 30])[0] * 0.5)
-            mcp_amp.append(struct.unpack('H', data[bias + 30 : bias + 32])[0])
-            num_cluster_tmp = struct.unpack('B', data[bias + 32 : bias + 33])[0]
-            num_cluster.append(num_cluster_tmp)
-
-            if num_cluster_tmp > 0:
-                cluster_id.append(
-                    list(struct.unpack('H' * num_cluster_tmp, data[bias + 33 : bias + 33 + num_cluster_tmp * 2]))
+        # NOTE: the per-row 35-byte stride below assumes ``num_cluster == 0``
+        # for every row. A row with non-zero cluster count is wider than
+        # 35 bytes (33 header + num_cluster*2 cluster IDs), so the
+        # ``bias = 12 + (35 * (i + 1))`` formula desynchronises and the
+        # parser silently returns garbage. We detect that condition and
+        # raise before producing wrong data. Variable-stride parsing
+        # would require a sequential reader; not yet implemented.
+        n = int(num_atoms[0])
+        if len(data) >= 12 + 33:
+            sample_num_cluster = struct.unpack('B', data[12 + 32 : 12 + 33])[0]
+            if sample_num_cluster > 0:
+                raise NotImplementedError(
+                    "ato_to_ccapt: file uses non-zero num_cluster on the "
+                    "first record; the current fixed-stride parser would "
+                    "produce silently-wrong output. Variable-stride .ato "
+                    "parsing is not implemented yet."
                 )
-            else:
-                cluster_id.append([])
+        expected_size = 12 + 35 * n
+        if len(data) < expected_size:
+            raise ValueError(
+                f"ato_to_ccapt: file truncated -- expected at least "
+                f"{expected_size} bytes for {n} fixed-stride records, "
+                f"got {len(data)}."
+            )
 
-            bias = 12 + (35 * (i + 1))
+        # Fast vectorised path: build a structured dtype matching the
+        # fixed 35-byte record layout and use np.frombuffer to parse all
+        # rows in one C-level call. This replaces ~28M individual
+        # ``struct.unpack`` calls per million atoms (minutes -> seconds).
+        record_dtype = np.dtype([
+            ('atom_id', '<u4'),
+            ('delta_p', '<i4'),
+            ('x_raw', '<i2'),
+            ('y_raw', '<i2'),
+            ('z_raw', '<f4'),
+            ('mc_raw', '<f4'),
+            ('tof_raw', '<f4'),
+            ('x_det_raw', '<i2'),
+            ('y_det_raw', '<i2'),
+            ('dc_voltage_raw', '<u2'),
+            ('mcp_amp', '<u2'),
+            ('num_cluster', '<u1'),
+            ('_cluster_id_low', '<u1'),
+            ('_cluster_id_high', '<u1'),
+        ])
+        assert record_dtype.itemsize == 35, "record stride must be 35 bytes"
+        records = np.frombuffer(data, dtype=record_dtype, count=n, offset=12)
+
+        # All rows assume num_cluster == 0 by the early raise above; verify
+        # the rest of the file confirms that to catch corrupt files.
+        if records['num_cluster'].any():
+            raise NotImplementedError(
+                "ato_to_ccapt: encountered non-zero num_cluster mid-stream "
+                "after a zero header; the file likely uses variable-stride "
+                "records and the fixed-stride parser is not safe to use."
+            )
+
+        atom_id = records['atom_id']
+        delta_p = records['delta_p']
+        x = records['x_raw'].astype(np.int32)
+        y = records['y_raw'].astype(np.int32)
+        z = records['z_raw'].astype(np.float32) * np.float32(0.1)
+        mc = records['mc_raw']
+        tof = records['tof_raw'].astype(np.float32) * np.float32(1000.0)
+        x_det = records['x_det_raw'].astype(np.float32) * np.float32(0.01)
+        y_det = records['y_det_raw'].astype(np.float32) * np.float32(0.01)
+        dc_voltage = records['dc_voltage_raw'].astype(np.float32) * np.float32(0.5)
+        mcp_amp = records['mcp_amp']
+        num_cluster = records['num_cluster']
+        cluster_id = [[] for _ in range(n)]  # always empty in fixed-stride mode
 
         if mode == 'ato':
             data_f = pd.DataFrame(
@@ -154,23 +186,29 @@ def ato_to_ccapt(file_path: str, mode: str) -> pd.DataFrame:
                 }
             )
         elif mode == 'pyccapt':
+            # The previous dict had ``'mc (Da)'`` twice (once with zeros,
+            # once with the parsed values); the second silently shadowed
+            # the first. Keep the parsed mc under 'mc (Da)' and put the
+            # zero-initialised calibrated column under 'mc_c (Da)' only.
+            n_rows = len(dc_voltage)
             data_f = pd.DataFrame(
                 {
-                    'x (nm)': np.zeros(len(dc_voltage)),
-                    'y (nm)': np.zeros(len(dc_voltage)),
-                    'z (nm)': np.zeros(len(dc_voltage)),
-                    'mc_c (Da)': np.zeros(len(dc_voltage)),
-                    'mc (Da)': np.zeros(len(dc_voltage)),
+                    'x (nm)': np.zeros(n_rows),
+                    'y (nm)': np.zeros(n_rows),
+                    'z (nm)': np.zeros(n_rows),
+                    'mc_c (Da)': np.zeros(n_rows),
                     'high_voltage (V)': dc_voltage,
-                    'pulse': np.zeros(len(dc_voltage)),
-                    'start_counter': np.zeros(len(dc_voltage)),
-                    't_c (ns)': np.zeros(len(dc_voltage)),
+                    'pulse': np.zeros(n_rows),
+                    'start_counter': np.zeros(n_rows),
+                    't_c (ns)': np.zeros(n_rows),
                     't (ns)': tof,
                     'mc (Da)': mc,
                     'x_det (mm)': x_det,
                     'y_det (mm)': y_det,
                     'delta_p': delta_p,
-                    'multi': np.zeros(len(dc_voltage)),
+                    'multi': np.zeros(n_rows),
                 }
             )
+        else:
+            raise ValueError(f"ato_to_ccapt: unknown mode {mode!r}")
     return data_f

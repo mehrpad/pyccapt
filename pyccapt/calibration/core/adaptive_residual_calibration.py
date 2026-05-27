@@ -286,7 +286,19 @@ def _collect_temporal_observations(calibration_array, template, n_windows, overl
                     continue
                 x_obs.append(0.5 * (start + stop - 1))
                 y_obs.append(shift)
-                w_obs.append(max(1.0, np.sqrt(local_values.size)) * max(1.0, score / local_values.size))
+                # Weight = sqrt(N) * fit-quality factor. ``score`` is the
+                # per-window log-likelihood SUM (np.sum(logp, axis=0))
+                # against a normalised template, so it is strongly
+                # negative; the previous ``max(1.0, score / N)`` clamped
+                # to exactly 1.0 every time, silently disabling the
+                # fit-quality boost so a 30-ion window with sharp
+                # template alignment counted the same as a 30-ion window
+                # of garbage. Use the geometric form exp(score/N), which
+                # is in (0, 1] and is larger when per-ion log-likelihood
+                # is closer to zero (i.e. the template fits well).
+                n_local = max(1, int(local_values.size))
+                quality = float(np.exp(score / n_local))
+                w_obs.append(np.sqrt(n_local) * quality)
             if best_attempt is None or len(x_obs) > best_attempt["n_observations"]:
                 best_attempt = {
                     "x_obs": np.asarray(x_obs, dtype=float),

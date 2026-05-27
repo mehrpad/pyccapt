@@ -412,17 +412,22 @@ def hdbscan_clustering(
 
     # Both HDBSCAN and sklearn DBSCAN raise on NaN coordinates. Drop
     # partial-recovered rows with undefined (x, y, z) before clustering
-    # rather than letting the backend explode. The returned ``labels``
-    # array length matches the filtered input; the caller is responsible
-    # for aligning with original-index arrays if needed.
+    # rather than letting the backend explode. ``labels`` is returned at
+    # FULL input length: NaN rows get label -1 (noise) so the caller's
+    # ``full_labels[selected_indices] = labels`` assignment continues to
+    # line up with ``selected_indices``. Previously the returned labels
+    # had the filtered length and broadcasting to a longer index slice
+    # crashed with ValueError (or silently misaligned in pre-numpy 1.20
+    # behaviour, putting every label after the first NaN row on the
+    # wrong ion).
     nan_row_mask = np.isnan(points).any(axis=1)
+    finite_points = points[~nan_row_mask]
     if nan_row_mask.any():
         print(
             f'[hdbscan_clustering] Dropping {int(nan_row_mask.sum())} rows with NaN '
             '(x, y, z) (partial-recovered ions) before clustering.'
         )
-        points = points[~nan_row_mask]
-        if len(points) == 0:
+        if len(finite_points) == 0:
             raise ValueError("points has no finite rows after dropping NaN coordinates")
 
     n_min = max(2, int(n_min))
@@ -432,13 +437,22 @@ def hdbscan_clustering(
         "min_samples": int(min_samples),
     }
 
+    def _expand_labels(filtered_labels: np.ndarray) -> np.ndarray:
+        """Expand labels back to full input length; NaN rows get -1 (noise)."""
+        full = np.full(len(points), -1, dtype=int)
+        full[~nan_row_mask] = filtered_labels
+        return full
+
     try:
         import hdbscan as _hdbscan
 
         clusterer = _hdbscan.HDBSCAN(min_cluster_size=n_min, min_samples=min_samples)
-        labels = np.asarray(clusterer.fit_predict(points), dtype=int)
-        labels = _drop_small_clusters(labels, n_min=n_min)
-        centers = _centers_from_labeled_points(points, labels)
+        filtered_labels = np.asarray(clusterer.fit_predict(finite_points), dtype=int)
+        filtered_labels = _drop_small_clusters(filtered_labels, n_min=n_min)
+        # Compute centers from the filtered (NaN-free) points so the
+        # centroid calculation isn't poisoned by undefined coords.
+        centers = _centers_from_labeled_points(finite_points, filtered_labels)
+        labels = _expand_labels(filtered_labels)
         parameters["backend"] = True
         return labels, centers, parameters
     except Exception:
@@ -447,15 +461,18 @@ def hdbscan_clustering(
 
         if auto_d_max or d_max is None:
             eps = estimate_maximum_separation_distance(
-                points,
+                finite_points,
                 kth_neighbor=max(1, min_samples),
                 percentile=float(percentile),
             )
         else:
             eps = float(d_max)
-        labels = np.asarray(DBSCAN(eps=eps, min_samples=n_min).fit_predict(points), dtype=int)
-        labels = _drop_small_clusters(labels, n_min=n_min)
-        centers = _centers_from_labeled_points(points, labels)
+        filtered_labels = np.asarray(
+            DBSCAN(eps=eps, min_samples=n_min).fit_predict(finite_points), dtype=int
+        )
+        filtered_labels = _drop_small_clusters(filtered_labels, n_min=n_min)
+        centers = _centers_from_labeled_points(finite_points, filtered_labels)
+        labels = _expand_labels(filtered_labels)
         parameters.update(
             {"backend": False, "d_max": float(eps), "auto_d_max": bool(auto_d_max), "percentile": float(percentile)}
         )

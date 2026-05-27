@@ -705,9 +705,13 @@ def reconstruction_plot(
                             faces = isosurf.faces.reshape(-1, 4)[:, 1:]
                             ion_name = ion[index].rsplit('$', 1)[0]
                             ion_name = ion_name + '_{iso}$'
+                            # Axis order MUST match the per-ion-grid branch
+                            # above (vertices[:, 0]=x, vertices[:, 1]=y);
+                            # the previous swap reflected every iso-surface
+                            # across y=x relative to the underlying scatter.
                             mesh = go.Mesh3d(
-                                x=vertices[:, 1],
-                                y=vertices[:, 0],
+                                x=vertices[:, 0],
+                                y=vertices[:, 1],
                                 z=vertices[:, 2],
                                 i=faces[:, 0],
                                 j=faces[:, 1],
@@ -1133,7 +1137,13 @@ def pos_to_voxel(data, grid_vec, species=None):
     for i in range(loc.shape[0]):
         vox[tuple(loc[i])] += 1
 
-    return vox.T
+    # ``vox`` is indexed [ix, iy, iz] (matches np.meshgrid(..., indexing='ij'));
+    # the downstream ``isosurface`` builder also assumes 'ij' ordering and
+    # flattens the data with the same convention. Returning ``vox.T`` here
+    # silently transposed to [iz, iy, ix] and put voxel concentration at the
+    # wrong spatial coordinate. Mirror the leap-clustering copy in
+    # clustering/isosurface.py and return ``vox`` directly.
+    return vox
 
 
 def isosurface(gridVec, data, isovalue):

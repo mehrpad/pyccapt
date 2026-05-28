@@ -53,7 +53,21 @@ class origClass:
             return -1
 
     def close_port(self):
-        self.ser.close()
+        # Idempotent: if open_port returned -1 (failed) we still have
+        # ``self.ser = None`` from __init__, and closing twice should
+        # also be safe. The previous unguarded ``self.ser.close()``
+        # crashed with AttributeError in both cases, which surfaced
+        # during the laser-safe-off sequence introduced in commit
+        # 0956c66 -- a crash there would have left the laser in
+        # whatever state it was in.
+        ser = getattr(self, 'ser', None)
+        if ser is None:
+            return
+        try:
+            ser.close()
+        except Exception:
+            pass
+        self.ser = None
 
     def Listen(self):
         cmd = "ly_oxp2_listen\n"

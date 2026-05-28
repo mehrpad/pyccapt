@@ -29,25 +29,41 @@ def _tdc_frame(pulses):
     return pd.DataFrame(rows)
 
 
-def test_complete_vs_partial_basic():
+def test_fully_sampled_vs_incomplete_basic():
     tdc = _tdc_frame([(1, [0, 1, 2, 3]), (2, [0, 1]), (3, [2, 3])])
     s = tdc_pulse_completeness(tdc)
     assert s["channels_required"] == 4
     assert s["total_pulses"] == 3
-    assert s["complete"] == 1
-    assert s["partial"] == 2
-    assert s["with_dld_match"] == 1  # only the 4-channel pulse
+    assert s["fully_sampled"] == 1       # the 4-channel pulse
+    assert s["reconstructible"] == 1     # only the 4-channel pulse reaches >=3
+    assert s["incomplete"] == 2          # the two 2-channel pulses
+    assert s["with_dld_match"] == 1      # only the 4-channel pulse
+    assert s["channel_histogram"] == {4: 1, 2: 2}
+
+
+def test_three_channel_pulse_is_reconstructible_not_fully_sampled():
+    # The key physics: a 2-D delay-line hit is reconstructible from 3 of the
+    # 4 channels (per-axis time-sum constraint). A 3-channel pulse must count
+    # as reconstructible (== "complete event from TDC") but NOT fully sampled.
+    tdc = _tdc_frame([(1, [0, 1, 2, 3]), (2, [0, 1, 2])])
+    s = tdc_pulse_completeness(tdc)
+    assert s["channels_required"] == 4
+    assert s["fully_sampled"] == 1
+    assert s["reconstructible"] == 2     # 4-channel + 3-channel
+    assert s["incomplete"] == 0
+    assert s["channel_histogram"] == {4: 1, 3: 1}
 
 
 def test_grouping_is_start_counter_wrap_safe():
-    # Two complete pulses share start_counter=10 (a uint32 wrap) but are
-    # separated in acquisition order by a different pulse. Contiguous-run
+    # Two fully-sampled pulses share start_counter=10 (a counter wrap) but
+    # are separated in acquisition order by a different pulse. Contiguous-run
     # grouping must keep them as two distinct pulses, not merge them.
     tdc = _tdc_frame([(10, [0, 1, 2, 3]), (11, [0, 1]), (10, [0, 1, 2, 3])])
     s = tdc_pulse_completeness(tdc)
     assert s["total_pulses"] == 3
-    assert s["complete"] == 2
-    assert s["partial"] == 1
+    assert s["fully_sampled"] == 2
+    assert s["reconstructible"] == 2
+    assert s["incomplete"] == 1
 
 
 def test_roentdek_style_zero_time_data_counts_as_not_fired():
@@ -66,8 +82,9 @@ def test_roentdek_style_zero_time_data_counts_as_not_fired():
     s = tdc_pulse_completeness(tdc)
     assert s["channels_required"] == 4
     assert s["total_pulses"] == 2
-    assert s["complete"] == 1
-    assert s["partial"] == 1
+    assert s["fully_sampled"] == 1
+    assert s["reconstructible"] == 1
+    assert s["incomplete"] == 1
 
 
 def test_empty_and_missing_inputs():
@@ -81,7 +98,9 @@ def test_single_row_frame():
     tdc = _tdc_frame([(1, [0])])
     s = tdc_pulse_completeness(tdc)
     assert s["total_pulses"] == 1
-    # One channel fired anywhere -> required set is {0}, so the pulse is complete.
+    # Only channel 0 fires anywhere -> required set is {0}; the single pulse
+    # is both fully sampled and reconstructible.
     assert s["channels_required"] == 1
-    assert s["complete"] == 1
-    assert s["partial"] == 0
+    assert s["fully_sampled"] == 1
+    assert s["reconstructible"] == 1
+    assert s["incomplete"] == 0

@@ -98,18 +98,31 @@ def partial_hit_counts(dld_df: pd.DataFrame) -> dict[str, int]:
 
 
 def tdc_pulse_completeness(tdc_df) -> dict[str, int]:
-    """Classify raw-TDC pulses as complete or partial by fired-channel set.
+    """Classify raw-TDC pulses by how many delay-line channels fired.
 
-    A delay-line detector reconstructs a full hit only when every
-    delay-line end fires for the same pulse. This groups the raw ``/tdc``
-    ticks into pulses and reports how many fired the full channel set
-    (complete) versus only some of it (partial).
+    Groups the raw ``/tdc`` ticks into pulses and reports, per pulse, how
+    many distinct delay-line channels fired. The counts use the physics of
+    a 2-D crossed delay-line detector, where a hit position can be
+    reconstructed from only THREE of the four channel timestamps:
+
+    - ``fully_sampled``  : fired all ``channels_required`` channels.
+    - ``reconstructible``: fired at least ``channels_required - 1`` (the
+      "all-but-one" case the detector can still reconstruct via the
+      per-axis time-sum constraint ``t0 + t1 = t2 + t3``; includes
+      ``fully_sampled``). This is the count that should line up with the
+      DLD reconstructed events -- NOT ``fully_sampled``.
+    - ``incomplete``     : fired 1 .. ``channels_required - 2`` channels;
+      too few to form a 2-D position.
+    - ``empty``          : no channel fired.
+
+    ``channel_histogram`` maps each distinct-fired-channel count to the
+    number of pulses, so nothing is hidden behind the summary categories.
 
     Pulses are grouped by CONTIGUOUS runs of equal ``start_counter`` in
     acquisition (row) order, not by the raw counter value -- ``start_counter``
-    is a uint32 that wraps roughly every ~71 min, so run-length grouping is
-    wrap-safe and also works for orphan pulses (which all share
-    ``event_group_id == -1`` and so cannot be grouped by that column).
+    wraps during long runs, so run-length grouping is wrap-safe and also
+    works for orphan pulses (which all share ``event_group_id == -1`` and so
+    cannot be grouped by that column).
 
     A channel counts as "fired" when its ``time_data`` is non-zero (the
     RoentDek flat layout writes a row for every channel with ``time_data``
@@ -117,18 +130,21 @@ def tdc_pulse_completeness(tdc_df) -> dict[str, int]:
     rows for fired ticks, so the test is correct for both). The required
     channel set is the set of channels that fire anywhere in the dataset.
 
-    Returns a dict with: ``total_pulses``, ``complete``, ``partial``,
-    ``empty`` (pulses with no fired channel), ``channels_required``, and
-    ``with_dld_match`` (pulses whose ticks are flagged ``has_dld_match``).
+    Returns a dict with: ``total_pulses``, ``fully_sampled``,
+    ``reconstructible``, ``incomplete``, ``empty``, ``channels_required``,
+    ``channel_histogram`` and ``with_dld_match`` (pulses whose ticks are
+    flagged ``has_dld_match``).
     """
-    out = {
+    out: dict[str, int] = {
         "total_pulses": 0,
-        "complete": 0,
-        "partial": 0,
+        "fully_sampled": 0,
+        "reconstructible": 0,
+        "incomplete": 0,
         "empty": 0,
         "channels_required": 0,
         "with_dld_match": 0,
     }
+    out["channel_histogram"] = {}
     if tdc_df is None or len(tdc_df) == 0:
         return out
     if "channel" not in tdc_df.columns or "start_counter" not in tdc_df.columns:
@@ -157,17 +173,23 @@ def tdc_pulse_completeness(tdc_df) -> dict[str, int]:
     out["channels_required"] = n_required
 
     if n_required and np.any(fired):
-        fired_frame = pd.DataFrame(
-            {"pulse": pulse_id[fired], "ch": channel[fired]}
-        )
+        fired_frame = pd.DataFrame({"pulse": pulse_id[fired], "ch": channel[fired]})
         distinct_per_pulse = fired_frame.groupby("pulse")["ch"].nunique()
-        out["complete"] = int((distinct_per_pulse >= n_required).sum())
-        out["partial"] = int(
-            ((distinct_per_pulse > 0) & (distinct_per_pulse < n_required)).sum()
-        )
-        out["empty"] = total_pulses - int(distinct_per_pulse.index.size)
+        # Reconstruction needs at least (n_required - 1) channels -- the
+        # missing one is recovered from the per-axis time-sum constraint.
+        reconstructible_min = max(1, n_required - 1)
+        out["fully_sampled"] = int((distinct_per_pulse >= n_required).sum())
+        out["reconstructible"] = int((distinct_per_pulse >= reconstructible_min).sum())
+        n_with_any = int(distinct_per_pulse.index.size)
+        out["incomplete"] = n_with_any - out["reconstructible"]
+        out["empty"] = total_pulses - n_with_any
+        hist = distinct_per_pulse.value_counts()
+        out["channel_histogram"] = {int(k): int(v) for k, v in hist.items()}
+        if out["empty"]:
+            out["channel_histogram"][0] = out["empty"]
     else:
         out["empty"] = total_pulses
+        out["channel_histogram"] = {0: total_pulses}
 
     if TDC_HAS_DLD_MATCH_COL in tdc_df.columns:
         matched = np.asarray(tdc_df[TDC_HAS_DLD_MATCH_COL].to_numpy(), dtype=bool)

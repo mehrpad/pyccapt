@@ -224,8 +224,20 @@ def _recover_surface_concept_partial_hits(
     detector_radius_cm: float = 4.0,
     max_tof_ns: float | None = None,
     axis_consistency_ns: float | None = 5.0,
+    combine_axes: bool = True,
 ) -> list[dict]:
     """Recover every physically-valid hit from a multi-hit pulse.
+
+    ``combine_axes`` (default True) cross-matches accepted x-pairs and
+    y-pairs into full 4-DLTS xy hits -- the right behaviour for the live
+    partial-recovery merge path, which produces FINAL hits. The
+    diagnostics / reporting path (``build_surface_concept_recovery_diagnostics``)
+    passes ``combine_axes=False`` together with ``detector_radius_cm=inf``
+    so it can ENUMERATE every per-axis candidate pair and let its own
+    ``detector_limit_cm`` check flag each hit's ``in_detector`` status,
+    rather than silently dropping out-of-detector reconstructions or
+    merging the two delay-line axes (which would under-count per-axis
+    recoverability and mislabel dlts).
 
     For each delay-line axis (x: ch0+ch1, y: ch2+ch3) ALL pairwise
     combinations of one ch-A timestamp with one ch-B timestamp are
@@ -288,12 +300,20 @@ def _recover_surface_concept_partial_hits(
         per_axis_selected[axis] = _select_axis_assignment(candidates, n_first, n_second)
 
     # --- Cross-axis ToF agreement → promote to full xy hits --------------
-    xy_hits, x_leftover, y_leftover = _combine_axes_into_xy_hits(
-        per_axis_selected['x'],
-        per_axis_selected['y'],
-        axis_consistency_ns=axis_consistency_ns,
-        max_tof_ns=max_tof_ns,
-    )
+    if combine_axes:
+        xy_hits, x_leftover, y_leftover = _combine_axes_into_xy_hits(
+            per_axis_selected['x'],
+            per_axis_selected['y'],
+            axis_consistency_ns=axis_consistency_ns,
+            max_tof_ns=max_tof_ns,
+        )
+    else:
+        # Diagnostics/reporting mode: keep the two delay-line axes
+        # separate so every reconstructible per-axis pair is emitted as
+        # its own 2-DLTS partial hit.
+        xy_hits = []
+        x_leftover = list(per_axis_selected['x'])
+        y_leftover = list(per_axis_selected['y'])
 
     # --- Emit results ----------------------------------------------------
     # Full xy hits first (more physically informative), then leftover
@@ -577,7 +597,16 @@ def _build_diagnostics_batch(args: tuple) -> list[dict]:
                 )
                 continue
 
-            partial_hits = _recover_surface_concept_partial_hits(chunk_channels, chunk_times)
+            # Diagnostics mode: enumerate every per-axis pair (no detector
+            # drop -- radius=inf) and keep the axes separate so the
+            # acceptance flagging below can mark each hit in_detector
+            # True/False against the caller's detector_limit_cm.
+            partial_hits = _recover_surface_concept_partial_hits(
+                chunk_channels,
+                chunk_times,
+                detector_radius_cm=float('inf'),
+                combine_axes=False,
+            )
             if not partial_hits:
                 rows.append(
                     {
@@ -609,6 +638,12 @@ def _build_diagnostics_batch(args: tuple) -> list[dict]:
                     in_detector = abs(det_y) <= detector_limit_cm
                 else:
                     in_detector = abs(det_x) <= detector_limit_cm and abs(det_y) <= detector_limit_cm
+                # A combined hit (detector_axis == 'xy') fired all four
+                # delay-line ends -> 4 DLTS; a single-axis partial -> 2.
+                # The diagnostics path runs with combine_axes=False so axis
+                # is always 'x'/'y' here, but label correctly in case the
+                # combine mode is ever used for diagnostics.
+                dlts_value = 4 if axis == 'xy' else 2
                 rows.append(
                     {
                         'sequence_index': sequence_index,
@@ -621,10 +656,10 @@ def _build_diagnostics_batch(args: tuple) -> list[dict]:
                         'x_det (cm)': det_x,
                         'y_det (cm)': det_y,
                         'radius_cm': float(np.hypot(det_x, det_y)),
-                        'dlts': 2,
+                        'dlts': dlts_value,
                         'detector_axis': axis,
                         'accepted': in_detector,
-                        'status': '2 DLTS in detector' if in_detector else '2 DLTS outside detector',
+                        'status': f'{dlts_value} DLTS in detector' if in_detector else f'{dlts_value} DLTS outside detector',
                     }
                 )
     return rows

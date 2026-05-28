@@ -28,6 +28,8 @@ def load_data(
     processing_mode=True,
     load_tdc_raw=False,
     merge_partial_tdc=None,
+    recover_from_matched_multihit=False,
+    multihit_match_tol_cm=0.1,
     detector_kind='surface_concept',
     show_progress=True,
 ):
@@ -59,6 +61,18 @@ def load_data(
             ``dlts`` column (``2`` for single-axis, ``4`` for native or
             recovered xy). Downstream code that needs both detector axes
             must filter rows with NaN in ``x_det (cm)`` or ``y_det (cm)``.
+    recover_from_matched_multihit : bool, default False
+            Forwarded to :func:`partial_recovery.merge_partial_tdc_into_dld`.
+            When True (and recovery runs), also mine MATCHED multi-hit
+            pulses for a second ion the firmware discarded (it keeps one
+            hit per pulse): the firmware's stops are inverse-matched to its
+            DLD event(s) and removed, and the residual stops are recovered.
+            Opt-in because the inverse match is heuristic (a pulse whose
+            firmware stops cannot be matched within ``multihit_match_tol_cm``
+            is skipped, so the firmware's own hit is never double-counted).
+    multihit_match_tol_cm : float, default 0.1
+            Position tolerance (cm) for inverse-matching the firmware's
+            stops to its DLD event in matched multi-hit recovery.
     detector_kind : str, default ``'surface_concept'``
             Detector-geometry key forwarded to the partial-hit recovery.
             Use ``'roentdek'`` for RoentDek hardware. Ignored when
@@ -264,6 +278,8 @@ def load_data(
                     variables,
                     detector_kind=detector_kind,
                     max_tof_ns=float(max_tof),
+                    recover_from_matched_multihit=bool(recover_from_matched_multihit),
+                    multihit_match_tol_cm=float(multihit_match_tol_cm),
                 )
             except Exception as exc:
                 print(f'WARNING: merge_partial_tdc failed: {exc}')

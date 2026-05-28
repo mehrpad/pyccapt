@@ -1,3 +1,37 @@
+"""Mass-calibration core for atom probe tomography data.
+
+This module turns detector hits (time-of-flight, high voltage, detector
+position) into a calibrated mass-to-charge (m/c) spectrum. The standard
+pipeline, in order, is:
+
+1. Initial calibration (``diagnostics.initial_calibration``): a global
+   t0 / flight-path estimate converts time-of-flight to a first m/c.
+2. Voltage correction (``voltage_corr_main``): corrects the per-event
+   m/c for the slow change in standing voltage during evaporation, fit
+   over ion-index or voltage segments.
+3. Bowl correction (``bowl_correction_main``): corrects the residual
+   position-dependent flight-time difference across the detector
+   ("bowl"), sampled in Cartesian or polar cells.
+4. Optional time-drift correction (``new_methods.voltage_corr_time_dependent``):
+   a multiplicative per-ion-index correction that cancels HV / temperature
+   drift left after steps 2-3 in long runs.
+5. Adaptive residual calibration (``adaptive_residual_calibration``):
+   a per-peak temporal + spatial residual fit that tightens mass
+   resolution after the parametric corrections.
+
+The notebook helpers expose three configuration presets that only change
+what happens after the shared voltage+bowl stage:
+``new`` (adaptive residual, default), ``best`` (adds step 4), and
+``old`` (legacy adaptive residual without the coarse-to-fine speedup).
+A separate NIST reference fit in the ion-list helper rescales the
+already-calibrated m/c onto reference masses without re-fitting V/bowl/drift.
+
+Peak locations are read from histograms at BIN CENTERS (not bin edges)
+and histogram bins are anchored to the requested bin width. Hot paths
+(bowl polar sampling, the voltage-correction segment loop) parallelise
+across CPU cores via ``parallel_map`` when the workload is large enough.
+"""
+
 from collections.abc import Mapping
 from copy import copy
 

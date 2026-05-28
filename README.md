@@ -139,6 +139,16 @@ Vacuum logs are written under `pyccapt/files/logs/vacuum`, and baking logs are w
 
 PyCCAPT calibration workflows cover detector hit maps, FDM views, mass-spectrum calibration, bowl and voltage correction, reconstruction, and downstream visualization.
 
+Mass calibration runs as a pipeline: initial `t0`/flight-path estimate →
+voltage correction → bowl correction → optional per-ion-index time-drift
+correction → adaptive per-peak residual fit. A **Config preset** dropdown
+in the data-processing notebook selects between adaptive residual (default),
+adaptive residual with time-drift correction (for long runs with measurable
+drift), and the legacy adaptive residual. A separate NIST reference fit
+rescales the calibrated `m/c` onto reference masses without re-fitting the
+voltage, bowl, or drift terms. See
+[docs/CALIBRATION.md](docs/CALIBRATION.md) for the stages and presets.
+
 ![Mass spectrum](pyccapt/files/readme_images/hist.png)
 
 <p align="center">
@@ -172,9 +182,17 @@ matching dld event are preserved untouched. See
 [docs/Calibration_DATA_STRUCTURE.md](docs/Calibration_DATA_STRUCTURE.md) for
 the on-disk schema.
 
+The Surface Concept raw-data workflow can recover physically valid hits from
+pulses that fired only some delay-line channels: each delay-line axis is paired
+and cross-matched by time-of-flight, and recovered rows are tagged with a `dlts`
+count and a `dlts_quality` label. See
+[docs/CALIBRATION.md](docs/CALIBRATION.md#partial-hit-recovery-surface-concept).
+
 The visualization helpers also include optional precipitate clustering with both
 Min-Max and Maximum-Separation algorithms, plus iso-surface and proxigram
-workflows for interface analysis.
+workflows for interface analysis. Scatter sub-sampling in the reconstruction and
+visualization plots is seeded, so re-running a plot on the same dataset produces
+the same figure.
 
 For control part of the package you can follow the steps
 on [documentation](https://pyccapt.readthedocs.io/).

@@ -26,6 +26,82 @@ Typical calibration workflows include:
 - `leap_tools`: LEAP/POS/EPOS/APT/RRNG/RNG readers, Cameca raw importers, and helper tools
 - `tutorials`: notebooks and notebook helper modules
 
+## Mass-Calibration Pipeline
+
+Mass calibration converts detector hits (time-of-flight, standing high
+voltage, detector position) into a calibrated mass-to-charge (`m/c`)
+spectrum. The pipeline in `pyccapt.calibration.core.calibration` runs the
+following stages in order:
+
+1. **Initial calibration** — a global `t0` and flight-path estimate
+   converts time-of-flight to a first `m/c`.
+2. **Voltage correction** — corrects each event's `m/c` for the slow
+   change in standing voltage during evaporation, fit over ion-index or
+   voltage segments.
+3. **Bowl correction** — corrects the residual position-dependent
+   flight-time difference across the detector (the "bowl"), sampled in
+   Cartesian or polar detector cells.
+4. **Time-drift correction** *(optional)* — a multiplicative
+   per-ion-index correction that cancels high-voltage or temperature
+   drift remaining after steps 2-3 in long acquisitions.
+5. **Adaptive residual calibration** — a per-peak temporal and spatial
+   residual fit that tightens mass resolution after the parametric
+   corrections.
+
+Peak locations used to drive the fits are read at histogram **bin
+centers**, and histogram bins are anchored to the requested bin width.
+
+### Configuration presets
+
+The data-processing notebook exposes a **Config preset** dropdown. All
+presets share the same voltage and bowl stages; they differ only in what
+runs afterward:
+
+- **Adaptive residual (default)** — voltage + bowl, then adaptive
+  residual with the coarse-to-fine peak-scoring speedup.
+- **+ time-drift correction (recommended)** — adds the per-ion-index
+  time-drift correction (stage 4) between bowl correction and the
+  residual fit. Suited to long runs with measurable drift.
+- **Legacy adaptive residual** — voltage + bowl, then adaptive residual
+  without the coarse-to-fine speedup. Slower, and reproduces the
+  pre-2026 reference behaviour for bit-comparable results.
+
+### NIST reference fit
+
+The ion-list helper provides a second **Fit method** that rescales the
+already-calibrated `m/c` onto reference (NIST) masses. It only rescales
+`m/c`; it does not re-fit the voltage, bowl, or drift corrections, so it
+composes with the pipeline above rather than replacing it. The rescale is
+applied to the current calibrated spectrum and is rejected automatically
+if it introduces non-finite values or collapses the mass spread.
+
+## Partial-Hit Recovery (Surface Concept)
+
+A delay-line detector reports an event only when all delay-line ends fire
+within the hardware coincidence window. Pulses that fired some, but not
+all, channels are normally discarded. The Surface Concept raw-data
+workflow can recover physically valid hits from these partial pulses:
+
+- For each delay-line axis (x: channels 0+1, y: channels 2+3), candidate
+  pairs are enumerated and a one-to-one assignment selects a consistent
+  subset. Axes are cross-matched by time-of-flight agreement: a matched
+  pair becomes a full 2-axis (`xy`) hit; unmatched pairs become
+  single-axis (1-DLTS) partial hits.
+- The diagnostics path (`extract_surface_concept_hits`) enumerates every
+  reconstructible pair and flags each one's `in_detector` status against
+  the configured detector limit, so out-of-detector reconstructions are
+  reported rather than silently dropped.
+- The live merge path
+  (`data_tools.partial_recovery.merge_partial_tdc_into_dld`) appends the
+  recovered rows to the `/dld` dataframe, tagging each with a `dlts`
+  (2 or 4) and `dlts_quality` label. Recovered rows carry `NaN` on the
+  unrecovered detector axis. Pulses are grouped by `event_group_id`
+  (wrap-safe), not by the raw `start_counter`, which wraps during long
+  runs.
+
+Partial-hit recovery is available from the `raw_data_analysis.ipynb`
+notebook and through the auto raw-analysis helper.
+
 ## Shared State and Validation
 
 Calibration workflows use shared mutable state through `Variables` in `pyccapt.calibration.core.share_variables`.

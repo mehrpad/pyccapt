@@ -200,9 +200,28 @@ def merge_partial_tdc_into_dld(
     conf=None,
     max_tof_ns: float | None = None,
     axis_consistency_ns: float | None = 5.0,
+    include_one_d_partials: bool = False,
     verbose: bool = True,
 ) -> int:
     """Recover partial-hit events from orphan TDC ticks and merge into DLD.
+
+    Order preservation
+    ------------------
+    Recovered atoms are inserted into ``variables.data`` at their correct
+    ACQUISITION position, not by sorting on ``start_counter`` (which is a
+    periodic counter that resets many times during a run, so sorting on it
+    scrambles the event sequence and destroys the reconstructed z/depth).
+    Each recovered atom is placed immediately after the native DLD rows of
+    the most recent matched pulse that precedes its orphan pulse in the raw
+    TDC stream; native rows keep their original order exactly.
+
+    ``include_one_d_partials`` (default False) controls whether single-axis
+    2-DLTS partials (one detector coordinate is ``NaN``) are merged. They
+    are excluded by default because a NaN detector coordinate cannot be
+    placed in the 3-D reconstruction; only full (x, y) hits -- native-style
+    4-channel and 3-of-4 time-sum recoveries -- are added. Set it True to
+    also append the 1-D partials (visible in the mass spectrum via their
+    centred-axis mc estimate, but dropped by the 3-D reconstruction).
 
     Parameters
     ----------
@@ -337,7 +356,27 @@ def merge_partial_tdc_into_dld(
     if DLTS_QUALITY_COLUMN not in dld_columns:
         dld_columns.append(DLTS_QUALITY_COLUMN)
 
+    # --- Acquisition-order placement (never sort on start_counter) -------
+    # Native DLD rows are already in acquisition order. To insert each
+    # recovered atom at the right place, map every native event_group_id to
+    # the last native DLD row carrying it, and compute a running "last
+    # matched gid" along the full TDC stream (matched gids increase with
+    # acquisition, so a running max gives the last matched gid seen at each
+    # row). An orphan pulse is then placed right after the native rows of
+    # the matched pulse that most recently preceded it.
+    native_gid = dld_df[EVENT_GROUP_ID_COLUMN].to_numpy()
+    last_dld_row_of_gid: dict[int, int] = {}
+    for _row_idx, _g in enumerate(native_gid):
+        last_dld_row_of_gid[int(_g)] = _row_idx
+    tdc_gid_full = tdc_df[EVENT_GROUP_ID_COLUMN].to_numpy()
+    last_matched_gid_at_row = np.maximum.accumulate(
+        np.where(tdc_gid_full >= 0, tdc_gid_full, -1)
+    )
+
     new_rows: list[dict] = []
+    # Native DLD row index AFTER which each recovered atom should be
+    # inserted (parallel to ``new_rows``); -1 means "before all native".
+    new_row_insert_after: list[int] = []
     # Map original-tdc-index -> new GID, so we can flip has_dld_match
     # and event_group_id on the TDC orphan rows that contributed.
     tdc_index_to_new_gid: dict[int, int] = {}
@@ -356,10 +395,23 @@ def merge_partial_tdc_into_dld(
         if not recovered:
             continue
 
+        # By default merge only full (x, y) hits; a single-axis 2-DLTS
+        # partial has a NaN detector coordinate that cannot be placed in
+        # the 3-D reconstruction.
+        if not include_one_d_partials:
+            recovered = [h for h in recovered if h.get("detector_axis") == "xy"]
+            if not recovered:
+                continue
+
         pulse_sc = int(orphan_sc[a])
         pulse_hv = float(orphan_hv[a])
         pulse_pv = float(orphan_pv[a])
         pulse_pl = float(orphan_pl[a])
+
+        # Insert position: right after the native rows of the matched pulse
+        # most recently preceding this orphan pulse in the TDC stream.
+        preceding_gid = int(last_matched_gid_at_row[int(orphan_original_index[a])])
+        insert_after_row = last_dld_row_of_gid.get(preceding_gid, -1)
 
         # One GID per pulse — all recovered candidates from this pulse
         # share it so the dld<->tdc link stays per-pulse, not per-row.
@@ -379,6 +431,7 @@ def merge_partial_tdc_into_dld(
                     flight_path_length_mm=flight_path_length_mm,
                 )
             )
+            new_row_insert_after.append(insert_after_row)
 
         # Tag every orphan tdc tick for this pulse with the new GID.
         for original_idx in orphan_original_index[a:b]:
@@ -396,13 +449,30 @@ def merge_partial_tdc_into_dld(
 
     recovered_frame = pd.DataFrame(new_rows, columns=dld_columns)
 
-    # Merge and chronologically sort by start_counter so downstream
-    # consumers see the partials interleaved with the native hits.
-    merged = pd.concat([dld_df, recovered_frame], ignore_index=True)
-    if "start_counter" in merged.columns:
-        merged = merged.sort_values("start_counter", kind="stable").reset_index(drop=True)
-    else:
-        merged = merged.reset_index(drop=True)
+    # Interleave the recovered atoms into the native sequence at their
+    # acquisition position. The sort key for a native row is its own row
+    # index; for a recovered atom it is the native row it should follow.
+    # A secondary "is recovered" flag breaks ties so a recovered atom with
+    # insert_after_row == R lands AFTER native row R and before native row
+    # R+1; a tertiary append-order key keeps multiple recovered atoms (and
+    # multi-hit atoms) in acquisition order. This NEVER sorts on
+    # start_counter, which is a periodic counter that would scramble depth.
+    n_native = len(dld_df)
+    n_rec = len(new_rows)
+    insert_after = np.asarray(new_row_insert_after, dtype=np.int64)
+    primary = np.concatenate([np.arange(n_native, dtype=np.int64), insert_after])
+    is_recovered = np.concatenate(
+        [np.zeros(n_native, dtype=np.int8), np.ones(n_rec, dtype=np.int8)]
+    )
+    tiebreak = np.concatenate(
+        [np.arange(n_native, dtype=np.int64), np.arange(n_rec, dtype=np.int64)]
+    )
+    order = np.lexsort((tiebreak, is_recovered, primary))
+    merged = (
+        pd.concat([dld_df, recovered_frame], ignore_index=True)
+        .iloc[order]
+        .reset_index(drop=True)
+    )
 
     # Update the orphan tdc rows in place: flip has_dld_match and write
     # the new GIDs so filter_tdc_by_dld preserves them after cropping.

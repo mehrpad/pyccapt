@@ -29,6 +29,7 @@ def load_data(
     load_tdc_raw=False,
     merge_partial_tdc=False,
     detector_kind='surface_concept',
+    show_progress=True,
 ):
     """Load a calibration dataset and stash it on ``variables``.
 
@@ -75,6 +76,14 @@ def load_data(
         # Check that the dataset is a valid ato_v6 dataset with .ato extension
         if not dataset_path.endswith(('.ato', '.ATO')):
             raise ValueError('The dataset should be a valid ato_v6 dataset with .ato extension')
+
+    # Staged progress bar over the three coarse phases of a load: reading
+    # the file (the slow, opaque HDF5/POS/EPOS read), synchronising the
+    # shared arrays, and the optional partial-hit recovery. The single
+    # file read can't be sub-divided cheaply, so the bar is staged rather
+    # than per-row. Works the same in raw-tdc and normal modes.
+    progress = _loader_progress(total=3, enabled=show_progress, desc="Loading dataset")
+    progress.set_postfix_str("reading dataset file")
 
     if processing_mode:
         # Calculate the maximum possible time of flight (TOF)
@@ -199,6 +208,9 @@ def load_data(
             load_data_type = 'leap_pos' if tdc in {'pos', 'leap_pos'} else tdc
             data = data_tools.load_data(dataset_path, load_data_type)
 
+    progress.update(1)  # phase 1: dataset read
+    progress.set_postfix_str("synchronizing shared variables")
+
     print('Total number of Ions:', len(data))
     if tdc_df is not None:
         print('Loaded raw tdc rows:', len(tdc_df))
@@ -211,8 +223,10 @@ def load_data(
     variables.flight_path_length = flightPathLength
     variables.pulse_mode = pulse_mode
     variables.sync_from_data(update_backups=True)
+    progress.update(1)  # phase 2: shared variables synchronized
 
     if merge_partial_tdc:
+        progress.set_postfix_str("recovering partial hits")
         if tdc != 'pyccapt':
             print(
                 'WARNING: merge_partial_tdc=True requires a pyccapt h5 dataset; '
@@ -236,6 +250,73 @@ def load_data(
                 )
             except Exception as exc:
                 print(f'WARNING: merge_partial_tdc failed: {exc}')
+
+    progress.update(1)  # phase 3: partial-hit recovery (or skipped)
+    progress.set_postfix_str("done")
+    progress.close()
+
+
+def summarize_loaded_events(variables, *, print_summary=True):
+    """Report complete vs partial event counts for the loaded dataset.
+
+    Combines two views of the just-loaded data:
+
+    * DLD side (``variables.data``): how many reconstructed events the file
+      contains. When partial-hit recovery has run (the ``dlts`` column is
+      present) the count is split into complete (native + recovered xy) and
+      partial (single-axis recovered) hits.
+    * Raw TDC side (``variables.data_tdc``, present only when the dataset
+      was loaded with raw tdc): how many pulses fired the full delay-line
+      channel set (complete) versus only part of it (partial), via
+      :func:`partial_hit_diagnostics.tdc_pulse_completeness`.
+
+    Returns the counts as a dict and, by default, prints a short summary.
+    """
+    from pyccapt.calibration.data_tools.partial_hit_diagnostics import (
+        tdc_pulse_completeness,
+    )
+
+    summary: dict[str, int] = {}
+    data = getattr(variables, "data", None)
+
+    if data is not None and "dlts" in getattr(data, "columns", []):
+        # ``dlts`` carries the per-row delay-line-timestamp count: 4 for a
+        # native or fully-recovered two-axis hit, 2 for a single-axis
+        # partial recovered by merge_partial_tdc.
+        dlts = np.asarray(data["dlts"].to_numpy())
+        summary["dld_total"] = int(len(data))
+        summary["dld_complete"] = int((dlts == 4).sum())
+        summary["dld_partial"] = int((dlts == 2).sum())
+    elif data is not None:
+        # No recovery column: every DLD row is a complete reconstructed event.
+        summary["dld_total"] = int(len(data))
+        summary["dld_complete"] = int(len(data))
+        summary["dld_partial"] = 0
+    else:
+        summary["dld_total"] = summary["dld_complete"] = summary["dld_partial"] = 0
+
+    tdc = getattr(variables, "data_tdc", None)
+    tdc_stats = tdc_pulse_completeness(tdc)
+    summary["tdc_loaded"] = tdc is not None
+    summary["tdc_total_pulses"] = tdc_stats["total_pulses"]
+    summary["tdc_complete"] = tdc_stats["complete"]
+    summary["tdc_partial"] = tdc_stats["partial"]
+    summary["tdc_with_dld_match"] = tdc_stats["with_dld_match"]
+
+    if print_summary:
+        print("Event statistics")
+        print("================")
+        print(f"  Complete events in DLD             : {summary['dld_complete']:,}")
+        if summary["dld_partial"]:
+            print(f"  Partial events recovered into DLD  : {summary['dld_partial']:,}")
+        if summary["tdc_loaded"]:
+            print(f"  Complete events found in raw TDC   : {summary['tdc_complete']:,}")
+            print(f"  Partial events found in raw TDC    : {summary['tdc_partial']:,}")
+            print(f"  Raw TDC pulses with a DLD match    : {summary['tdc_with_dld_match']:,}")
+        else:
+            print("  (raw TDC not loaded; enable 'Load raw tdc' for TDC-side counts)")
+
+    return summary
 
 
 def add_columns(variables, max_mc):

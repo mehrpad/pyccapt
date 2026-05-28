@@ -97,6 +97,86 @@ def partial_hit_counts(dld_df: pd.DataFrame) -> dict[str, int]:
     return counts
 
 
+def tdc_pulse_completeness(tdc_df) -> dict[str, int]:
+    """Classify raw-TDC pulses as complete or partial by fired-channel set.
+
+    A delay-line detector reconstructs a full hit only when every
+    delay-line end fires for the same pulse. This groups the raw ``/tdc``
+    ticks into pulses and reports how many fired the full channel set
+    (complete) versus only some of it (partial).
+
+    Pulses are grouped by CONTIGUOUS runs of equal ``start_counter`` in
+    acquisition (row) order, not by the raw counter value -- ``start_counter``
+    is a uint32 that wraps roughly every ~71 min, so run-length grouping is
+    wrap-safe and also works for orphan pulses (which all share
+    ``event_group_id == -1`` and so cannot be grouped by that column).
+
+    A channel counts as "fired" when its ``time_data`` is non-zero (the
+    RoentDek flat layout writes a row for every channel with ``time_data``
+    set to 0 for the ones that did not fire; Surface Concept only writes
+    rows for fired ticks, so the test is correct for both). The required
+    channel set is the set of channels that fire anywhere in the dataset.
+
+    Returns a dict with: ``total_pulses``, ``complete``, ``partial``,
+    ``empty`` (pulses with no fired channel), ``channels_required``, and
+    ``with_dld_match`` (pulses whose ticks are flagged ``has_dld_match``).
+    """
+    out = {
+        "total_pulses": 0,
+        "complete": 0,
+        "partial": 0,
+        "empty": 0,
+        "channels_required": 0,
+        "with_dld_match": 0,
+    }
+    if tdc_df is None or len(tdc_df) == 0:
+        return out
+    if "channel" not in tdc_df.columns or "start_counter" not in tdc_df.columns:
+        return out
+
+    channel = np.asarray(tdc_df["channel"].to_numpy())
+    start_counter = np.asarray(tdc_df["start_counter"].to_numpy())
+    if "time_data" in tdc_df.columns:
+        fired = np.asarray(tdc_df["time_data"].to_numpy()) != 0
+    else:
+        fired = np.ones(channel.shape[0], dtype=bool)
+
+    # Wrap-safe pulse id: a new pulse starts whenever start_counter changes
+    # between adjacent rows. (Acquisition order is assumed, which is how the
+    # /tdc group is stored.)
+    if start_counter.shape[0] == 1:
+        pulse_id = np.zeros(1, dtype=np.int64)
+    else:
+        boundary = (start_counter[1:] != start_counter[:-1]).astype(np.int64)
+        pulse_id = np.concatenate(([0], np.cumsum(boundary)))
+    total_pulses = int(pulse_id[-1]) + 1
+    out["total_pulses"] = total_pulses
+
+    required = np.unique(channel[fired])
+    n_required = int(required.size)
+    out["channels_required"] = n_required
+
+    if n_required and np.any(fired):
+        fired_frame = pd.DataFrame(
+            {"pulse": pulse_id[fired], "ch": channel[fired]}
+        )
+        distinct_per_pulse = fired_frame.groupby("pulse")["ch"].nunique()
+        out["complete"] = int((distinct_per_pulse >= n_required).sum())
+        out["partial"] = int(
+            ((distinct_per_pulse > 0) & (distinct_per_pulse < n_required)).sum()
+        )
+        out["empty"] = total_pulses - int(distinct_per_pulse.index.size)
+    else:
+        out["empty"] = total_pulses
+
+    if TDC_HAS_DLD_MATCH_COL in tdc_df.columns:
+        matched = np.asarray(tdc_df[TDC_HAS_DLD_MATCH_COL].to_numpy(), dtype=bool)
+        match_frame = pd.DataFrame({"pulse": pulse_id, "m": matched})
+        out["with_dld_match"] = int(match_frame.groupby("pulse")["m"].any().sum())
+
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Plot 1 — high-level breakdown
 # ---------------------------------------------------------------------------

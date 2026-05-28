@@ -32,18 +32,37 @@ def _sorted_chunk_files(chunk_dir: Path, stem: str) -> list[Path]:
 
 
 def _write_chunked_dataset(hdf_file, dataset_name: str, chunk_files: list[Path], dtype) -> None:
+    # First pass: size each chunk via a memory-mapped header read (no full
+    # load) and cache the sizes so the write pass doesn't re-open files.
+    target_dtype = np.dtype(dtype)
+    chunk_sizes: list[int] = []
     total_size = 0
     for chunk_file in chunk_files:
         chunk_array = np.load(chunk_file, mmap_mode="r")
-        total_size += int(chunk_array.shape[0])
+        size = int(chunk_array.shape[0])
+        chunk_sizes.append(size)
+        total_size += size
+        # Release the mmap handle promptly.
+        del chunk_array
 
-    dataset = hdf_file.create_dataset(dataset_name, (total_size,), dtype=dtype)
+    dataset = hdf_file.create_dataset(dataset_name, (total_size,), dtype=target_dtype)
     offset = 0
-    for chunk_file in chunk_files:
-        chunk_array = np.load(chunk_file)
-        chunk_size = int(chunk_array.shape[0])
-        dataset[offset : offset + chunk_size] = chunk_array
+    for chunk_file, chunk_size in zip(chunk_files, chunk_sizes):
+        # Stream the chunk via mmap so the whole file isn't pulled into
+        # RAM at once; h5py copies from the mapped view. Assert the chunk
+        # dtype matches the destination -- a mismatched chunk (e.g. an
+        # interrupted run restarted under new code) would otherwise be
+        # silently up/down-cast or wrap.
+        chunk_array = np.load(chunk_file, mmap_mode="r")
+        if np.dtype(chunk_array.dtype) != target_dtype:
+            raise ValueError(
+                f"Chunk {chunk_file.name} has dtype {chunk_array.dtype}, "
+                f"expected {target_dtype} for dataset {dataset_name!r}. "
+                f"Refusing to silently cast acquisition data."
+            )
+        dataset[offset : offset + chunk_size] = chunk_array[...]
         offset += chunk_size
+        del chunk_array
 
 
 def _coerce_numeric_array(data, dtype):
@@ -196,22 +215,58 @@ def hdf_creator(variables, conf, time_counter, time_ex):
                     ]
                 )  # shape (n_events, 8)
                 _n_events = _ch_stack.shape[0]
-                _time_data_flat = _ch_stack.reshape(-1)  # row-major: ev0_ch0..ch7, ev1_ch0..ch7, ...
-                _channel_flat = np.tile(np.arange(8, dtype=np.uint32), _n_events)
+
+                # Validate per-event auxiliary arrays are long enough BEFORE
+                # slicing. Previously ``[:_n_events]`` silently truncated a
+                # short array, writing tdc/* groups of inconsistent length
+                # that crash the calibration reader much later. Fail loudly
+                # at write time instead.
                 _start_counter_per_event = np.asarray(variables.time_stamp, dtype=np.uint64).reshape(-1)
-                _start_counter_flat = np.repeat(_start_counter_per_event[:_n_events], 8)
                 _hv_per_event = np.asarray(variables.main_v_dc_tdc, dtype=np.float64).reshape(-1)
                 _vp_per_event = np.asarray(variables.main_v_p_tdc, dtype=np.float64).reshape(-1)
                 _lp_per_event = np.asarray(variables.main_l_p_tdc, dtype=np.float64).reshape(-1)
-                _hv_flat = np.repeat(_hv_per_event[:_n_events], 8)
-                _vp_flat = np.repeat(_vp_per_event[:_n_events], 8)
-                _lp_flat = np.repeat(_lp_per_event[:_n_events], 8)
+                for _name, _arr in (
+                    ("time_stamp", _start_counter_per_event),
+                    ("main_v_dc_tdc", _hv_per_event),
+                    ("main_v_p_tdc", _vp_per_event),
+                    ("main_l_p_tdc", _lp_per_event),
+                ):
+                    if _arr.shape[0] < _n_events:
+                        raise ValueError(
+                            f"RoentDek auxiliary array {_name!r} has length "
+                            f"{_arr.shape[0]} < {_n_events} events; cannot build "
+                            f"consistent tdc/* groups. (Did the per-event and "
+                            f"per-channel buffers desync during acquisition?)"
+                        )
+
+                # MEMORY: build-write-free each flat array in turn so peak
+                # RAM is ~ _ch_stack + ONE 8*n_events flat array, not all six
+                # at once (~17 GB for 50M events with the old up-front build).
+                # tdc/time_data is a view of _ch_stack, so keep _ch_stack
+                # alive until that one is written.
+                _create_dataset(hdf_file, "tdc/time_data", _ch_stack.reshape(-1), np.uint64)
+                del _ch_stack
+
+                _channel_flat = np.tile(np.arange(8, dtype=np.uint32), _n_events)
                 _create_dataset(hdf_file, "tdc/channel", _channel_flat, np.uint32)
-                _create_dataset(hdf_file, "tdc/time_data", _time_data_flat, np.uint64)
-                _create_dataset(hdf_file, "tdc/start_counter", _start_counter_flat, np.uint64)
-                _create_dataset(hdf_file, "tdc/high_voltage", _hv_flat, np.float64)
-                _create_dataset(hdf_file, "tdc/voltage_pulse", _vp_flat, np.float64)
-                _create_dataset(hdf_file, "tdc/laser_pulse", _lp_flat, np.float64)
+                del _channel_flat
+
+                _create_dataset(
+                    hdf_file, "tdc/start_counter",
+                    np.repeat(_start_counter_per_event[:_n_events], 8), np.uint64,
+                )
+                _create_dataset(
+                    hdf_file, "tdc/high_voltage",
+                    np.repeat(_hv_per_event[:_n_events], 8), np.float64,
+                )
+                _create_dataset(
+                    hdf_file, "tdc/voltage_pulse",
+                    np.repeat(_vp_per_event[:_n_events], 8), np.float64,
+                )
+                _create_dataset(
+                    hdf_file, "tdc/laser_pulse",
+                    np.repeat(_lp_per_event[:_n_events], 8), np.float64,
+                )
 
             elif conf["tdc"] == "on" and conf["tdc_model"] == "HSD" and variables.counter_source == "HSD":
                 # DRS readout: GetTime returns ns and GetWave returns mV as

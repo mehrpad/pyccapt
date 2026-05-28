@@ -734,8 +734,27 @@ class Ui_Laser_Control(object):
         self.variables.laser_intensity = 0.0
         self._open_laser_cli(self.com_port_laser, initial_open=True)
 
-        self.worker = Worker(self.check_laser_status)
-        self.worker.start()
+        # Laser status loop.
+        #
+        # SAFETY: this loop both reads the laser state over serial AND
+        # mutates GUI widgets (LED pixmaps, button enabled-states) that
+        # operators rely on to know whether the laser is emitting. PyQt6
+        # widget operations are only valid on the GUI thread; the previous
+        # implementation ran ``check_laser_status`` inside a Worker
+        # QThread, mutating widgets cross-thread, which can corrupt Qt's
+        # internal state and produce undefined LED behaviour.
+        #
+        # Run it on the GUI thread via a QTimer instead (mirrors the
+        # existing _stage_poll_timer). The serial transaction is short
+        # (~once per second), and a re-entrancy guard prevents a slow
+        # poll from stacking. This trades the cross-thread-widget hazard
+        # for brief serial I/O on the GUI thread -- a deliberate, strictly
+        # safer trade for laser status.
+        self._laser_status_in_progress = False
+        self._laser_status_timer = QtCore.QTimer()
+        self._laser_status_timer.setInterval(1000)
+        self._laser_status_timer.timeout.connect(self._poll_laser_status)
+        self._laser_status_timer.start()
 
         # ----- SmarAct laser focusing stage --------------------------------
         self.stage_device = None
@@ -1178,6 +1197,24 @@ class Ui_Laser_Control(object):
         """
         repetition_rates = {4: 400000, 5: 500000, 6: 579710, 7: 720720, 8: 800000, 9: 898876, 10: 1000000}
         return repetition_rates.get(index, "Invalid index")
+
+    def _poll_laser_status(self):
+        """Main-thread QTimer slot that drives the laser status loop.
+
+        Wraps ``check_laser_status`` with a re-entrancy guard so a slow
+        serial transaction can't cause overlapping polls to stack, and
+        swallows transient errors so a single failed read doesn't stop
+        the timer (mirrors the old Worker.run try/except).
+        """
+        if self._laser_status_in_progress:
+            return
+        self._laser_status_in_progress = True
+        try:
+            self.check_laser_status()
+        except Exception as exc:
+            print(f"Laser status poll failed (non-fatal): {exc}")
+        finally:
+            self._laser_status_in_progress = False
 
     def check_laser_status(self):
         if self.laser_device is not None:
@@ -1942,12 +1979,20 @@ class Ui_Laser_Control(object):
         """Stop background workers and release device handles.
 
         Called from gui_main.cleanup() when the user closes the main GUI;
-        without this the laser status Worker QThread (while True loop)
-        keeps running and prevents the Python process from exiting.
+        without this the laser status loop keeps running and prevents the
+        Python process from exiting cleanly.
         """
-        # Stop the laser-status QThread.  Worker.run() checks _stop_flag
-        # at every iteration; we then wait briefly for it to finish so we
-        # don't get a "destroyed while still running" warning from Qt.
+        # Stop the laser-status QTimer (now a main-thread timer instead of
+        # a Worker QThread; see _poll_laser_status). Stopping the timer is
+        # synchronous so there's no thread to join.
+        status_timer = getattr(self, '_laser_status_timer', None)
+        if status_timer is not None:
+            try:
+                status_timer.stop()
+            except Exception:
+                pass
+        # Back-compat: if an old-style Worker QThread is still present
+        # (e.g. a subclass or hot-reload), stop it too.
         worker = getattr(self, 'worker', None)
         if worker is not None:
             try:

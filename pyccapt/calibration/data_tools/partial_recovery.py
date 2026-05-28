@@ -277,9 +277,23 @@ def merge_partial_tdc_into_dld(
         variables.sync_from_data(update_backups=True)
         return 0
 
-    # Group orphan ticks by pulse trigger. We rely on start_counter
-    # uniquely identifying a pulse within the orphan subset (the same
-    # invariant that build_event_group_mapping uses).
+    # Group orphan ticks by pulse trigger.
+    #
+    # IMPORTANT: ``start_counter`` is a uint32 hardware counter that
+    # WRAPS roughly every ~71 minutes at typical rates. Sorting by
+    # start_counter (the previous approach) lumped two physically
+    # distinct pulses that happen to share a counter value (one before
+    # and one after a wrap) into a single "mega-pulse", producing
+    # spurious paired hits separated by hours.
+    #
+    # Instead we rely on the fact that, within the raw TDC stream, all
+    # ticks belonging to one pulse are CONTIGUOUS and the orphan subset
+    # (a boolean mask over tdc_df) preserves that acquisition order. So
+    # we keep acquisition order and run-length-encode by a CHANGE in
+    # start_counter: consecutive pulses always differ (the counter
+    # increments, and even at a wrap MAX->low it still changes), while a
+    # wrapped duplicate value reappears as a separate contiguous run
+    # rather than being merged with its earlier namesake.
     orphan_channels = orphans["channel"].to_numpy()
     orphan_times = orphans["time_data"].to_numpy()
     orphan_sc = orphans["start_counter"].to_numpy()
@@ -292,16 +306,20 @@ def merge_partial_tdc_into_dld(
     )
     orphan_original_index = orphans.index.to_numpy()
 
-    # Run-length encode by start_counter so each pulse becomes one slice.
-    sort_order = np.argsort(orphan_sc, kind="stable")
-    orphan_channels = orphan_channels[sort_order]
-    orphan_times = orphan_times[sort_order]
-    orphan_sc = orphan_sc[sort_order]
-    orphan_hv = orphan_hv[sort_order]
-    orphan_pv = orphan_pv[sort_order]
-    orphan_pl = orphan_pl[sort_order]
-    orphan_original_index = orphan_original_index[sort_order]
+    # Defensive: ensure strict acquisition order (in case the frame's
+    # index was not a sorted RangeIndex). A stable sort by the original
+    # index preserves per-pulse tick contiguity.
+    acq_order = np.argsort(orphan_original_index, kind="stable")
+    orphan_channels = orphan_channels[acq_order]
+    orphan_times = orphan_times[acq_order]
+    orphan_sc = orphan_sc[acq_order]
+    orphan_hv = orphan_hv[acq_order]
+    orphan_pv = orphan_pv[acq_order]
+    orphan_pl = orphan_pl[acq_order]
+    orphan_original_index = orphan_original_index[acq_order]
 
+    # Run-length encode by a CHANGE in start_counter in acquisition
+    # order; each contiguous equal-counter run is one pulse (wrap-safe).
     run_starts = np.r_[0, np.where(np.diff(orphan_sc) != 0)[0] + 1, orphan_sc.size]
 
     existing_max_gid = int(dld_df[EVENT_GROUP_ID_COLUMN].max()) if len(dld_df) > 0 else -1

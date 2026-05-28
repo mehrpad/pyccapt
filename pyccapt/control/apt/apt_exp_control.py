@@ -829,8 +829,11 @@ class APT_Exp_Control:
 
         try:
             if self._signal_generator_active():
-                # Turn off the signal generator
-                signal_generator.turn_off_signal_generator()
+                # Turn off the signal generator. Pass variables so the
+                # VISA resource address comes from config; the previous
+                # hardcoded serial number silently no-op'd on every
+                # rig except the original developer machine.
+                signal_generator.turn_off_signal_generator(self.variables)
 
         except Exception as e:
             print(e)

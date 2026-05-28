@@ -69,7 +69,14 @@ def _stack_xyz(x, y, z) -> np.ndarray:
 
 
 def _matlab_bin_centers(dist: np.ndarray, bin_nm: float) -> Tuple[np.ndarray, np.ndarray]:
-    centers_raw = np.linspace(0.0, 10000 * bin_nm, 10001)
+    # Size the raw centre grid from the actual signed-distance span
+    # rather than a fixed 10001-entry grid capped at 10000*bin_nm. The
+    # fixed grid silently clipped distances beyond +/- 500 nm (with the
+    # default sub-nm bin) into the end bin, producing a wrong proxigram
+    # for large interfaces, while over-allocating for small ones.
+    reach = max(abs(float(dist.min())), abs(float(dist.max()))) + bin_nm
+    n_steps = max(1, int(np.ceil(reach / float(bin_nm))))
+    centers_raw = np.arange(0, (n_steps + 1)) * float(bin_nm)
     centers_raw = np.concatenate((-centers_raw[1:][::-1], centers_raw))
     mask = (centers_raw >= dist.min()) & (centers_raw <= dist.max())
     centers = centers_raw[mask]

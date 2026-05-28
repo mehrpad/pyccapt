@@ -286,6 +286,16 @@ def _clip_isosurface_to_specimen_envelope(mesh, grid_vec, voxel_counts, smoothin
     if cell_keep.size == 0:
         return tri_mesh
     if not np.any(cell_keep):
+        # Every cell was clipped away -- the iso-surface fell entirely
+        # outside the specimen envelope. Warn loudly: silently returning
+        # an empty mesh makes a legitimate iso-surface disappear from the
+        # plot with no diagnostic (common on small-cell-count specimens).
+        print(
+            '[_clip_isosurface_to_specimen_envelope] WARNING: all '
+            f'{cell_keep.size} iso-surface cells fell outside the specimen '
+            'envelope and were clipped; returning an empty mesh. Check the '
+            'min_atoms_per_voxel / smoothing parameters or the iso value.'
+        )
         return pv.PolyData()
 
     clipped = tri_mesh.extract_cells(np.flatnonzero(cell_keep))
@@ -1038,10 +1048,18 @@ def bin_vectors_from_distance(dist, bin_values, mode='distance'):
     # Constant bin distance interval
     if is_constant_distance:
         for dim in range(num_dim):
-            # dmin = dist[:, dim].min()
-            # dmax = dist[:, dim].max()
-            # Generate raw bin vector
-            bin_vector_raw = np.linspace(0, 10000 * bin_values[dim], 10001)
+            # Size the raw bin vector from the ACTUAL data span instead of
+            # a fixed 10001-entry grid capped at 10000*bin. The old fixed
+            # grid silently clipped any point beyond +/- 500 nm (e.g. a
+            # 600 nm specimen with 0.05 nm bins), lumping out-of-range
+            # ions into the end bin -- a silently wrong histogram -- while
+            # also over-allocating 20001 entries for small specimens.
+            bin = float(bin_values[dim])
+            dmin = float(dist[:, dim].min())
+            dmax = float(dist[:, dim].max())
+            reach = max(abs(dmin), abs(dmax)) + bin
+            n_steps = max(1, int(np.ceil(reach / bin)))
+            bin_vector_raw = np.arange(0, (n_steps + 1)) * bin
             bin_vector_raw = np.concatenate((-np.flip(bin_vector_raw[1:]), bin_vector_raw))
 
             # Filter bin centers within the distance range

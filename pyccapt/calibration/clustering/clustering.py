@@ -236,34 +236,60 @@ def _drop_small_clusters(labels: np.ndarray, *, n_min: int) -> np.ndarray:
     return np.array([remap[int(label)] if label >= 0 else -1 for label in labels], dtype=int)
 
 
-def min_max_clustering(points: np.ndarray, n_clusters: int = 2, max_iter: int = 50) -> tuple[np.ndarray, np.ndarray]:
-    """Segment points with a deterministic Min-Max initialization plus centroid refinement."""
+def min_max_clustering(
+    points: np.ndarray,
+    n_clusters: int = 2,
+    max_iter: int = 50,
+    n_min: int | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Segment points with a deterministic Min-Max initialization plus centroid refinement.
+
+    Parameters
+    ----------
+    n_min : optional int
+        When provided, clusters with fewer than ``n_min`` members are
+        relabelled as noise (-1) and the surviving labels compacted --
+        consistent with the HDBSCAN / DBSCAN / maximum-separation
+        algorithms in this module, which all drop tiny clusters. The
+        default (None) preserves the legacy behaviour of returning
+        exactly ``n_clusters`` partitions.
+
+    Notes
+    -----
+    NaN-coordinate rows (partial-recovered ions) are dropped before
+    clustering and re-inserted afterwards with label -1; previously the
+    NaN values flowed through ``np.linalg.norm`` / ``argmin`` and
+    silently produced garbage labels.
+    """
     points = np.asarray(points, dtype=float)
     if points.ndim != 2 or points.shape[1] != 3:
         raise ValueError("points must be a (N, 3) array")
     if n_clusters < 2:
         raise ValueError("n_clusters must be at least 2")
-    if len(points) < n_clusters:
-        raise ValueError("Not enough points for the requested number of clusters")
 
-    centroid = points.mean(axis=0)
-    first_index = int(np.argmax(np.linalg.norm(points - centroid, axis=1)))
-    centers = [points[first_index]]
+    nan_row_mask = np.isnan(points).any(axis=1)
+    finite_points = points[~nan_row_mask]
+    if len(finite_points) < n_clusters:
+        raise ValueError("Not enough (finite) points for the requested number of clusters")
+
+    centroid = finite_points.mean(axis=0)
+    first_index = int(np.argmax(np.linalg.norm(finite_points - centroid, axis=1)))
+    centers = [finite_points[first_index]]
 
     while len(centers) < n_clusters:
-        distances = np.stack([np.linalg.norm(points - center, axis=1) for center in centers], axis=1)
+        distances = np.stack([np.linalg.norm(finite_points - center, axis=1) for center in centers], axis=1)
         candidate_index = int(np.argmax(np.min(distances, axis=1)))
-        centers.append(points[candidate_index])
+        centers.append(finite_points[candidate_index])
 
     centers = np.asarray(centers, dtype=float)
-    labels = np.zeros(len(points), dtype=int)
+    labels = np.zeros(len(finite_points), dtype=int)
 
     for _ in range(max_iter):
-        distances = np.stack([np.linalg.norm(points - center, axis=1) for center in centers], axis=1)
+        distances = np.stack([np.linalg.norm(finite_points - center, axis=1) for center in centers], axis=1)
         new_labels = np.argmin(distances, axis=1)
         new_centers = centers.copy()
         for idx in range(n_clusters):
-            cluster_points = points[new_labels == idx]
+            cluster_points = finite_points[new_labels == idx]
             if len(cluster_points) > 0:
                 new_centers[idx] = cluster_points.mean(axis=0)
         if np.array_equal(new_labels, labels) and np.allclose(new_centers, centers):
@@ -277,6 +303,18 @@ def min_max_clustering(points: np.ndarray, n_clusters: int = 2, max_iter: int = 
     remap = {int(old): int(new) for new, old in enumerate(order)}
     labels = np.array([remap[int(label)] for label in labels], dtype=int)
     centers = centers[order]
+
+    if n_min is not None:
+        labels = _drop_small_clusters(labels, n_min=int(n_min))
+        centers = _centers_from_labeled_points(finite_points, labels)
+
+    if nan_row_mask.any():
+        # Re-expand to the original input length so callers that index by
+        # selection mask stay aligned; NaN rows are noise (-1).
+        full = np.full(len(points), -1, dtype=int)
+        full[~nan_row_mask] = labels
+        labels = full
+
     return labels, centers
 
 

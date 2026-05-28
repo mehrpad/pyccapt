@@ -12,6 +12,7 @@ import pandas as pd
 from pyccapt.calibration.data_tools import partial_recovery as pr
 from pyccapt.calibration.data_tools._raw_workflow_surface_concept import (
     _surface_concept_position_from_pair as _pos,
+    _surface_concept_hit_from_time_data as _hit4,
 )
 
 EGID = pr.EVENT_GROUP_ID_COLUMN
@@ -31,12 +32,12 @@ class _FakeVariables:
         return self.data
 
 
-def _dld_one_event(gid, sc, x_det, y_det):
+def _dld_one_event(gid, sc, x_det, y_det, tof=1000.0):
     return pd.DataFrame({
         "x (nm)": [0.0], "y (nm)": [0.0], "z (nm)": [0.0],
         "mc (Da)": [0.0], "mc_uc (Da)": [0.0],
         "high_voltage (V)": [5000.0], "pulse_v (V)": [0.0], "pulse_l (pJ)": [0.0],
-        "t (ns)": [1000.0],
+        "t (ns)": [tof],
         "x_det (cm)": [x_det], "y_det (cm)": [y_det],
         "start_counter": [sc], EGID: [gid],
     })
@@ -59,18 +60,20 @@ def _tdc(channels, times, sc, gid, has_match):
 def test_residual_recovered_from_matched_two_ion_pulse(monkeypatch):
     monkeypatch.setattr(pr, "load_detector_constants", lambda *a, **k: {"detector_limit_cm": 100.0})
 
-    # Ion A (firmware kept): sums 240/240. Ion B (residual): sums 460/460.
-    a_t = [100, 140, 130, 110]   # ch0,1,2,3
-    b_t = [200, 260, 250, 210]
-    x_a, y_a = _pos(100, 140), _pos(130, 110)
-    x_b, y_b = _pos(200, 260), _pos(250, 210)
+    # Ion A (firmware kept) and ion B (residual), well separated in ToF.
+    a_t = [100, 140, 130, 110]          # ch0,1,2,3  -> short ToF
+    b_t = [2000, 2060, 2050, 2010]      # ch0,1,2,3  -> long ToF (different ion)
+    x_a, y_a, tof_a = _hit4(a_t)
+    x_b, y_b = _pos(2000, 2060), _pos(2050, 2010)
 
     tdc = _tdc(
         channels=[0, 1, 2, 3, 0, 1, 2, 3],
         times=a_t + b_t,
         sc=100, gid=0, has_match=True,
     )
-    dld = _dld_one_event(gid=0, sc=100, x_det=x_a, y_det=y_a)
+    # The native DLD event carries ion A's recorded flight time, which is how
+    # the firmware's stops are told apart from ion B's during subtraction.
+    dld = _dld_one_event(gid=0, sc=100, x_det=x_a, y_det=y_a, tof=tof_a)
     variables = _FakeVariables(dld, tdc)
 
     # Off by default: with no orphans and the flag off, nothing is recovered.
@@ -114,3 +117,23 @@ def test_unmatchable_firmware_stops_skip_pulse(monkeypatch):
         variables, recover_from_matched_multihit=True, multihit_match_tol_cm=0.05, verbose=False
     )
     assert n == 0
+
+
+def test_firmware_hit_was_3channel_skips_no_cross_ion_artifact(monkeypatch):
+    monkeypatch.setattr(pr, "load_detector_constants", lambda *a, **k: {"detector_limit_cm": 100.0})
+    # Firmware's DLD event for ion A was reconstructed from only 3 raw stops
+    # (A's ch3 missing from the raw stream); a full ion B is also present.
+    # No coherent 4-stop set for A exists, so subtraction must SKIP the pulse
+    # rather than stitch A's x to B's y (which share a similar position) and
+    # fabricate a garbage residual or double-count A.
+    a_t3 = [100, 140, 130]              # A: ch0, ch1, ch2 only (ch3 dropped)
+    b_t = [2000, 2060, 2050, 2010]      # B: full, far in ToF
+    x_a, y_a, tof_a = _hit4([100, 140, 130, 110])  # firmware inferred A's ch3=110
+    tdc = _tdc([0, 1, 2, 0, 1, 2, 3], a_t3 + b_t, sc=100, gid=0, has_match=True)
+    dld = _dld_one_event(gid=0, sc=100, x_det=x_a, y_det=y_a, tof=tof_a)
+    variables = _FakeVariables(dld, tdc)
+    n = pr.merge_partial_tdc_into_dld(variables, recover_from_matched_multihit=True, verbose=False)
+    assert n == 0
+    # Only the native A row remains; ion B is NOT spuriously recovered here.
+    assert len(variables.data) == 1
+    assert variables.data[pr.DLTS_QUALITY_COLUMN].tolist() == ["native"]

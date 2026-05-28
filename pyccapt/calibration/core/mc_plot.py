@@ -21,6 +21,7 @@ import re
 import matplotlib.pyplot as plt
 import numpy as np
 from adjustText import adjust_text
+from matplotlib.ticker import FuncFormatter
 
 from pyccapt.calibration.path_utils import save_figure
 from pyccapt.calibration.core.mc_plot_background_helpers import (
@@ -103,6 +104,8 @@ class AptHistPlotter:
         self.percent = None
         self.rectangle = None
         self.bins = None
+        self.normalize = False
+        self.norm_factor = 1.0
         self.plotted_circles = []
         self.plotted_lines = []
         self.plotted_labels = []
@@ -143,7 +146,10 @@ class AptHistPlotter:
 
         Args:
             bin_width (float): The width of the bins.
-            normalize (bool): Whether to normalize the histogram.
+            normalize (bool): Display-only y-axis normalization. The histogram
+                data stays in raw counts (so peak finding, MRP, and background
+                fits are unaffected); when True the y-axis ticks are relabeled
+                to relative intensity (tallest bin = 1).
             label (str): The label of the x-axis ('mc' or 'tof').
             log (bool): Whether to use log scale for the y-axis.
             grid (bool): Whether to show the grid.
@@ -192,9 +198,12 @@ class AptHistPlotter:
         # Plot the histogram directly
         self.fig, self.ax = plt.subplots(figsize=fig_size)
 
-        # Force fast mode for bar-incompatible rendering or large datasets
+        # Always histogram in raw COUNTS so peak finding, MRP, and background
+        # fits (which rely on count-based thresholds) keep working. ``normalize``
+        # only rescales the y-axis *display* (handled after plotting); the
+        # underlying data and every overlay stay in count space.
         if fast and steps != 'bar':
-            self.y, self.x = np.histogram(self.mc_tof, bins=self.bins, density=normalize)
+            self.y, self.x = np.histogram(self.mc_tof, bins=self.bins)
             self.x_centers = (self.x[:-1] + self.x[1:]) * 0.5
             self.ax.fill_between(self.x_centers, self.y, step='mid', alpha=0.9, color='slategray')
             self.ax.step(self.x_centers, self.y, where='mid', color='k', linewidth=0.5)
@@ -207,25 +216,27 @@ class AptHistPlotter:
                 edgecolor = 'k'
                 alpha = 0.9
 
-            if normalize:
-                self.y, self.x, self.patches = self.ax.hist(
-                    self.mc_tof,
-                    bins=self.bins,
-                    alpha=alpha,
-                    color='slategray',
-                    edgecolor=edgecolor,
-                    histtype=steps,
-                    density=True,
-                )
-            else:
-                self.y, self.x, self.patches = self.ax.hist(
-                    self.mc_tof, bins=self.bins, alpha=alpha, color='slategray', edgecolor=edgecolor, histtype=steps
-                )
+            self.y, self.x, self.patches = self.ax.hist(
+                self.mc_tof, bins=self.bins, alpha=alpha, color='slategray', edgecolor=edgecolor, histtype=steps
+            )
             self.x_centers = (self.x[:-1] + self.x[1:]) * 0.5
 
         self.ax.set_xlabel('Mass/Charge [Da]' if label == 'mc' else 'Time of Flight [ns]')
-        self.ax.set_ylabel('Event Counts')
         self.ax.set_yscale('log' if log else 'linear')
+        # Display-only normalization: the data above is in counts, so we relabel
+        # the y-axis ticks to relative intensity (tallest bin = 1) instead of
+        # rescaling the data. Peak/MRP/background analysis therefore keeps
+        # running on real counts while the axis reads as normalized.
+        self.normalize = normalize
+        self.norm_factor = 1.0
+        if normalize and self.y.size and float(np.max(self.y)) > 0:
+            self.norm_factor = 1.0 / float(np.max(self.y))
+            self.ax.yaxis.set_major_formatter(
+                FuncFormatter(lambda value, _pos: f'{value * self.norm_factor:.2g}')
+            )
+            self.ax.set_ylabel('Normalized counts')
+        else:
+            self.ax.set_ylabel('Event Counts')
         if grid:
             plt.grid(True, which='both', axis='both', linestyle='--', linewidth=0.4, alpha=0.3)
         if self.original_x_limits is None:

@@ -41,6 +41,7 @@ import numpy as np
 import pandas as pd
 
 from pyccapt.calibration.data_tools._raw_workflow_common import (
+    TOF_FACTOR_NS_1D,
     load_detector_constants,
 )
 from pyccapt.calibration.data_tools._raw_workflow_surface_concept import (
@@ -172,29 +173,44 @@ def _subtract_firmware_stops(
     times: np.ndarray,
     native_events,
     match_tol_cm: float,
+    axis_consistency_ns: float | None = 5.0,
+    tof_match_tol_ns: float = 10.0,
 ):
     """Remove the stops the firmware used for its DLD event(s) from a matched
     multi-hit pulse and return the residual ``(channels, times)``.
 
     The Surface Concept quadrupel finder keeps only one hit per pulse, so a
     multi-hit pulse (more stops than the firmware used) can carry a second
-    ion the firmware discarded. For each native DLD event ``(det_x, det_y)``
-    of the pulse we find the ``(ch0, ch1)`` pair whose reconstructed x is
-    closest to ``det_x`` and the ``(ch2, ch3)`` pair whose y is closest to
-    ``det_y`` (each within ``match_tol_cm``, each tick used at most once),
-    and drop those four stops. The residual stops are what the firmware did
-    not use and can be re-run through the normal recovery.
+    ion the firmware discarded. ``native_events`` is a list of
+    ``(det_x, det_y, tof_ns)`` for the pulse's DLD event(s). For each we
+    look for a COHERENT quadruplet -- a ``(ch0, ch1)`` pair within
+    ``match_tol_cm`` of ``det_x`` and a ``(ch2, ch3)`` pair within
+    ``match_tol_cm`` of ``det_y`` -- subject to two ToF gates:
 
-    Returns ``None`` if any native event cannot be matched within tolerance
-    -- the caller then skips residual recovery for that pulse rather than
-    risk re-reconstructing (double-counting) the firmware's own hit.
+    * the x-pair and y-pair ToFs agree within ``axis_consistency_ns`` (the
+      per-axis time-sum coincidence ``t0 + t1 = t2 + t3``), and
+    * the quadruplet ToF matches the firmware event's recorded ``tof_ns``
+      within ``tof_match_tol_ns``.
+
+    Both gates are needed because a detector COORDINATE depends only on the
+    time DIFFERENCE of an axis, so a second ion at a similar position (but a
+    very different flight time) would otherwise be matched and removed,
+    fabricating a garbage residual or double-counting. The ToF match keys
+    on the firmware's own recorded flight time, which differs between ions.
+
+    The four matched stops are dropped; the residual is re-run through the
+    normal recovery. Returns ``None`` if any native event has no coherent
+    quadruplet within tolerance -- the caller then skips that pulse. (A
+    firmware hit that was itself a 3-channel reconstruction has no full
+    4-stop set in the raw stream, so it safely skips here.)
     """
     n = len(channels)
     used = [False] * n
     idx_by_channel = {c: [i for i in range(n) if int(channels[i]) == c] for c in (0, 1, 2, 3)}
 
-    def _best_pair(a_list, b_list, target):
-        best = None  # (err, i, j)
+    def _candidate_pairs(a_list, b_list, target):
+        # (pos_err, i, j, tof) for unused (a, b) pairs within match_tol_cm.
+        out = []
         for i in a_list:
             if used[i]:
                 continue
@@ -202,19 +218,38 @@ def _subtract_firmware_stops(
             for j in b_list:
                 if used[j]:
                     continue
-                pos = _surface_concept_position_from_pair(ti, float(times[j]))
+                tj = float(times[j])
+                pos = _surface_concept_position_from_pair(ti, tj)
                 err = abs(pos - target)
-                if err <= match_tol_cm and (best is None or err < best[0]):
-                    best = (err, i, j)
-        return best
+                if err <= match_tol_cm:
+                    out.append((err, i, j, (ti + tj) * TOF_FACTOR_NS_1D))
+        return out
 
-    for det_x, det_y in native_events:
-        bx = _best_pair(idx_by_channel[0], idx_by_channel[1], float(det_x))
-        by = _best_pair(idx_by_channel[2], idx_by_channel[3], float(det_y))
-        if bx is None or by is None:
+    for event in native_events:
+        det_x, det_y = float(event[0]), float(event[1])
+        native_tof = float(event[2]) if len(event) > 2 else float("nan")
+        cand_x = _candidate_pairs(idx_by_channel[0], idx_by_channel[1], det_x)
+        cand_y = _candidate_pairs(idx_by_channel[2], idx_by_channel[3], det_y)
+        if not cand_x or not cand_y:
             return None
-        used[bx[1]] = used[bx[2]] = True
-        used[by[1]] = used[by[2]] = True
+        best = None  # (score, xi, xj, yi, yj)
+        for ex, xi, xj, tof_x in cand_x:
+            for ey, yi, yj, tof_y in cand_y:
+                # (1) per-axis time-sum coincidence (same ion's two axes).
+                if axis_consistency_ns is not None and abs(tof_x - tof_y) > axis_consistency_ns:
+                    continue
+                # (2) match the firmware event's recorded flight time, which
+                # separates ions that share a similar position.
+                quad_tof = 0.5 * (tof_x + tof_y)
+                if np.isfinite(native_tof) and abs(quad_tof - native_tof) > tof_match_tol_ns:
+                    continue
+                score = ex + ey
+                if best is None or score < best[0]:
+                    best = (score, xi, xj, yi, yj)
+        if best is None:
+            return None
+        _, xi, xj, yi, yj = best
+        used[xi] = used[xj] = used[yi] = used[yj] = True
 
     residual = [i for i in range(n) if not used[i]]
     if not residual:
@@ -555,12 +590,17 @@ def merge_partial_tdc_into_dld(
             cand_gids = {int(pulse_gid[p]) for p in candidates}
             x_det_native = dld_df["x_det (cm)"].to_numpy()
             y_det_native = dld_df["y_det (cm)"].to_numpy()
+            tof_native = (
+                dld_df["t (ns)"].to_numpy()
+                if "t (ns)" in dld_df.columns
+                else np.full(len(dld_df), np.nan)
+            )
             events_by_gid: dict[int, list] = {}
             for row_idx, g in enumerate(native_gid):
                 gi = int(g)
                 if gi in cand_gids:
                     events_by_gid.setdefault(gi, []).append(
-                        (x_det_native[row_idx], y_det_native[row_idx])
+                        (x_det_native[row_idx], y_det_native[row_idx], tof_native[row_idx])
                     )
             for p in candidates:
                 gid = int(pulse_gid[p])
@@ -569,7 +609,9 @@ def merge_partial_tdc_into_dld(
                     continue
                 s, e = int(pulse_starts[p]), int(pulse_ends[p])
                 residual = _subtract_firmware_stops(
-                    ch_full[s:e], t_full[s:e], events, match_tol_cm=multihit_match_tol_cm
+                    ch_full[s:e], t_full[s:e], events,
+                    match_tol_cm=multihit_match_tol_cm,
+                    axis_consistency_ns=axis_consistency_ns,
                 )
                 if residual is None:
                     continue

@@ -101,22 +101,27 @@ def tdc_pulse_completeness(tdc_df) -> dict[str, int]:
     """Classify raw-TDC pulses by how many delay-line channels fired.
 
     Groups the raw ``/tdc`` ticks into pulses and reports, per pulse, how
-    many distinct delay-line channels fired. The counts use the physics of
-    a 2-D crossed delay-line detector, where a hit position can be
-    reconstructed from only THREE of the four channel timestamps:
+    many distinct delay-line channels fired:
 
-    - ``fully_sampled``  : fired all ``channels_required`` channels.
-    - ``reconstructible``: fired at least ``channels_required - 1`` (the
-      "all-but-one" case the detector can still reconstruct via the
-      per-axis time-sum constraint ``t0 + t1 = t2 + t3``; includes
-      ``fully_sampled``). This is the count that should line up with the
-      DLD reconstructed events -- NOT ``fully_sampled``.
-    - ``incomplete``     : fired 1 .. ``channels_required - 2`` channels;
-      too few to form a 2-D position.
-    - ``empty``          : no channel fired.
+    - ``complete``: fired all ``channels_required`` channels. For a 2-D
+      crossed delay-line detector this is the four channels the Surface
+      Concept "quadrupel finder" needs to reconstruct a hit (x = t0-t1,
+      y = t2-t3, plus the time-sum coincidence (t0+t1)-(t2+t3)).
+    - ``partial`` : fired 1 .. ``channels_required - 1`` channels.
+    - ``empty``   : no channel fired.
 
     ``channel_histogram`` maps each distinct-fired-channel count to the
-    number of pulses, so nothing is hidden behind the summary categories.
+    number of pulses, so the full distribution is visible.
+
+    NOTE on ``with_dld_match`` vs ``complete``: the raw ``/tdc`` stop
+    stream and the reconstructed ``/dld`` event stream are captured
+    separately by the detector, so they are not guaranteed stop-for-stop
+    identical. A small fraction of pulses can therefore carry a DLD match
+    while their raw record shows < ``channels_required`` channels (the raw
+    stream dropped a stop the reconstruction used, or the two streams'
+    start-counters pair imperfectly). ``with_dld_match`` is thus the
+    authoritative "produced an atom" count; ``complete`` is the raw-stream
+    completeness, and the two differing slightly is expected.
 
     Pulses are grouped by CONTIGUOUS runs of equal ``start_counter`` in
     acquisition (row) order, not by the raw counter value -- ``start_counter``
@@ -130,16 +135,14 @@ def tdc_pulse_completeness(tdc_df) -> dict[str, int]:
     rows for fired ticks, so the test is correct for both). The required
     channel set is the set of channels that fire anywhere in the dataset.
 
-    Returns a dict with: ``total_pulses``, ``fully_sampled``,
-    ``reconstructible``, ``incomplete``, ``empty``, ``channels_required``,
-    ``channel_histogram`` and ``with_dld_match`` (pulses whose ticks are
-    flagged ``has_dld_match``).
+    Returns a dict with: ``total_pulses``, ``complete``, ``partial``,
+    ``empty``, ``channels_required``, ``channel_histogram`` and
+    ``with_dld_match`` (pulses whose ticks are flagged ``has_dld_match``).
     """
     out: dict[str, int] = {
         "total_pulses": 0,
-        "fully_sampled": 0,
-        "reconstructible": 0,
-        "incomplete": 0,
+        "complete": 0,
+        "partial": 0,
         "empty": 0,
         "channels_required": 0,
         "with_dld_match": 0,
@@ -175,13 +178,9 @@ def tdc_pulse_completeness(tdc_df) -> dict[str, int]:
     if n_required and np.any(fired):
         fired_frame = pd.DataFrame({"pulse": pulse_id[fired], "ch": channel[fired]})
         distinct_per_pulse = fired_frame.groupby("pulse")["ch"].nunique()
-        # Reconstruction needs at least (n_required - 1) channels -- the
-        # missing one is recovered from the per-axis time-sum constraint.
-        reconstructible_min = max(1, n_required - 1)
-        out["fully_sampled"] = int((distinct_per_pulse >= n_required).sum())
-        out["reconstructible"] = int((distinct_per_pulse >= reconstructible_min).sum())
+        out["complete"] = int((distinct_per_pulse >= n_required).sum())
         n_with_any = int(distinct_per_pulse.index.size)
-        out["incomplete"] = n_with_any - out["reconstructible"]
+        out["partial"] = n_with_any - out["complete"]
         out["empty"] = total_pulses - n_with_any
         hist = distinct_per_pulse.value_counts()
         out["channel_histogram"] = {int(k): int(v) for k, v in hist.items()}

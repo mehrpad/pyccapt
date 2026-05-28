@@ -299,9 +299,8 @@ def summarize_loaded_events(variables, *, print_summary=True):
     tdc_stats = tdc_pulse_completeness(tdc)
     summary["tdc_loaded"] = tdc is not None
     summary["tdc_total_pulses"] = tdc_stats["total_pulses"]
-    summary["tdc_fully_sampled"] = tdc_stats["fully_sampled"]      # all channels fired
-    summary["tdc_reconstructible"] = tdc_stats["reconstructible"]  # >= channels-1
-    summary["tdc_incomplete"] = tdc_stats["incomplete"]            # too few to reconstruct
+    summary["tdc_complete"] = tdc_stats["complete"]   # fired all channels
+    summary["tdc_partial"] = tdc_stats["partial"]     # fired some-but-not-all
     summary["tdc_with_dld_match"] = tdc_stats["with_dld_match"]
     summary["tdc_channels_required"] = tdc_stats["channels_required"]
     summary["tdc_channel_histogram"] = tdc_stats["channel_histogram"]
@@ -309,26 +308,26 @@ def summarize_loaded_events(variables, *, print_summary=True):
     if print_summary:
         print("Event statistics")
         print("================")
-        print(f"  Complete events in DLD                 : {summary['dld_complete']:,}")
+        print(f"  Complete events in DLD (atoms)          : {summary['dld_complete']:,}")
         if summary["dld_partial"]:
-            print(f"  Partial events recovered into DLD      : {summary['dld_partial']:,}")
+            print(f"  Partial events recovered into DLD       : {summary['dld_partial']:,}")
         if summary["tdc_loaded"]:
             req = summary["tdc_channels_required"]
-            print(f"  Raw TDC pulses (triggers)              : {summary['tdc_total_pulses']:,}")
+            print(f"  Raw TDC pulses (triggers)               : {summary['tdc_total_pulses']:,}")
             # Per-channel-count histogram (descending), so nothing is hidden.
             hist = summary["tdc_channel_histogram"]
             for k in sorted(hist, reverse=True):
                 if k == 0:
                     continue
-                tag = " (fully sampled)" if k == req else ""
-                print(f"      fired {k} channel(s){tag:<16}: {hist[k]:,}")
-            # A 2-D delay-line hit needs only (req-1) channels (the missing
-            # end is recovered from the per-axis time-sum constraint), so the
-            # 'reconstructible' count -- not 'fully sampled' -- is what should
-            # line up with the DLD reconstructed events.
-            print(f"  Complete (reconstructible, >={max(1, req - 1)} ch)     : {summary['tdc_reconstructible']:,}")
-            print(f"  Partial (too few channels to reconstruct): {summary['tdc_incomplete']:,}")
-            print(f"  Raw TDC pulses linked to a DLD event   : {summary['tdc_with_dld_match']:,}")
+                tag = " (complete)" if k == req else ""
+                print(f"      fired {k} channel(s){tag:<12}: {hist[k]:,}")
+            print(f"  Complete pulses in raw TDC ({req} ch)      : {summary['tdc_complete']:,}")
+            print(f"  Partial pulses in raw TDC (<{req} ch)      : {summary['tdc_partial']:,}")
+            # The authoritative 'produced an atom' count. It can differ
+            # slightly from the complete-pulse count because the raw stop
+            # stream and the reconstructed DLD stream are captured
+            # separately (see tdc_pulse_completeness docstring).
+            print(f"  Raw TDC pulses linked to a DLD event    : {summary['tdc_with_dld_match']:,}")
         else:
             print("  (raw TDC not loaded; enable 'Load raw tdc' for TDC-side counts)")
 

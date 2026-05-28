@@ -45,6 +45,7 @@ from pyccapt.calibration.data_tools._raw_workflow_common import (
 )
 from pyccapt.calibration.data_tools._raw_workflow_surface_concept import (
     _recover_surface_concept_partial_hits,
+    _surface_concept_position_from_pair,
 )
 from pyccapt.calibration.data_tools.data_loadcrop import (
     EVENT_GROUP_ID_COLUMN,
@@ -166,6 +167,64 @@ def _build_recovered_row(
     return row
 
 
+def _subtract_firmware_stops(
+    channels: np.ndarray,
+    times: np.ndarray,
+    native_events,
+    match_tol_cm: float,
+):
+    """Remove the stops the firmware used for its DLD event(s) from a matched
+    multi-hit pulse and return the residual ``(channels, times)``.
+
+    The Surface Concept quadrupel finder keeps only one hit per pulse, so a
+    multi-hit pulse (more stops than the firmware used) can carry a second
+    ion the firmware discarded. For each native DLD event ``(det_x, det_y)``
+    of the pulse we find the ``(ch0, ch1)`` pair whose reconstructed x is
+    closest to ``det_x`` and the ``(ch2, ch3)`` pair whose y is closest to
+    ``det_y`` (each within ``match_tol_cm``, each tick used at most once),
+    and drop those four stops. The residual stops are what the firmware did
+    not use and can be re-run through the normal recovery.
+
+    Returns ``None`` if any native event cannot be matched within tolerance
+    -- the caller then skips residual recovery for that pulse rather than
+    risk re-reconstructing (double-counting) the firmware's own hit.
+    """
+    n = len(channels)
+    used = [False] * n
+    idx_by_channel = {c: [i for i in range(n) if int(channels[i]) == c] for c in (0, 1, 2, 3)}
+
+    def _best_pair(a_list, b_list, target):
+        best = None  # (err, i, j)
+        for i in a_list:
+            if used[i]:
+                continue
+            ti = float(times[i])
+            for j in b_list:
+                if used[j]:
+                    continue
+                pos = _surface_concept_position_from_pair(ti, float(times[j]))
+                err = abs(pos - target)
+                if err <= match_tol_cm and (best is None or err < best[0]):
+                    best = (err, i, j)
+        return best
+
+    for det_x, det_y in native_events:
+        bx = _best_pair(idx_by_channel[0], idx_by_channel[1], float(det_x))
+        by = _best_pair(idx_by_channel[2], idx_by_channel[3], float(det_y))
+        if bx is None or by is None:
+            return None
+        used[bx[1]] = used[bx[2]] = True
+        used[by[1]] = used[by[2]] = True
+
+    residual = [i for i in range(n) if not used[i]]
+    if not residual:
+        return None
+    return (
+        np.asarray([channels[i] for i in residual], dtype=np.int64),
+        np.asarray([times[i] for i in residual], dtype=np.int64),
+    )
+
+
 def _recover_for_pulse(
     pulse_channels: np.ndarray,
     pulse_times: np.ndarray,
@@ -201,6 +260,8 @@ def merge_partial_tdc_into_dld(
     max_tof_ns: float | None = None,
     axis_consistency_ns: float | None = 5.0,
     include_one_d_partials: bool = False,
+    recover_from_matched_multihit: bool = False,
+    multihit_match_tol_cm: float = 0.1,
     verbose: bool = True,
 ) -> int:
     """Recover partial-hit events from orphan TDC ticks and merge into DLD.
@@ -222,6 +283,20 @@ def merge_partial_tdc_into_dld(
     4-channel and 3-of-4 time-sum recoveries -- are added. Set it True to
     also append the 1-D partials (visible in the mass spectrum via their
     centred-axis mc estimate, but dropped by the 3-D reconstruction).
+
+    ``recover_from_matched_multihit`` (default False) additionally recovers
+    ions the firmware discarded from MATCHED multi-hit pulses. The Surface
+    Concept quadrupel finder keeps one hit per pulse, so a pulse that fired
+    more stops than its DLD event(s) used may contain a second ion. For
+    each such pulse the stops the firmware used are inverse-matched to its
+    DLD event(s) (the (ch0,ch1) pair closest to det_x and the (ch2,ch3)
+    pair closest to det_y, within ``multihit_match_tol_cm``) and removed;
+    the residual stops are then run through the normal recovery. It is
+    opt-in because the inverse match is heuristic -- if the firmware's
+    stops cannot be matched within tolerance the pulse is skipped, to avoid
+    re-reconstructing (double-counting) the firmware's own hit. Recovered
+    rows are tagged ``recovered_xy`` / ``recovered_xy_3of4`` like the orphan
+    path.
 
     Parameters
     ----------
@@ -295,7 +370,9 @@ def merge_partial_tdc_into_dld(
 
     orphan_mask = ~tdc_df[TDC_HAS_DLD_MATCH_COLUMN].to_numpy(dtype=bool)
     orphans = tdc_df.loc[orphan_mask]
-    if orphans.empty:
+    if orphans.empty and not recover_from_matched_multihit:
+        # No orphan pulses to recover, and matched-multihit residual
+        # recovery is off -- nothing to do.
         if verbose:
             print("[partial_recovery] No orphan tdc rows; nothing to recover.")
         variables.data = dld_df.reset_index(drop=True)
@@ -436,6 +513,103 @@ def merge_partial_tdc_into_dld(
         # Tag every orphan tdc tick for this pulse with the new GID.
         for original_idx in orphan_original_index[a:b]:
             tdc_index_to_new_gid[int(original_idx)] = new_gid
+
+    # --- Residual recovery from MATCHED multi-hit pulses -----------------
+    # The firmware keeps one hit per pulse, so a matched pulse with more
+    # stops than its DLD event(s) used may hold a second ion. Subtract the
+    # firmware's stops (inverse-matched to its DLD events) and recover from
+    # the residual. Opt-in; runs on the full TDC stream's matched pulses.
+    if recover_from_matched_multihit and len(tdc_df) > 0:
+        sc_full = tdc_df["start_counter"].to_numpy()
+        ch_full = tdc_df["channel"].to_numpy()
+        t_full = tdc_df["time_data"].to_numpy()
+        hv_full = (
+            tdc_df["high_voltage (V)"].to_numpy()
+            if "high_voltage (V)" in tdc_df.columns
+            else np.zeros(len(sc_full))
+        )
+        pv_full = (
+            tdc_df["pulse_v (V)"].to_numpy()
+            if "pulse_v (V)" in tdc_df.columns
+            else np.zeros(len(sc_full))
+        )
+        pl_full = (
+            tdc_df["pulse_l (pJ)"].to_numpy()
+            if "pulse_l (pJ)" in tdc_df.columns
+            else np.zeros(len(sc_full))
+        )
+        # Wrap-safe full-stream pulse boundaries.
+        bnd = np.empty(len(sc_full), dtype=bool)
+        bnd[0] = True
+        bnd[1:] = sc_full[1:] != sc_full[:-1]
+        pulse_starts = np.flatnonzero(bnd)
+        pulse_ends = np.r_[pulse_starts[1:], len(sc_full)]
+        pulse_gid = tdc_gid_full[pulse_starts]
+        pulse_tick = pulse_ends - pulse_starts
+        # K (native DLD events) per gid, and candidate pulses where the raw
+        # pulse has more stops than the firmware's 4*K.
+        k_series = dld_df[EVENT_GROUP_ID_COLUMN].value_counts()
+        k_per_pulse = pd.Series(pulse_gid).map(k_series).fillna(0).to_numpy()
+        candidates = np.flatnonzero((pulse_gid >= 0) & (pulse_tick > 4 * k_per_pulse))
+        if candidates.size:
+            cand_gids = {int(pulse_gid[p]) for p in candidates}
+            x_det_native = dld_df["x_det (cm)"].to_numpy()
+            y_det_native = dld_df["y_det (cm)"].to_numpy()
+            events_by_gid: dict[int, list] = {}
+            for row_idx, g in enumerate(native_gid):
+                gi = int(g)
+                if gi in cand_gids:
+                    events_by_gid.setdefault(gi, []).append(
+                        (x_det_native[row_idx], y_det_native[row_idx])
+                    )
+            for p in candidates:
+                gid = int(pulse_gid[p])
+                events = events_by_gid.get(gid)
+                if not events:
+                    continue
+                s, e = int(pulse_starts[p]), int(pulse_ends[p])
+                residual = _subtract_firmware_stops(
+                    ch_full[s:e], t_full[s:e], events, match_tol_cm=multihit_match_tol_cm
+                )
+                if residual is None:
+                    continue
+                res_channels, res_times = residual
+                if res_channels.size < 2:
+                    continue
+                recovered = _recover_for_pulse(
+                    res_channels,
+                    res_times,
+                    detector_radius_cm=detector_radius_cm,
+                    max_tof_ns=max_tof_ns,
+                    axis_consistency_ns=axis_consistency_ns,
+                )
+                if not recovered:
+                    continue
+                if not include_one_d_partials:
+                    recovered = [h for h in recovered if h.get("detector_axis") == "xy"]
+                    if not recovered:
+                        continue
+                insert_after_row = last_dld_row_of_gid.get(gid, -1)
+                pulse_sc = int(sc_full[s])
+                pulse_hv = float(hv_full[s])
+                pulse_pv = float(pv_full[s])
+                pulse_pl = float(pl_full[s])
+                new_gid = next_gid
+                next_gid += 1
+                for hit in recovered:
+                    new_rows.append(
+                        _build_recovered_row(
+                            start_counter=pulse_sc,
+                            high_voltage=pulse_hv,
+                            pulse_v=pulse_pv,
+                            pulse_l=pulse_pl,
+                            recovered_hit=hit,
+                            new_gid=new_gid,
+                            dld_columns=dld_columns,
+                            flight_path_length_mm=flight_path_length_mm,
+                        )
+                    )
+                    new_row_insert_after.append(insert_after_row)
 
     if not new_rows:
         if verbose:

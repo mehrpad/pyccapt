@@ -108,6 +108,27 @@ workflow can recover physically valid hits from these partial pulses:
   Concept firmware "quadrupel finder" requires all four stops, so these
   hits exist only after this offline step. Set
   `recover_three_channel=False` to disable it.
+- **Matched multi-hit residual recovery** (opt-in,
+  `recover_from_matched_multihit=True`): the firmware keeps one hit per
+  pulse, so a *matched* pulse that fired more stops than its DLD event(s)
+  used may hold a second ion. The stops the firmware used are
+  inverse-matched to its DLD event(s) (the `(ch0, ch1)` pair closest to
+  `det_x` and the `(ch2, ch3)` pair closest to `det_y`, within
+  `multihit_match_tol_cm`) and removed; the residual stops are run through
+  the recovery above. It is opt-in because the inverse match is heuristic
+  -- if the firmware's stops cannot be matched within tolerance the pulse
+  is skipped, to avoid re-reconstructing (double-counting) the firmware's
+  own hit.
+- **Order preservation**: recovered atoms are inserted into the DLD frame
+  at their acquisition position (right after the native rows of the most
+  recent preceding pulse), never by sorting on `start_counter` (a periodic
+  counter whose value repeats throughout a run), so the reconstructed
+  z/depth sequence is preserved.
+- **Only full `(x, y)` hits are merged by default**; single-axis 2-DLTS
+  partials (one detector coordinate is `NaN`) are excluded because they
+  cannot be placed in the 3-D reconstruction. Set
+  `include_one_d_partials=True` to also append them (they appear in the
+  mass spectrum via a centred-axis mc estimate).
 
 Partial-hit recovery is available from the `raw_data_analysis.ipynb`
 notebook and through the auto raw-analysis helper.

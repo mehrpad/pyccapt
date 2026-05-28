@@ -174,7 +174,11 @@ def voltage_correction(
     # per-segment evaluation through parallel_map(gil_releasing=True) and let
     # the auto-serial fallback kick in for tiny datasets.
     if mode == 'ion_seq':
-        num_segments = int(len(dld_highVoltage_peak) / sample_size) + 1
+        # Use ceildiv (not int(len/sample_size) + 1) so a trailing empty
+        # segment is not generated on exact divisibility. The empty
+        # segment is filtered downstream, but the printed segment count
+        # then disagreed with the number of (V, t) points the fit saw.
+        num_segments = (len(dld_highVoltage_peak) + sample_size - 1) // sample_size
 
         def _segment_indices(i: int):
             start = i * sample_size
@@ -185,7 +189,14 @@ def voltage_correction(
     elif mode == 'voltage':
         v_min = np.min(dld_highVoltage_peak)
         v_max = np.max(dld_highVoltage_peak)
-        num_segments = int((v_max - v_min) / sample_size) + 1
+        # Ceildiv on the voltage range; sample_size is the V step in this
+        # mode. Need to handle zero-range data (all the same voltage)
+        # explicitly so we don't underflow to zero segments.
+        v_range = float(v_max - v_min)
+        if v_range <= 0:
+            num_segments = 1
+        else:
+            num_segments = max(1, int(np.ceil(v_range / float(sample_size))))
 
         def _segment_by_voltage(i: int):
             lo = v_min + i * sample_size
@@ -361,7 +372,10 @@ def voltage_corr_main(
 
     print('The number of ions is:', len(dld_highVoltage_peak_v))
     sample_size = _resolve_sample_size(sample_size, len(dld_highVoltage_peak_v))
-    print('The number of samples is:', int(len(dld_highVoltage_peak_v) / sample_size))
+    # Match the ceildiv used inside ``voltage_correction`` so the printed
+    # count agrees with the actual number of (V, t) segments the fit sees.
+    _printed_segments = (len(dld_highVoltage_peak_v) + sample_size - 1) // sample_size
+    print('The number of samples is:', int(_printed_segments))
 
     if peak_maximum == 0:
         maximum_location = _resolve_peak_location(

@@ -207,7 +207,16 @@ def filter_peak_regression_table(
 
 
 def compute_effective_voltage(high_voltage_v, pulse_v, pulse_mode: str) -> np.ndarray:
-    """Return the effective accelerating voltage used in the mass conversion model."""
+    """Return the effective accelerating voltage used in the mass conversion model.
+
+    Raises only when *every* row would be invalid (the model has nothing to
+    work with). Real datasets routinely contain a handful of zero/NaN
+    voltage rows from hardware glitches, and the previous all-or-nothing
+    raise made those datasets unloadable. Caller-side downstream code is
+    expected to mask out non-finite / non-positive entries (or the
+    matching-row callers can filter using the returned mask via
+    np.isfinite()/>0).
+    """
     high_voltage = np.asarray(high_voltage_v, dtype=float)
     pulse = np.asarray(pulse_v, dtype=float)
     if pulse_mode == "laser":
@@ -217,8 +226,24 @@ def compute_effective_voltage(high_voltage_v, pulse_v, pulse_mode: str) -> np.nd
     else:
         raise ValueError(f"Unsupported pulse mode: {pulse_mode!r}")
 
-    if np.any(~np.isfinite(effective_voltage)) or np.any(effective_voltage <= 0):
-        raise ValueError("Effective accelerating voltage must stay finite and positive.")
+    if effective_voltage.size == 0:
+        raise ValueError("Effective accelerating voltage array is empty.")
+    bad = (~np.isfinite(effective_voltage)) | (effective_voltage <= 0)
+    n_bad = int(np.sum(bad))
+    if n_bad == effective_voltage.size:
+        raise ValueError(
+            "Every row has invalid effective accelerating voltage "
+            "(non-finite or <= 0); cannot compute mass conversion."
+        )
+    if n_bad > 0:
+        # Warn loudly the first time but keep going; the bad rows will
+        # propagate NaN through the downstream sqrt/divide and the caller
+        # filters them at the cropping stage.
+        print(
+            f"[compute_effective_voltage] {n_bad} of {effective_voltage.size} "
+            f"row(s) have invalid voltage (non-finite or <= 0); they will "
+            f"produce NaN in the derived mass values."
+        )
     return effective_voltage
 
 

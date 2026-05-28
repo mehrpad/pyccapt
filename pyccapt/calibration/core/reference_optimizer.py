@@ -255,7 +255,14 @@ def _cell_observations(
             obs_t.append(float(np.mean(chunk_idx)) / max(1.0, n_ions - 1))
             obs_centre.append(centre)
             target.append(float(ref.mz))
-            weight.append(float(ref.weight) * float(np.sqrt(chunk_idx.size)))
+            # LS-correct weight: per-cell variance scales as 1/N, so the
+            # inverse-variance weight is N (linear), and the residual is
+            # multiplied by sqrt(weight) = sqrt(N). The previous
+            # sqrt(chunk_idx.size) here combined with the sqrt(cells["w"])
+            # at residual time gave N**0.25 per residual -- effectively
+            # half the precision contribution of high-count cells, so a
+            # 20-ion cell could drag a 2000-ion cell.
+            weight.append(float(ref.weight) * float(chunk_idx.size))
     if not obs_centre:
         return None
     return {

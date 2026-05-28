@@ -40,9 +40,11 @@ Typical calibrated dataset fields:
 When partial-hit recovery (`data_tools.partial_recovery`) runs, the DLD
 dataframe gains two columns: `dlts` `(N/A, int8)` — `4` for a native or
 fully-recovered two-axis hit, `2` for a single-axis partial — and
-`dlts_quality` `(N/A, string)` provenance label (`native` for original rows,
-`recovered_xy` / `recovered_x` / `recovered_y` for recovered rows). Recovered
-rows hold `NaN` on the unrecovered detector axis.
+`dlts_quality` `(N/A, string)` provenance label (`native` for original rows;
+`recovered_xy` / `recovered_x` / `recovered_y` for recovered rows; and
+`recovered_xy_3of4` for a full (x, y) hit rebuilt from a 3-channel pulse via
+the delay-line time-sum constraint). Single-axis recovered rows hold `NaN` on
+the unrecovered detector axis.
 
 ## Range Dataset (HDF5 or Imported `.rrng` / `.rng`)
 

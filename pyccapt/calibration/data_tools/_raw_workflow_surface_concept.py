@@ -217,6 +217,134 @@ def _combine_axes_into_xy_hits(
     return xy_hits, x_leftover, y_leftover
 
 
+def _recover_three_channel_hits(
+    chunk_channels: np.ndarray,
+    chunk_times: np.ndarray,
+    used_global: set,
+    x_leftover: list[dict],
+    y_leftover: list[dict],
+    detector_radius_cm: float,
+    max_tof_ns: float | None,
+) -> tuple[list[dict], set, set]:
+    """Recover full xy hits from 3-channel pulses via the delay-line time-sum.
+
+    A pulse that fired one complete delay-line axis (both ends) plus a
+    single end of the OTHER axis is reconstructable. The two crossed delay
+    lines share the same total propagation time, ``t0 + t1 = t2 + t3``
+    (both start from the same MCP signal), so the missing end is
+
+        ``t_missing = sum_complete_axis - t_present``
+
+    and with it both det_x and det_y are computed -> a full 4-DLTS-equivalent
+    xy hit. This is the offline analogue of the standard "3 of 4" delay-line
+    reconstruction; the Surface Concept firmware quadrupel finder requires
+    all four stops, so these hits are only recovered here.
+
+    Each leftover complete-axis pair is matched with the most central
+    coincident orphan single channel of the other axis (one orphan per
+    pair). Hits are gated by non-negative recovered times, the detector
+    radius, and the ToF window so a wrong orphan pairing is rejected.
+
+    Returns ``(recovered_hits, consumed_x_idx, consumed_y_idx)`` -- the
+    index sets mark which ``x_leftover`` / ``y_leftover`` entries were
+    promoted, so the caller can drop them instead of emitting them again as
+    1-D partials.
+    """
+    recovered: list[dict] = []
+    consumed_x: set = set()
+    consumed_y: set = set()
+    n = chunk_channels.shape[0]
+
+    orphan_x = [i for i in range(n) if i not in used_global and int(chunk_channels[i]) in (0, 1)]
+    orphan_y = [i for i in range(n) if i not in used_global and int(chunk_channels[i]) in (2, 3)]
+    if not orphan_x and not orphan_y:
+        return recovered, consumed_x, consumed_y
+    used_orphan: set = set()
+
+    def _tof_ok(tof_val: float) -> bool:
+        return max_tof_ns is None or (0.0 < tof_val <= max_tof_ns)
+
+    # Complete Y axis + orphan X channel -> recover the missing X end.
+    for yi, y_pair in enumerate(y_leftover):
+        tof_full = float(y_pair['tof'])  # == sum_y * TOF_FACTOR_NS_1D (full tof)
+        if not _tof_ok(tof_full):
+            continue
+        sum_y = tof_full / TOF_FACTOR_NS_1D
+        best = None  # (abs_x, orphan_idx, x)
+        for oi in orphan_x:
+            if oi in used_orphan:
+                continue
+            channel = int(chunk_channels[oi])
+            t_present = float(chunk_times[oi])
+            if channel == 0:
+                t0 = t_present
+                t1 = sum_y - t0
+            else:  # channel == 1
+                t1 = t_present
+                t0 = sum_y - t1
+            if t0 < 0 or t1 < 0:
+                continue
+            x = _surface_concept_position_from_pair(t0, t1)
+            if abs(x) > detector_radius_cm:
+                continue
+            if best is None or abs(x) < best[0]:
+                best = (abs(x), oi, x)
+        if best is not None:
+            _, oi, x = best
+            used_orphan.add(oi)
+            consumed_y.add(yi)
+            recovered.append({
+                'x_det (cm)': float(x),
+                'y_det (cm)': float(y_pair['position']),
+                'tof (ns)': tof_full,
+                'detector_axis': 'xy',
+                'tof_axis_x_ns': tof_full,
+                'tof_axis_y_ns': tof_full,
+                'recovery_method': '3of4',
+            })
+
+    # Complete X axis + orphan Y channel -> recover the missing Y end.
+    for xi, x_pair in enumerate(x_leftover):
+        tof_full = float(x_pair['tof'])
+        if not _tof_ok(tof_full):
+            continue
+        sum_x = tof_full / TOF_FACTOR_NS_1D
+        best = None
+        for oi in orphan_y:
+            if oi in used_orphan:
+                continue
+            channel = int(chunk_channels[oi])
+            t_present = float(chunk_times[oi])
+            if channel == 2:
+                t2 = t_present
+                t3 = sum_x - t2
+            else:  # channel == 3
+                t3 = t_present
+                t2 = sum_x - t3
+            if t2 < 0 or t3 < 0:
+                continue
+            y = _surface_concept_position_from_pair(t2, t3)
+            if abs(y) > detector_radius_cm:
+                continue
+            if best is None or abs(y) < best[0]:
+                best = (abs(y), oi, y)
+        if best is not None:
+            _, oi, y = best
+            used_orphan.add(oi)
+            consumed_x.add(xi)
+            recovered.append({
+                'x_det (cm)': float(x_pair['position']),
+                'y_det (cm)': float(y),
+                'tof (ns)': tof_full,
+                'detector_axis': 'xy',
+                'tof_axis_x_ns': tof_full,
+                'tof_axis_y_ns': tof_full,
+                'recovery_method': '3of4',
+            })
+
+    return recovered, consumed_x, consumed_y
+
+
 def _recover_surface_concept_partial_hits(
     chunk_channels: np.ndarray,
     chunk_times: np.ndarray,
@@ -225,6 +353,7 @@ def _recover_surface_concept_partial_hits(
     max_tof_ns: float | None = None,
     axis_consistency_ns: float | None = 5.0,
     combine_axes: bool = True,
+    recover_three_channel: bool = True,
 ) -> list[dict]:
     """Recover every physically-valid hit from a multi-hit pulse.
 
@@ -238,6 +367,13 @@ def _recover_surface_concept_partial_hits(
     rather than silently dropping out-of-detector reconstructions or
     merging the two delay-line axes (which would under-count per-axis
     recoverability and mislabel dlts).
+
+    ``recover_three_channel`` (default True, only active with
+    ``combine_axes=True``) additionally promotes 3-channel pulses -- one
+    complete axis plus one orphan end of the other axis -- to full xy hits
+    via the delay-line time-sum constraint (see
+    :func:`_recover_three_channel_hits`). These carry
+    ``recovery_method='3of4'`` so the caller can label them distinctly.
 
     For each delay-line axis (x: ch0+ch1, y: ch2+ch3) ALL pairwise
     combinations of one ch-A timestamp with one ch-B timestamp are
@@ -300,6 +436,7 @@ def _recover_surface_concept_partial_hits(
         per_axis_selected[axis] = _select_axis_assignment(candidates, n_first, n_second)
 
     # --- Cross-axis ToF agreement → promote to full xy hits --------------
+    three_channel_hits: list[dict] = []
     if combine_axes:
         xy_hits, x_leftover, y_leftover = _combine_axes_into_xy_hits(
             per_axis_selected['x'],
@@ -307,6 +444,27 @@ def _recover_surface_concept_partial_hits(
             axis_consistency_ns=axis_consistency_ns,
             max_tof_ns=max_tof_ns,
         )
+        # 3-of-4 recovery: a complete axis + one orphan end of the other
+        # axis reconstructs a full xy hit through the time-sum constraint.
+        if recover_three_channel and (x_leftover or y_leftover):
+            used_global: set = set()
+            for axis_pairs in per_axis_selected.values():
+                for pair in axis_pairs:
+                    used_global.add(int(pair['first_global']))
+                    used_global.add(int(pair['second_global']))
+            three_channel_hits, consumed_x, consumed_y = _recover_three_channel_hits(
+                chunk_channels,
+                chunk_times,
+                used_global,
+                x_leftover,
+                y_leftover,
+                detector_radius_cm=detector_radius_cm,
+                max_tof_ns=max_tof_ns,
+            )
+            if consumed_x:
+                x_leftover = [p for i, p in enumerate(x_leftover) if i not in consumed_x]
+            if consumed_y:
+                y_leftover = [p for i, p in enumerate(y_leftover) if i not in consumed_y]
     else:
         # Diagnostics/reporting mode: keep the two delay-line axes
         # separate so every reconstructible per-axis pair is emitted as
@@ -316,11 +474,12 @@ def _recover_surface_concept_partial_hits(
         y_leftover = list(per_axis_selected['y'])
 
     # --- Emit results ----------------------------------------------------
-    # Full xy hits first (more physically informative), then leftover
-    # single-axis partials. Each dict matches the schema the caller in
-    # partial_recovery.py expects: x_det / y_det are NaN on the axis
-    # that was not recovered.
+    # Full xy hits first (more physically informative), then the 3-of-4
+    # time-sum recoveries, then leftover single-axis partials. Each dict
+    # matches the schema the caller in partial_recovery.py expects:
+    # x_det / y_det are NaN on the axis that was not recovered.
     recovered_hits.extend(xy_hits)
+    recovered_hits.extend(three_channel_hits)
     for x_hit in x_leftover:
         recovered_hits.append(
             {

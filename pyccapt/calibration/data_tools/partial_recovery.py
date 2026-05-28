@@ -107,7 +107,13 @@ def _build_recovered_row(
     detector_axis = recovered_hit.get("detector_axis", "xy")
     if detector_axis == "xy":
         dlts_value = 4
-        quality = "recovered_xy"
+        # A 3-of-4 time-sum recovery is a full xy position (dlts 4) but
+        # derived with one reconstructed delay-line end; label it
+        # distinctly so it can be told apart from native / 4-stop xy.
+        if recovered_hit.get("recovery_method") == "3of4":
+            quality = "recovered_xy_3of4"
+        else:
+            quality = "recovered_xy"
     else:
         dlts_value = 2
         quality = f"recovered_{detector_axis}"

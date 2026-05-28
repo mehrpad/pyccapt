@@ -94,10 +94,20 @@ workflow can recover physically valid hits from these partial pulses:
 - The live merge path
   (`data_tools.partial_recovery.merge_partial_tdc_into_dld`) appends the
   recovered rows to the `/dld` dataframe, tagging each with a `dlts`
-  (2 or 4) and `dlts_quality` label. Recovered rows carry `NaN` on the
-  unrecovered detector axis. Pulses are grouped by `event_group_id`
-  (wrap-safe), not by the raw `start_counter`, which wraps during long
-  runs.
+  (2 or 4) and `dlts_quality` label. Single-axis recovered rows carry
+  `NaN` on the unrecovered detector axis. Pulses are grouped by
+  `event_group_id` (wrap-safe), not by the raw `start_counter`, which
+  wraps during long runs.
+- **3-of-4 (time-sum) recovery** (on by default in the merge path):
+  pulses that fired one complete delay-line axis plus a single end of the
+  other axis are promoted to full `(x, y)` hits. The crossed delay lines
+  share the same total propagation time (`t0 + t1 = t2 + t3`), so the
+  missing end is `sum_complete_axis - t_present`; the recovered hit is
+  gated by non-negative recovered times, the detector radius, and the ToF
+  window, and labelled `dlts_quality = recovered_xy_3of4`. The Surface
+  Concept firmware "quadrupel finder" requires all four stops, so these
+  hits exist only after this offline step. Set
+  `recover_three_channel=False` to disable it.
 
 Partial-hit recovery is available from the `raw_data_analysis.ipynb`
 notebook and through the auto raw-analysis helper.

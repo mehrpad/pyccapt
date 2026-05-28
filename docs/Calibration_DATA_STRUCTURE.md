@@ -49,8 +49,11 @@ for pulses that fired only some delay-line channels are tagged as recovered.
   `4` for a native or fully-recovered two-axis hit, `2` for a single-axis
   partial.
 - `dlts_quality`: `(n,)` `(N/A, string)` provenance label: `native` for the
-  original DLD rows, and `recovered_xy` / `recovered_x` / `recovered_y` for
-  recovered rows.
+  original DLD rows; `recovered_xy` / `recovered_x` / `recovered_y` for hits
+  rebuilt from a full 4-channel pulse or a single delay-line axis; and
+  `recovered_xy_3of4` for a full (x, y) hit reconstructed from a 3-channel
+  pulse via the delay-line time-sum constraint (`dlts == 4`, both axes
+  present, one delay-line end inferred).
 
 Recovered partial rows store `NaN` on the detector axis that was not
 reconstructed (`x_det (cm)` for a y-only hit, and vice versa); their `mc`/

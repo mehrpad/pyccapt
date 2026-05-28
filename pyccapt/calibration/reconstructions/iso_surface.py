@@ -486,7 +486,13 @@ def reconstruction_plot(
         if size == len(true_indices):
             chosen = true_indices
         else:
-            chosen = np.random.choice(true_indices, size=size, replace=False)
+            # Seed the local Generator from the input mask's length so
+            # repeated plots of the same data give the same subsample
+            # (the previous ``np.random.choice`` used the global state
+            # and the same notebook re-run produced different scatter
+            # points each time).
+            _rng = np.random.default_rng(int(len(true_indices)))
+            chosen = _rng.choice(true_indices, size=size, replace=False)
 
         sampled_mask = np.zeros_like(mask_s, dtype=bool)
         sampled_mask[chosen] = True
@@ -781,7 +787,10 @@ def reconstruction_plot(
             print('The maximum number of ions is not provided, setting it to 100,000')
             max_num_ions = 100_000
         sample_size = min(len(variables.x), int(max_num_ions))
-        mask = np.random.choice(len(variables.x), size=sample_size, replace=False)
+        # Same reproducibility seed as _safe_random_subset above: keyed
+        # on the dataset length, so re-plots are deterministic.
+        _rng = np.random.default_rng(int(len(variables.x)))
+        mask = _rng.choice(len(variables.x), size=sample_size, replace=False)
         fig = go.Figure()
         fig.add_trace(
             go.Scatter3d(

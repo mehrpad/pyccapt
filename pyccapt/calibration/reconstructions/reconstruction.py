@@ -382,7 +382,10 @@ def reconstruction_plot(
                 # Find indices where the original mask is True
                 true_indices = np.where(mask)[0]
                 # Randomly choose 100 indices from the true indices
-                random_true_indices = np.random.choice(true_indices, size=size, replace=False)
+                # Seeded RNG keyed on the input length so re-plots are
+                # deterministic (replaces a global-state np.random.choice).
+                random_true_indices = np.random.default_rng(int(len(true_indices))).choice(
+                    true_indices, size=size, replace=False)
                 # Create a new mask with the same length as the original, initialized with False
                 new_mask = np.full(len(variables.dld_t), False)
                 # Set the selected indices to True in the new mask
@@ -418,7 +421,10 @@ def reconstruction_plot(
                 # Find indices where the original mask is True
                 true_indices = np.where(mask)[0]
                 # Randomly choose 100 indices from the true indices
-                random_true_indices = np.random.choice(true_indices, size=size, replace=False)
+                # Seeded RNG keyed on the input length so re-plots are
+                # deterministic (replaces a global-state np.random.choice).
+                random_true_indices = np.random.default_rng(int(len(true_indices))).choice(
+                    true_indices, size=size, replace=False)
                 # Create a new mask with the same length as the original, initialized with False
                 new_mask = np.full(len(variables.dld_t), False)
                 # Set the selected indices to True in the new mask
@@ -634,7 +640,8 @@ def scatter_plot(data, range_data, variables, element_percentage, selected_area,
         df_s = df_s[(df_s['mc_c (Da)'] > mc_low[index]) & (df_s['mc_c (Da)'] < mc_up[index])]
         df_s.reset_index(inplace=True, drop=True)
         remove_n = int(len(df_s) - (len(df_s) * float(element_percentage[index])))
-        drop_indices = np.random.choice(df_s.index, remove_n, replace=False)
+        drop_indices = np.random.default_rng(int(len(df_s))).choice(
+            df_s.index, remove_n, replace=False)
         df_subset = df_s.drop(drop_indices)
         if phases[index] == 'unranged':
             name_element = 'unranged'
@@ -754,7 +761,8 @@ def projection(
         # Find indices where the original mask is True
         true_indices = np.where(mask)[0]
         # Randomly choose 100 indices from the true indices
-        random_true_indices = np.random.choice(true_indices, size=size, replace=False)
+        random_true_indices = np.random.default_rng(int(len(true_indices))).choice(
+            true_indices, size=size, replace=False)
         # Create a new mask with the same length as the original, initialized with False
         new_mask = np.full(len(variables.dld_t), False)
         # Set the selected indices to True in the new mask
@@ -877,7 +885,8 @@ def heatmap(
         # Find indices where the original mask is True
         true_indices = np.where(mask_s)[0]
         # Randomly choose 100 indices from the true indices
-        random_true_indices = np.random.choice(true_indices, size=size, replace=False)
+        random_true_indices = np.random.default_rng(int(len(true_indices))).choice(
+            true_indices, size=size, replace=False)
         # Create a new mask with the same length as the original, initialized with False
         new_mask = np.full(len(variables.mc), False)
 
@@ -996,7 +1005,8 @@ def reconstruction_2d_histogram(
 
     num_elements_to_select = int(len(x) * percentage)
     # Randomly select elements
-    indices = np.random.choice(len(x), num_elements_to_select, replace=False)
+    indices = np.random.default_rng(int(len(x))).choice(
+        len(x), num_elements_to_select, replace=False)
     x = x[indices]
     y = y[indices]
     # Check if the bin is a tuple

@@ -160,7 +160,9 @@ def sdm(
         # set axis limits based on fraction of x and y data based on fraction
         true_indices = np.where(mask)[0]
         num_set_to_flase = int(len(true_indices) * (1 - frac))
-        indices_to_set_false = np.random.choice(true_indices, num_set_to_flase, replace=False)
+        # Seeded RNG so re-plots are deterministic.
+        indices_to_set_false = np.random.default_rng(int(len(true_indices))).choice(
+            true_indices, num_set_to_flase, replace=False)
         mask[indices_to_set_false] = False
         print('The number of data cropping due to fraction:', len_true_mask - len(mask[mask == True]))
 

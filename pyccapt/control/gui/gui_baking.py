@@ -110,8 +110,9 @@ class Ui_Baking(object):
         QtCore.QMetaObject.connectSlotsByName(Baking)
         tooltips.apply_tooltips(self, tooltips.BAKING_TOOLTIPS)
         ###
-        read_thread = threading.Thread(target=self.read)
-        read_thread.setDaemon(True)
+        # daemon=True via constructor; setDaemon(True) was deprecated in
+        # 3.10 and removed in 3.12.
+        read_thread = threading.Thread(target=self.read, daemon=True)
         read_thread.start()
 
         self.save_data.clicked.connect(self.save_data_csv)

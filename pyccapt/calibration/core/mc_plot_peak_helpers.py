@@ -1361,13 +1361,28 @@ def find_peaks_and_widths(plotter, prominence=None, distance=None, percent=50):
 
     except ValueError:
         print('Peak finding failed.')
-        plotter.peaks = None
-        plotter.properties = None
-        plotter.peak_widths = None
-        plotter.prominences = None
-        plotter.variables.peak_x = None
-        plotter.variables.peak_y = None
+        plotter.peaks = np.empty(0, dtype=int)
+        plotter.properties = {}
+        plotter.peak_widths = (
+            np.empty(0, dtype=float),
+            np.empty(0, dtype=float),
+            np.empty(0, dtype=float),
+            np.empty(0, dtype=float),
+        )
+        plotter.prominences = (
+            np.empty(0, dtype=float),
+            np.empty(0, dtype=int),
+            np.empty(0, dtype=int),
+        )
+        # Use empty arrays (not None) so callers like
+        # ``helper_ion_selection.select_all_peaks`` can iterate without
+        # an isinstance check. Previously these were None, which crashed
+        # downstream code that did ``variables.peaks_x_selected = variables.peak_x``
+        # then iterated.
+        plotter.variables.peak_x = np.empty(0, dtype=float)
+        plotter.variables.peak_y = np.empty(0, dtype=float)
         plotter.variables.max_peak = None
+        plotter.variables.peak_widths = plotter.peak_widths
 
     return plotter.peaks, plotter.properties, plotter.peak_widths, plotter.prominences
 

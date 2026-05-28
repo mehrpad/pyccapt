@@ -376,7 +376,12 @@ def _fit_voltage_polynomial(
     if float(np.max(v_means) - np.min(v_means)) < 50.0:
         return None, 0.0
     try:
-        coeffs, _ = curve_fit(voltage_corr, v_means, ratios)
+        # Cap iterations so a pathological input (e.g. all events at
+        # the same voltage during a vdc_hold) cannot stall the live
+        # calibration thread for the seconds-to-minutes it takes
+        # scipy to give up. The QThread polls ``_stop_event`` only
+        # between fits, so an unbounded ``maxfev`` blocks shutdown.
+        coeffs, _ = curve_fit(voltage_corr, v_means, ratios, maxfev=2000)
     except Exception:
         return None, 0.0
     a, b, c = (float(v) for v in coeffs)
@@ -405,7 +410,9 @@ def _fit_bowl_polynomial(
     if samples["x"].size < 6:
         return None
     try:
-        coeffs, _ = curve_fit(bowl_corr, [samples["x"], samples["y"]], samples["t"])
+        coeffs, _ = curve_fit(
+            bowl_corr, [samples["x"], samples["y"]], samples["t"], maxfev=2000
+        )
     except Exception:
         return None
     if coeffs.size != 6 or not np.all(np.isfinite(coeffs)):
@@ -541,7 +548,29 @@ class LiveCalibrationWorker(QtCore.QThread):
         if snapshot is None:
             self.status_changed.emit("waiting for events…")
             return None
-        t_ns, v_dc, x_cm, y_cm = snapshot
+        # SAFETY: the snapshot callback's contract does NOT say the
+        # returned arrays must be copies, and the GUI side historically
+        # has handed over views into the live writer's arrays. If the
+        # writer extends one of those arrays while curve_fit is
+        # iterating, the result is either a noisy fit or a
+        # mid-iteration ValueError caught by the broad `except` in
+        # ``run()`` -- both of which the user sees as "refit error" /
+        # "calibrating…" without any clue why. Take a defensive deep
+        # copy here so the fit sees frozen inputs.
+        try:
+            t_ns = np.array(snapshot[0], dtype=np.float64, copy=True)
+            v_dc = np.array(snapshot[1], dtype=np.float64, copy=True)
+            x_cm = np.array(snapshot[2], dtype=np.float64, copy=True)
+            y_cm = np.array(snapshot[3], dtype=np.float64, copy=True)
+        except Exception as exc:  # malformed snapshot
+            self.status_changed.emit(f"snapshot error: {exc.__class__.__name__}")
+            return None
+        if not (t_ns.size == v_dc.size == x_cm.size == y_cm.size):
+            self.status_changed.emit(
+                f"snapshot length mismatch: t={t_ns.size}, v={v_dc.size}, "
+                f"x={x_cm.size}, y={y_cm.size}"
+            )
+            return None
         if t_ns.size < self._min_events:
             self.status_changed.emit(f"calibrating… ({t_ns.size}/{self._min_events} events)")
             return None

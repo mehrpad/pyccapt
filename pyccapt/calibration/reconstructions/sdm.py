@@ -9,6 +9,116 @@ from scipy.signal import find_peaks
 from pyccapt.calibration.data_tools.merge_range import merge_by_range
 from pyccapt.calibration.reconstructions.io_utils import save_matplotlib_figure
 
+
+# Half-width of the SDM acceptance box, in nm. Pairs whose per-axis
+# displacement exceeds this are discarded. Matches the hardcoded
+# +/- 1 nm cut applied downstream in ``sdm``.
+_SDM_BOX_HALF_WIDTH_NM = 1.0
+
+
+def _compute_sdm_displacements(*, particles, mask_i, mask_j, axes, z_cut, theta, phi,
+                               target_working_bytes=256_000_000):
+    """Return box-cut 1-D pair displacements (dx, dy, dz) for the SDM.
+
+    Memory-bounded replacement for the original full ``np.subtract.outer``
+    matrices. Iterates over the ``mask_i`` particles in adaptively-sized
+    chunks, applies the SAME +/- 1 nm box cut per chunk, and accumulates
+    only the surviving displacements. ``None`` is returned for any axis
+    not in ``axes``.
+
+    The box-cut rule reproduces the downstream logic exactly: every
+    active non-z axis is cut to [-1, 1]; the z axis is cut only when
+    ``z_cut`` is True (so a z-only SDM with ``z_cut=False`` keeps every
+    pair, matching the original behaviour).
+    """
+    want_x = 'x' in axes
+    want_y = 'y' in axes
+    want_z = 'z' in axes
+    rotated = not (theta == 0 and phi == 0)
+
+    pts_i = particles[mask_i]
+    pts_j = particles[mask_j]
+    n_i = len(pts_i)
+    n_j = len(pts_j)
+
+    def _empty():
+        e = np.empty(0, dtype=float)
+        return (e.copy() if want_x else None,
+                e.copy() if want_y else None,
+                e.copy() if want_z else None)
+
+    if n_i == 0 or n_j == 0:
+        return _empty()
+
+    jx, jy, jz = pts_j[:, 0], pts_j[:, 1], pts_j[:, 2]
+
+    # Adaptive chunk: bound the per-chunk working set. The rotated path
+    # materialises up to ~6 (C x n_j) arrays (3 deltas + 3 shifts); the
+    # plain path up to 3. Use the larger factor so peak stays bounded.
+    per_pair_arrays = 6 if rotated else 3
+    bytes_per_row = max(1, n_j * 8 * per_pair_arrays)
+    chunk = max(1, int(target_working_bytes // bytes_per_row))
+
+    acc_x, acc_y, acc_z = [], [], []
+    box = _SDM_BOX_HALF_WIDTH_NM
+
+    for start in range(0, n_i, chunk):
+        ci = pts_i[start:start + chunk]
+        # Per-axis deltas for this chunk: (chunk_rows, n_j).
+        if rotated:
+            dxr = ci[:, 0][:, None] - jx[None, :]
+            dyr = ci[:, 1][:, None] - jy[None, :]
+            dzr = ci[:, 2][:, None] - jz[None, :]
+            cur_x = (np.cos(theta) * dxr
+                     + np.sin(theta) * np.sin(phi) * dyr
+                     + np.sin(theta) * np.cos(phi) * dzr) if want_x else None
+            cur_y = (np.cos(phi) * dyr - np.sin(phi) * dzr) if want_y else None
+            cur_z = (-np.sin(theta) * dxr
+                     + np.cos(theta) * np.sin(phi) * dyr
+                     + np.cos(theta) * np.cos(phi) * dzr) if want_z else None
+            del dxr, dyr, dzr
+        else:
+            cur_x = (ci[:, 0][:, None] - jx[None, :]) if want_x else None
+            cur_y = (ci[:, 1][:, None] - jy[None, :]) if want_y else None
+            cur_z = (ci[:, 2][:, None] - jz[None, :]) if want_z else None
+
+        # Build the per-chunk keep mask using the exact downstream rule.
+        keep = None
+
+        def _and(mask, condition):
+            return condition if mask is None else (mask & condition)
+
+        if want_x:
+            keep = _and(keep, np.abs(cur_x) <= box)
+        if want_y:
+            keep = _and(keep, np.abs(cur_y) <= box)
+        if want_z and z_cut:
+            keep = _and(keep, np.abs(cur_z) <= box)
+
+        if keep is None:
+            # Only reachable for the z-only / z_cut=False case: no cut,
+            # keep every pair (matches original behaviour).
+            if want_x:
+                acc_x.append(np.ravel(cur_x))
+            if want_y:
+                acc_y.append(np.ravel(cur_y))
+            if want_z:
+                acc_z.append(np.ravel(cur_z))
+            continue
+
+        if want_x:
+            acc_x.append(cur_x[keep])
+        if want_y:
+            acc_y.append(cur_y[keep])
+        if want_z:
+            acc_z.append(cur_z[keep])
+
+    out_x = np.concatenate(acc_x) if want_x else None
+    out_y = np.concatenate(acc_y) if want_y else None
+    out_z = np.concatenate(acc_z) if want_z else None
+    return out_x, out_y, out_z
+
+
 def sdm(
     particles,
     bin_size,
@@ -226,53 +336,29 @@ def sdm(
     print('The number of ions in is:', len(particles[mask]))
     print('The number of ions in i composition is:', len(particles[mask_i]))
     print('The number of ions in j composition is:', len(particles[mask_j]))
-    # Calculate relative positions based on user choices
+    # Calculate relative pair displacements.
+    #
+    # MEMORY: the original code built full N_i x N_j matrices via
+    # np.subtract.outer for each axis (and a dense (N_i, N_j, 3) array in
+    # the rotated branch), then box-cut the result to +/- 1 nm. For a
+    # normal-sized specimen (N ~ 1e5 per species) that is ~12 GB per axis
+    # and reliably OOMs. Because only pairs inside the +/- 1 nm box
+    # survive, we instead iterate over the i particles in adaptively
+    # sized chunks and apply the EXACT same box-cut per chunk, keeping
+    # only the surviving 1-D displacements. Peak memory is bounded to
+    # ~chunk_i x N_j instead of N_i x N_j. The downstream histogram code
+    # re-applies the (now idempotent) box-cut, so numerics are identical.
     dx, dy, dz = None, None, None
     histograms = []
-    if theta_x == 0 and phi_y == 0:
-        if 'x' in axes and 'y' in axes and 'z' in axes:
-            dx = np.subtract.outer(particles[:, 0][mask_i], particles[:, 0][mask_j])
-            dy = np.subtract.outer(particles[:, 1][mask_i], particles[:, 1][mask_j])
-            dz = np.subtract.outer(particles[:, 2][mask_i], particles[:, 2][mask_j])
-        elif 'x' in axes and 'y' in axes:
-            dx = np.subtract.outer(particles[:, 0][mask_i], particles[:, 0][mask_j])
-            dy = np.subtract.outer(particles[:, 1][mask_i], particles[:, 1][mask_j])
-        elif 'x' in axes and 'z' in axes:
-            dx = np.subtract.outer(particles[:, 0][mask_i], particles[:, 0][mask_j])
-            dz = np.subtract.outer(particles[:, 2][mask_i], particles[:, 2][mask_j])
-        elif 'y' in axes and 'z' in axes:
-            dy = np.subtract.outer(particles[:, 1][mask_i], particles[:, 1][mask_j])
-            dz = np.subtract.outer(particles[:, 2][mask_i], particles[:, 2][mask_j])
-        elif 'x' in axes:
-            dx = np.subtract.outer(particles[:, 0][mask_i], particles[:, 0][mask_j])
-        elif 'y' in axes:
-            dy = np.subtract.outer(particles[:, 1][mask_i], particles[:, 1][mask_j])
-        elif 'z' in axes:
-            dz = np.subtract.outer(particles[:, 2][mask_i], particles[:, 2][mask_j])
-    else:
-        particles_i_masked = particles[mask_i]
-        particles_j_masked = particles[mask_j]
-        shift = np.empty((len(particles_i_masked), len(particles_j_masked), 3), dtype=np.result_type(particles, particles))
-        for i in range(len(particles_i_masked)):
-            delta = particles_i_masked[i, :] - particles[mask_j]
-
-            shift[i, :, 0] = (
-                np.cos(theta) * delta[:, 0]
-                + np.sin(theta) * np.sin(phi) * delta[:, 1]
-                + np.sin(theta) * np.cos(phi) * delta[:, 2]
-            )
-            shift[i, :, 1] = np.cos(phi) * delta[:, 1] - np.sin(phi) * delta[:, 2]
-            shift[i, :, 2] = (
-                -np.sin(theta) * delta[:, 0]
-                + np.cos(theta) * np.sin(phi) * delta[:, 1]
-                + np.cos(theta) * np.cos(phi) * delta[:, 2]
-            )
-        if 'x' in axes:
-            dx = shift[:, :, 0]
-        if 'y' in axes:
-            dy = shift[:, :, 1]
-        if 'z' in axes:
-            dz = shift[:, :, 2]
+    dx, dy, dz = _compute_sdm_displacements(
+        particles=particles,
+        mask_i=mask_i,
+        mask_j=mask_j,
+        axes=axes,
+        z_cut=z_cut,
+        theta=theta,
+        phi=phi,
+    )
 
     edges_list = []
 

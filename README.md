@@ -79,6 +79,32 @@ pip install -e ".[control]"
 pip install -e ".[calibration]"
 ```
 
+### Faster local installs
+
+The editable (`-e`) step is fast; most of the time goes into resolving and
+downloading dependencies. A few scientific dependencies are heavy: `numba`
+pulls in `llvmlite` (and backtracks or builds from source if no wheel matches
+your Python), and `tables`/`h5py` build against the HDF5 C library when no
+wheel is available. The dependencies are also unpinned, so pip downloads
+metadata for many candidate versions to satisfy the `numpy` ranges that
+`numba`, `tables`, and `h5py` require.
+
+To speed it up:
+
+```bash
+# Resolve/download in parallel with uv
+uv pip install -e ".[full]"
+
+# Or let conda provide the heavy binaries, then skip re-resolving them
+conda install -c conda-forge numpy scipy pandas h5py pytables numba matplotlib
+pip install -e . --no-deps
+
+# During iterative development, when deps are already installed
+pip install -e . --no-deps
+```
+
+See [docs/installation](https://pyccapt.readthedocs.io/en/latest/installation.html) for details.
+
 ## Running PyCCAPT
 
 Start the control application:

@@ -1,3 +1,20 @@
+"""Mass-spectrum plotting and peak handling (``AptHistPlotter``).
+
+``AptHistPlotter`` builds the mass-to-charge (or time-of-flight)
+histogram that drives peak finding, ranging, MRP estimation, and the
+interactive Range tab. Two conventions matter for correctness and are
+relied on throughout the calibration core:
+
+- Histogram bin EDGES are anchored to the requested ``bin_width``
+  (``np.arange(min, max + bin_width, bin_width)``); the bin count is
+  derived from the data span, not the other way round.
+- Peak LOCATIONS are reported at bin CENTERS, not left edges, so a
+  detected peak is not biased low by half a bin.
+
+The heavy peak/background/selector logic lives in the
+``mc_plot_*_helpers`` modules and is imported here; this module is the
+thin stateful front end used by the notebook helpers.
+"""
 import math
 import re
 

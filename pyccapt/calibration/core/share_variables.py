@@ -1,3 +1,23 @@
+"""Shared mutable state for the calibration workflow.
+
+The notebook helpers and the calibration core pass a single ``Variables``
+instance around instead of threading dozens of arrays through every
+function. It holds, for the dataset currently loaded:
+
+- the working arrays (``dld_t``, ``dld_high_voltage``, ``dld_x_det`` /
+  ``dld_y_det``, ``mc``, ``mc_uc``, ``x``/``y``/``z``, ...),
+- the per-mode calibrated arrays ``dld_t_calib`` (tof) and ``mc_calib``
+  (m/c), plus ``*_backup`` snapshots used to revert a correction,
+- the active peak range and per-mode calibration selection masks, and
+- the ``initial_calibration_done_{mc,tof}`` flags that tell the
+  auto-calibration buttons whether the global t0/flight-path step has
+  already run on THIS dataset.
+
+``sync_from_data`` rebuilds all of the above from a dataframe after a
+load / crop / reset; it resets the per-dataset flags so a freshly loaded
+dataset is not mistaken for an already-calibrated one. State/validation
+problems raise the explicit calibration exceptions from ``exceptions``.
+"""
 from __future__ import annotations
 
 import os

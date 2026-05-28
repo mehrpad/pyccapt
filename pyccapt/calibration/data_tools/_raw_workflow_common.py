@@ -77,6 +77,19 @@ def _iter_columns_chunks(
         yield {name: source[name].to_numpy(dtype=float) for name in columns}
 
 
+# Detector / TDC geometry constants for the Surface Concept delay-line
+# detector. The TDC reports times in 27.432 ps bins.
+#   TOF_FACTOR_NS    : ps/bin -> ns for a full 4-channel event. The sum of
+#                      the four delay-line timestamps is divided by 4 (and
+#                      ps->ns by /1000), so the factor is 27.432/(1000*4).
+#   TOF_FACTOR_NS_1D : ps/bin -> ns for a single delay-line axis (two
+#                      timestamps), hence /2 instead of /4. Used by the
+#                      partial-hit recovery, which works one axis at a time.
+#   DETBINS / BINNING_FACTOR / XY_FACTOR / XY_BIN_SHIFT : convert raw
+#                      delay-line bin positions to detector cm. The detector
+#                      spans ~80 mm across DETBINS bins (binned by 2);
+#                      XY_BIN_SHIFT recenters the origin to the detector
+#                      middle before scaling by XY_FACTOR.
 TOF_FACTOR_NS = 27.432 / (1000.0 * 4.0)
 TOF_FACTOR_NS_1D = 27.432 / (1000.0 * 2.0)
 DETBINS = 4900

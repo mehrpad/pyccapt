@@ -347,6 +347,19 @@ def estimate_maximum_separation_distance(
     return d_max
 
 
+def _expand_maxsep_labels(filtered_labels: np.ndarray, finite_idx: np.ndarray, input_len: int) -> np.ndarray:
+    """Re-expand labels computed on the NaN-filtered subset to full length.
+
+    Dropped (NaN-coordinate) rows become -1 (noise) so callers that index
+    by the original selection mask stay aligned.
+    """
+    if len(filtered_labels) == input_len:
+        return filtered_labels
+    full = np.full(input_len, -1, dtype=int)
+    full[finite_idx] = filtered_labels
+    return full
+
+
 def maximum_separation_clustering(
     points: np.ndarray,
     *,
@@ -366,10 +379,24 @@ def maximum_separation_clustering(
     if n_min < 2:
         raise ValueError("n_min must be at least 2")
 
+    # NaN-coordinate rows (partial-recovered ions) would break cKDTree;
+    # drop them up front and re-expand labels to the original length with
+    # -1 (noise) afterwards, consistent with hdbscan_clustering and
+    # min_max_clustering. ``input_len`` / ``finite_idx`` carry the mapping.
+    input_len = len(points)
+    nan_row_mask = np.isnan(points).any(axis=1)
+    finite_idx = np.flatnonzero(~nan_row_mask)
+    if nan_row_mask.any():
+        print(
+            f'[maximum_separation_clustering] Dropping {int(nan_row_mask.sum())} '
+            'rows with NaN (x, y, z) (partial-recovered ions) before clustering.'
+        )
+    points = points[finite_idx]
+
     n_points = len(points)
     labels = np.full(n_points, -1, dtype=int)
     if n_points < n_min:
-        return labels, np.empty((0, 3), dtype=float)
+        return _expand_maxsep_labels(labels, finite_idx, input_len), np.empty((0, 3), dtype=float)
 
     tree = cKDTree(points)
     try:
@@ -378,7 +405,7 @@ def maximum_separation_clustering(
         pairs = np.asarray(sorted(tree.query_pairs(d_max)), dtype=int)
 
     if pairs.size == 0:
-        return labels, np.empty((0, 3), dtype=float)
+        return _expand_maxsep_labels(labels, finite_idx, input_len), np.empty((0, 3), dtype=float)
 
     parent = np.arange(n_points, dtype=int)
     size = np.ones(n_points, dtype=int)
@@ -404,9 +431,13 @@ def maximum_separation_clustering(
 
     roots = np.fromiter((find(index) for index in range(n_points)), count=n_points, dtype=int)
     unique_roots, inverse, counts = np.unique(roots, return_inverse=True, return_counts=True)
+    # numpy 2.0 briefly returned ``inverse`` with the input's shape
+    # (i.e. (n, 1) here); ravel so the ``enumerate(inverse)`` loop below
+    # always yields scalar local_root_id values.
+    inverse = np.ravel(inverse)
     valid_mask = counts >= n_min
     if not np.any(valid_mask):
-        return labels, np.empty((0, 3), dtype=float)
+        return _expand_maxsep_labels(labels, finite_idx, input_len), np.empty((0, 3), dtype=float)
 
     centers = []
     cluster_sizes = []
@@ -424,12 +455,19 @@ def maximum_separation_clustering(
 
     remap = {int(old_idx): int(new_idx) for new_idx, old_idx in enumerate(order)}
     for point_index, local_root_id in enumerate(inverse):
+        local_root_id = int(local_root_id)
         if not valid_mask[local_root_id]:
             continue
-        labels[point_index] = remap[old_to_new[int(local_root_id)]]
+        # Defensive .get: old_to_new only holds valid roots, and the
+        # valid_mask guard above already gates entry, but a guard here
+        # makes the relabel robust to any future index-space drift.
+        center_idx = old_to_new.get(local_root_id)
+        if center_idx is None:
+            continue
+        labels[point_index] = remap[center_idx]
 
     centers = centers[order]
-    return labels, centers
+    return _expand_maxsep_labels(labels, finite_idx, input_len), centers
 
 
 def hdbscan_clustering(

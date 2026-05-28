@@ -72,6 +72,28 @@ def test_extend_to_non_list_field_raises(variables):
         variables.extend_to("counter", [1])
 
 
+def test_getattr_missing_field_still_raises_attribute_error(variables):
+    # The hot-path getattr was reduced from two Manager round-trips
+    # (hasattr + getattr) to one; a genuinely missing attribute must
+    # still raise AttributeError, not return None or leak the proxy's
+    # error.
+    with pytest.raises(AttributeError):
+        _ = variables.a_field_that_does_not_exist_anywhere
+
+
+def test_extend_to_missing_field_raises_value_error(variables):
+    # extend_to dropped its separate hasattr() round-trip; a missing
+    # field must still surface as ValueError (distinct from the
+    # not-a-list TypeError).
+    with pytest.raises(ValueError):
+        variables.extend_to("a_field_that_does_not_exist_anywhere", [1, 2])
+
+
+def test_clear_to_missing_field_raises_value_error(variables):
+    with pytest.raises(ValueError):
+        variables.clear_to("a_field_that_does_not_exist_anywhere")
+
+
 def test_unknown_assignment_is_shared_in_namespace(variables):
     variables.custom_runtime_flag = True
     assert variables.custom_runtime_flag is True

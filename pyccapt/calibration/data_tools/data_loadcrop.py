@@ -10,7 +10,7 @@ from matplotlib.widgets import RectangleSelector, EllipseSelector
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
 from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
 
-from pyccapt.calibration.data_tools import data_tools, selectors_data
+from pyccapt.calibration.data_tools import data_tools, hdf5_schema, selectors_data
 from pyccapt.calibration.path_utils import save_figure
 
 EXTRACT_MODE_ALIASES = {
@@ -219,9 +219,13 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld', *, lazy: bool 
             dld_t = hdf5_data['dld/t'].to_numpy()
             dld_x = hdf5_data['dld/x'].to_numpy()
             dld_y = hdf5_data['dld/y'].to_numpy()
-            dld_group_array = np.concatenate(
-                (dld_high_voltage, dld_pulse_v, dld_pulse_l, dld_start_counter, dld_t, dld_x, dld_y),
-                axis=1,
+            # Assemble via the schema helper, which normalises each column
+            # to 1-D before stacking. This works whether the writer emitted
+            # (N,) or (N, 1) datasets; the previous np.concatenate(axis=1)
+            # raised AxisError if any column came back 1-D. Column order
+            # MUST match hdf5_schema.DLD_COLUMNS / create_pandas_dataframe.
+            dld_group_array = hdf5_schema.stack_columns(
+                (dld_high_voltage, dld_pulse_v, dld_pulse_l, dld_start_counter, dld_t, dld_x, dld_y)
             )
             dld_group_storage = create_pandas_dataframe(
                 dld_group_array, mode='dld', flag_old_pyccpat_data=flag_old_pyccpat_data
@@ -255,9 +259,10 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld', *, lazy: bool 
                 laser_pulse = laser_pulse.reshape(-1, 1)
             time_data = hdf5_data['tdc/time_data'].to_numpy()
 
-            dld_group_array = np.concatenate(
-                (channel, start_counter, high_voltage, voltage_pulse, laser_pulse, time_data),
-                axis=1,
+            # Shape-robust stack (see DLD branch). Column order MUST match
+            # hdf5_schema.TDC_COLUMNS / create_pandas_dataframe('tdc_*').
+            dld_group_array = hdf5_schema.stack_columns(
+                (channel, start_counter, high_voltage, voltage_pulse, laser_pulse, time_data)
             )
             dld_group_storage = create_pandas_dataframe(dld_group_array, mode=extract_mode)
             return dld_group_storage

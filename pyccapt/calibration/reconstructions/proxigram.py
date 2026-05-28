@@ -11,8 +11,15 @@ from pyccapt.calibration.reconstructions import iso_surface
 
 def _interface_vertices_and_normals(
     interface: Union[pv.PolyData, Dict[str, np.ndarray]], flip_normals: bool = False
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Return interface vertices and point normals."""
+):
+    """Return (oriented_surface, vertices, point_normals).
+
+    The oriented surface carries BOTH point and cell normals so the
+    signed-distance computation can project onto the nearest FACE rather
+    than only the nearest vertex (more accurate on coarse / clipped
+    meshes). Vertices + point normals are still returned for the
+    nearest-vertex fallback.
+    """
     if isinstance(interface, pv.PolyData):
         surf = interface
     elif isinstance(interface, dict) and "vertices" in interface and "faces" in interface:
@@ -29,7 +36,7 @@ def _interface_vertices_and_normals(
     surf = surf.clean()
     try:
         normed = surf.compute_normals(
-            cell_normals=False,
+            cell_normals=True,
             point_normals=True,
             auto_orient_normals=True,
             inplace=False,
@@ -41,7 +48,46 @@ def _interface_vertices_and_normals(
     normals = normed.point_normals.astype(np.float64, copy=False)
     if flip_normals:
         normals = -normals
-    return vertices, normals
+        # Keep the cell normals consistent with the (flipped) point
+        # normals so the face-based sign matches the vertex-based sign.
+        try:
+            if "Normals" in normed.cell_data:
+                normed.cell_data["Normals"] = -np.asarray(normed.cell_data["Normals"])
+        except Exception:
+            pass
+    return normed, vertices, normals
+
+
+def _signed_distance_to_interface(points, surf, vertices, normals):
+    """Signed perpendicular distance from each point to the interface.
+
+    Prefers the FACE-based projection: ``find_closest_cell`` gives the
+    closest point ON the surface (on a face, not just a vertex) plus the
+    cell it lies on; the sign comes from the cell normal. Falls back to
+    the nearest-vertex normal when the pyvista build doesn't support
+    ``return_closest_point`` or cell normals are unavailable.
+    """
+    cell_normals = None
+    try:
+        cell_normals = surf.cell_normals
+    except Exception:
+        cell_normals = None
+
+    if cell_normals is not None and surf.n_cells > 0:
+        try:
+            cell_ids, closest_pts = surf.find_closest_cell(points, return_closest_point=True)
+            cell_ids = np.asarray(cell_ids).reshape(-1)
+            closest_pts = np.asarray(closest_pts, dtype=np.float64).reshape(-1, 3)
+            cn = np.asarray(cell_normals, dtype=np.float64)[cell_ids]
+            return np.einsum("ij,ij->i", cn, points - closest_pts)
+        except Exception:
+            # Any incompatibility -> fall through to nearest-vertex.
+            pass
+
+    # Fallback: nearest-vertex normal (the original behaviour).
+    tree = cKDTree(vertices)
+    _, idx = tree.query(points, k=1)
+    return np.einsum("ij,ij->i", normals[idx], points - vertices[idx])
 
 
 def _stack_xyz(x, y, z) -> np.ndarray:
@@ -104,16 +150,12 @@ def patch_create_proxigram_mask(
     points_all = _stack_xyz(pos_x, pos_y, pos_z)
     points_species = _stack_xyz(pos_x[mask], pos_y[mask], pos_z[mask])
 
-    vertices, normals = _interface_vertices_and_normals(interface, flip_normals=flip_normals)
-    tree = cKDTree(vertices)
+    surf, vertices, normals = _interface_vertices_and_normals(interface, flip_normals=flip_normals)
 
-    _, idx_all = tree.query(points_all, k=1)
-    dist_vec_all = points_all - vertices[idx_all]
-    dist_all = np.einsum("ij,ij->i", normals[idx_all], dist_vec_all)
-
-    _, idx_species = tree.query(points_species, k=1)
-    dist_vec_species = points_species - vertices[idx_species]
-    dist_species = np.einsum("ij,ij->i", normals[idx_species], dist_vec_species)
+    # Face-based signed distance (closest point on a face, sign from the
+    # cell normal); falls back to the nearest-vertex normal internally.
+    dist_all = _signed_distance_to_interface(points_all, surf, vertices, normals)
+    dist_species = _signed_distance_to_interface(points_species, surf, vertices, normals)
 
     if symmetric_range is not None:
         dist_all = dist_all[np.abs(dist_all) <= symmetric_range]

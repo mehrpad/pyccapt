@@ -322,7 +322,12 @@ class AptHistPlotter:
         Returns:
             None
         """
-        bin_index = np.digitize([peak_loc], self.x) - 1
+        # np.digitize returns an ndarray when given an array input; cast
+        # to a scalar int so the bounds check (and any future arithmetic)
+        # behaves like a normal Python int. The previous
+        # ``ndarray < int or ndarray >= int`` raised numpy's
+        # DeprecationWarning and will fail outright under future numpy.
+        bin_index = int(np.digitize([peak_loc], self.x)[0]) - 1
         try:
             self.ranged_line.remove()
         except AttributeError:
@@ -331,17 +336,19 @@ class AptHistPlotter:
         if bin_index < 0 or bin_index >= len(self.y):
             raise IndexError(f"Bin index {bin_index} out of range for y array of length {len(self.y)}")
 
-        # Get the scalar value for ymax
-        ymax = float(self.y[bin_index])
         # Plot the vertical line on the plotter's own axes so the marker lands
         # on the currently displayed figure even when matplotlib's pyplot state
         # has drifted to a different figure (common under %matplotlib ipympl).
+        # NOTE: ``ymax`` for ``Axes.axvline`` is in AXES-FRACTION space
+        # ([0, 1]); passing a raw event count (e.g. 8000) silently clips
+        # to 1.0 and makes the marker span the full y axis every time --
+        # which is the same as just omitting the kwarg. Drop it so the
+        # behaviour is explicit.
         self.ranged_line = self.ax.axvline(
             x=peak_loc,
             color=color,
             linestyle='dashdot',
             linewidth=2,
-            ymax=ymax,
         )
         if self.fig is not None and self.fig.canvas is not None:
             self.fig.canvas.draw_idle()

@@ -94,14 +94,29 @@ def build_event_group_mapping(
                 continue
         # Orphan tdc run: keep gid = -1, has_match = False.
     if j < n_dld_runs:
-        # dld rows with no matching tdc run indicate inconsistent inputs.
-        # Assign them unique negative ids so they remain distinguishable.
-        unmatched = dld_runs[j + 1] - dld_runs[j]
-        raise ValueError(
-            "Found dld rows without a matching tdc start_counter run "
-            f"(at least {unmatched} rows starting at dld index {dld_runs[j]}). "
-            "Are the dld and tdc datasets from the same acquisition?"
+        # Acquisition crashes mid-run routinely produce a few dld events
+        # whose corresponding tdc rows were never flushed (or were
+        # already truncated by a partial-write recovery). Previously this
+        # raised ValueError and the file became completely unloadable --
+        # which is exactly the situation partial_recovery.py was added
+        # for, but it can't help if the loader fails first. Demote to a
+        # warning and assign the orphan dld rows a fresh NEGATIVE GID
+        # range so they stay distinguishable; downstream filters can
+        # drop them by predicate (gid < 0) if needed.
+        unmatched_total = int(n_dld_runs - j)
+        first_orphan_start = int(dld_runs[j])
+        first_orphan_size = int(dld_runs[j + 1] - dld_runs[j])
+        print(
+            f"[build_event_group_mapping] WARNING: {unmatched_total} dld run(s) "
+            f"have no matching tdc start_counter. First orphan starts at dld "
+            f"index {first_orphan_start} (size {first_orphan_size}). Loading "
+            f"with negative event_group_id for the orphan rows; check that "
+            f"the dld and tdc datasets are from the same acquisition."
         )
+        # Assign each orphan dld run a unique negative gid: -1, -2, -3, ...
+        for orphan_idx, k in enumerate(range(j, n_dld_runs)):
+            d_start, d_end = int(dld_runs[k]), int(dld_runs[k + 1])
+            dld_gid[d_start:d_end] = -(orphan_idx + 1)
     return dld_gid, tdc_gid, tdc_has_match
 
 def fetch_dataset_with_tdc(

@@ -27,7 +27,7 @@ def load_data(
     variables,
     processing_mode=True,
     load_tdc_raw=False,
-    merge_partial_tdc=False,
+    merge_partial_tdc=None,
     detector_kind='surface_concept',
     show_progress=True,
 ):
@@ -40,8 +40,16 @@ def load_data(
             the h5 file. The dld and tdc dataframes are linked via a shared
             ``event_group_id`` column so dld filtering decisions can later be
             propagated to tdc at save time. Stored on ``variables.data_tdc``.
-    merge_partial_tdc : bool, default False
-            If True (and ``load_tdc_raw`` is True on a pyccapt h5 dataset),
+    merge_partial_tdc : bool or None, default None
+            Whether to run partial-hit recovery after the main DLD frame is
+            loaded. ``None`` (default) means "follow ``load_tdc_raw``": if
+            the raw ``/tdc`` group is loaded for a pyccapt h5 dataset,
+            recovery runs automatically and the recovered atoms (full xy,
+            3-of-4 time-sum, and 1-D partials) are appended to
+            ``variables.data`` -- so enabling "Load raw tdc" actually adds
+            the recovered events and increases ``len(variables.data)``.
+            Pass ``True``/``False`` to force it on/off.
+            When True (and ``load_tdc_raw`` is True on a pyccapt h5 dataset),
             after the main DLD frame is loaded, run the partial-hit recovery
             pipeline: orphan TDC ticks (pulses with 1-3 channels fired) are
             paired axis-by-axis, gated by the detector-surface constraint,
@@ -76,6 +84,15 @@ def load_data(
         # Check that the dataset is a valid ato_v6 dataset with .ato extension
         if not dataset_path.endswith(('.ato', '.ATO')):
             raise ValueError('The dataset should be a valid ato_v6 dataset with .ato extension')
+
+    # Resolve the "follow load_tdc_raw" default: when the caller leaves
+    # merge_partial_tdc unset (None), recover partial hits automatically
+    # whenever the raw /tdc group is loaded for a pyccapt h5 dataset. This
+    # makes "Load raw tdc" actually add the recovered atoms to
+    # variables.data instead of only loading the raw stops. Pass an
+    # explicit True/False to override.
+    if merge_partial_tdc is None:
+        merge_partial_tdc = bool(load_tdc_raw) and tdc == 'pyccapt'
 
     # Staged progress bar over the three coarse phases of a load: reading
     # the file (the slow, opaque HDF5/POS/EPOS read), synchronising the

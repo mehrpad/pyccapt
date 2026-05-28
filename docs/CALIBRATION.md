@@ -112,13 +112,19 @@ workflow can recover physically valid hits from these partial pulses:
   `recover_from_matched_multihit=True`): the firmware keeps one hit per
   pulse, so a *matched* pulse that fired more stops than its DLD event(s)
   used may hold a second ion. The stops the firmware used are
-  inverse-matched to its DLD event(s) (the `(ch0, ch1)` pair closest to
-  `det_x` and the `(ch2, ch3)` pair closest to `det_y`, within
-  `multihit_match_tol_cm`) and removed; the residual stops are run through
-  the recovery above. It is opt-in because the inverse match is heuristic
-  -- if the firmware's stops cannot be matched within tolerance the pulse
-  is skipped, to avoid re-reconstructing (double-counting) the firmware's
-  own hit.
+  inverse-matched to its DLD event(s) by a coherent quadruplet -- a
+  `(ch0, ch1)` pair within `multihit_match_tol_cm` of `det_x` and a
+  `(ch2, ch3)` pair within `multihit_match_tol_cm` of `det_y` whose ToFs
+  agree and whose combined ToF matches the firmware event's recorded
+  `t (ns)` -- and removed; the residual stops are run through the recovery
+  above. The ToF match matters because a detector coordinate depends only
+  on the per-axis time *difference*, so a second ion at a similar position
+  but a different flight time would otherwise be mis-removed; keying on the
+  recorded flight time prevents that. It is opt-in because the inverse
+  match is heuristic -- a pulse with no coherent quadruplet matching the
+  firmware event is skipped, avoiding both double-counting the firmware's
+  own hit and stitching a cross-ion artefact (a firmware hit that was
+  itself a 3-channel reconstruction therefore skips safely).
 - **Order preservation**: recovered atoms are inserted into the DLD frame
   at their acquisition position (right after the native rows of the most
   recent preceding pulse), never by sorting on `start_counter` (a periodic

@@ -324,14 +324,21 @@ def merge_partial_tdc_into_dld(
     Concept quadrupel finder keeps one hit per pulse, so a pulse that fired
     more stops than its DLD event(s) used may contain a second ion. For
     each such pulse the stops the firmware used are inverse-matched to its
-    DLD event(s) (the (ch0,ch1) pair closest to det_x and the (ch2,ch3)
-    pair closest to det_y, within ``multihit_match_tol_cm``) and removed;
-    the residual stops are then run through the normal recovery. It is
-    opt-in because the inverse match is heuristic -- if the firmware's
-    stops cannot be matched within tolerance the pulse is skipped, to avoid
-    re-reconstructing (double-counting) the firmware's own hit. Recovered
-    rows are tagged ``recovered_xy`` / ``recovered_xy_3of4`` like the orphan
-    path.
+    DLD event(s) -- a (ch0,ch1) pair within ``multihit_match_tol_cm`` of
+    det_x AND a (ch2,ch3) pair within ``multihit_match_tol_cm`` of det_y
+    whose two ToFs agree (axis_consistency_ns) and whose combined ToF
+    matches the firmware event's recorded ``t (ns)``. The ToF match is
+    essential: a detector COORDINATE depends only on the per-axis time
+    DIFFERENCE, so a second ion at a similar position would otherwise be
+    mis-removed; keying on the recorded flight time (which differs between
+    ions) prevents that. The matched stops are removed and the residual is
+    run through the normal recovery. It is opt-in because the inverse match
+    is heuristic -- if no coherent quadruplet matches the firmware event
+    within tolerance the pulse is skipped, to avoid double-counting the
+    firmware's own hit or stitching a cross-ion artefact (this also makes a
+    firmware hit that was itself a 3-channel reconstruction skip safely).
+    Recovered rows are tagged ``recovered_xy`` / ``recovered_xy_3of4`` like
+    the orphan path.
 
     Parameters
     ----------

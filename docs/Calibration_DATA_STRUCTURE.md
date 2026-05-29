@@ -37,7 +37,15 @@ Typical calibrated dataset fields:
 - `event_group_id` *(optional)*: `(n,)` `(N/A, int64)` shared event-group id
   linking each dld row to the matching raw `/tdc` rows. Present only when the
   dataset was loaded with `load_tdc_raw=True`. Survives all downstream cropping
-  steps so the link can be used at save time.
+  steps so the link can be used at save time. This is the recorded answer to
+  "which raw stops produced this atom": a dld row's stops are the `/tdc` rows
+  with the same `event_group_id`. A **negative** `event_group_id` marks a dld
+  event that has **no** raw-TDC pulse behind it — `build_event_group_mapping`
+  could not pair its `start_counter` run to any `/tdc` run (typically the raw
+  stops were never written because an acquisition stop/crash flushed `/dld` but
+  not `/tdc`, or a partial-write recovery truncated the tail). Such atoms are
+  valid and kept; `summarize_loaded_events` reports their count under
+  "DLD events with no raw-TDC match".
 
 ### Recovered partial-hit rows (optional)
 

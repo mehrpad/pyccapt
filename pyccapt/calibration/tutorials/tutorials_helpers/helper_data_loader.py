@@ -329,6 +329,24 @@ def summarize_loaded_events(variables, *, print_summary=True):
     else:
         summary["dld_total"] = summary["dld_complete"] = summary["dld_partial"] = 0
 
+    # DLD events that have no raw-TDC pulse behind them. At load time
+    # build_event_group_mapping links each dld row to its raw /tdc stops by
+    # start_counter; a dld run that never pairs with a tdc run is tagged with
+    # a NEGATIVE event_group_id (data_loadcrop.build_event_group_mapping).
+    # The column exists only when the file was loaded with load_tdc_raw=True,
+    # so the count is "known" only then. Recovered atoms get positive gids,
+    # so a negative gid is always an unmatched *native* dld event.
+    summary["dld_without_match_known"] = False
+    summary["dld_without_match"] = 0
+    if data is not None and "event_group_id" in getattr(data, "columns", []):
+        try:
+            gid = np.asarray(data["event_group_id"].to_numpy(), dtype=np.float64)
+            summary["dld_without_match"] = int(np.sum(np.isfinite(gid) & (gid < 0)))
+            summary["dld_without_match_known"] = True
+        except (TypeError, ValueError):
+            # Non-numeric event_group_id (unexpected) -- leave as unknown.
+            summary["dld_without_match_known"] = False
+
     tdc = getattr(variables, "data_tdc", None)
     tdc_stats = tdc_pulse_completeness(tdc)
     summary["tdc_loaded"] = tdc is not None
@@ -355,6 +373,28 @@ def summarize_loaded_events(variables, *, print_summary=True):
         print(f"  Complete events in DLD (atoms)          : {summary['dld_complete']:,}")
         if summary["dld_partial"]:
             print(f"  Partial events recovered into DLD       : {summary['dld_partial']:,}")
+        if summary["dld_without_match_known"]:
+            n_unmatched = summary["dld_without_match"]
+            total = max(summary["dld_total"], 1)
+            print(
+                f"  DLD events with no raw-TDC match        : {n_unmatched:,} "
+                f"({n_unmatched / total:.3%})"
+            )
+            if n_unmatched:
+                # Why: build_event_group_mapping pairs dld<->tdc by contiguous
+                # start_counter runs; a dld run with no tdc counterpart keeps a
+                # negative event_group_id. This happens when the raw /tdc stops
+                # for those pulses were never written -- an acquisition stop or
+                # crash flushed /dld but not /tdc, or a partial-write recovery
+                # truncated the tail. The dld atoms are valid and kept.
+                print(
+                    "      (reason: no raw /tdc stops recorded for these pulses -- "
+                    "dld/tdc start_counter runs do not align,"
+                )
+                print(
+                    "       usually an acquisition stop/crash or a truncated tail; "
+                    "tagged with a negative event_group_id and kept.)"
+                )
         if summary["tdc_loaded"]:
             req = summary["tdc_channels_required"]
             print(f"  Raw TDC pulses (triggers)               : {summary['tdc_total_pulses']:,}")

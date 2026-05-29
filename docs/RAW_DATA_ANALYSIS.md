@@ -33,6 +33,43 @@ When a file is loaded with `load_tdc_raw=True`, both groups are read and
 linked by a shared **`event_group_id`** column. That link is what makes the
 recovery and the cross-checks below possible.
 
+### Which raw stops belong to which DLD event?
+
+The link is **recorded** as the `event_group_id` column, written to **both**
+groups at load (`data_loadcrop.build_event_group_mapping`,
+`fetch_dataset_with_tdc`). For a DLD atom with `event_group_id == g`, its raw
+stops are exactly the `/tdc` rows with `event_group_id == g`:
+
+```python
+stops = tdc_df[tdc_df["event_group_id"] == g]
+```
+
+The mapping is built by walking the contiguous `start_counter` runs of both
+groups in acquisition order (robust to counter wrap; it never compares
+counter values across different runs). `event_group_id` survives every
+cropping step in the calibration workflow, and when the dataset is saved with
+`save_tdc=True` it is written into **both** the `/df` (dld) and `/tdc` groups
+on disk — so the linkage is persisted for every saved dataset, not just held
+in memory. (`has_dld_match` is also stored on `/tdc`; orphan rows are kept on
+save so the raw stream stays complete.)
+
+### DLD events with no raw-TDC match
+
+Some DLD atoms have **no** raw `/tdc` pulse behind them. During the mapping
+sweep, a dld `start_counter` run that cannot be paired to any `/tdc` run is
+given a **negative** `event_group_id` (`-1, -2, …`). This happens when the
+raw stops for those pulses were never recorded — most often an acquisition
+stop or crash flushed `/dld` but not `/tdc`, or a partial-write recovery
+truncated the tail of the raw stream. The dld atoms are physically valid and
+are kept; only their *raw-stop provenance* is missing.
+
+`summarize_loaded_events` reports this as **"DLD events with no raw-TDC
+match"** (count of rows with `event_group_id < 0`). To list them:
+
+```python
+unmatched = variables.data[variables.data["event_group_id"] < 0]
+```
+
 ---
 
 ## 2. The delay-line detector and the four channels
@@ -339,6 +376,9 @@ enable):
 Event statistics
 ================
   Complete events in DLD (atoms)          : 12,305,247
+  DLD events with no raw-TDC match        : 107,676 (0.875%)
+      (reason: no raw /tdc stops recorded for these pulses -- dld/tdc start_counter runs do not align,
+       usually an acquisition stop/crash or a truncated tail; tagged with a negative event_group_id and kept.)
   Raw TDC pulses (triggers)               : 16,947,143
       fired 4 channel(s) (complete) : 12,081,535
       fired 3 channel(s)            : 2,187,190

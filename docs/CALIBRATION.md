@@ -139,6 +139,12 @@ workflow can recover physically valid hits from these partial pulses:
 Partial-hit recovery is available from the `raw_data_analysis.ipynb`
 notebook and through the auto raw-analysis helper.
 
+For a step-by-step walkthrough — the delay-line reconstruction formulas,
+worked examples of Surface Concept pulses of every length (0–8+ stops),
+the matched multi-hit residual recovery, and the TDC↔DLD match-quality
+cross-check printed at load time — see
+[RAW_DATA_ANALYSIS.md](RAW_DATA_ANALYSIS.md).
+
 ## Shared State and Validation
 
 Calibration workflows use shared mutable state through `Variables` in `pyccapt.calibration.core.share_variables`.

@@ -198,6 +198,235 @@ def tdc_pulse_completeness(tdc_df) -> dict[str, int]:
     return out
 
 
+def matched_dld_tdc_residuals(
+    dld_df,
+    tdc_df,
+    *,
+    detector_kind: str = "surface_concept",
+    conf=None,
+    only_native: bool = True,
+    pos_tol_cm: float | None = None,
+    tof_tol_ns: float | None = None,
+) -> dict:
+    """Cross-check the DLD<->TDC pulse link by re-deriving det_x/det_y/tof.
+
+    The raw ``/tdc`` stops and the firmware-reconstructed ``/dld`` event are
+    captured by SEPARATE paths (the Surface Concept quadrupel finder runs in
+    firmware; the raw stops are a parallel record). They are linked only by a
+    shared ``event_group_id``. This function verifies that the link is
+    correct by RE-COMPUTING the detector position and time-of-flight from the
+    raw stops and comparing them to the values the firmware wrote into
+    ``/dld``. Small residuals mean the stops we associate with each DLD event
+    really are the stops that produced it (and that our reconstruction
+    formula matches the firmware's); large residuals would flag a mis-link.
+
+    To keep the comparison unambiguous the check is restricted to the clean
+    case -- a pulse that fired EXACTLY the four delay-line channels once each
+    (ch0, ch1, ch2, ch3), is flagged ``has_dld_match``, and links to EXACTLY
+    ONE DLD row. Multi-hit pulses (more than four stops) are excluded because
+    which four stops the firmware used is exactly the ambiguity the matched
+    multi-hit recovery has to solve; they are not a clean ground truth.
+
+    Parameters
+    ----------
+    dld_df, tdc_df : DataFrame
+        ``variables.data`` and ``variables.data_tdc`` after a raw-tdc load.
+    detector_kind : str, default ``'surface_concept'``
+        Geometry key; the position/ToF re-derivation uses Surface Concept
+        delay-line constants. The check is meaningful only for SC data.
+    conf : optional
+        Config mapping forwarded to :func:`load_detector_constants` so
+        per-rig geometry overrides are honoured.
+    only_native : bool, default True
+        Compare against firmware (``dlts_quality == 'native'``) rows only.
+        Recovered rows derive their position from the same raw stops, so
+        comparing them to the stops would be circular. When the ``dlts``
+        columns are absent (a fresh load before recovery) every row counts.
+    pos_tol_cm : float, optional
+        "Essentially exact" position tolerance for the within-tolerance
+        fractions. Defaults to one detector bin (``xy_factor * 0.5 * 0.1`` cm).
+    tof_tol_ns : float, optional
+        "Essentially exact" ToF tolerance. Defaults to one TDC bin
+        (``tof_ns_per_bin`` ns).
+
+    Returns
+    -------
+    dict
+        ``n_compared`` plus mean/median/p99/max of ``|Δx_det|``,
+        ``|Δy_det|`` (cm) and ``|Δtof|`` (ns), the within-tolerance
+        fractions, the tolerances used, and a ``reason`` string when the
+        check could not run (``n_compared == 0``).
+    """
+    from pyccapt.calibration.data_tools._raw_workflow_common import (
+        TOF_FACTOR_NS,
+        XY_BIN_SHIFT,
+        XY_FACTOR,
+        load_detector_constants,
+    )
+
+    def _empty(reason: str) -> dict:
+        return {
+            "n_compared": 0,
+            "dx_mean_cm": float("nan"),
+            "dx_median_cm": float("nan"),
+            "dx_p99_cm": float("nan"),
+            "dx_max_cm": float("nan"),
+            "dy_mean_cm": float("nan"),
+            "dy_median_cm": float("nan"),
+            "dy_p99_cm": float("nan"),
+            "dy_max_cm": float("nan"),
+            "dtof_mean_ns": float("nan"),
+            "dtof_median_ns": float("nan"),
+            "dtof_p99_ns": float("nan"),
+            "dtof_max_ns": float("nan"),
+            "frac_x_within_tol": float("nan"),
+            "frac_y_within_tol": float("nan"),
+            "frac_tof_within_tol": float("nan"),
+            "pos_tol_cm": float("nan"),
+            "tof_tol_ns": float("nan"),
+            "reason": reason,
+        }
+
+    if tdc_df is None or len(tdc_df) == 0:
+        return _empty("raw tdc not loaded")
+    required_tdc = {"channel", "start_counter", "time_data", EVENT_GROUP_ID_COL}
+    if not required_tdc.issubset(set(tdc_df.columns)):
+        return _empty("tdc frame missing channel/start_counter/time_data/event_group_id")
+    if dld_df is None or len(dld_df) == 0:
+        return _empty("dld frame empty")
+    if not {"x_det (cm)", "y_det (cm)", "t (ns)", EVENT_GROUP_ID_COL}.issubset(set(dld_df.columns)):
+        return _empty("dld frame missing x_det/y_det/t/event_group_id")
+
+    constants = load_detector_constants(detector_kind, conf=conf)
+    xy_factor = float(constants.get("xy_factor", XY_FACTOR))
+    xy_bin_shift = float(constants.get("xy_bin_shift", XY_BIN_SHIFT))
+    tof_per_bin = float(constants.get("tof_ns_per_bin", TOF_FACTOR_NS))
+    if pos_tol_cm is None:
+        pos_tol_cm = xy_factor * 0.5 * 0.1  # one detector bin in cm
+    if tof_tol_ns is None:
+        tof_tol_ns = tof_per_bin  # one TDC bin in ns
+
+    def _sc_pos(first, second):
+        # Vectorised mirror of _surface_concept_position_from_pair so the
+        # re-derivation matches the firmware reconstruction bit-for-bit.
+        difference = second - first
+        shifted = -0.5 * difference + xy_bin_shift
+        return ((shifted - xy_bin_shift) * xy_factor) * 0.1
+
+    channel = np.asarray(tdc_df["channel"].to_numpy())
+    start_counter = np.asarray(tdc_df["start_counter"].to_numpy())
+    time_data = np.asarray(tdc_df["time_data"].to_numpy(), dtype=np.float64)
+    gid_tdc = np.asarray(tdc_df[EVENT_GROUP_ID_COL].to_numpy(), dtype=np.int64)
+    if TDC_HAS_DLD_MATCH_COL in tdc_df.columns:
+        has_match = np.asarray(tdc_df[TDC_HAS_DLD_MATCH_COL].to_numpy(), dtype=bool)
+    else:
+        has_match = np.ones(channel.shape[0], dtype=bool)
+
+    # Keep only fired ticks, then run-length-encode pulses by a CHANGE in
+    # start_counter in acquisition order (wrap-safe, identical to
+    # tdc_pulse_completeness). Removing the never-fired RoentDek pad rows does
+    # not break per-pulse contiguity because pad rows share their pulse's
+    # start_counter.
+    fired = time_data != 0
+    if not np.any(fired):
+        return _empty("no fired tdc ticks")
+    channel = channel[fired]
+    start_counter = start_counter[fired]
+    time_data = time_data[fired]
+    gid_tdc = gid_tdc[fired]
+    has_match = has_match[fired]
+
+    n = channel.shape[0]
+    if n == 1:
+        pulse_id = np.zeros(1, dtype=np.int64)
+    else:
+        boundary = (start_counter[1:] != start_counter[:-1]).astype(np.int64)
+        pulse_id = np.concatenate(([0], np.cumsum(boundary)))
+    counts = np.bincount(pulse_id)
+
+    # Rows that belong to a pulse with exactly four fired stops. Those pulses
+    # are contiguous 4-row blocks, so the selected rows reshape cleanly.
+    mask4 = counts[pulse_id] == 4
+    if not np.any(mask4):
+        return _empty("no matched pulses with exactly 4 stops")
+    ch4 = channel[mask4].reshape(-1, 4)
+    t4 = time_data[mask4].reshape(-1, 4)
+    gid4 = gid_tdc[mask4].reshape(-1, 4)
+    hm4 = has_match[mask4].reshape(-1, 4)
+
+    # Order each pulse's stops by channel so columns are [ch0, ch1, ch2, ch3].
+    order = np.argsort(ch4, axis=1, kind="stable")
+    ch_sorted = np.take_along_axis(ch4, order, axis=1)
+    t_sorted = np.take_along_axis(t4, order, axis=1)
+    is_quad = np.all(ch_sorted == np.array([0, 1, 2, 3]), axis=1)
+    matched_pulse = hm4.any(axis=1)
+    sel = is_quad & matched_pulse
+    if not np.any(sel):
+        return _empty("no matched 4-channel (ch0..ch3) pulses")
+    t_sel = t_sorted[sel]
+    gid_sel = gid4[sel, 0]
+
+    det_x_tdc = _sc_pos(t_sel[:, 0], t_sel[:, 1])
+    det_y_tdc = _sc_pos(t_sel[:, 2], t_sel[:, 3])
+    tof_tdc = t_sel.sum(axis=1) * tof_per_bin
+
+    # DLD side: map each event_group_id to its single native row. A gid that
+    # owns more than one DLD row (or, with only_native, whose single row is
+    # recovered) is dropped so the comparison stays one-to-one and is against
+    # firmware ground truth.
+    gid_dld = np.asarray(dld_df[EVENT_GROUP_ID_COL].to_numpy(), dtype=np.int64)
+    x_dld = np.asarray(dld_df["x_det (cm)"].to_numpy(), dtype=np.float64)
+    y_dld = np.asarray(dld_df["y_det (cm)"].to_numpy(), dtype=np.float64)
+    t_dld = np.asarray(dld_df["t (ns)"].to_numpy(), dtype=np.float64)
+    if only_native and DLTS_QUALITY_COL in dld_df.columns:
+        native = dld_df[DLTS_QUALITY_COL].astype(str).to_numpy() == "native"
+    else:
+        native = np.ones(gid_dld.shape[0], dtype=bool)
+
+    pos = np.arange(gid_dld.shape[0])
+    rows_per_gid = pd.Series(pos).groupby(gid_dld).transform("size").to_numpy()
+    eligible = (rows_per_gid == 1) & native
+    if not np.any(eligible):
+        return _empty("no single-row native DLD events to compare against")
+    gid_to_pos = pd.Series(pos[eligible], index=gid_dld[eligible])
+
+    looked_up = gid_to_pos.reindex(gid_sel)
+    valid = looked_up.notna().to_numpy()
+    if not np.any(valid):
+        return _empty("matched 4-channel pulses did not map to single-row native DLD events")
+    dld_pos = looked_up.dropna().astype(np.int64).to_numpy()
+
+    dx = np.abs(det_x_tdc[valid] - x_dld[dld_pos])
+    dy = np.abs(det_y_tdc[valid] - y_dld[dld_pos])
+    dtof = np.abs(tof_tdc[valid] - t_dld[dld_pos])
+    finite = np.isfinite(dx) & np.isfinite(dy) & np.isfinite(dtof)
+    dx, dy, dtof = dx[finite], dy[finite], dtof[finite]
+    if dx.size == 0:
+        return _empty("no finite residuals after matching")
+
+    return {
+        "n_compared": int(dx.size),
+        "dx_mean_cm": float(np.mean(dx)),
+        "dx_median_cm": float(np.median(dx)),
+        "dx_p99_cm": float(np.percentile(dx, 99)),
+        "dx_max_cm": float(np.max(dx)),
+        "dy_mean_cm": float(np.mean(dy)),
+        "dy_median_cm": float(np.median(dy)),
+        "dy_p99_cm": float(np.percentile(dy, 99)),
+        "dy_max_cm": float(np.max(dy)),
+        "dtof_mean_ns": float(np.mean(dtof)),
+        "dtof_median_ns": float(np.median(dtof)),
+        "dtof_p99_ns": float(np.percentile(dtof, 99)),
+        "dtof_max_ns": float(np.max(dtof)),
+        "frac_x_within_tol": float(np.mean(dx <= pos_tol_cm)),
+        "frac_y_within_tol": float(np.mean(dy <= pos_tol_cm)),
+        "frac_tof_within_tol": float(np.mean(dtof <= tof_tol_ns)),
+        "pos_tol_cm": float(pos_tol_cm),
+        "tof_tol_ns": float(tof_tol_ns),
+        "reason": "",
+    }
+
+
 # ---------------------------------------------------------------------------
 # Plot 1 — high-level breakdown
 # ---------------------------------------------------------------------------

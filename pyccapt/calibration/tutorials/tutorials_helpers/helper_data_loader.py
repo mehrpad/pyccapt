@@ -306,6 +306,7 @@ def summarize_loaded_events(variables, *, print_summary=True):
     Returns the counts as a dict and, by default, prints a short summary.
     """
     from pyccapt.calibration.data_tools.partial_hit_diagnostics import (
+        matched_dld_tdc_residuals,
         tdc_pulse_completeness,
     )
 
@@ -338,6 +339,16 @@ def summarize_loaded_events(variables, *, print_summary=True):
     summary["tdc_channels_required"] = tdc_stats["channels_required"]
     summary["tdc_channel_histogram"] = tdc_stats["channel_histogram"]
 
+    # Match-quality cross-check: re-derive det_x/det_y/tof from the raw stops
+    # of cleanly-matched single-hit pulses and compare to the firmware-written
+    # DLD values. Small residuals confirm the event_group_id link (and the
+    # reconstruction formula) are correct.
+    if tdc is not None and data is not None:
+        match_res = matched_dld_tdc_residuals(data, tdc)
+    else:
+        match_res = {"n_compared": 0, "reason": "raw tdc not loaded"}
+    summary["match_check"] = match_res
+
     if print_summary:
         print("Event statistics")
         print("================")
@@ -361,6 +372,36 @@ def summarize_loaded_events(variables, *, print_summary=True):
             # stream and the reconstructed DLD stream are captured
             # separately (see tdc_pulse_completeness docstring).
             print(f"  Raw TDC pulses linked to a DLD event    : {summary['tdc_with_dld_match']:,}")
+
+            # Match-quality cross-check (TDC vs DLD). Re-derives the detector
+            # position and ToF from the raw stops of cleanly-matched single-hit
+            # pulses and compares to the firmware-recorded DLD values; near-zero
+            # residuals confirm the match (event_group_id link + formula).
+            mc = summary["match_check"]
+            print("  Match check (TDC-derived vs DLD recorded, clean 4-ch single-hit pulses):")
+            if mc.get("n_compared", 0) > 0:
+                print(f"      pulses cross-checked                : {mc['n_compared']:,}")
+                print(
+                    f"      |dx_det| median / max (cm)          : "
+                    f"{mc['dx_median_cm']:.2e} / {mc['dx_max_cm']:.2e}"
+                )
+                print(
+                    f"      |dy_det| median / max (cm)          : "
+                    f"{mc['dy_median_cm']:.2e} / {mc['dy_max_cm']:.2e}"
+                )
+                print(
+                    f"      |dtof|   median / max (ns)          : "
+                    f"{mc['dtof_median_ns']:.2e} / {mc['dtof_max_ns']:.2e}"
+                )
+                print(
+                    f"      within tol (x/y={mc['pos_tol_cm']:.2e} cm, "
+                    f"tof={mc['tof_tol_ns']:.2e} ns)  : "
+                    f"{mc['frac_x_within_tol']:.1%} / "
+                    f"{mc['frac_y_within_tol']:.1%} / "
+                    f"{mc['frac_tof_within_tol']:.1%}"
+                )
+            else:
+                print(f"      (not available: {mc.get('reason', 'no comparable pulses')})")
         else:
             print("  (raw TDC not loaded; enable 'Load raw tdc' for TDC-side counts)")
 

@@ -7,6 +7,8 @@ from pathlib import Path
 import h5py
 import numpy as np
 
+from pyccapt.control.apt.detector_models import normalize_tdc_model
+
 _INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
@@ -171,6 +173,7 @@ def hdf_creator(variables, conf, time_counter, time_ex):
     # intact, and we are left with at most a partial .tmp that can be
     # deleted manually.
     tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tdc_model = normalize_tdc_model(conf.get("tdc_model")) if conf.get("tdc") == "on" else ""
     try:
         with h5py.File(tmp_path, "w") as hdf_file:
             _create_dataset(hdf_file, "apt/id", time_counter, np.uint64)
@@ -180,10 +183,10 @@ def hdf_creator(variables, conf, time_counter, time_ex):
             _create_dataset(hdf_file, "apt/experiment_chamber_vacuum", variables.main_chamber_vacuum, np.float64)
             _create_dataset(hdf_file, "apt/timestamps", time_ex, np.float64)
 
-            if conf["tdc"] == "on" and conf["tdc_model"] == "Surface_Consept" and variables.counter_source == "TDC":
+            if conf["tdc"] == "on" and tdc_model == "Surface_Concept" and variables.counter_source == "TDC":
                 _write_surface_concept_detector_data(hdf_file, variables)
 
-            elif conf["tdc"] == "on" and conf["tdc_model"] == "RoentDek" and variables.counter_source == "TDC":
+            elif conf["tdc"] == "on" and tdc_model == "RoentDek" and variables.counter_source == "TDC":
                 _create_dataset(hdf_file, "dld/x", variables.x, np.float64)
                 _create_dataset(hdf_file, "dld/y", variables.y, np.float64)
                 _create_dataset(hdf_file, "dld/t", variables.t, np.float64)
@@ -268,7 +271,7 @@ def hdf_creator(variables, conf, time_counter, time_ex):
                     np.repeat(_lp_per_event[:_n_events], 8), np.float64,
                 )
 
-            elif conf["tdc"] == "on" and conf["tdc_model"] == "HSD" and variables.counter_source == "HSD":
+            elif conf["tdc"] == "on" and tdc_model == "HSD" and variables.counter_source == "HSD":
                 # DRS readout: GetTime returns ns and GetWave returns mV as
                 # C float — both are signed real values, NOT unsigned ints.
                 # Casting to uint64 (the previous behaviour) silently

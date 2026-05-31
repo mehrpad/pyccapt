@@ -67,3 +67,52 @@ def test_reader_loads_1d_dld_datasets(tmp_path: Path):
     assert list(df.columns)[:7] == list(hdf5_schema.DLD_COLUMNS)
     assert np.allclose(df["high_voltage (V)"].to_numpy(), 1000.0)
     assert np.allclose(df["t (ns)"].to_numpy(), np.linspace(100.0, 200.0, n))
+
+
+def test_reader_loads_canonical_dld_laser_pulse_alias(tmp_path: Path):
+    path = tmp_path / "dld_laser_pulse.h5"
+    n = 3
+    with h5py.File(path, "w") as hdf:
+        dld = hdf.create_group("dld")
+        dld.create_dataset("high_voltage", data=np.full(n, 1000.0))
+        dld.create_dataset("voltage_pulse", data=np.full(n, 200.0))
+        dld.create_dataset("laser_pulse", data=np.array([1.5, 2.5, 3.5]))
+        dld.create_dataset("start_counter", data=np.arange(n, dtype=np.uint64))
+        dld.create_dataset("t", data=np.linspace(100.0, 200.0, n))
+        dld.create_dataset("x", data=np.full(n, 0.5))
+        dld.create_dataset("y", data=np.full(n, -0.5))
+
+    df = data_loadcrop.fetch_dataset_from_dld_grp(str(path), extract_mode="dld")
+
+    assert np.allclose(df["pulse_l (pJ)"].to_numpy(), [1.5, 2.5, 3.5])
+
+
+def test_reader_preserves_uint64_counters_and_tdc_times(tmp_path: Path):
+    path = tmp_path / "uint64_raw.h5"
+    big = np.uint64(2**60 + 7)
+    with h5py.File(path, "w") as hdf:
+        dld = hdf.create_group("dld")
+        dld.create_dataset("high_voltage", data=np.array([1000.0]))
+        dld.create_dataset("voltage_pulse", data=np.array([200.0]))
+        dld.create_dataset("laser_pulse", data=np.array([1.0]))
+        dld.create_dataset("start_counter", data=np.array([big], dtype=np.uint64))
+        dld.create_dataset("t", data=np.array([100.0]))
+        dld.create_dataset("x", data=np.array([0.5]))
+        dld.create_dataset("y", data=np.array([-0.5]))
+
+        tdc = hdf.create_group("tdc")
+        tdc.create_dataset("channel", data=np.array([1], dtype=np.uint32))
+        tdc.create_dataset("start_counter", data=np.array([big], dtype=np.uint64))
+        tdc.create_dataset("high_voltage", data=np.array([1000.0]))
+        tdc.create_dataset("voltage_pulse", data=np.array([200.0]))
+        tdc.create_dataset("laser_pulse", data=np.array([1.0]))
+        tdc.create_dataset("time_data", data=np.array([big], dtype=np.uint64))
+
+    dld_df = data_loadcrop.fetch_dataset_from_dld_grp(str(path), extract_mode="dld")
+    tdc_df = data_loadcrop.fetch_dataset_from_dld_grp(str(path), extract_mode="tdc_sc")
+
+    assert int(dld_df["start_counter"].iloc[0]) == int(big)
+    assert int(tdc_df["start_counter"].iloc[0]) == int(big)
+    assert int(tdc_df["time_data"].iloc[0]) == int(big)
+    assert str(dld_df["start_counter"].dtype) == "uint64"
+    assert str(tdc_df["time_data"].dtype) == "uint64"

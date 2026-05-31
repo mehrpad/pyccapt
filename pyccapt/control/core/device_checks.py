@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Sequence
 
+from pyccapt.control.apt.detector_models import normalize_tdc_model
+
 
 @dataclass(frozen=True)
 class DeviceIssue:
@@ -146,6 +148,11 @@ def collect_startup_device_issues(
         tdc_model = str(conf.get("tdc_model", "")).strip()
         if not tdc_model:
             issues.append(DeviceIssue(device="tdc", reason="missing tdc_model in configuration"))
+        else:
+            try:
+                normalize_tdc_model(tdc_model)
+            except ValueError as exc:
+                issues.append(DeviceIssue(device="tdc", reason=str(exc)))
 
     if _is_enabled(conf, "v_p") and _is_voltage_pulse_mode(pulse_mode):
         vp_port = _resolve_config_value(conf, variables, "COM_PORT_V_p")

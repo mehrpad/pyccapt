@@ -32,6 +32,17 @@ def _normalize_extract_mode(extract_mode: str) -> str:
 EVENT_GROUP_ID_COLUMN = "event_group_id"
 TDC_HAS_DLD_MATCH_COLUMN = "has_dld_match"
 
+
+def _first_hdf5_column(hdf5_data, aliases, *, default_length=None):
+    """Return the first present HDF5 dataset for a list of aliases."""
+    for alias in aliases:
+        if alias in hdf5_data:
+            return hdf5_data[alias].to_numpy()
+    if default_length is None:
+        raise KeyError(f"None of the HDF5 aliases exist: {aliases}")
+    return np.zeros((default_length, 1))
+
+
 def _run_starts(values: np.ndarray) -> np.ndarray:
     """Index boundaries of consecutive equal-value runs.
 
@@ -206,11 +217,11 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld', *, lazy: bool 
             else:
                 dld_pulse_v = np.zeros(len(dld_high_voltage))
                 dld_pulse_v = np.expand_dims(dld_pulse_v, axis=1)
-            if 'dld/laser_intensity' in hdf5_data:
-                dld_pulse_l = hdf5_data['dld/laser_intensity'].to_numpy()
-            else:
-                dld_pulse_l = np.zeros(len(dld_high_voltage))
-                dld_pulse_l = np.expand_dims(dld_pulse_l, axis=1)
+            dld_pulse_l = _first_hdf5_column(
+                hdf5_data,
+                hdf5_schema.DLD_GROUP_ALIASES["pulse_l (pJ)"],
+                default_length=len(dld_high_voltage),
+            )
             if 'dld/start_counter' in hdf5_data:
                 dld_start_counter = hdf5_data['dld/start_counter'].to_numpy()
             else:
@@ -294,6 +305,7 @@ def _fetch_dataset_from_dld_grp_lazy(filename: str, extract_mode: str):
             'dld/pulse': 'pulse_v (V)',
             'dld/voltage_pulse': 'pulse_v (V)',
             'dld/pulse_voltage': 'pulse_v (V)',
+            'dld/laser_pulse': 'pulse_l (pJ)',
             'dld/laser_intensity': 'pulse_l (pJ)',
             'dld/start_counter': 'start_counter',
             'dld/t': 't (ns)',
@@ -910,25 +922,31 @@ def create_pandas_dataframe(data_crop, mode='dld', flag_old_pyccpat_data=False):
             columns=['high_voltage (V)', 'pulse_v (V)', 'pulse_l (pJ)', 'start_counter', 't (ns)', 'x_det (cm)', 'y_det (cm)'],
         )
 
-        hdf_dataframe['start_counter'] = hdf_dataframe['start_counter'].astype('uint32')
+        for column in ['high_voltage (V)', 'pulse_v (V)', 'pulse_l (pJ)', 't (ns)', 'x_det (cm)', 'y_det (cm)']:
+            hdf_dataframe[column] = hdf_dataframe[column].astype('float64')
+        hdf_dataframe['start_counter'] = hdf_dataframe['start_counter'].astype('uint64')
     elif mode == 'tdc_sc':
         hdf_dataframe = pd.DataFrame(
             data=data_crop,
             columns=['channel', 'start_counter', 'high_voltage (V)', 'pulse_v (V)', 'pulse_l (pJ)', 'time_data'],
         )
 
+        for column in ['high_voltage (V)', 'pulse_v (V)', 'pulse_l (pJ)']:
+            hdf_dataframe[column] = hdf_dataframe[column].astype('float64')
         hdf_dataframe['channel'] = hdf_dataframe['channel'].astype('uint32')
-        hdf_dataframe['start_counter'] = hdf_dataframe['start_counter'].astype('uint32')
-        hdf_dataframe['time_data'] = hdf_dataframe['time_data'].astype('uint32')
+        hdf_dataframe['start_counter'] = hdf_dataframe['start_counter'].astype('uint64')
+        hdf_dataframe['time_data'] = hdf_dataframe['time_data'].astype('uint64')
     elif mode == 'tdc_ro':
         hdf_dataframe = pd.DataFrame(
             data=data_crop,
             columns=['channel', 'start_counter', 'high_voltage (V)', 'pulse_v (V)', 'pulse_l (pJ)', 'time_data'],
         )
 
+        for column in ['high_voltage (V)', 'pulse_v (V)', 'pulse_l (pJ)']:
+            hdf_dataframe[column] = hdf_dataframe[column].astype('float64')
         hdf_dataframe['channel'] = hdf_dataframe['channel'].astype('uint32')
-        hdf_dataframe['start_counter'] = hdf_dataframe['start_counter'].astype('uint32')
-        hdf_dataframe['time_data'] = hdf_dataframe['time_data'].astype('uint32')
+        hdf_dataframe['start_counter'] = hdf_dataframe['start_counter'].astype('uint64')
+        hdf_dataframe['time_data'] = hdf_dataframe['time_data'].astype('uint64')
     else:
         raise ValueError(f"Unsupported mode: {mode!r}")
 

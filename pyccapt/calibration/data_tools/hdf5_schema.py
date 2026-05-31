@@ -45,7 +45,7 @@ DLD_COLUMNS = (
 DLD_GROUP_ALIASES = {
     "high_voltage (V)": ("dld/high_voltage",),
     "pulse_v (V)": ("dld/pulse", "dld/voltage_pulse", "dld/pulse_voltage"),
-    "pulse_l (pJ)": ("dld/laser_intensity",),
+    "pulse_l (pJ)": ("dld/laser_pulse", "dld/laser_intensity"),
     "start_counter": ("dld/start_counter",),
     "t (ns)": ("dld/t",),
     "x_det (cm)": ("dld/x",),
@@ -108,7 +108,7 @@ def stack_columns(columns):
                 f"{n_rows}; the /dld or /tdc groups have inconsistent "
                 f"lengths (writer/reader schema mismatch)."
             )
-        normalized.append(arr)
+        normalized.append(arr.astype(object, copy=False))
     if not normalized:
         raise ValueError("stack_columns received no columns")
     return np.column_stack(normalized)

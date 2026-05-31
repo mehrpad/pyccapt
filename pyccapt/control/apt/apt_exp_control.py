@@ -517,10 +517,12 @@ class APT_Exp_Control:
 
                 self.total_ions = self.variables.total_ions
                 self.total_raw_signals = self.variables.total_raw_signals
-                # here we check if tdc is failed or not by checking if the total number of ions is
-                # constant for 100 iteration
-                detector_running = self.variables.counter_source != 'TDC' or self.detector_runtime.tdc_process is not None
-                if detector_running and total_ions_tmp == self.total_ions and not self.variables.vdc_hold:
+                # TDC failure detection should only run for an active TDC
+                # process and only after the detector has produced at least
+                # one event. Early zero-ion ramp-up is physically valid.
+                detector_running = self.variables.counter_source == 'TDC' and self.detector_runtime.tdc_process is not None
+                has_seen_tdc_events = self.total_ions > 0 or total_ions_tmp > 0
+                if detector_running and has_seen_tdc_events and total_ions_tmp == self.total_ions and not self.variables.vdc_hold:
                     index_tdc_failure += 1
                     if index_tdc_failure > 200:
                         self.variables.flag_tdc_failure = True

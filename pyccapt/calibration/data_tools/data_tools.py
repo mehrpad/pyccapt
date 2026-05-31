@@ -262,7 +262,7 @@ def store_df_to_csv(data: pd.DataFrame, path: str | Path) -> None:
     data.to_csv(file_path, encoding="utf-8", index=False, sep=";")
 
 
-def remove_invalid_data(dld_group_storage: pd.DataFrame, max_tof: float) -> pd.DataFrame:
+def remove_invalid_data(dld_group_storage: pd.DataFrame, max_tof: float, detector_zero_epsilon: float = 0.001) -> pd.DataFrame:
     """Remove invalid TOF and detector rows and return the cleaned dataframe."""
     mask_1 = dld_group_storage["t (ns)"].to_numpy() > max_tof
     mask_2 = dld_group_storage["t (ns)"].to_numpy() < 50
@@ -272,16 +272,22 @@ def remove_invalid_data(dld_group_storage: pd.DataFrame, max_tof: float) -> pd.D
         & (dld_group_storage["t (ns)"].to_numpy() == 0)
     )
     mask_4 = dld_group_storage["high_voltage (V)"].to_numpy() < 0
-    mask_5 = (dld_group_storage["x_det (cm)"].to_numpy() == 0) & (dld_group_storage["y_det (cm)"].to_numpy() == 0)
 
     mask_f_1 = np.logical_or(mask_1, mask_2)
     mask_f_2 = np.logical_or(mask_3, mask_4)
-    mask_f_2 = np.logical_or(mask_f_2, mask_5)
     mask = np.logical_or(mask_f_1, mask_f_2)
 
     num_over_max_tof = int(np.count_nonzero(mask))
     dld_group_storage.drop(np.where(mask)[0], inplace=True)
     dld_group_storage.reset_index(inplace=True, drop=True)
+    center_mask = (
+        (dld_group_storage["x_det (cm)"].to_numpy() == 0)
+        & (dld_group_storage["y_det (cm)"].to_numpy() == 0)
+    )
+    if np.any(center_mask):
+        for column in ["x_det (cm)", "y_det (cm)"]:
+            dld_group_storage[column] = dld_group_storage[column].astype(float, copy=False)
+        dld_group_storage.loc[center_mask, ["x_det (cm)", "y_det (cm)"]] = float(detector_zero_epsilon)
     print("The number of data that is removed:", num_over_max_tof)
     return dld_group_storage
 

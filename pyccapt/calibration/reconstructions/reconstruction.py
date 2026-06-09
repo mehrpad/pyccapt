@@ -345,10 +345,12 @@ def reconstruction_plot(
     mc_up = variables.range_data['mc_up'].tolist()
     ion = variables.range_data['ion'].tolist()
 
-    # Draw an edge of cube around the 3D plot
-    x_range = [min(variables.x), max(variables.x)]
-    y_range = [min(variables.y), max(variables.y)]
-    z_range = [min(variables.z), max(variables.z)]
+    # Draw an edge of cube around the 3D plot. ``min``/``max`` builtins
+    # propagate NaN; partial-recovered rows have NaN (x, y, z) and would
+    # blank out the cube. Use nanmin/nanmax.
+    x_range = [float(np.nanmin(variables.x)), float(np.nanmax(variables.x))]
+    y_range = [float(np.nanmin(variables.y)), float(np.nanmax(variables.y))]
+    z_range = [float(np.nanmin(variables.z)), float(np.nanmax(variables.z))]
     range_cube = [x_range, y_range, z_range]
     if element_alpha is None:
         element_alpha = [float(opacity)] * len(ion)
@@ -380,7 +382,10 @@ def reconstruction_plot(
                 # Find indices where the original mask is True
                 true_indices = np.where(mask)[0]
                 # Randomly choose 100 indices from the true indices
-                random_true_indices = np.random.choice(true_indices, size=size, replace=False)
+                # Seeded RNG keyed on the input length so re-plots are
+                # deterministic (replaces a global-state np.random.choice).
+                random_true_indices = np.random.default_rng(int(len(true_indices))).choice(
+                    true_indices, size=size, replace=False)
                 # Create a new mask with the same length as the original, initialized with False
                 new_mask = np.full(len(variables.dld_t), False)
                 # Set the selected indices to True in the new mask
@@ -416,7 +421,10 @@ def reconstruction_plot(
                 # Find indices where the original mask is True
                 true_indices = np.where(mask)[0]
                 # Randomly choose 100 indices from the true indices
-                random_true_indices = np.random.choice(true_indices, size=size, replace=False)
+                # Seeded RNG keyed on the input length so re-plots are
+                # deterministic (replaces a global-state np.random.choice).
+                random_true_indices = np.random.default_rng(int(len(true_indices))).choice(
+                    true_indices, size=size, replace=False)
                 # Create a new mask with the same length as the original, initialized with False
                 new_mask = np.full(len(variables.dld_t), False)
                 # Set the selected indices to True in the new mask
@@ -632,7 +640,8 @@ def scatter_plot(data, range_data, variables, element_percentage, selected_area,
         df_s = df_s[(df_s['mc_c (Da)'] > mc_low[index]) & (df_s['mc_c (Da)'] < mc_up[index])]
         df_s.reset_index(inplace=True, drop=True)
         remove_n = int(len(df_s) - (len(df_s) * float(element_percentage[index])))
-        drop_indices = np.random.choice(df_s.index, remove_n, replace=False)
+        drop_indices = np.random.default_rng(int(len(df_s))).choice(
+            df_s.index, remove_n, replace=False)
         df_subset = df_s.drop(drop_indices)
         if phases[index] == 'unranged':
             name_element = 'unranged'
@@ -752,7 +761,8 @@ def projection(
         # Find indices where the original mask is True
         true_indices = np.where(mask)[0]
         # Randomly choose 100 indices from the true indices
-        random_true_indices = np.random.choice(true_indices, size=size, replace=False)
+        random_true_indices = np.random.default_rng(int(len(true_indices))).choice(
+            true_indices, size=size, replace=False)
         # Create a new mask with the same length as the original, initialized with False
         new_mask = np.full(len(variables.dld_t), False)
         # Set the selected indices to True in the new mask
@@ -875,7 +885,8 @@ def heatmap(
         # Find indices where the original mask is True
         true_indices = np.where(mask_s)[0]
         # Randomly choose 100 indices from the true indices
-        random_true_indices = np.random.choice(true_indices, size=size, replace=False)
+        random_true_indices = np.random.default_rng(int(len(true_indices))).choice(
+            true_indices, size=size, replace=False)
         # Create a new mask with the same length as the original, initialized with False
         new_mask = np.full(len(variables.mc), False)
 
@@ -994,7 +1005,8 @@ def reconstruction_2d_histogram(
 
     num_elements_to_select = int(len(x) * percentage)
     # Randomly select elements
-    indices = np.random.choice(len(x), num_elements_to_select, replace=False)
+    indices = np.random.default_rng(int(len(x))).choice(
+        len(x), num_elements_to_select, replace=False)
     x = x[indices]
     y = y[indices]
     # Check if the bin is a tuple
@@ -1190,8 +1202,24 @@ def x_y_z_calculation_and_plot(
         dld_Voltage = variables.dld_high_voltage
     elif variables.pulse_mode == 'voltage':
         dld_Voltage = variables.dld_high_voltage + variables.dld_pulse_v
-    dld_x = variables.dld_x_det
-    dld_y = variables.dld_y_det
+    dld_x = np.asarray(variables.dld_x_det, dtype=float)
+    dld_y = np.asarray(variables.dld_y_det, dtype=float)
+    # Partial-recovered rows lack one detector axis -- 3-D reconstruction
+    # is undefined for them (no (x_det, y_det) -> (px, py, pz) mapping).
+    # The element-wise formulas below naturally yield NaN for those rows
+    # (NaN inputs propagate through sqrt/divide/atan2); downstream
+    # clustering / RDF / density-map already filter NaN. Just inform the
+    # user how many ions were excluded so the missing count isn't a
+    # mystery.
+    _finite_xy_recon = np.isfinite(dld_x) & np.isfinite(dld_y)
+    _n_partial = int((~_finite_xy_recon).sum())
+    if _n_partial > 0:
+        print(
+            f'[x_y_z_calculation_and_plot] Excluding {_n_partial} partial-recovered '
+            'rows (NaN x_det / y_det) from 3-D reconstruction; their (x, y, z) will '
+            'be NaN. Downstream analyses (clustering, RDF, density map) drop them.'
+        )
+
     if mode == 'Geiser':
         px, py, pz = atom_probe_recons_from_detector_Geiser_et_al(
             dld_x, dld_y, dld_Voltage, flight_path_length, kf, det_eff, icf, field_evap, avg_dens

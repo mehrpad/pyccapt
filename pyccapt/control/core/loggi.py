@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import logging
 import logging.handlers
+import threading
 import os
 import platform
 import socket
@@ -216,6 +217,13 @@ class _StreamToLogger:
         self._level = level
         self._original = original
         self._buffer = ""
+        # ``sys.stdout`` is shared across all threads in the process
+        # (TDC drain, GUI, pump polling, baking, ...), so concurrent
+        # writes through this wrapper race on ``self._buffer +=`` and
+        # ``split``. Python's logging module is thread-safe at the
+        # logger.log() boundary, but the buffering layer here is not.
+        # Guard with a lock.
+        self._lock = threading.Lock()
 
     def write(self, text: str) -> int:
         if self._original is not None:
@@ -225,12 +233,19 @@ class _StreamToLogger:
                 pass
         if not text:
             return 0
-        self._buffer += text
-        while "\n" in self._buffer:
-            line, self._buffer = self._buffer.split("\n", 1)
-            line = line.rstrip("\r")
-            if line:
-                self._logger.log(self._level, line)
+        with self._lock:
+            self._buffer += text
+            lines_to_log = []
+            while "\n" in self._buffer:
+                line, self._buffer = self._buffer.split("\n", 1)
+                line = line.rstrip("\r")
+                if line:
+                    lines_to_log.append(line)
+        # Log outside the lock to avoid holding it across the
+        # potentially-slow logger.log call (which can itself acquire
+        # other locks inside logging).
+        for line in lines_to_log:
+            self._logger.log(self._level, line)
         return len(text)
 
     def flush(self) -> None:
@@ -239,9 +254,11 @@ class _StreamToLogger:
                 self._original.flush()
             except Exception:
                 pass
-        if self._buffer.strip():
-            self._logger.log(self._level, self._buffer.strip())
+        with self._lock:
+            tail = self._buffer.strip()
             self._buffer = ""
+        if tail:
+            self._logger.log(self._level, tail)
 
     def isatty(self) -> bool:
         try:

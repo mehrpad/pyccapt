@@ -251,6 +251,27 @@ def load_tdc_raw_selection():
     )
 
 
+def recover_matched_multihit_selection():
+    """Create the dropdown for opting into matched multi-hit residual recovery.
+
+    The widget has labels (``True``, ``False``) and resolves to ``bool``
+    values. Pass the widget's ``.value`` to ``helper_data_loader.load_data``
+    via the ``recover_from_matched_multihit`` argument (only effective when
+    raw ``/tdc`` is loaded and partial-hit recovery runs). When True, matched
+    multi-hit pulses are mined for a second ion the Surface Concept firmware
+    discarded -- the firmware's stops are inverse-matched to its DLD event(s)
+    and removed, and the residual stops are recovered. Off by default because
+    the inverse match is heuristic; pulses whose firmware stops cannot be
+    matched are skipped so the firmware's own hit is never double-counted.
+    """
+    return widgets.Dropdown(
+        options=[('False', False), ('True', True)],
+        value=False,
+        description='Recover matched multi-hit:',
+        style={'description_width': 'initial'},
+    )
+
+
 def density_field_selection():
     """
     Create and return the element dropdown widget for density field selection.

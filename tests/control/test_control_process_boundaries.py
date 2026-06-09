@@ -5,6 +5,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import pytest
+
 from pyccapt.control.apt import detector_runtime
 from pyccapt.control.gui.process_coordinator import ProcessCoordinator
 
@@ -36,6 +38,37 @@ def test_surface_concept_detector_process_contract():
     assert runtime_state.stop_event is event_obj
     assert runtime_state.tdc_process is process
     process.start.assert_called_once()
+
+
+def test_surface_concept_detector_accepts_correct_spelling():
+    process = Mock()
+    process_factory = Mock(return_value=process)
+
+    runtime_state = detector_runtime.start_detector_processes(
+        {"tdc": "on", "tdc_model": "Surface_Concept"},
+        _dummy_variables("TDC"),
+        x_plot=object(),
+        y_plot=object(),
+        t_plot=object(),
+        main_v_dc_plot=object(),
+        process_factory=process_factory,
+        event_factory=Mock(return_value=object()),
+    )
+
+    assert runtime_state.tdc_process is process
+    process.start.assert_called_once()
+
+
+def test_unknown_detector_model_is_rejected():
+    with pytest.raises(ValueError, match="Unsupported tdc_model"):
+        detector_runtime.start_detector_processes(
+            {"tdc": "on", "tdc_model": "SurfaceConcept"},
+            _dummy_variables("TDC"),
+            x_plot=None,
+            y_plot=None,
+            t_plot=None,
+            main_v_dc_plot=None,
+        )
 
 
 def test_roentdek_detector_process_contract():

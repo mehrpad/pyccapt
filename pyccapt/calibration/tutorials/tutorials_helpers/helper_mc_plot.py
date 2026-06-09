@@ -19,7 +19,9 @@ def call_mc_plot(variables, selector):
     bin_size_widget = widgets.FloatText(value=0.1)
     log_widget = widgets.Dropdown(options=[('True', True), ('False', False)])
     grid_widget = widgets.Dropdown(options=[('True', True), ('False', False)])
-    mode_widget = widgets.Dropdown(options=[('False', False), ('True', True)])
+    # Mass-spectrum viewer defaults to a normalized y-axis (log scale already
+    # defaults to True via log_widget). Flip to False for raw event counts.
+    mode_widget = widgets.Dropdown(options=[('True', True), ('False', False)])
     mrp_all_widget = widgets.Dropdown(options=[('True', True), ('False', False)])
     prominence_widget = widgets.IntText(value=10)
     distance_widget = widgets.IntText(value=100)
@@ -190,29 +192,31 @@ def call_mc_plot(variables, selector):
                 fig_size=figure_size,
             )
             peak_warning = None
-            if mode_value != 'normalized':
+            # Peaks/MRP are computed on raw counts (plot_histogram keeps the data
+            # in counts and only relabels the axis when normalized), so peak
+            # finding runs regardless of the Normalize display setting.
+            try:
+                mc_hist.find_peaks_and_widths(
+                    prominence=prominence_value, distance=distance_value, percent=percent_value
+                )
+            except Exception as exc:
+                peak_warning = f'peak detector raised {type(exc).__name__}: {exc}'
+            if peak_warning is None and (mc_hist.peaks is None or len(mc_hist.peaks) == 0):
+                peak_warning = (
+                    f'no peaks satisfy prominence={prominence_value} and distance={distance_value}'
+                )
+            if peak_warning is None:
+                if plot_peak.value:
+                    try:
+                        mc_hist.plot_peaks()
+                    except Exception as exc:
+                        peak_warning = f'plot_peaks failed: {type(exc).__name__}: {exc}'
                 try:
-                    mc_hist.find_peaks_and_widths(
-                        prominence=prominence_value, distance=distance_value, percent=percent_value
+                    mc_hist.plot_hist_info_legend(
+                        label='mc', mrp_all=mrp_all_widget.value, background=None, loc='right'
                     )
                 except Exception as exc:
-                    peak_warning = f'peak detector raised {type(exc).__name__}: {exc}'
-                if peak_warning is None and (mc_hist.peaks is None or len(mc_hist.peaks) == 0):
-                    peak_warning = (
-                        f'no peaks satisfy prominence={prominence_value} and distance={distance_value}'
-                    )
-                if peak_warning is None:
-                    if plot_peak.value:
-                        try:
-                            mc_hist.plot_peaks()
-                        except Exception as exc:
-                            peak_warning = f'plot_peaks failed: {type(exc).__name__}: {exc}'
-                    try:
-                        mc_hist.plot_hist_info_legend(
-                            label='mc', mrp_all=mrp_all_widget.value, background=None, loc='right'
-                        )
-                    except Exception as exc:
-                        peak_warning = f'plot_hist_info_legend failed: {type(exc).__name__}: {exc}'
+                    peak_warning = f'plot_hist_info_legend failed: {type(exc).__name__}: {exc}'
 
             if background_widget.value is not None:
                 try:

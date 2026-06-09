@@ -92,6 +92,24 @@ def test_load_data_raw_with_tdc_falls_back_to_roentdek_extract_mode(monkeypatch)
     assert calls == ["tdc_sc", "tdc_ro"]
 
 
+def test_remove_invalid_data_keeps_center_hits_with_epsilon():
+    data = pd.DataFrame(
+        {
+            "t (ns)": [100.0, 0.0, 6000.0],
+            "x_det (cm)": [0.0, 0.0, 0.2],
+            "y_det (cm)": [0.0, 0.0, 0.3],
+            "high_voltage (V)": [1000.0, 1000.0, 1000.0],
+        }
+    )
+
+    cleaned = data_tools.remove_invalid_data(data, max_tof=5000)
+
+    assert len(cleaned) == 1
+    assert cleaned["x_det (cm)"].iloc[0] == pytest.approx(0.001)
+    assert cleaned["y_det (cm)"].iloc[0] == pytest.approx(0.001)
+    assert cleaned["t (ns)"].iloc[0] == pytest.approx(100.0)
+
+
 def test_read_range_h5_backfills_name_from_ion(tmp_path: Path):
     range_path = tmp_path / "legacy_range.h5"
     legacy_range = pd.DataFrame(

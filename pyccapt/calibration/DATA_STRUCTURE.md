@@ -3,6 +3,12 @@
 This document summarizes the data layout used by the calibration module and its
 range files.
 
+The canonical machine-readable schema for the raw acquisition groups
+(`/dld`, `/tdc`, `/hsd`) — column names, order, dtypes, and the group
+aliases accepted across pyccapt versions — is defined in
+`pyccapt.calibration.data_tools.hdf5_schema`. The control-side writer
+and the calibration-side reader both follow that module.
+
 ## Notation
 
 - `(n,)`: one-dimensional array with length `n`
@@ -26,7 +32,19 @@ Typical calibrated dataset fields:
 - `y_det (cm)`: `(n,)` `(cm, float64)` detector y hit position
 - `delta_p`: `(n,)` `(N/A, uint32)` pulses since previous detected event
 - `multi`: `(n,)` `(N/A, uint32)` multiplicity per pulse
-- `start_counter`: `(n,)` `(N/A, float64)` TDC counter value
+- `start_counter`: `(n,)` `(N/A, float64)` TDC counter value (wraps; not unique)
+- `event_group_id` *(optional)*: `(n,)` `(N/A, int64)` shared id linking each
+  dld row to the matching raw `/tdc` rows; present when the dataset was loaded
+  with `load_tdc_raw=True` and preserved through every cropping step.
+
+When partial-hit recovery (`data_tools.partial_recovery`) runs, the DLD
+dataframe gains two columns: `dlts` `(N/A, int8)` — `4` for a native or
+fully-recovered two-axis hit, `2` for a single-axis partial — and
+`dlts_quality` `(N/A, string)` provenance label (`native` for original rows;
+`recovered_xy` / `recovered_x` / `recovered_y` for recovered rows; and
+`recovered_xy_3of4` for a full (x, y) hit rebuilt from a 3-channel pulse via
+the delay-line time-sum constraint). Single-axis recovered rows hold `NaN` on
+the unrecovered detector axis.
 
 ## Range Dataset (HDF5 or Imported `.rrng` / `.rng`)
 

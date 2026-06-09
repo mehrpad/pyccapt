@@ -6,6 +6,7 @@ import datetime
 from pathlib import Path
 from typing import Any
 
+from pyccapt.control.apt.detector_models import normalize_tdc_model
 from pyccapt.control.core import runtime
 
 _CLEAR_LIST_FIELDS = (
@@ -97,7 +98,12 @@ def _warn_on_mismatch(log_apt: Any, label: str, arrays: list[Any]) -> None:
 
 def validate_detector_data_lengths(variables: Any, conf: dict[str, Any], log_apt: Any) -> None:
     """Validate synchronized detector list lengths and emit warnings."""
-    if variables.counter_source == "TDC" and conf.get("tdc_model") == "Surface_Consept":
+    try:
+        tdc_model = normalize_tdc_model(conf.get("tdc_model"))
+    except ValueError:
+        tdc_model = str(conf.get("tdc_model", "")).strip()
+
+    if variables.counter_source == "TDC" and tdc_model == "Surface_Concept":
         _warn_on_mismatch(
             log_apt,
             "dld",
@@ -124,7 +130,7 @@ def validate_detector_data_lengths(variables: Any, conf: dict[str, Any], log_apt
             ],
         )
 
-    elif variables.counter_source == "TDC" and conf.get("tdc_model") == "RoentDek":
+    elif variables.counter_source == "TDC" and tdc_model == "RoentDek":
         _warn_on_mismatch(
             log_apt,
             "roentdek_dld",

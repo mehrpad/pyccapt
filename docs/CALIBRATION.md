@@ -26,6 +26,125 @@ Typical calibration workflows include:
 - `leap_tools`: LEAP/POS/EPOS/APT/RRNG/RNG readers, Cameca raw importers, and helper tools
 - `tutorials`: notebooks and notebook helper modules
 
+## Mass-Calibration Pipeline
+
+Mass calibration converts detector hits (time-of-flight, standing high
+voltage, detector position) into a calibrated mass-to-charge (`m/c`)
+spectrum. The pipeline in `pyccapt.calibration.core.calibration` runs the
+following stages in order:
+
+1. **Initial calibration** — a global `t0` and flight-path estimate
+   converts time-of-flight to a first `m/c`.
+2. **Voltage correction** — corrects each event's `m/c` for the slow
+   change in standing voltage during evaporation, fit over ion-index or
+   voltage segments.
+3. **Bowl correction** — corrects the residual position-dependent
+   flight-time difference across the detector (the "bowl"), sampled in
+   Cartesian or polar detector cells.
+4. **Time-drift correction** *(optional)* — a multiplicative
+   per-ion-index correction that cancels high-voltage or temperature
+   drift remaining after steps 2-3 in long acquisitions.
+5. **Adaptive residual calibration** — a per-peak temporal and spatial
+   residual fit that tightens mass resolution after the parametric
+   corrections.
+
+Peak locations used to drive the fits are read at histogram **bin
+centers**, and histogram bins are anchored to the requested bin width.
+
+### Configuration presets
+
+The data-processing notebook exposes a **Config preset** dropdown. All
+presets share the same voltage and bowl stages; they differ only in what
+runs afterward:
+
+- **Adaptive residual (default)** — voltage + bowl, then adaptive
+  residual with the coarse-to-fine peak-scoring speedup.
+- **+ time-drift correction (recommended)** — adds the per-ion-index
+  time-drift correction (stage 4) between bowl correction and the
+  residual fit. Suited to long runs with measurable drift.
+- **Legacy adaptive residual** — voltage + bowl, then adaptive residual
+  without the coarse-to-fine speedup. Slower, and reproduces the
+  pre-2026 reference behaviour for bit-comparable results.
+
+### NIST reference fit
+
+The ion-list helper provides a second **Fit method** that rescales the
+already-calibrated `m/c` onto reference (NIST) masses. It only rescales
+`m/c`; it does not re-fit the voltage, bowl, or drift corrections, so it
+composes with the pipeline above rather than replacing it. The rescale is
+applied to the current calibrated spectrum and is rejected automatically
+if it introduces non-finite values or collapses the mass spread.
+
+## Partial-Hit Recovery (Surface Concept)
+
+A delay-line detector reports an event only when all delay-line ends fire
+within the hardware coincidence window. Pulses that fired some, but not
+all, channels are normally discarded. The Surface Concept raw-data
+workflow can recover physically valid hits from these partial pulses:
+
+- For each delay-line axis (x: channels 0+1, y: channels 2+3), candidate
+  pairs are enumerated and a one-to-one assignment selects a consistent
+  subset. Axes are cross-matched by time-of-flight agreement: a matched
+  pair becomes a full 2-axis (`xy`) hit; unmatched pairs become
+  single-axis (1-DLTS) partial hits.
+- The diagnostics path (`extract_surface_concept_hits`) enumerates every
+  reconstructible pair and flags each one's `in_detector` status against
+  the configured detector limit, so out-of-detector reconstructions are
+  reported rather than silently dropped.
+- The live merge path
+  (`data_tools.partial_recovery.merge_partial_tdc_into_dld`) appends the
+  recovered rows to the `/dld` dataframe, tagging each with a `dlts`
+  (2 or 4) and `dlts_quality` label. Single-axis recovered rows carry
+  `NaN` on the unrecovered detector axis. Pulses are grouped by
+  `event_group_id` (wrap-safe), not by the raw `start_counter`, which
+  wraps during long runs.
+- **3-of-4 (time-sum) recovery** (on by default in the merge path):
+  pulses that fired one complete delay-line axis plus a single end of the
+  other axis are promoted to full `(x, y)` hits. The crossed delay lines
+  share the same total propagation time (`t0 + t1 = t2 + t3`), so the
+  missing end is `sum_complete_axis - t_present`; the recovered hit is
+  gated by non-negative recovered times, the detector radius, and the ToF
+  window, and labelled `dlts_quality = recovered_xy_3of4`. The Surface
+  Concept firmware "quadrupel finder" requires all four stops, so these
+  hits exist only after this offline step. Set
+  `recover_three_channel=False` to disable it.
+- **Matched multi-hit residual recovery** (opt-in,
+  `recover_from_matched_multihit=True`): the firmware keeps one hit per
+  pulse, so a *matched* pulse that fired more stops than its DLD event(s)
+  used may hold a second ion. The stops the firmware used are
+  inverse-matched to its DLD event(s) by a coherent quadruplet -- a
+  `(ch0, ch1)` pair within `multihit_match_tol_cm` of `det_x` and a
+  `(ch2, ch3)` pair within `multihit_match_tol_cm` of `det_y` whose ToFs
+  agree and whose combined ToF matches the firmware event's recorded
+  `t (ns)` -- and removed; the residual stops are run through the recovery
+  above. The ToF match matters because a detector coordinate depends only
+  on the per-axis time *difference*, so a second ion at a similar position
+  but a different flight time would otherwise be mis-removed; keying on the
+  recorded flight time prevents that. It is opt-in because the inverse
+  match is heuristic -- a pulse with no coherent quadruplet matching the
+  firmware event is skipped, avoiding both double-counting the firmware's
+  own hit and stitching a cross-ion artefact (a firmware hit that was
+  itself a 3-channel reconstruction therefore skips safely).
+- **Order preservation**: recovered atoms are inserted into the DLD frame
+  at their acquisition position (right after the native rows of the most
+  recent preceding pulse), never by sorting on `start_counter` (a periodic
+  counter whose value repeats throughout a run), so the reconstructed
+  z/depth sequence is preserved.
+- **Only full `(x, y)` hits are merged by default**; single-axis 2-DLTS
+  partials (one detector coordinate is `NaN`) are excluded because they
+  cannot be placed in the 3-D reconstruction. Set
+  `include_one_d_partials=True` to also append them (they appear in the
+  mass spectrum via a centred-axis mc estimate).
+
+Partial-hit recovery is available from the `raw_data_analysis.ipynb`
+notebook and through the auto raw-analysis helper.
+
+For a step-by-step walkthrough — the delay-line reconstruction formulas,
+worked examples of Surface Concept pulses of every length (0–8+ stops),
+the matched multi-hit residual recovery, and the TDC↔DLD match-quality
+cross-check printed at load time — see
+[RAW_DATA_ANALYSIS.md](RAW_DATA_ANALYSIS.md).
+
 ## Shared State and Validation
 
 Calibration workflows use shared mutable state through `Variables` in `pyccapt.calibration.core.share_variables`.

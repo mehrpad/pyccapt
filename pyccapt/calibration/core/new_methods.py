@@ -102,6 +102,14 @@ def voltage_corr_time_dependent(
     calib = np.asarray(variables.get_calibration_array(calibration_mode), dtype=float).copy()
 
     # --- Stage 2: ion-index drift residual (gated, clipped) ---
+    #
+    # APT drift is physically MULTIPLICATIVE: a voltage drift scales m/c by
+    # a factor (mc proportional to t^2*V), it does not add a constant Da
+    # offset. The previous implementation subtracted a constant ``shift``
+    # computed in-peak (e.g. at 29 Da for Ni-58) from EVERY ion in the
+    # chunk, which biased peaks at 100 Da by ~3x too little correction.
+    # Apply a multiplicative factor (= target / chunk_center) instead so
+    # every peak in the chunk is rescaled proportionally.
     left, right = variables.get_calibration_peak_range(calibration_mode)
     mask = (calib > left) & (calib < right)
     if mask.sum() < gate_min_ions:
@@ -109,7 +117,13 @@ def voltage_corr_time_dependent(
             _write_calib(variables, calibration_mode, calib)
         return calib
     target = _trimmed_mean(calib[mask], trim=0.10)
-    abs_clip = abs(target) * float(max_shift_fraction)
+    if not np.isfinite(target) or target == 0:
+        if apply:
+            _write_calib(variables, calibration_mode, calib)
+        return calib
+    # ``max_shift_fraction`` is interpreted as a bound on |1 - factor|.
+    factor_lo = 1.0 - float(max_shift_fraction)
+    factor_hi = 1.0 + float(max_shift_fraction)
     n_ions = calib.size
 
     edges = np.linspace(0, n_ions, int(n_time_bins) + 1, dtype=int)
@@ -123,21 +137,31 @@ def voltage_corr_time_dependent(
             continue
         chunk_values = calib[lo:hi][m]
         chunk_center = _trimmed_mean(chunk_values, trim=0.10)
-        raw_shift = chunk_center - target
-        # Clip to physical bound
-        shift = float(np.clip(raw_shift, -abs_clip, abs_clip))
-        if abs(shift) < bin_size * 0.25:
-            continue  # below noise floor, skip
-        # Gate: only apply if it would improve the chunk's FWHM
+        if not np.isfinite(chunk_center) or chunk_center == 0:
+            continue
+        raw_factor = target / chunk_center
+        # Clip the multiplicative factor to the physical bound; this maps
+        # to a maximum relative correction of ``max_shift_fraction``.
+        factor = float(np.clip(raw_factor, factor_lo, factor_hi))
+        # Skip when the relative correction is below the noise floor
+        # (translate the original "0.25 * bin_size" gate into a relative
+        # term using the calibration target).
+        if abs((factor - 1.0) * target) < bin_size * 0.25:
+            continue
+        # Gate: only apply if scaling improves the chunk's local FWHM
+        # around ``target`` (the FWHM helper measures spread relative to
+        # the target, so a chunk that drifts off-target shows inflated
+        # FWHM and the multiplicative pull-back tightens it).
         before_fwhm = _local_fwhm(chunk_values, target)
-        candidate = chunk_values - shift
+        candidate = chunk_values * factor
         after_fwhm = _local_fwhm(candidate, target)
         if not (np.isfinite(after_fwhm) and np.isfinite(before_fwhm)):
             continue
         if after_fwhm > before_fwhm * 0.99:  # require >1% improvement
             continue
-        # Apply the shift to ALL ions in the chunk (not just masked ones)
-        calib_out[lo:hi] = calib[lo:hi] - shift
+        # Apply the scaling to ALL ions in the chunk (every peak gets
+        # the same proportional correction).
+        calib_out[lo:hi] = calib[lo:hi] * factor
 
     if apply:
         _write_calib(variables, calibration_mode, calib_out)
@@ -621,11 +645,19 @@ def adaptive_residual_gbm(
             if not np.isfinite(observed_centre):
                 continue
             shift = observed_centre - tgt
-            # One feature row per peak per window
+            # One feature row per peak per window.
+            # Use nanmean so partial-recovered rows (NaN x_det / y_det)
+            # don't poison the window-average features. If the entire
+            # window is partial (all NaN), nanmean returns NaN with a
+            # warning; guard so we just skip the row instead.
+            xw = x_det[start:stop]
+            yw = y_det[start:stop]
+            if not np.any(np.isfinite(xw)) or not np.any(np.isfinite(yw)):
+                continue
             feats.append([
                 0.5 * (start + stop - 1) / max(1, n_ions),
-                float(np.mean(x_det[start:stop])),
-                float(np.mean(y_det[start:stop])),
+                float(np.nanmean(xw)),
+                float(np.nanmean(yw)),
                 float(np.mean(voltage[start:stop])),
                 tgt,  # which peak
             ])
@@ -643,15 +675,22 @@ def adaptive_residual_gbm(
     )
     gbm.fit(X, y, sample_weight=w)
 
-    # Predict per-ion shift (use the dominant peak's target as the reference per ion)
+    # Predict per-ion shift (use the dominant peak's target as the reference per ion).
+    # Partial rows have NaN x_det / y_det -> GBM.predict raises on NaN
+    # features. Predict only on position-capable rows; partials get zero
+    # shift so their uncalibrated value passes through unchanged.
     indices = np.arange(n_ions, dtype=float) / max(1.0, n_ions)
+    finite_xy_pred = np.isfinite(x_det) & np.isfinite(y_det)
     X_pred = np.column_stack([
-        indices,
-        x_det, y_det,
-        voltage,
-        np.full(n_ions, target),
+        indices[finite_xy_pred],
+        x_det[finite_xy_pred],
+        y_det[finite_xy_pred],
+        voltage[finite_xy_pred],
+        np.full(int(finite_xy_pred.sum()), target),
     ])
-    per_ion_shift = gbm.predict(X_pred)
+    per_ion_shift = np.zeros(n_ions, dtype=float)
+    if X_pred.size > 0:
+        per_ion_shift[finite_xy_pred] = gbm.predict(X_pred)
     bound = max(float(np.std(y)) * 4.0, 1e-6)
     per_ion_shift = np.clip(per_ion_shift, -bound, bound)
     calib_out = calib - per_ion_shift

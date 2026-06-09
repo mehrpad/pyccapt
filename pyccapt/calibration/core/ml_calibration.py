@@ -95,10 +95,20 @@ def _extract_training_data(
     all_y = []
     peak_labels = []
 
+    # Partial-recovered rows have NaN x_det / y_det -> NaN feature
+    # vectors -> sklearn GradientBoostingRegressor.fit raises. Exclude
+    # them from the training set entirely.
+    finite_xy_train = np.isfinite(np.asarray(x_det, dtype=float)) & np.isfinite(np.asarray(y_det, dtype=float))
+    if not finite_xy_train.all():
+        print(
+            f'[_extract_training_data] Excluding {int((~finite_xy_train).sum())} '
+            'partial-recovered rows (NaN x_det / y_det) from ML training.'
+        )
+
     for peak in peaks:
         pos = float(peak["position"])
         x1, x2 = float(peak["x1"]), float(peak["x2"])
-        mask = (calibration_array > x1) & (calibration_array < x2)
+        mask = (calibration_array > x1) & (calibration_array < x2) & finite_xy_train
         indices = np.nonzero(mask)[0]
         if indices.size < 30:
             continue

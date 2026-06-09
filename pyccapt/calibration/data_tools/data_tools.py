@@ -262,7 +262,7 @@ def store_df_to_csv(data: pd.DataFrame, path: str | Path) -> None:
     data.to_csv(file_path, encoding="utf-8", index=False, sep=";")
 
 
-def remove_invalid_data(dld_group_storage: pd.DataFrame, max_tof: float) -> pd.DataFrame:
+def remove_invalid_data(dld_group_storage: pd.DataFrame, max_tof: float, detector_zero_epsilon: float = 0.001) -> pd.DataFrame:
     """Remove invalid TOF and detector rows and return the cleaned dataframe."""
     mask_1 = dld_group_storage["t (ns)"].to_numpy() > max_tof
     mask_2 = dld_group_storage["t (ns)"].to_numpy() < 50
@@ -272,16 +272,22 @@ def remove_invalid_data(dld_group_storage: pd.DataFrame, max_tof: float) -> pd.D
         & (dld_group_storage["t (ns)"].to_numpy() == 0)
     )
     mask_4 = dld_group_storage["high_voltage (V)"].to_numpy() < 0
-    mask_5 = (dld_group_storage["x_det (cm)"].to_numpy() == 0) & (dld_group_storage["y_det (cm)"].to_numpy() == 0)
 
     mask_f_1 = np.logical_or(mask_1, mask_2)
     mask_f_2 = np.logical_or(mask_3, mask_4)
-    mask_f_2 = np.logical_or(mask_f_2, mask_5)
     mask = np.logical_or(mask_f_1, mask_f_2)
 
     num_over_max_tof = int(np.count_nonzero(mask))
     dld_group_storage.drop(np.where(mask)[0], inplace=True)
     dld_group_storage.reset_index(inplace=True, drop=True)
+    center_mask = (
+        (dld_group_storage["x_det (cm)"].to_numpy() == 0)
+        & (dld_group_storage["y_det (cm)"].to_numpy() == 0)
+    )
+    if np.any(center_mask):
+        for column in ["x_det (cm)", "y_det (cm)"]:
+            dld_group_storage[column] = dld_group_storage[column].astype(float, copy=False)
+        dld_group_storage.loc[center_mask, ["x_det (cm)", "y_det (cm)"]] = float(detector_zero_epsilon)
     print("The number of data that is removed:", num_over_max_tof)
     return dld_group_storage
 
@@ -363,41 +369,65 @@ def save_data(
 
     if hdf:
         output_h5 = _resolve_variable_output_file(variables, filename=f"{data_name}.h5", data_directory=True)
-        store_df_to_hdf(export_data, "df", output_h5)
-        saved_outputs["hdf"] = output_h5
-        if save_tdc:
-            tdc_full = getattr(variables, "data_tdc", None)
-            if tdc_full is None:
-                warnings.warn(
-                    "save_tdc=True but variables.data_tdc is None; no raw tdc to save.",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
-            elif "event_group_id" not in export_data.columns:
-                warnings.warn(
-                    "save_tdc=True but exported dld has no event_group_id column; "
-                    "raw tdc was not loaded with the linking flag enabled.",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
-            else:
-                from pyccapt.calibration.data_tools.data_loadcrop import filter_tdc_by_dld
+        # Atomic multi-group write: stage everything into a .tmp sibling
+        # file, then rename. The previous mode='w' then mode='a' sequence
+        # could leave the final .h5 with /df but no /tdc / /range if any
+        # step after the first crashed -- no rollback, and the file path
+        # downstream loaders look at was in a half-written state.
+        output_h5_path = _as_path(output_h5)
+        tmp_h5_path = output_h5_path.with_suffix(output_h5_path.suffix + '.tmp')
+        try:
+            store_df_to_hdf(export_data, "df", str(tmp_h5_path))
+            tdc_status: str | None = None
+            if save_tdc:
+                tdc_full = getattr(variables, "data_tdc", None)
+                if tdc_full is None:
+                    warnings.warn(
+                        "save_tdc=True but variables.data_tdc is None; no raw tdc to save.",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+                elif "event_group_id" not in export_data.columns:
+                    warnings.warn(
+                        "save_tdc=True but exported dld has no event_group_id column; "
+                        "raw tdc was not loaded with the linking flag enabled.",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+                else:
+                    from pyccapt.calibration.data_tools.data_loadcrop import filter_tdc_by_dld
 
-                tdc_filtered = filter_tdc_by_dld(export_data, tdc_full)
-                # Append /tdc to the same h5 file (mode='a' to preserve /df).
-                tdc_filtered.to_hdf(_as_path(output_h5), key="tdc", mode="a")
-                saved_outputs["hdf_tdc"] = f"{output_h5} (/tdc, {len(tdc_filtered)} rows)"
-        if save_range:
-            range_table = getattr(variables, "range_data", None)
-            if range_table is None or len(range_table) == 0:
-                warnings.warn(
-                    "save_range=True but variables.range_data is empty.",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
-            else:
-                range_table.to_hdf(_as_path(output_h5), key="range", mode="a")
-                saved_outputs["hdf_range"] = f"{output_h5} (/range, {len(range_table)} rows)"
+                    tdc_filtered = filter_tdc_by_dld(export_data, tdc_full)
+                    tdc_filtered.to_hdf(tmp_h5_path, key="tdc", mode="a")
+                    tdc_status = f"{output_h5} (/tdc, {len(tdc_filtered)} rows)"
+            range_status: str | None = None
+            if save_range:
+                range_table = getattr(variables, "range_data", None)
+                if range_table is None or len(range_table) == 0:
+                    warnings.warn(
+                        "save_range=True but variables.range_data is empty.",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+                else:
+                    range_table.to_hdf(tmp_h5_path, key="range", mode="a")
+                    range_status = f"{output_h5} (/range, {len(range_table)} rows)"
+            # All writes succeeded -- atomically replace the target.
+            os.replace(tmp_h5_path, output_h5_path)
+            saved_outputs["hdf"] = output_h5
+            if tdc_status is not None:
+                saved_outputs["hdf_tdc"] = tdc_status
+            if range_status is not None:
+                saved_outputs["hdf_range"] = range_status
+        except Exception:
+            # Clean up the partial .tmp file so subsequent runs are not
+            # confused by stale fragments. Use missing_ok-safe unlink.
+            try:
+                if tmp_h5_path.exists():
+                    tmp_h5_path.unlink()
+            except Exception:
+                pass
+            raise
     if epos:
         output_epos = _resolve_variable_output_file(variables, filename=f"{data_name}.epos", data_directory=True)
         output_epos_path = _as_path(output_epos)

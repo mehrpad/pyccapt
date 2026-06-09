@@ -37,14 +37,27 @@ def plot_fdm(x, y, variables, save, bins_s, index_fig, figure_size=(5, 4)):
     plt.show()
 
 def initial_calibration(data, flight_path_length):
-    """Compute initial time-of-flight calibration factors."""
+    """Compute initial time-of-flight calibration factors.
+
+    Partial-recovered rows (NaN x_det / y_det) yield NaN ``d_values``;
+    using ``np.mean(d_values)`` would then poison every row's flight-path
+    factor. Use ``np.nanmean`` so the average is built from the
+    position-capable subset, and pass the NaN rows through with a
+    finite per-ion factor of 1.0 so their uncalibrated t survives.
+    """
     v_dc = data["high_voltage (V)"].to_numpy()
     t_values = data["t (ns)"].to_numpy()
     x_det = data["x_det (cm)"].to_numpy() * 10
     y_det = data["y_det (cm)"].to_numpy() * 10
     d_values = x_det**2 + y_det**2 + flight_path_length**2
 
-    init_flight_path_factor = np.mean(d_values) / d_values
+    mean_d = float(np.nanmean(d_values)) if np.any(np.isfinite(d_values)) else float(flight_path_length**2)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        init_flight_path_factor = np.where(
+            np.isfinite(d_values),
+            mean_d / d_values,
+            1.0,  # partials: identity factor (no spatial correction)
+        )
     init_voltage_factor = np.sqrt(v_dc / np.mean(v_dc))
     return t_values * init_flight_path_factor * init_voltage_factor
 

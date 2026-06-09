@@ -286,7 +286,19 @@ def _collect_temporal_observations(calibration_array, template, n_windows, overl
                     continue
                 x_obs.append(0.5 * (start + stop - 1))
                 y_obs.append(shift)
-                w_obs.append(max(1.0, np.sqrt(local_values.size)) * max(1.0, score / local_values.size))
+                # Weight = sqrt(N) * fit-quality factor. ``score`` is the
+                # per-window log-likelihood SUM (np.sum(logp, axis=0))
+                # against a normalised template, so it is strongly
+                # negative; the previous ``max(1.0, score / N)`` clamped
+                # to exactly 1.0 every time, silently disabling the
+                # fit-quality boost so a 30-ion window with sharp
+                # template alignment counted the same as a 30-ion window
+                # of garbage. Use the geometric form exp(score/N), which
+                # is in (0, 1] and is larger when per-ion log-likelihood
+                # is closer to zero (i.e. the template fits well).
+                n_local = max(1, int(local_values.size))
+                quality = float(np.exp(score / n_local))
+                w_obs.append(np.sqrt(n_local) * quality)
             if best_attempt is None or len(x_obs) > best_attempt["n_observations"]:
                 best_attempt = {
                     "x_obs": np.asarray(x_obs, dtype=float),
@@ -370,10 +382,17 @@ def _fit_spatial_residual(calibration_array, template, x_det_cm, y_det_cm, grid_
     nx = ny = max(4, int(grid_size))
     x_edges = np.linspace(np.nanmin(x_mm), np.nanmax(x_mm), nx + 1)
     y_edges = np.linspace(np.nanmin(y_mm), np.nanmax(y_mm), ny + 1)
-    # Cell index per ion (clip to [0, nx-1] / [0, ny-1])
-    ix_of_ion = np.clip(np.digitize(x_mm, x_edges) - 1, 0, nx - 1)
-    iy_of_ion = np.clip(np.digitize(y_mm, y_edges) - 1, 0, ny - 1)
+    # Cell index per ion (clip to [0, nx-1] / [0, ny-1]).
+    # Partial-recovered rows have NaN x_det / y_det; np.digitize on NaN
+    # returns len(edges), which clip would force into the last cell.
+    # Push them into a sentinel position 0 but record the mask so the
+    # downstream eligibility / scoring loop excludes them via
+    # ``finite_xy_per_ion``. The final correction array is built only
+    # on the position-capable subset; partials get zero shift.
+    ix_of_ion = np.clip(np.digitize(np.where(np.isfinite(x_mm), x_mm, x_edges[0]), x_edges) - 1, 0, nx - 1)
+    iy_of_ion = np.clip(np.digitize(np.where(np.isfinite(y_mm), y_mm, y_edges[0]), y_edges) - 1, 0, ny - 1)
     cell_id_of_ion = ix_of_ion * ny + iy_of_ion  # [N]
+    finite_xy_per_ion = np.isfinite(x_mm) & np.isfinite(y_mm)
 
     sum_grid = np.zeros((nx, ny), dtype=float)
     weight_grid = np.zeros_like(sum_grid)
@@ -387,7 +406,9 @@ def _fit_spatial_residual(calibration_array, template, x_det_cm, y_det_cm, grid_
 
     calib = np.asarray(calibration_array, dtype=float)
     # Pre-compute TOTAL ion count per cell (independent of scale).
-    cell_total_count = np.bincount(cell_id_of_ion, minlength=n_cells)
+    # Exclude partial-recovered rows so they neither inflate cell
+    # eligibility nor count toward a cell's shift estimate.
+    cell_total_count = np.bincount(cell_id_of_ion[finite_xy_per_ion], minlength=n_cells)
 
     for threshold in [max(8, int(min_cell_ions)), max(8, int(min_cell_ions * 0.6)), max(6, int(min_cell_ions * 0.35))]:
         for scale in [1.0, 1.5, 2.0, 3.0]:
@@ -395,7 +416,9 @@ def _fit_spatial_residual(calibration_array, template, x_det_cm, y_det_cm, grid_
             weight_grid.fill(0.0)
 
             # Pass 1: which ions are "in-peak" under this scale?
-            in_peak = _expanded_peak_mask(calib, template, scale=scale)
+            # Restricted to position-capable rows -- partials cannot
+            # contribute to a cell's score because their cell is unknown.
+            in_peak = _expanded_peak_mask(calib, template, scale=scale) & finite_xy_per_ion
             if not np.any(in_peak):
                 continue
             in_idx = np.where(in_peak)[0]
@@ -471,7 +494,12 @@ def _fit_spatial_residual(calibration_array, template, x_det_cm, y_det_cm, grid_
         bounds_error=False,
         fill_value=0.0,
     )
+    # Interpolate the smooth shift map at every ion's position. Partial
+    # rows have NaN coords -> NaN correction; force them to 0 so the
+    # final ``mc - correction`` step leaves their uncalibrated value
+    # untouched rather than NaN-poisoning them.
     correction = interp(np.column_stack([x_mm, y_mm]))
+    correction = np.where(finite_xy_per_ion, correction, 0.0)
     max_abs = max(np.nanpercentile(np.abs(correction), 95) * 1.5, 1e-6)
     return np.clip(correction, -max_abs, max_abs), {
         "n_cells": best_payload["n_cells"],

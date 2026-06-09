@@ -21,7 +21,6 @@ def _apply_manual_temporal_values(variables, start_idx, end_idx):
 
 def apply_crop(variables, out, use_manual_values, start_widget, end_widget):
     with out:
-        out.clear_output()
         try:
             if use_manual_values.value:
                 _apply_manual_temporal_values(variables, start_widget.value, end_widget.value)

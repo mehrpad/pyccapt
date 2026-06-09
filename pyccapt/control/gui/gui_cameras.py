@@ -618,13 +618,45 @@ class Ui_Cameras_Alignment(object):
         Return:
         None
         """
+        # Clamp manual exposure entry to a safe range before emitting.
+        # The previous code passed whatever ``int(text)`` evaluated to
+        # directly to the firmware -- including 0 (rejected silently,
+        # leaving the UI showing a bogus value) and absurdly large
+        # values (10**9 us = 1000 s, also rejected). Basler / generic
+        # USB cameras typically accept ~100 us .. ~10 s; clamp here
+        # and surface the bound to the user.
+        EXPOSURE_MIN_US = 1
+        EXPOSURE_MAX_US = 10_000_000  # 10 seconds
+
+        def _clamp(field):
+            txt = field.text().strip()
+            if not txt:
+                return None
+            try:
+                raw = int(txt)
+            except ValueError:
+                return None
+            clamped = max(EXPOSURE_MIN_US, min(EXPOSURE_MAX_US, raw))
+            if clamped != raw:
+                print(
+                    f'Camera exposure clamped: {raw} -> {clamped} us '
+                    f'(allowed range {EXPOSURE_MIN_US} .. {EXPOSURE_MAX_US} us)'
+                )
+                # Reflect the clamped value back in the field so the
+                # user sees what was actually sent.
+                field.setText(str(clamped))
+            return clamped
+
         try:
-            if self.exposure_time_cam_1.text() != '':
-                self.emitter.cam_1_exposure_time.emit(int(self.exposure_time_cam_1.text()))
-            if self.exposure_time_cam_2.text() != '':
-                self.emitter.cam_2_exposure_time.emit(int(self.exposure_time_cam_2.text()))
-            if self.exposure_time_cam_3.text() != '':
-                self.emitter.cam_3_exposure_time.emit(int(self.exposure_time_cam_3.text()))
+            v1 = _clamp(self.exposure_time_cam_1)
+            if v1 is not None:
+                self.emitter.cam_1_exposure_time.emit(v1)
+            v2 = _clamp(self.exposure_time_cam_2)
+            if v2 is not None:
+                self.emitter.cam_2_exposure_time.emit(v2)
+            v3 = _clamp(self.exposure_time_cam_3)
+            if v3 is not None:
+                self.emitter.cam_3_exposure_time.emit(v3)
         except Exception as e:
             print(e)
             print('type the exposure time in microseconds')

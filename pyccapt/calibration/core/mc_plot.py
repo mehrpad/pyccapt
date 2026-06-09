@@ -1,9 +1,27 @@
+"""Mass-spectrum plotting and peak handling (``AptHistPlotter``).
+
+``AptHistPlotter`` builds the mass-to-charge (or time-of-flight)
+histogram that drives peak finding, ranging, MRP estimation, and the
+interactive Range tab. Two conventions matter for correctness and are
+relied on throughout the calibration core:
+
+- Histogram bin EDGES are anchored to the requested ``bin_width``
+  (``np.arange(min, max + bin_width, bin_width)``); the bin count is
+  derived from the data span, not the other way round.
+- Peak LOCATIONS are reported at bin CENTERS, not left edges, so a
+  detected peak is not biased low by half a bin.
+
+The heavy peak/background/selector logic lives in the
+``mc_plot_*_helpers`` modules and is imported here; this module is the
+thin stateful front end used by the notebook helpers.
+"""
 import math
 import re
 
 import matplotlib.pyplot as plt
 import numpy as np
 from adjustText import adjust_text
+from matplotlib.ticker import FuncFormatter
 
 from pyccapt.calibration.path_utils import save_figure
 from pyccapt.calibration.core.mc_plot_background_helpers import (
@@ -86,6 +104,8 @@ class AptHistPlotter:
         self.percent = None
         self.rectangle = None
         self.bins = None
+        self.normalize = False
+        self.norm_factor = 1.0
         self.plotted_circles = []
         self.plotted_lines = []
         self.plotted_labels = []
@@ -126,7 +146,10 @@ class AptHistPlotter:
 
         Args:
             bin_width (float): The width of the bins.
-            normalize (bool): Whether to normalize the histogram.
+            normalize (bool): Display-only y-axis normalization. The histogram
+                data stays in raw counts (so peak finding, MRP, and background
+                fits are unaffected); when True the y-axis ticks are relabeled
+                to relative intensity (tallest bin = 1).
             label (str): The label of the x-axis ('mc' or 'tof').
             log (bool): Whether to use log scale for the y-axis.
             grid (bool): Whether to show the grid.
@@ -139,17 +162,48 @@ class AptHistPlotter:
             tuple: A tuple of the y and x values of the histogram.
 
         """
-        # Define the bins
+        # Define the bins. Defensive: filter non-finite values so a
+        # single NaN (e.g. from a partial-recovery row whose centred-axis
+        # mc_uc failed) doesn't poison np.min / np.max and break the
+        # histogram. Non-destructive: ``self.mc_tof`` is overwritten only
+        # with the finite subset; the original array is not stored
+        # elsewhere on the plotter.
         self.bin_width = bin_width
         self.plot_show = plot_show
-        self.bins = np.linspace(np.min(self.mc_tof), np.max(self.mc_tof), round(np.max(self.mc_tof) / bin_width))
+        mc_tof_arr = np.asarray(self.mc_tof)
+        finite_mask = np.isfinite(mc_tof_arr)
+        if not finite_mask.all():
+            n_dropped = int((~finite_mask).sum())
+            print(f'[AptHistPlotter] Skipping {n_dropped} non-finite mc/tof values.')
+            self.mc_tof = mc_tof_arr[finite_mask]
+            if self.mc_tof.size == 0:
+                raise ValueError("mc_tof has no finite values for histogram")
+        # Build edges anchored to ``bin_width``; using ``np.linspace`` would
+        # silently disagree with the requested width whenever min > 0 (the
+        # actual width becomes (max-min)/(N-1), not bin_width). Use
+        # ``arange`` so each bin has exactly the requested width, then add
+        # one trailing edge so the last bin is closed.
+        lo = float(np.min(self.mc_tof))
+        hi = float(np.max(self.mc_tof))
+        if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo or bin_width <= 0:
+            raise ValueError(
+                "Cannot build histogram bins: invalid mc_tof range "
+                f"[{lo}, {hi}] or bin_width={bin_width}."
+            )
+        self.bins = np.arange(lo, hi + bin_width, bin_width)
+        if self.bins.size < 2:
+            # Degenerate range narrower than one bin; fall back to two edges.
+            self.bins = np.array([lo, lo + bin_width], dtype=float)
 
         # Plot the histogram directly
         self.fig, self.ax = plt.subplots(figsize=fig_size)
 
-        # Force fast mode for bar-incompatible rendering or large datasets
+        # Always histogram in raw COUNTS so peak finding, MRP, and background
+        # fits (which rely on count-based thresholds) keep working. ``normalize``
+        # only rescales the y-axis *display* (handled after plotting); the
+        # underlying data and every overlay stay in count space.
         if fast and steps != 'bar':
-            self.y, self.x = np.histogram(self.mc_tof, bins=self.bins, density=normalize)
+            self.y, self.x = np.histogram(self.mc_tof, bins=self.bins)
             self.x_centers = (self.x[:-1] + self.x[1:]) * 0.5
             self.ax.fill_between(self.x_centers, self.y, step='mid', alpha=0.9, color='slategray')
             self.ax.step(self.x_centers, self.y, where='mid', color='k', linewidth=0.5)
@@ -162,25 +216,27 @@ class AptHistPlotter:
                 edgecolor = 'k'
                 alpha = 0.9
 
-            if normalize:
-                self.y, self.x, self.patches = self.ax.hist(
-                    self.mc_tof,
-                    bins=self.bins,
-                    alpha=alpha,
-                    color='slategray',
-                    edgecolor=edgecolor,
-                    histtype=steps,
-                    density=True,
-                )
-            else:
-                self.y, self.x, self.patches = self.ax.hist(
-                    self.mc_tof, bins=self.bins, alpha=alpha, color='slategray', edgecolor=edgecolor, histtype=steps
-                )
+            self.y, self.x, self.patches = self.ax.hist(
+                self.mc_tof, bins=self.bins, alpha=alpha, color='slategray', edgecolor=edgecolor, histtype=steps
+            )
             self.x_centers = (self.x[:-1] + self.x[1:]) * 0.5
 
         self.ax.set_xlabel('Mass/Charge [Da]' if label == 'mc' else 'Time of Flight [ns]')
-        self.ax.set_ylabel('Event Counts')
         self.ax.set_yscale('log' if log else 'linear')
+        # Display-only normalization: the data above is in counts, so we relabel
+        # the y-axis ticks to relative intensity (tallest bin = 1) instead of
+        # rescaling the data. Peak/MRP/background analysis therefore keeps
+        # running on real counts while the axis reads as normalized.
+        self.normalize = normalize
+        self.norm_factor = 1.0
+        if normalize and self.y.size and float(np.max(self.y)) > 0:
+            self.norm_factor = 1.0 / float(np.max(self.y))
+            self.ax.yaxis.set_major_formatter(
+                FuncFormatter(lambda value, _pos: f'{value * self.norm_factor:.2g}')
+            )
+            self.ax.set_ylabel('Normalized counts')
+        else:
+            self.ax.set_ylabel('Event Counts')
         if grid:
             plt.grid(True, which='both', axis='both', linestyle='--', linewidth=0.4, alpha=0.3)
         if self.original_x_limits is None:
@@ -294,7 +350,12 @@ class AptHistPlotter:
         Returns:
             None
         """
-        bin_index = np.digitize([peak_loc], self.x) - 1
+        # np.digitize returns an ndarray when given an array input; cast
+        # to a scalar int so the bounds check (and any future arithmetic)
+        # behaves like a normal Python int. The previous
+        # ``ndarray < int or ndarray >= int`` raised numpy's
+        # DeprecationWarning and will fail outright under future numpy.
+        bin_index = int(np.digitize([peak_loc], self.x)[0]) - 1
         try:
             self.ranged_line.remove()
         except AttributeError:
@@ -303,17 +364,19 @@ class AptHistPlotter:
         if bin_index < 0 or bin_index >= len(self.y):
             raise IndexError(f"Bin index {bin_index} out of range for y array of length {len(self.y)}")
 
-        # Get the scalar value for ymax
-        ymax = float(self.y[bin_index])
         # Plot the vertical line on the plotter's own axes so the marker lands
         # on the currently displayed figure even when matplotlib's pyplot state
         # has drifted to a different figure (common under %matplotlib ipympl).
+        # NOTE: ``ymax`` for ``Axes.axvline`` is in AXES-FRACTION space
+        # ([0, 1]); passing a raw event count (e.g. 8000) silently clips
+        # to 1.0 and makes the marker span the full y axis every time --
+        # which is the same as just omitting the kwarg. Drop it so the
+        # behaviour is explicit.
         self.ranged_line = self.ax.axvline(
             x=peak_loc,
             color=color,
             linestyle='dashdot',
             linewidth=2,
-            ymax=ymax,
         )
         if self.fig is not None and self.fig.canvas is not None:
             self.fig.canvas.draw_idle()

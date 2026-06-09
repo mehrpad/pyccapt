@@ -87,6 +87,22 @@ def test_collect_startup_device_issues_reports_missing_tdc_model():
     assert "missing tdc_model" in issues[0].reason
 
 
+def test_collect_startup_device_issues_reports_unknown_tdc_model():
+    conf = {"tdc": "on", "tdc_model": "SurfaceConcept", "v_dc": "off", "v_p": "off", "signal_generator": "off"}
+
+    issues = device_checks.collect_startup_device_issues(
+        conf,
+        _variables(),
+        pulse_mode="Voltage",
+        serial_factory=lambda **_kwargs: None,
+        resource_manager_factory=lambda: None,
+    )
+
+    assert len(issues) == 1
+    assert issues[0].device == "tdc"
+    assert "Unsupported tdc_model" in issues[0].reason
+
+
 def test_collect_startup_device_issues_skips_voltage_pulse_hardware_in_laser_mode():
     conf = {"v_dc": "off", "v_p": "on", "signal_generator": "on"}
 

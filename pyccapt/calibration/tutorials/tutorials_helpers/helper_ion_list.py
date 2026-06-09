@@ -407,12 +407,20 @@ def call_ion_list(variables, selector, path='../../../files/'):
                 # --- Fit the SAME 2-/3-parameter polynomial as parametric_fit ---
                 # NO V, no bowl, no drift -- only m/c rescaling, so this
                 # cannot undo the Hybrid V+Bowl+drift pipeline.
+                #
+                # IMPORTANT: peaks were detected in the CURRENT mc_calib
+                # (which may already include Hybrid V+Bowl+drift corrections);
+                # the rescale must therefore be applied to mc_calib, NOT to
+                # mc_calib_backup. Applying to the backup would silently
+                # erase the prior Hybrid pipeline output every time the
+                # user clicks NIST.
+                source_arr = np.asarray(variables.mc_calib, dtype=float)
                 if n_matched >= 3:
                     def shift_3(mc, a, b, c):
                         return mc**a + b * mc + c
                     try:
                         popt, _ = curve_fit(shift_3, observed_pairs, ideal_pairs, maxfev=2000)
-                        corrected = shift_3(variables.mc_calib_backup, *popt)
+                        corrected = shift_3(source_arr, *popt)
                     except Exception as exc:
                         print(f'NIST fit (3-param) failed: {exc}')
                         return
@@ -422,7 +430,7 @@ def call_ion_list(variables, selector, path='../../../files/'):
                         return mc**a + b
                     try:
                         popt, _ = curve_fit(shift_2, observed_pairs, ideal_pairs, maxfev=2000)
-                        corrected = shift_2(variables.mc_calib_backup, *popt)
+                        corrected = shift_2(source_arr, *popt)
                     except Exception as exc:
                         print(f'NIST fit (2-param) failed: {exc}')
                         return
@@ -433,7 +441,7 @@ def call_ion_list(variables, selector, path='../../../files/'):
                 # (i.e. all ions mapped to a tiny range, the classic
                 # 'one giant peak' failure mode).
                 finite = corrected[np.isfinite(corrected)]
-                pre_std = float(np.nanstd(variables.mc_calib_backup))
+                pre_std = float(np.nanstd(source_arr))
                 post_std = float(np.nanstd(finite)) if finite.size else 0.0
                 if finite.size < len(corrected) * 0.95:
                     print(f'NIST fit reverted: {len(corrected) - finite.size} '

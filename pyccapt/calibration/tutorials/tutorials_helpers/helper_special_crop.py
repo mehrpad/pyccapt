@@ -22,7 +22,6 @@ def _apply_manual_spatial_values(variables, center_x, center_y, radius):
 
 def apply_crop(variables, out, use_manual_values, center_x_widget, center_y_widget, radius_widget):
     with out:
-        out.clear_output()
         try:
             if use_manual_values.value:
                 _apply_manual_spatial_values(

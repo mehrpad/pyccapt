@@ -44,6 +44,13 @@ KNOWN_OFFENDERS_TO_REFACTOR = frozenset(
         # legacy chunked recovery + plotting helpers stay here. Schedule that
         # split next time this file gets a substantive change.
         Path("data_tools/_raw_workflow_surface_concept.py").as_posix(),
+        # TODO(iso_surface): currently 1253 lines. The voxelisation helpers
+        # (pos_to_voxel, isosurface, calculate_iso_value, _safe_random_subset)
+        # and the plotly mesh assembly are independent and easy to extract;
+        # the dominant size is the calculate_element_isosurface flow. Split
+        # into iso_surface_voxel.py + iso_surface_plot.py next time this
+        # file gets a substantive change.
+        Path("reconstructions/iso_surface.py").as_posix(),
     }
 )
 

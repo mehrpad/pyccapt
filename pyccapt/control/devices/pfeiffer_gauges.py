@@ -54,15 +54,43 @@ class TPG26x(object):
     ACK = chr(6)  # \x06
     NAK = chr(21)  # \x15
 
-    def __init__(self, port='/dev/ttyUSB0', baudrate=9600):
+    def __init__(self, port=None, baudrate=9600):
         """
         Initialize the TPG26x driver.
 
         Args:
-                port (str or int): The COM port to open.
+                port (str or int): The COM port to open. Required --
+                    the previous Linux-only ``/dev/ttyUSB0`` default
+                    masked configuration mistakes on Windows.
                 baudrate (int): Data transmission rate.
         """
+        if port is None:
+            raise ValueError(
+                "TPG26x requires an explicit ``port`` (e.g. 'COM5' or "
+                "'/dev/ttyUSB0'); the previous Linux default silently "
+                "broke Windows configurations."
+            )
         self.serial = serial.Serial(port=port, baudrate=baudrate, timeout=1)
+
+    def close(self):
+        """Release the underlying serial port handle.
+
+        Previously the class held the serial.Serial open until process
+        exit (no close method, no __del__). Add an explicit close so
+        callers can reopen on a different port without exiting the
+        process.
+        """
+        try:
+            if getattr(self, 'serial', None) is not None and self.serial.is_open:
+                self.serial.close()
+        except Exception:
+            pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
 
     def _cr_lf(self, string):
         """
@@ -212,12 +240,13 @@ class TPG362(TPG26x):
     Inherits from TPG26x.
     """
 
-    def __init__(self, port='/dev/ttyUSB0', baudrate=9600):
+    def __init__(self, port=None, baudrate=9600):
         """
         Initialize the TPG362 driver.
 
         Args:
-                port (str or int): The COM port to open.
+                port (str or int): The COM port to open. Required --
+                    no platform-specific default.
                 baudrate (int): Data transmission rate.
         """
         super(TPG362, self).__init__(port=port, baudrate=baudrate)

@@ -1,3 +1,14 @@
+"""Ion identification and ranging-table construction.
+
+Turns picked mass-spectrum peaks into an identified ion list: it expands
+molecular formulae (``fix_parentheses``), enumerates isotope/charge
+combinations, looks their ideal m/c up in the bundled isotope table, and
+writes range windows (``mc_low``/``mc_up``) into ``variables.range_data``
+with the schema documented in ``Calibration_DATA_STRUCTURE.md``. The
+range table can also be populated from imported ``.rrng`` / ``.rng``
+files; downstream ranging applies these windows to assign each ion a
+label and colour.
+"""
 import itertools
 import re
 import matplotlib

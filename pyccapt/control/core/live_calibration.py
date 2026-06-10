@@ -90,7 +90,7 @@ from PyQt6 import QtCore
 from scipy.optimize import curve_fit
 
 from pyccapt.calibration.core.correction_models import (
-	bowl_corr_radial,
+    bowl_corr_radial,
     voltage_corr,
 )
 from pyccapt.control.core import tof2mc_simple
@@ -162,21 +162,21 @@ def _voltage_factor(v: np.ndarray, params_vol: tuple) -> np.ndarray:
 
 
 def _bowl_factor(x_mm: np.ndarray, y_mm: np.ndarray, params_bowl: tuple) -> np.ndarray:
-	# Radial-dominant bowl model (matches the offline polar default).
-	return bowl_corr_radial([x_mm, y_mm], *params_bowl)
+    # Radial-dominant bowl model (matches the offline polar default).
+    return bowl_corr_radial([x_mm, y_mm], *params_bowl)
 
 
 def _clamp_factor(f: np.ndarray) -> Optional[np.ndarray]:
-	"""Clamp a correction-factor array to the sane band.
+    """Clamp a correction-factor array to the sane band.
 
-	Returns None if any value is non-finite (caller falls back to the raw
-	path); otherwise clips into ``[_FACTOR_MIN, _FACTOR_MAX]`` so a few
-	rim events with an extrapolated factor can neither veto the whole
-	batch nor shrink the mass toward 0.
-	"""
-	if not np.all(np.isfinite(f)):
-		return None
-	return np.clip(f, _FACTOR_MIN, _FACTOR_MAX)
+    Returns None if any value is non-finite (caller falls back to the raw
+    path); otherwise clips into ``[_FACTOR_MIN, _FACTOR_MAX]`` so a few
+    rim events with an extrapolated factor can neither veto the whole
+    batch nor shrink the mass toward 0.
+    """
+    if not np.all(np.isfinite(f)):
+        return None
+    return np.clip(f, _FACTOR_MIN, _FACTOR_MAX)
 
 
 def apply_corrections(
@@ -249,10 +249,10 @@ def apply_corrections(
         return t_corr, mc_corr
 
     if mode == 'mc':
-	    # Initial MC calibration = the physics conversion, which already
-	    # accounts for V (the 2eV factor) and per-event geometry/flight
-	    # path, and uses t_0 so the peak lands near the true mass. Then
-	    # ONE voltage + ONE bowl correction refine it (offline MC pipeline).
+        # Initial MC calibration = the physics conversion, which already
+        # accounts for V (the 2eV factor) and per-event geometry/flight
+        # path, and uses t_0 so the peak lands near the true mass. Then
+        # ONE voltage + ONE bowl correction refine it (offline MC pipeline).
         mc = tof2mc_simple.tof_2_mc(
             t,
             params.t_0,
@@ -264,17 +264,17 @@ def apply_corrections(
         # Voltage correction. For MC the offline code divides by f_v
         # directly (NO sqrt -- that's the TOF convention because t ~
         # 1/sqrt(V) but mc is linear in V).
-	    f_v = _clamp_factor(_voltage_factor(v, params.vol))
-	    if f_v is None:
+        f_v = _clamp_factor(_voltage_factor(v, params.vol))
+        if f_v is None:
             return None
-	    mc_v = mc / f_v
+        mc_v = mc / f_v
 
-	    # Bowl correction on the voltage-corrected mc.
-	    f_bowl = _clamp_factor(_bowl_factor(x_mm, y_mm, params.bowl_final))
-	    if f_bowl is None:
+        # Bowl correction on the voltage-corrected mc.
+        f_bowl = _clamp_factor(_bowl_factor(x_mm, y_mm, params.bowl_final))
+        if f_bowl is None:
             return None
-	    mc_corr = mc_v / f_bowl * params.mc_scale
-	    return t, mc_corr
+        mc_corr = mc_v / f_bowl * params.mc_scale
+        return t, mc_corr
 
     return None
 
@@ -430,11 +430,11 @@ def _fit_bowl_polynomial(
     if samples["x"].size < 6:
         return None
     try:
-	    # Radial-dominant model (offline polar default). Unlike the free
-	    # Cartesian quadratic, this does not extrapolate to huge factors
-	    # at the detector rim when fit only on the peak-ion footprint.
+        # Radial-dominant model (offline polar default). Unlike the free
+        # Cartesian quadratic, this does not extrapolate to huge factors
+        # at the detector rim when fit only on the peak-ion footprint.
         coeffs, _ = curve_fit(
-	        bowl_corr_radial, [samples["x"], samples["y"]], samples["t"], maxfev=2000
+            bowl_corr_radial, [samples["x"], samples["y"]], samples["t"], maxfev=2000
         )
     except Exception:
         return None
@@ -444,43 +444,43 @@ def _fit_bowl_polynomial(
 
 
 def _bowl_surface_ok(bowl: tuple, det_diam_mm: float) -> bool:
-	"""True if the bowl correction stays in the sane band across the detector.
+    """True if the bowl correction stays in the sane band across the detector.
 
-	The fit is constrained near 1.0 only inside the peak-ion footprint;
-	this evaluates it on a coarse grid over the full detector disk and
-	rejects it (-> caller uses identity) if the factor leaves
-	``[_FACTOR_MIN, _FACTOR_MAX]`` anywhere, the way the collapse arose.
-	"""
-	r = max(float(det_diam_mm) / 2.0, 1.0)
-	g = np.linspace(-r, r, 15)
-	gx, gy = np.meshgrid(g, g)
-	disk = (gx * gx + gy * gy) <= r * r
-	f = bowl_corr_radial([gx[disk], gy[disk]], *bowl)
-	return bool(np.all(np.isfinite(f)) and f.min() >= _FACTOR_MIN and f.max() <= _FACTOR_MAX)
+    The fit is constrained near 1.0 only inside the peak-ion footprint;
+    this evaluates it on a coarse grid over the full detector disk and
+    rejects it (-> caller uses identity) if the factor leaves
+    ``[_FACTOR_MIN, _FACTOR_MAX]`` anywhere, the way the collapse arose.
+    """
+    r = max(float(det_diam_mm) / 2.0, 1.0)
+    g = np.linspace(-r, r, 15)
+    gx, gy = np.meshgrid(g, g)
+    disk = (gx * gx + gy * gy) <= r * r
+    f = bowl_corr_radial([gx[disk], gy[disk]], *bowl)
+    return bool(np.all(np.isfinite(f)) and f.min() >= _FACTOR_MIN and f.max() <= _FACTOR_MAX)
 
 
 # ---------------------------------------------------------------- EMA
 
 
 def _mean_params(window: Deque[CalibrationParams]) -> Optional[CalibrationParams]:
-	"""EMA-smooth the SCALAR fields; keep the latest polynomial tuples.
+    """EMA-smooth the SCALAR fields; keep the latest polynomial tuples.
 
-	Averaging polynomial *coefficients* across fits done on different
-	event pools / peak medians is not the same as averaging the
-	correction *surfaces* and biases the divisor away from 1 (a key
-	contributor to the old MC-cal collapse). So ``vol`` and ``bowl_final``
-	take the most-recent fit verbatim; only the scalar anchors (peak
-	location, mass scale, etc.) are smoothed.
-	"""
+    Averaging polynomial *coefficients* across fits done on different
+    event pools / peak medians is not the same as averaging the
+    correction *surfaces* and biases the divisor away from 1 (a key
+    contributor to the old MC-cal collapse). So ``vol`` and ``bowl_final``
+    take the most-recent fit verbatim; only the scalar anchors (peak
+    location, mass scale, etc.) are smoothed.
+    """
     if not window:
         return None
     if len(window) == 1:
         return window[0]
     latest = window[-1]
     avg_kwargs = {}
-	# Polynomial-coefficient tuples are NOT averaged (see docstring) -- they
-	# take the latest fit via the else-branch below.
-	tuple_fields: set = set()
+    # Polynomial-coefficient tuples are NOT averaged (see docstring) -- they
+    # take the latest fit via the else-branch below.
+    tuple_fields: set = set()
     # Pure-numeric scalar fields -- arithmetic mean.
     scalar_fields = {
         "t_0",
@@ -520,7 +520,7 @@ class LiveCalibrationWorker(QtCore.QThread):
         self,
         snapshot_callback: Callable[[], Optional[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]],
         conf: dict,
-		    event_count_callback: Optional[Callable[[], int]] = None,
+            event_count_callback: Optional[Callable[[], int]] = None,
     ) -> None:
         super().__init__()
         self._snapshot = snapshot_callback
@@ -560,38 +560,38 @@ class LiveCalibrationWorker(QtCore.QThread):
 
     def run(self) -> None:
         _log.info(
-	        "Live calibration worker started (mode=%s, cadence=%s, min %d events, min R²=%.2f, EMA=%d)",
+            "Live calibration worker started (mode=%s, cadence=%s, min %d events, min R²=%.2f, EMA=%d)",
             self._mode,
-	        ("every %d events" % self._refit_event_interval) if self._event_count is not None
-	        else ("every %.1f s" % self._refit_interval_s),
+            ("every %d events" % self._refit_event_interval) if self._event_count is not None
+            else ("every %.1f s" % self._refit_interval_s),
             self._min_events,
             self._min_fit_quality,
             self._ema_window_size,
         )
         while not self._stop_event.is_set():
-	        if self._event_count is not None:
-		        # Event-count cadence: re-fit every _refit_event_interval new
-		        # ions. Poll the GUI's running counter on a short tick.
-		        try:
-			        cur = int(self._event_count())
-		        except Exception:
-			        cur = self._last_refit_count
-		        if cur < self._last_refit_count:
-			        # GUI cleared its counter (new session) -- resync.
-			        self._last_refit_count = 0
-		        if cur - self._last_refit_count < self._refit_event_interval:
-			        self.msleep(200)
-			        continue
-		        self._last_refit_count = cur
-	        else:
-		        # Legacy time cadence. Sleep first so the very first tick has
-		        # events to look at. Monotonic clock so an NTP/manual time
-		        # change can't skip or stack refits.
-		        deadline = time.monotonic() + self._refit_interval_s
-		        while time.monotonic() < deadline:
-			        if self._stop_event.is_set():
-				        return
-			        self.msleep(200)
+            if self._event_count is not None:
+                # Event-count cadence: re-fit every _refit_event_interval new
+                # ions. Poll the GUI's running counter on a short tick.
+                try:
+                    cur = int(self._event_count())
+                except Exception:
+                    cur = self._last_refit_count
+                if cur < self._last_refit_count:
+                    # GUI cleared its counter (new session) -- resync.
+                    self._last_refit_count = 0
+                if cur - self._last_refit_count < self._refit_event_interval:
+                    self.msleep(200)
+                    continue
+                self._last_refit_count = cur
+            else:
+                # Legacy time cadence. Sleep first so the very first tick has
+                # events to look at. Monotonic clock so an NTP/manual time
+                # change can't skip or stack refits.
+                deadline = time.monotonic() + self._refit_interval_s
+                while time.monotonic() < deadline:
+                    if self._stop_event.is_set():
+                        return
+                    self.msleep(200)
             try:
                 fit = self._refit_once()
             except Exception as exc:
@@ -726,13 +726,13 @@ class LiveCalibrationWorker(QtCore.QThread):
             self._volt_sample_size,
         )
         if vol_fit is None or r2 < self._min_fit_quality:
-	        # A weak/flat voltage dependence (e.g. during a vdc_hold, or too
-	        # few windows) is NOT a reason to abort the whole refit -- fall
-	        # back to identity voltage (no V correction is always safe) so
-	        # the dominant bowl correction still runs. Mirrors the offline
-	        # pipeline, which tolerates a near-flat voltage term.
-	        vol_fit = _VOLT_IDENTITY
-	        r2 = 0.0
+            # A weak/flat voltage dependence (e.g. during a vdc_hold, or too
+            # few windows) is NOT a reason to abort the whole refit -- fall
+            # back to identity voltage (no V correction is always safe) so
+            # the dominant bowl correction still runs. Mirrors the offline
+            # pipeline, which tolerates a near-flat voltage term.
+            vol_fit = _VOLT_IDENTITY
+            r2 = 0.0
 
         # Apply voltage correction to ALL events at the peak so the
         # bowl fit sees voltage-flat data, exactly as the offline
@@ -759,7 +759,7 @@ class LiveCalibrationWorker(QtCore.QThread):
         # detector (would distort/destroy rim events); voltage-only is
         # still useful.
         if bowl_fit is None or not _bowl_surface_ok(bowl_fit, det_diam_mm):
-	        bowl_fit = _BOWL_IDENTITY
+            bowl_fit = _BOWL_IDENTITY
 
         # Initial mass scale.
         target = self._target_mass if self._target_mass is not None else peak_mass
@@ -820,22 +820,22 @@ class LiveCalibrationWorker(QtCore.QThread):
         # directly -- NO sqrt; mc is linear in V).
         maximum_location_mc = float(np.median(mc_peak))
         if maximum_location_mc <= 0:
-	        self.status_changed.emit("invalid peak location for voltage fit")
+            self.status_changed.emit("invalid peak location for voltage fit")
             return None
         vol_fit, r2 = _fit_voltage_polynomial(
-	        v_peak,
+            v_peak,
             mc_peak,
             maximum_location_mc,
             self._volt_sample_size,
         )
         if vol_fit is None or r2 < self._min_fit_quality:
-	        # Weak/flat voltage dependence -> identity (skip V correction),
-	        # keep going so the bowl correction still applies. The MC
-	        # voltage target (mc/median) is often near-flat, so aborting
-	        # here would leave MC permanently uncalibrated (the reason the
-	        # status banner only ever showed a 'tof:' entry).
-	        vol_fit = _VOLT_IDENTITY
-	        r2 = 0.0
+            # Weak/flat voltage dependence -> identity (skip V correction),
+            # keep going so the bowl correction still applies. The MC
+            # voltage target (mc/median) is often near-flat, so aborting
+            # here would leave MC permanently uncalibrated (the reason the
+            # status banner only ever showed a 'tof:' entry).
+            vol_fit = _VOLT_IDENTITY
+            r2 = 0.0
         f_v_peak = voltage_corr(v_peak, *vol_fit)
         mc_v_peak = mc_peak / np.maximum(f_v_peak, 1e-30)
 
@@ -844,9 +844,9 @@ class LiveCalibrationWorker(QtCore.QThread):
         bowl_final = _fit_bowl_polynomial(
             x_mm_peak,
             y_mm_peak,
-	        mc_v_peak,
+            mc_v_peak,
             v_peak,
-	        maximum_location_mc_v,
+            maximum_location_mc_v,
             self._bowl_sample_size_mm,
             det_diam_mm,
         )
@@ -868,7 +868,7 @@ class LiveCalibrationWorker(QtCore.QThread):
             mean_v=0.0,  # unused in MC apply path
             vol=vol_fit,
             bowl_final=bowl_final,
-	        maximum_location=maximum_location_mc_v,
+            maximum_location=maximum_location_mc_v,
             mc_scale=mc_scale,
             fit_quality=r2,
             timestamp=time.time(),

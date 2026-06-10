@@ -820,14 +820,14 @@ class Ui_Laser_Control(object):
         self._refresh_stage_position()
 
     def _set_stage_movement_enabled(self, enabled):
-	    # The laser focusing stage is a SEPARATE device from the laser
-	    # source, so its jog/Home buttons are deliberately NOT gated on the
-	    # stage connection (nor on the laser): they stay enabled and each
-	    # click handler shows a clear "Laser stage not connected" message if
-	    # the SmarAct controller is absent. This keeps the panel usable and
-	    # independent when the stage connects late or its SDK/locator isn't
-	    # set. ``enabled`` is ignored here, kept only for call-site
-	    # compatibility.
+        # The laser focusing stage is a SEPARATE device from the laser
+        # source, so its jog/Home buttons are deliberately NOT gated on the
+        # stage connection (nor on the laser): they stay enabled and each
+        # click handler shows a clear "Laser stage not connected" message if
+        # the SmarAct controller is absent. This keeps the panel usable and
+        # independent when the stage connects late or its SDK/locator isn't
+        # set. ``enabled`` is ignored here, kept only for call-site
+        # compatibility.
         for btn in (
             self.laser_up,
             self.laser_down,
@@ -837,10 +837,10 @@ class Ui_Laser_Control(object):
             self.laser_backward,
             self.laser_home,
         ):
-	        btn.setEnabled(True)
-	    # Reference is gated solely behind Override Access; _stage_reference()
-	    # guards against a missing device.
-	    self.laser_stage_reference.setEnabled(self.flag_super_user_stage)
+            btn.setEnabled(True)
+        # Reference is gated solely behind Override Access; _stage_reference()
+        # guards against a missing device.
+        self.laser_stage_reference.setEnabled(self.flag_super_user_stage)
         # STOP stays clickable so the user can always abort.
 
     def _stage_super_user_access(self):
@@ -1028,12 +1028,12 @@ class Ui_Laser_Control(object):
         self.error_message(f"Reference failed: {message}")
 
     def _set_stage_jog_enabled(self, enabled):
-	    """Enable/disable jog + Home for the duration of a reference run.
+        """Enable/disable jog + Home for the duration of a reference run.
 
-		Only the referencing lock toggles these (so the operator can't jog
-		mid-reference); the connection state is handled by the click
-		handlers, not by greying the buttons out.
-		"""
+        Only the referencing lock toggles these (so the operator can't jog
+        mid-reference); the connection state is handled by the click
+        handlers, not by greying the buttons out.
+        """
         for btn in (
             self.laser_up,
             self.laser_down,
@@ -1043,7 +1043,7 @@ class Ui_Laser_Control(object):
             self.laser_backward,
             self.laser_home,
         ):
-	        btn.setEnabled(enabled)
+            btn.setEnabled(enabled)
 
     def _stage_stop(self):
         # Abort an in-flight reference search FIRST, then stop the axes.

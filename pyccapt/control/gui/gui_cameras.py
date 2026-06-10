@@ -24,11 +24,15 @@ class Ui_Cameras_Alignment(object):
                 conf: Configuration data.
                 SignalEmitter: Signal emitter for communication.
         """
-        # Cameras default to auto-exposure (Continuous) on startup; the
-        # button text describes the action it performs ("Auto Exposure
-        # Time Off" → click to switch into manual mode). The flag mirrors
-        # the worker's `exposure_auto` state.
-        self.auto_exposure_time_flag = True
+        # Cameras default to manual/preset exposure on startup: the Auto
+        # Exposure Time button starts deselected (off). It is a plain
+        # toggle that goes green while selected, like the other buttons.
+        # This flag mirrors the worker's `exposure_auto` state.
+        self.auto_exposure_time_flag = False
+        # "Manual Exposure Time" toggle (only meaningful when auto is off):
+        #   selected  -> the three µs fields are user-editable;
+        #   unselected -> the worker drives them from light-dependent presets.
+        self.manual_exposure_flag = False
         self.conf = conf
         self.emitter = SignalEmitter
         self.variables = variables
@@ -270,10 +274,6 @@ class Ui_Cameras_Alignment(object):
         # LED indicator that sits directly to the left of the
         # auto-exposure button. Green = auto on, red = manual. Mirrors
         # the light button / led_light pair just to the right.
-        self.led_auto_exposure = QtWidgets.QLabel(parent=Cameras_Alignment)
-        self.led_auto_exposure.setMaximumSize(QtCore.QSize(50, 50))
-        self.led_auto_exposure.setObjectName("led_auto_exposure")
-        self.horizontalLayout.addWidget(self.led_auto_exposure)
         self.auto_exposure_time = QtWidgets.QPushButton(parent=Cameras_Alignment)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Fixed)
         sizePolicy.setHorizontalStretch(0)
@@ -470,9 +470,6 @@ class Ui_Cameras_Alignment(object):
         self.led_red = QPixmap('./files/led-red-on.png')
         self.led_green = QPixmap('./files/green-led-on.png')
         self.led_light.setPixmap(self.led_red)
-        # Auto-exposure starts in 'Continuous' (see __init__), so light
-        # the LED green to match.
-        self.led_auto_exposure.setPixmap(self.led_green)
 
         # bottom camera (x, y)
         # arrow1 = pg.ArrowItem(pos=(925, 770), angle=0)
@@ -494,7 +491,7 @@ class Ui_Cameras_Alignment(object):
         ###
         self.light.clicked.connect(self.light_switch)
         self.auto_exposure_time.clicked.connect(self.auto_exposure_time_switch)
-        self.default_exposure_time.clicked.connect(self.default_exposure_time_switch)
+        self.default_exposure_time.clicked.connect(self.manual_exposure_time_switch)
 
         self.emitter.img0_orig.connect(self.update_cam_s_o)
         self.emitter.img1_orig.connect(self.update_cam_b_o)
@@ -509,12 +506,13 @@ class Ui_Cameras_Alignment(object):
         self.exposure_time_cam_3.editingFinished.connect(self.update_exposure_time)
 
         self.original_button_style = self.auto_exposure_time.styleSheet()
-        # Manual exposure controls only make sense when the camera is
-        # not running its own auto-exposure loop, so the "Default
-        # Exposure Time" button and the three per-camera µs fields are
-        # disabled while auto-exposure is on. Cameras start in auto, so
-        # initialise these as disabled.
-        self._set_manual_exposure_widgets_enabled(not self.auto_exposure_time_flag)
+        # Captured so the "Manual Exposure Time" toggle can restore its own
+        # look when deselected (it goes green while selected).
+        self._original_manual_exposure_style = self.default_exposure_time.styleSheet()
+        # Exposure controls depend on two flags (auto on/off, manual on/off);
+        # cameras start in auto, so this disables the manual button and the
+        # three per-camera µs fields. See _refresh_exposure_widgets.
+        self._refresh_exposure_widgets()
 
         self.emitter.cams_exposure_time_default.connect(self.set_default_exposure_time)
         # Live read-back: each tick the worker tells us what
@@ -555,10 +553,10 @@ class Ui_Cameras_Alignment(object):
         self.light.setText(_translate("Cameras_Alignment", "Light"))
         self.led_light_2.setText(_translate("Cameras_Alignment", "Exposure Time Side (us)"))
         self.exposure_time_cam_1.setText(_translate("Cameras_Alignment", "2000000"))
-        self.exposure_time_cam_2.setText(_translate("Cameras_Alignment", "400000"))
+        self.exposure_time_cam_2.setText(_translate("Cameras_Alignment", "1000000"))
         self.exposure_time_cam_3.setText(_translate("Cameras_Alignment", "2000000"))
         self.led_light_3.setText(_translate("Cameras_Alignment", "Exposure Time Top (us)"))
-        self.default_exposure_time.setText(_translate("Cameras_Alignment", "Default Exposure Time"))
+        self.default_exposure_time.setText(_translate("Cameras_Alignment", "Manual Exposure Time"))
         self.led_light_4.setText(_translate("Cameras_Alignment", "Exposure Time Angle (us)"))
 
         ###
@@ -727,42 +725,55 @@ class Ui_Cameras_Alignment(object):
         None
         """
         self.auto_exposure_time_flag = not self.auto_exposure_time_flag
-        # LED mirrors the auto-exposure state: green = auto on, red = manual.
+        # Button goes green while selected (auto on), like the other toggles.
         if self.auto_exposure_time_flag:
-            self.led_auto_exposure.setPixmap(self.led_green)
+            self.auto_exposure_time.setStyleSheet("QPushButton{background: rgb(0, 255, 26)}")
+            # Auto owns exposure now; clear any manual selection so that
+            # turning auto back off lands in preset mode by default.
+            if self.manual_exposure_flag:
+                self.manual_exposure_flag = False
+                self.default_exposure_time.setStyleSheet(self._original_manual_exposure_style)
+                self.emitter.default_exposure_time.emit(False)
         else:
-            self.led_auto_exposure.setPixmap(self.led_red)
-        # Manual fields are only meaningful in manual mode.
-        self._set_manual_exposure_widgets_enabled(not self.auto_exposure_time_flag)
+            self.auto_exposure_time.setStyleSheet(self.original_button_style)
+        self._refresh_exposure_widgets()
         self.emitter.auto_exposure_time.emit(True)
 
-    def _set_manual_exposure_widgets_enabled(self, enabled):
-        """Enable/disable the manual exposure inputs as a group.
+    def _refresh_exposure_widgets(self):
+        """Enable/disable the exposure controls for the current mode.
 
-        Disabled in auto mode because the camera firmware owns
-        ExposureTime there — typing into the µs fields or hitting
-        "Default Exposure Time" would have no effect and only confuse
-        the user.
+        Three states:
+          * auto on                 -> manual button + fields disabled
+                                       (firmware owns ExposureTime).
+          * auto off, manual on      -> the three µs fields are editable.
+          * auto off, manual off     -> fields disabled; the worker drives
+                                       them from the light-dependent presets.
         """
-        for widget in (
-            self.default_exposure_time,
-            self.exposure_time_cam_1,
-            self.exposure_time_cam_2,
-            self.exposure_time_cam_3,
-        ):
-            widget.setEnabled(enabled)
+        auto = self.auto_exposure_time_flag
+        manual = self.manual_exposure_flag
+        # The Manual toggle is only selectable while auto exposure is off.
+        self.default_exposure_time.setEnabled(not auto)
+        fields_editable = (not auto) and manual
+        for widget in (self.exposure_time_cam_1, self.exposure_time_cam_2, self.exposure_time_cam_3):
+            widget.setEnabled(fields_editable)
 
-    def default_exposure_time_switch(self):
+    def manual_exposure_time_switch(self):
+        """Toggle user-manual exposure entry (only when auto is off).
+
+        Selected (green)  -> the three µs fields become user-editable.
+        Unselected        -> the worker reverts to the light-dependent
+                             presets and the fields are locked.
         """
-        Default exposure time switch function
-
-        Args:
-        None
-
-        Return:
-        None
-        """
-        self.emitter.default_exposure_time.emit(True)
+        if self.auto_exposure_time_flag:
+            return
+        self.manual_exposure_flag = not self.manual_exposure_flag
+        if self.manual_exposure_flag:
+            self.default_exposure_time.setStyleSheet("QPushButton{background: rgb(0, 255, 26)}")
+        else:
+            self.default_exposure_time.setStyleSheet(self._original_manual_exposure_style)
+        self._refresh_exposure_widgets()
+        # True = user-manual values; False = light presets.
+        self.emitter.default_exposure_time.emit(self.manual_exposure_flag)
 
     def initialize_camera_thread(self):
         """

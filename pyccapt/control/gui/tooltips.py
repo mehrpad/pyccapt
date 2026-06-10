@@ -404,7 +404,11 @@ VISUALIZATION_TOOLTIPS = {
     "this field is ignored and every ion is "
     "accumulated forever.  Default 1000000.",
     # --- Spectrum view --------------------------------------------------
-    "spectrum_switch": "Toggle the spectrum X axis between mass-to-charge (mc, Da) and time-of-flight (tof, ns).",
+	"btn_view_mc": "Show the raw (uncalibrated) mass-to-charge spectrum (Da).",
+	"btn_view_tof": "Show the raw (uncalibrated) time-of-flight spectrum (ns).",
+	"btn_view_mc_cal": "Show the live-calibrated mass-to-charge spectrum (Da).",
+	"btn_view_tof_cal": "Show the live-calibrated time-of-flight spectrum (ns). "
+	                    "All four spectra accumulate in parallel; switching is instant and never resets data.",
     "spectrum_last_events_switch": "Show only the last N events in the spectrum (rolling window).",
     "num_last_events": "Number of most-recent events used by the 'Last Events' spectrum mode.",
     "max_mc": "Upper limit of the mass spectrum X axis (Da).",

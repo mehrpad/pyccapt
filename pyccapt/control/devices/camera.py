@@ -82,14 +82,20 @@ class CameraWorker(QObject):
     VIEW_ORDER = ("side", "top", "angle")
     RECONNECT_INTERVAL = 3.0
 
+    # Manual-exposure presets (microseconds), per view [side, top, angle].
+    # Used when auto-exposure is off and the user has NOT selected the
+    # "Manual Exposure Time" mode; the worker picks the row by light state.
+    PRESET_EXPOSURE_DARK = (2_000_000, 1_000_000, 2_000_000)  # light off
+    PRESET_EXPOSURE_LIGHT = (100_000, 50_000, 100_000)  # light on
+
     def __init__(self, variables, emitter, conf=None):
         super().__init__()
-        self.flag_default_exposure_time = None
-        # Cameras start with ExposureAuto = Continuous so the user gets a
-        # usable image even before they touch the exposure inputs. The
-        # GUI's auto-exposure button toggles this back to manual ('Off').
-        self.exposure_auto = True
-        self.exposure_mode = 'Continuous'
+        # Cameras start in manual mode (ExposureAuto = 'Off') with the
+        # light-dependent presets applied, matching the GUI's Auto Exposure
+        # Time button which starts deselected. Clicking that button toggles
+        # the worker into Continuous (firmware auto) and back.
+        self.exposure_auto = False
+        self.exposure_mode = 'Off'
         self.emitter = emitter
         self.variables = variables
 
@@ -108,21 +114,21 @@ class CameraWorker(QObject):
 
         self.running = False
         self.index_save_image = 0
-        # Defaults for the "light off" case (microseconds). Side (cam_1)
-        # and angle (cam_3) need a long exposure (~2 s) to see the puck
-        # in the dark; the top camera (cam_2) sees more ambient light
-        # and gets washed out at 2 s, so it stays at 400 ms.
-        self.exposure_time_cam_1 = 2_000_000
-        self.exposure_time_cam_1_light = 10000
-        self.exposure_time_cam_2 = 400_000
-        self.exposure_time_cam_2_light = 20000
-        self.exposure_time_cam_3 = 2_000_000
-        self.exposure_time_cam_3_light = 10000
+        # User-entered manual exposure values (microseconds), per view
+        # [side, top, angle]. Used only in user-manual mode; preset mode
+        # uses PRESET_EXPOSURE_DARK / PRESET_EXPOSURE_LIGHT instead. Seeded
+        # with the dark presets so the GUI fields start with sane values.
+        self.exposure_time_cam_1 = self.PRESET_EXPOSURE_DARK[0]
+        self.exposure_time_cam_2 = self.PRESET_EXPOSURE_DARK[1]
+        self.exposure_time_cam_3 = self.PRESET_EXPOSURE_DARK[2]
+        # Manual-exposure source (only relevant when exposure_auto is off):
+        #   False -> light-dependent presets (default), True -> user values.
+        self.manual_user_mode = False
 
         self.emitter.cam_1_exposure_time.connect(self.set_exposure_time_1)
         self.emitter.cam_2_exposure_time.connect(self.set_exposure_time_2)
         self.emitter.cam_3_exposure_time.connect(self.set_exposure_time_3)
-        self.emitter.default_exposure_time.connect(self.set_default_exposure_time)
+        self.emitter.default_exposure_time.connect(self.set_manual_exposure_mode)
         self.emitter.auto_exposure_time.connect(self.set_auto_exposure_time)
 
         self._slots = [None] * self.SLOT_COUNT
@@ -189,27 +195,18 @@ class CameraWorker(QObject):
         self.running = False
 
     @pyqtSlot(bool)
-    def set_default_exposure_time(self):
-        if not self.exposure_auto:
-            self.exposure_time_cam_1 = 2_000_000
-            self.exposure_time_cam_1_light = 10000
-            self.exposure_time_cam_2 = 400_000
-            self.exposure_time_cam_2_light = 20000
-            self.exposure_time_cam_3 = 2_000_000
-            self.exposure_time_cam_3_light = 10000
+    @pyqtSlot(bool)
+    def set_manual_exposure_mode(self, manual):
+        """Choose the manual-exposure source (only used when auto is off).
 
-            self.flag_default_exposure_time = True
-            if self.variables.light:
-                exposure_times = [
-                    self.exposure_time_cam_1_light,
-                    self.exposure_time_cam_2_light,
-                    self.exposure_time_cam_3_light,
-                ]
-            else:
-                exposure_times = [self.exposure_time_cam_1, self.exposure_time_cam_2, self.exposure_time_cam_3]
-            self.emitter.cams_exposure_time_default.emit(exposure_times)
-        else:
-            print('Cannot set the default exposure time when auto exposure is on')
+        manual=True  -> use the user-entered exposure_time_cam_N values.
+        manual=False -> use the light-dependent presets (PRESET_EXPOSURE_*).
+        Invalidate the applied-exposure cache so _apply_exposure_changes
+        re-pushes the right value on the next tick.
+        """
+        self.manual_user_mode = bool(manual)
+        for slot in range(self.SLOT_COUNT):
+            self._applied_exposure[slot] = None
 
     @pyqtSlot(bool)
     def set_auto_exposure_time(self):
@@ -233,11 +230,13 @@ class CameraWorker(QObject):
         self.exposure_time_cam_3 = exposure_time
 
     def _exposure_for_slot(self, slot):
-        if slot == 0:
-            return self.exposure_time_cam_1
-        if slot == 1:
-            return self.exposure_time_cam_2
-        return self.exposure_time_cam_3
+        if self.manual_user_mode:
+            # User-entered values from the GUI fields.
+            return (self.exposure_time_cam_1, self.exposure_time_cam_2, self.exposure_time_cam_3)[slot]
+        # Preset mode: light-dependent defaults (side, top, angle).
+        light_on = bool(getattr(self.variables, 'light', False))
+        presets = self.PRESET_EXPOSURE_LIGHT if light_on else self.PRESET_EXPOSURE_DARK
+        return presets[slot]
 
     def _close_slot(self, slot):
         cam = self._slots[slot]
@@ -735,10 +734,9 @@ class CameraWorker(QObject):
                 last_save_time = now
                 self._save_screenshots(grabbed_images)
 
-            if self.variables.light_switch or self.flag_default_exposure_time:
+            if self.variables.light_switch:
                 self.light_switch()
                 self.variables.light_switch = False
-                self.flag_default_exposure_time = False
 
             time.sleep(0.5)
 
@@ -821,21 +819,12 @@ class CameraWorker(QObject):
         time.sleep(0.5)
 
     def light_switch(self):
+        # In preset mode the exposure depends on the light state, so a
+        # light toggle changes the target. Invalidate the applied-exposure
+        # cache and let _apply_exposure_changes re-push the (now light-aware)
+        # value from _exposure_for_slot on the next tick. No effect in auto
+        # mode, and in user-manual mode the user's value is light-independent.
         if self.exposure_auto:
             return
-        try:
-            light_on = bool(self.variables.light)
-            slot_targets = (
-                self.exposure_time_cam_1_light if light_on else self.exposure_time_cam_1,
-                self.exposure_time_cam_2_light if light_on else self.exposure_time_cam_2,
-                self.exposure_time_cam_3_light if light_on else self.exposure_time_cam_3,
-            )
-            for slot in range(self.SLOT_COUNT):
-                cam = self._slots[slot]
-                if cam is None:
-                    continue
-                target = slot_targets[slot]
-                cam.ExposureTime.SetValue(target)
-                self._applied_exposure[slot] = target
-        except Exception as e:
-            print(f"Error in switching the light: {e}")
+        for slot in range(self.SLOT_COUNT):
+            self._applied_exposure[slot] = None

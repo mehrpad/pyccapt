@@ -419,7 +419,7 @@
                             <item row="2" column="0">
                                 <layout class="QHBoxLayout" name="horizontalLayout">
                                     <item>
-                                        <widget class="QPushButton" name="spectrum_switch">
+                                        <widget class="QPushButton" name="btn_view_mc">
                                             <property name="minimumSize">
                                                 <size>
                                                     <width>0</width>
@@ -428,12 +428,88 @@
                                             </property>
                                             <property name="maximumSize">
                                                 <size>
-                                                    <width>60</width>
+                                                    <width>70</width>
                                                     <height>16777215</height>
                                                 </size>
                                             </property>
                                             <property name="text">
-                                                <string>mc/tof</string>
+                                                <string>MC</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item>
+                                        <widget class="QPushButton" name="btn_view_tof">
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>0</width>
+                                                    <height>20</height>
+                                                </size>
+                                            </property>
+                                            <property name="maximumSize">
+                                                <size>
+                                                    <width>70</width>
+                                                    <height>16777215</height>
+                                                </size>
+                                            </property>
+                                            <property name="text">
+                                                <string>TOF</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item>
+                                        <widget class="QPushButton" name="btn_view_mc_cal">
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>0</width>
+                                                    <height>20</height>
+                                                </size>
+                                            </property>
+                                            <property name="maximumSize">
+                                                <size>
+                                                    <width>90</width>
+                                                    <height>16777215</height>
+                                                </size>
+                                            </property>
+                                            <property name="text">
+                                                <string>MC cal</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item>
+                                        <widget class="QPushButton" name="btn_view_tof_cal">
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>0</width>
+                                                    <height>20</height>
+                                                </size>
+                                            </property>
+                                            <property name="maximumSize">
+                                                <size>
+                                                    <width>90</width>
+                                                    <height>16777215</height>
+                                                </size>
+                                            </property>
+                                            <property name="text">
+                                                <string>TOF cal</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item>
+                                        <widget class="QLabel" name="calib_status_label">
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>120</width>
+                                                    <height>20</height>
+                                                </size>
+                                            </property>
+                                            <property name="font">
+                                                <font>
+                                                    <pointsize>8</pointsize>
+                                                    <italic>true</italic>
+                                                </font>
+                                            </property>
+                                            <property name="text">
+                                                <string>live cal: calibrating…</string>
                                             </property>
                                         </widget>
                                     </item>
@@ -624,7 +700,10 @@
         <tabstop>hitmap_plot_size</tabstop>
         <tabstop>hit_displayed</tabstop>
         <tabstop>heatmap_fdm_switch</tabstop>
-        <tabstop>spectrum_switch</tabstop>
+        <tabstop>btn_view_mc</tabstop>
+        <tabstop>btn_view_tof</tabstop>
+        <tabstop>btn_view_mc_cal</tabstop>
+        <tabstop>btn_view_tof_cal</tabstop>
         <tabstop>spectrum_last_events_switch</tabstop>
         <tabstop>num_last_events</tabstop>
         <tabstop>max_mc</tabstop>

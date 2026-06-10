@@ -15,16 +15,16 @@ else:
 
 
 def _normalize_serial(value) -> str | None:
-	"""Coerce a config serial value to a clean string, or None if blank.
+    """Coerce a config serial value to a clean string, or None if blank.
 
-	Serials may be written in config.toml as a quoted string or a bare
-	number; both are accepted. An empty/whitespace value means "not
-	configured" and returns None.
-	"""
-	if value is None:
-		return None
-	text = str(value).strip()
-	return text or None
+    Serials may be written in config.toml as a quoted string or a bare
+    number; both are accepted. An empty/whitespace value means "not
+    configured" and returns None.
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def check_camera_backend() -> tuple[bool, str]:
@@ -100,8 +100,8 @@ class CameraWorker(QObject):
         # VIEW_ORDER / the slot layout (side=0, top=1, angle=2).
         conf = conf or {}
         self._configured_serials = [
-	        _normalize_serial(conf.get(f"camera_serial_{view}"))
-	        for view in self.VIEW_ORDER
+            _normalize_serial(conf.get(f"camera_serial_{view}"))
+            for view in self.VIEW_ORDER
         ]
         # Serials explicitly assigned to a view never fill a different slot.
         self._configured_serial_set = {s for s in self._configured_serials if s}
@@ -315,7 +315,7 @@ class CameraWorker(QObject):
             # to its own slot (handled by the first pass above); never let it
             # first-come into a different view.
             if sn in self._configured_serial_set:
-	            continue
+                continue
             for slot in range(self.SLOT_COUNT):
                 if self._slots[slot] is not None:
                     continue
@@ -750,17 +750,17 @@ class CameraWorker(QObject):
         self.finished.emit()
 
     def _emit_images(self, images):
-	    # Slot 0 -> img0 (side overview), slot 1 -> img1 (top overview),
-	    # slot 2 -> img2 (angle). When no third camera is attached, the
-	    # angle view mirrors slot 0 so it doesn't go blank.
+        # Slot 0 -> img0 (side overview), slot 1 -> img1 (top overview),
+        # slot 2 -> img2 (angle). When no third camera is attached, the
+        # angle view mirrors slot 0 so it doesn't go blank.
         img0 = images[0] if len(images) > 0 else None
         img1 = images[1] if len(images) > 1 else None
-	    img2 = images[2] if len(images) > 2 else None
+        img2 = images[2] if len(images) > 2 else None
         if img0 is not None:
             self.emitter.img0_orig.emit(np.swapaxes(img0, 0, 1))
         if img1 is not None:
             self.emitter.img1_orig.emit(np.swapaxes(img1, 0, 1))
-	    angle_src = img2 if img2 is not None else (img0 if img0 is not None else img1)
+        angle_src = img2 if img2 is not None else (img0 if img0 is not None else img1)
         if angle_src is not None:
             self.emitter.img2_orig.emit(np.swapaxes(angle_src, 0, 1))
 
@@ -792,7 +792,7 @@ class CameraWorker(QObject):
         # Angle reports its own camera when present, else mirrors the side feed.
         t2 = _read(2)
         if t2 is None:
-	        t2 = t0
+            t2 = t0
         # Nothing useful to report if no slots are attached.
         if t0 is None and t1 is None:
             return

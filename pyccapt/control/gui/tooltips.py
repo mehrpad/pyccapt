@@ -82,7 +82,6 @@ MAIN_TOOLTIPS = {
     "never command above this.  Hard-capped by max_vdc "
     "in config.toml.",
     "vdc_min": "DC voltage starting / lower limit (V).",
-    "set_min_voltage": "Apply the DC Min. Voltage value to the supply now (without starting the experiment).",
     "speciemen_voltage": "Live read-back of the specimen DC voltage (V).",
     # --- Pulse parameters -------------------------------------------------
     "pulse_mode": "Pulse source: Voltage (HV pulser) or Laser (NKT/origami).",
@@ -415,6 +414,8 @@ VISUALIZATION_TOOLTIPS = {
     "max_tof": "Upper limit of the time-of-flight spectrum X axis (ns).",
     # --- Hold + range ---------------------------------------------------
     "dc_hold": "Hold the DC voltage at its current value (pause feedback control).",
+    "set_dc_voltage_value": "Target DC voltage (V) to apply to the supply. Enabled only while DC is held; limited to the config min/max DC range.",
+    "set_dc_voltage": "Apply the entered DC voltage to the supply now. Enabled only while DC voltage is held.",
     "detection_rate_range_switch": "Toggle the detection-rate display between Short and Long Range.",
     "Error": "Status messages from the visualization process.",
 }

@@ -353,10 +353,8 @@ class Ui_PyCCAPT(object):
         self.label_176.setSizePolicy(sizePolicy)
         self.label_176.setObjectName("label_176")
         self.gridLayout_3.addWidget(self.label_176, 0, 0, 1, 1)
-        self.set_min_voltage = QtWidgets.QPushButton(parent=self.centralwidget)
-        self.set_min_voltage.setMinimumSize(QtCore.QSize(0, 20))
-        self.set_min_voltage.setObjectName("set_min_voltage")
-        self.gridLayout_3.addWidget(self.set_min_voltage, 3, 1, 1, 2)
+        # NOTE: the "Set" (set_min_voltage) button moved to the Visualization
+        # window, next to "Hold DC Voltage" (see gui_visualization.set_dc_voltage).
         self.ex_time = QtWidgets.QLineEdit(parent=self.centralwidget)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Minimum)
         sizePolicy.setHorizontalStretch(0)
@@ -1069,8 +1067,7 @@ class Ui_PyCCAPT(object):
         PyCCAPT.setTabOrder(self.criteria_ions, self.max_ions)
         PyCCAPT.setTabOrder(self.max_ions, self.criteria_vdc)
         PyCCAPT.setTabOrder(self.criteria_vdc, self.vdc_max)
-        PyCCAPT.setTabOrder(self.vdc_max, self.set_min_voltage)
-        PyCCAPT.setTabOrder(self.set_min_voltage, self.vdc_min)
+        PyCCAPT.setTabOrder(self.vdc_max, self.vdc_min)
         PyCCAPT.setTabOrder(self.vdc_min, self.pulse_mode)
         PyCCAPT.setTabOrder(self.pulse_mode, self.pulse_fraction)
         PyCCAPT.setTabOrder(self.pulse_fraction, self.pulse_frequency)
@@ -1165,7 +1162,6 @@ class Ui_PyCCAPT(object):
         ###
         self.start_button.clicked.connect(self.start_experiment_clicked)
         self.stop_button.clicked.connect(self.stop_experiment_clicked)
-        self.set_min_voltage.clicked.connect(self.set_min_voltage_clicked)
         self.superuser.clicked.connect(self.super_user_access)
 
         self.emitter.elapsed_time.connect(self.update_elapsed_time)
@@ -1236,7 +1232,6 @@ class Ui_PyCCAPT(object):
         self.label_2.setText(_translate("PyCCAPT", "Stop at"))
         self.label_3.setText(_translate("PyCCAPT", "Stop at"))
         self.label_176.setText(_translate("PyCCAPT", "Max. Experiment Time (s)"))
-        self.set_min_voltage.setText(_translate("PyCCAPT", "Set"))
         self.ex_time.setText(_translate("PyCCAPT", "3600"))
         self.label_179.setText(_translate("PyCCAPT", "DC Min. Voltage (V)"))
         self.vdc_max.setText(_translate("PyCCAPT", "4000"))
@@ -2064,22 +2059,6 @@ class Ui_PyCCAPT(object):
 
         elif not self.variables.vdc_hold:
             self.pulse_mode.setEnabled(False)  # Enable the pulse mode
-
-    def set_min_voltage_clicked(self):
-        """
-        Set the minimum voltage
-
-        Args:
-                None
-
-        Return:
-                None
-        """
-
-        if self.variables.vdc_hold:
-            self.variables.flag_new_min_voltage = True
-        else:
-            self.error_message("Hold the DC voltage first")
 
     def wins_init(self):
         available_ports = device_checks.list_available_serial_ports()

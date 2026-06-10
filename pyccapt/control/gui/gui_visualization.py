@@ -191,7 +191,28 @@ class Ui_Visualization(object):
         self.dc_hold.setMinimumSize(QtCore.QSize(100, 20))
         self.dc_hold.setMaximumSize(QtCore.QSize(100, 16777215))
         self.dc_hold.setObjectName("dc_hold")
-        self.gridLayout_4.addWidget(self.dc_hold, 2, 0, 1, 2)
+        # Row: Hold DC Voltage | [target voltage field] | Set DC Voltage.
+        # The field + Set button are disabled until the DC voltage is held
+        # (enabled in dc_hold_clicked). Set applies the entered value to the
+        # supply via the existing flag_new_min_voltage mechanism.
+        self.dc_hold_row = QtWidgets.QHBoxLayout()
+        self.dc_hold_row.setObjectName("dc_hold_row")
+        self.dc_hold_row.addWidget(self.dc_hold)
+        self.set_dc_voltage_value = QtWidgets.QLineEdit(parent=Visualization)
+        self.set_dc_voltage_value.setMinimumSize(QtCore.QSize(80, 20))
+        self.set_dc_voltage_value.setMaximumSize(QtCore.QSize(100, 16777215))
+        self.set_dc_voltage_value.setStyleSheet("QLineEdit{background: rgb(223,223,233)}")
+        self.set_dc_voltage_value.setObjectName("set_dc_voltage_value")
+        self.set_dc_voltage_value.setEnabled(False)
+        self.dc_hold_row.addWidget(self.set_dc_voltage_value)
+        self.set_dc_voltage = QtWidgets.QPushButton(parent=Visualization)
+        self.set_dc_voltage.setMinimumSize(QtCore.QSize(0, 20))
+        self.set_dc_voltage.setMaximumSize(QtCore.QSize(120, 16777215))
+        self.set_dc_voltage.setObjectName("set_dc_voltage")
+        self.set_dc_voltage.setEnabled(False)
+        self.dc_hold_row.addWidget(self.set_dc_voltage)
+        self.dc_hold_row.addStretch(1)
+        self.gridLayout_4.addLayout(self.dc_hold_row, 2, 0, 1, 3)
         self.gridLayout_5.addLayout(self.gridLayout_4, 0, 0, 1, 1)
         self.gridLayout = QtWidgets.QGridLayout()
         self.gridLayout.setObjectName("gridLayout")
@@ -554,7 +575,9 @@ class Ui_Visualization(object):
         Visualization.setTabOrder(self.voltage, self.detection_rate)
         Visualization.setTabOrder(self.detection_rate, self.hitmap_count)
         Visualization.setTabOrder(self.hitmap_count, self.dc_hold)
-        Visualization.setTabOrder(self.dc_hold, self.detection_rate_range_switch)
+        Visualization.setTabOrder(self.dc_hold, self.set_dc_voltage_value)
+        Visualization.setTabOrder(self.set_dc_voltage_value, self.set_dc_voltage)
+        Visualization.setTabOrder(self.set_dc_voltage, self.detection_rate_range_switch)
         Visualization.setTabOrder(self.detection_rate_range_switch, self.reset_heatmap_v)
         Visualization.setTabOrder(self.reset_heatmap_v, self.hitmap_plot_size)
         Visualization.setTabOrder(self.hitmap_plot_size, self.hit_displayed)
@@ -690,6 +713,8 @@ class Ui_Visualization(object):
         self.index_hist_mc = np.where(self.bins_mc == self.max_mc_val)[0][0]
 
         self.dc_hold.clicked.connect(self.dc_hold_clicked)
+        self.set_dc_voltage.clicked.connect(self.set_dc_voltage_clicked)
+        self.set_dc_voltage_value.editingFinished.connect(self._clamp_set_dc_voltage_field)
 
         self.hitmap_count.setReadOnly(True)
         self.voltage.setReadOnly(True)
@@ -722,6 +747,8 @@ class Ui_Visualization(object):
         self.label_200.setText(_translate("Visualization", "Voltage"))
         self.voltage.setText(_translate("Visualization", "0"))
         self.dc_hold.setText(_translate("Visualization", "Hold DC Voltage"))
+        self.set_dc_voltage.setText(_translate("Visualization", "Set DC Voltage"))
+        self.set_dc_voltage_value.setText(_translate("Visualization", str(int(self.conf.get('default_vdc_min', 500)))))
         self.label_201.setText(_translate("Visualization", "Detection Rate"))
         self.detection_rate.setText(_translate("Visualization", "0"))
         self.detection_rate_range_switch.setText(_translate("Visualization", "Short Range"))
@@ -760,9 +787,64 @@ class Ui_Visualization(object):
             if not self.variables.vdc_hold:
                 self.variables.vdc_hold = True
                 self.dc_hold.setStyleSheet("QPushButton{\nbackground: rgb(0, 255, 26)\n}")
+                self._set_dc_voltage_controls_enabled(True)
             elif self.variables.vdc_hold:
                 self.variables.vdc_hold = False
                 self.dc_hold.setStyleSheet(self.original_button_style)
+                self._set_dc_voltage_controls_enabled(False)
+
+    def _dc_voltage_limits(self):
+        """(min, max) DC voltage the Set field allows, from config.toml."""
+        lo = int(self.conf.get('default_vdc_min', 500))
+        hi = int(self.conf.get('default_vdc_max', 4000))
+        return (lo, hi) if lo <= hi else (hi, lo)
+
+    def _set_dc_voltage_controls_enabled(self, enabled):
+        """Enable the Set-DC-voltage field + button only while DC is held."""
+        self.set_dc_voltage_value.setEnabled(enabled)
+        self.set_dc_voltage.setEnabled(enabled)
+        if enabled:
+            # Seed the field with the current supply voltage (clamped) so the
+            # operator nudges from where it is now.
+            lo, hi = self._dc_voltage_limits()
+            try:
+                cur = int(float(getattr(self.variables, 'specimen_voltage', 0)))
+            except (TypeError, ValueError):
+                cur = lo
+            self.set_dc_voltage_value.setText(str(min(max(cur, lo), hi)))
+
+    def _clamp_set_dc_voltage_field(self):
+        """Clamp the typed value into the config [min, max] DC range."""
+        lo, hi = self._dc_voltage_limits()
+        try:
+            val = int(float(self.set_dc_voltage_value.text().strip()))
+        except (TypeError, ValueError):
+            self.set_dc_voltage_value.setText(str(lo))
+            return
+        self.set_dc_voltage_value.setText(str(min(max(val, lo), hi)))
+
+    def set_dc_voltage_clicked(self):
+        """Apply the entered DC voltage to the supply (only while DC is held).
+
+        Reuses the existing mechanism unchanged: write the clamped target
+        into ``variables.vdc_min`` and raise ``flag_new_min_voltage``, which
+        the experiment control loop consumes to ramp the supply to it (the
+        same path the old main-GUI 'Set' button used, just with a
+        user-entered value instead of the Min. Voltage field).
+        """
+        if not self.variables.vdc_hold:
+            self.error_message("Hold the DC voltage first")
+            return
+        lo, hi = self._dc_voltage_limits()
+        try:
+            val = int(float(self.set_dc_voltage_value.text().strip()))
+        except (TypeError, ValueError):
+            self.error_message("Enter a valid DC voltage (V)")
+            return
+        val = min(max(val, lo), hi)
+        self.set_dc_voltage_value.setText(str(val))
+        self.variables.vdc_min = val
+        self.variables.flag_new_min_voltage = True
 
     def heatmap_fdm_switch_change(self):
         """No-op kept for backward compatibility.

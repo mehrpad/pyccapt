@@ -14,6 +14,19 @@ else:
     _PYPYLON_IMPORT_ERROR = None
 
 
+def _normalize_serial(value) -> str | None:
+	"""Coerce a config serial value to a clean string, or None if blank.
+
+	Serials may be written in config.toml as a quoted string or a bare
+	number; both are accepted. An empty/whitespace value means "not
+	configured" and returns None.
+	"""
+	if value is None:
+		return None
+	text = str(value).strip()
+	return text or None
+
+
 def check_camera_backend() -> tuple[bool, str]:
     """Return whether the Basler camera backend is usable on this host.
 
@@ -62,10 +75,14 @@ class CameraWorker(QObject):
 
     finished = pyqtSignal()
 
-    SLOT_COUNT = 2
+    # One slot per logical GUI view, in fixed order: 0 = side, 1 = top,
+    # 2 = angle. Only side and top are physical today; angle mirrors the
+    # side image until a third camera is configured (see VIEW_ORDER).
+    SLOT_COUNT = 3
+    VIEW_ORDER = ("side", "top", "angle")
     RECONNECT_INTERVAL = 3.0
 
-    def __init__(self, variables, emitter):
+    def __init__(self, variables, emitter, conf=None):
         super().__init__()
         self.flag_default_exposure_time = None
         # Cameras start with ExposureAuto = Continuous so the user gets a
@@ -75,6 +92,19 @@ class CameraWorker(QObject):
         self.exposure_mode = 'Continuous'
         self.emitter = emitter
         self.variables = variables
+
+        # Pin each view to a physical camera by serial number, read from
+        # config.toml (camera_serial_side / _top / _angle). A blank/missing
+        # value leaves that slot to auto-fill from any unassigned camera,
+        # which reproduces the legacy first-come behaviour. Order must match
+        # VIEW_ORDER / the slot layout (side=0, top=1, angle=2).
+        conf = conf or {}
+        self._configured_serials = [
+	        _normalize_serial(conf.get(f"camera_serial_{view}"))
+	        for view in self.VIEW_ORDER
+        ]
+        # Serials explicitly assigned to a view never fill a different slot.
+        self._configured_serial_set = {s for s in self._configured_serials if s}
 
         self.running = False
         self.index_save_image = 0
@@ -96,7 +126,10 @@ class CameraWorker(QObject):
         self.emitter.auto_exposure_time.connect(self.set_auto_exposure_time)
 
         self._slots = [None] * self.SLOT_COUNT
-        self._slot_serials = [None] * self.SLOT_COUNT
+        # Pre-seed each slot with its configured serial so the slot only ever
+        # binds to that physical camera; unconfigured slots stay None and keep
+        # the first-come fill behaviour.
+        self._slot_serials = list(self._configured_serials)
         self._applied_exposure = [None] * self.SLOT_COUNT
         self._applied_exposure_mode = [None] * self.SLOT_COUNT
         self._last_reconnect_attempt = 0.0
@@ -278,6 +311,11 @@ class CameraWorker(QObject):
         for sn, dev in by_serial.items():
             if sn in used_serials or sn in self._user_disabled_serials:
                 continue
+            # A serial pinned to a view in config.toml is only ever attached
+            # to its own slot (handled by the first pass above); never let it
+            # first-come into a different view.
+            if sn in self._configured_serial_set:
+	            continue
             for slot in range(self.SLOT_COUNT):
                 if self._slots[slot] is not None:
                     continue
@@ -712,16 +750,17 @@ class CameraWorker(QObject):
         self.finished.emit()
 
     def _emit_images(self, images):
-        # Slot 0 -> img0 (side overview), Slot 1 -> img1 (top overview).
-        # img2 mirrors slot 0 so the existing 'angle' view doesn't go blank
-        # when only one camera is connected.
+	    # Slot 0 -> img0 (side overview), slot 1 -> img1 (top overview),
+	    # slot 2 -> img2 (angle). When no third camera is attached, the
+	    # angle view mirrors slot 0 so it doesn't go blank.
         img0 = images[0] if len(images) > 0 else None
         img1 = images[1] if len(images) > 1 else None
+	    img2 = images[2] if len(images) > 2 else None
         if img0 is not None:
             self.emitter.img0_orig.emit(np.swapaxes(img0, 0, 1))
         if img1 is not None:
             self.emitter.img1_orig.emit(np.swapaxes(img1, 0, 1))
-        angle_src = img0 if img0 is not None else img1
+	    angle_src = img2 if img2 is not None else (img0 if img0 is not None else img1)
         if angle_src is not None:
             self.emitter.img2_orig.emit(np.swapaxes(angle_src, 0, 1))
 
@@ -735,8 +774,8 @@ class CameraWorker(QObject):
         that isn't currently attached.
 
         The mapping is slot 0 → cam_1 (side), slot 1 → cam_2 (top),
-        cam_3 (angle) mirrors slot 0 because the angle view is a copy
-        of the side image when only two cameras are connected.
+        slot 2 → cam_3 (angle). When no third camera is attached the angle
+        view mirrors slot 0, so its exposure is reported as the side value.
         """
 
         def _read(slot):
@@ -750,8 +789,10 @@ class CameraWorker(QObject):
 
         t0 = _read(0)
         t1 = _read(1)
-        # Angle is a duplicate of the side feed, so report the same value.
-        t2 = t0
+        # Angle reports its own camera when present, else mirrors the side feed.
+        t2 = _read(2)
+        if t2 is None:
+	        t2 = t0
         # Nothing useful to report if no slots are attached.
         if t0 is None and t1 is None:
             return

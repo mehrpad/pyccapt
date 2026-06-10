@@ -781,7 +781,7 @@ class Ui_Cameras_Alignment(object):
         # cameras are currently connected so that hot-plugging a camera
         # later automatically populates the views — the GUI window itself
         # stays open in either case.
-        self.camera_worker = camera.CameraWorker(variables=self.variables, emitter=self.emitter)
+        self.camera_worker = camera.CameraWorker(variables=self.variables, emitter=self.emitter, conf=self.conf)
         if self.camera_worker.camera_status_message:
             print(self.camera_worker.camera_status_message)
         if not self.camera_worker.camera_available:

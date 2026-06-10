@@ -1133,10 +1133,13 @@ class Ui_Visualization(object):
                     range=self.range,
                 )
                 self.hist_fdm = np.log10(win_hist + 1)
-                self.fdm_count.setText(str(int(self._fdm_window_x.size)))
             else:
                 self.hist_fdm = self._fdm_hist_all
-                self.fdm_count.setText(str(self._fdm_count_all))
+
+            # The ion counter is the cumulative total detected and keeps
+            # growing every tick regardless of mode, so toggling Last Events
+            # only swaps which map is drawn — it never changes the number.
+            self.fdm_count.setText(str(self._fdm_count_all))
 
             img_fdm = pg.ImageItem()
             img_fdm.setImage(np.copy(self.hist_fdm))
@@ -1421,15 +1424,19 @@ class Ui_Visualization(object):
         # (the two pipelines differ — TOF starts with a sqrt(V/V̄)
         # prescaling, MC with a bowl-only initial step), so set the mode
         # immediately before building each worker.
+        # Re-fit cadence is driven by the GUI's running ion counter
+        # (length_events): each worker re-fits every
+        # live_calibration_refit_event_interval new events.
+        event_count = lambda: self.length_events
         self.conf["live_calibration_mode"] = "tof"
         self._calib_worker_tof = live_calibration.LiveCalibrationWorker(
-            self._calibration_snapshot, self.conf,
+            self._calibration_snapshot, self.conf, event_count,
         )
         self._calib_worker_tof.parameters_updated.connect(self._on_calib_params_tof)
         self._calib_worker_tof.status_changed.connect(self._on_calib_status_tof)
         self.conf["live_calibration_mode"] = "mc"
         self._calib_worker_mc = live_calibration.LiveCalibrationWorker(
-            self._calibration_snapshot, self.conf,
+            self._calibration_snapshot, self.conf, event_count,
         )
         self._calib_worker_mc.parameters_updated.connect(self._on_calib_params_mc)
         self._calib_worker_mc.status_changed.connect(self._on_calib_status_mc)
@@ -1443,14 +1450,22 @@ class Ui_Visualization(object):
     # arrays. The GUI thread picks the work up in _drain_calib_updates()
     # on the next render tick.
     def _on_calib_params_tof(self, params):
+        # Reset the calibrated accumulator ONLY when calibration turns on or
+        # off (None<->params), not on every refit. With the ~1000-event
+        # cadence, resetting each refit would keep the calibrated spectrum
+        # permanently near-empty. Between transitions the histogram keeps
+        # accumulating and sharpens as the fit converges (small frequent
+        # parameter nudges barely move already-binned events).
+        if (self._calib_params_tof is None) != (params is None):
+            self._calib_reset_tof = True
         self._calib_params_tof = params  # atomic reference swap
-        self._calib_reset_tof = True  # GUI thread zeroes hist_tof
         self._calib_status["tof"] = self._params_status(params)
         self._calib_status_dirty = True
 
     def _on_calib_params_mc(self, params):
+        if (self._calib_params_mc is None) != (params is None):
+            self._calib_reset_mc = True
         self._calib_params_mc = params
-        self._calib_reset_mc = True
         self._calib_status["mc"] = self._params_status(params)
         self._calib_status_dirty = True
 

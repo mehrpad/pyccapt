@@ -31,10 +31,13 @@ try:
 except ImportError:
     ctl = None
     print(
-        "[stage_smartact] WARNING: 'smaract' package not found.\n"
-        "  Install it with:  pip install smaract\n"
-        "  Or follow the SmarAct MCS2 SDK installation guide.\n"
-        "  All stage functions will raise RuntimeError until the package is installed."
+        "[stage_smartact] WARNING: 'smaract.ctl' SDK not found.\n"
+        "  It is NOT on PyPI ('pip install smaract' will fail). Install it from\n"
+        "  the SmarAct MCS2 SDK that ships with the controller, e.g.:\n"
+        "    pip install \"C:/SmarAct/MCS2/SDK/Python/packages/smaract.ctl-<ver>.zip\"\n"
+        "  If that fails on modern setuptools (no setuptools.command.upload),\n"
+        "  copy the SDK's smaract/ folder into the env's site-packages instead.\n"
+        "  All stage functions will raise RuntimeError until the SDK is installed."
     )
 
 
@@ -42,9 +45,9 @@ def _check_smaract():
     """Raise a clear error if smaract is not installed."""
     if ctl is None:
         raise RuntimeError(
-            "The 'smaract' package is not installed.\n"
-            "Install it with:  pip install smaract\n"
-            "Or follow the SmarAct MCS2 SDK installation guide."
+            "The 'smaract.ctl' SDK is not installed (it is NOT on PyPI).\n"
+            "Install it from the SmarAct MCS2 SDK, e.g.:\n"
+            "  pip install \"C:/SmarAct/MCS2/SDK/Python/packages/smaract.ctl-<ver>.zip\""
         )
 
 
@@ -299,9 +302,9 @@ def find_reference(locator: str = None):
 if __name__ == "__main__":
     if ctl is None:
         print(
-            "\nERROR: 'smaract' package is not installed.\n"
-            "  Install it with:  pip install smaract\n"
-            "  Or follow the SmarAct MCS2 SDK installation guide."
+            "\nERROR: 'smaract.ctl' SDK is not installed (it is NOT on PyPI).\n"
+            "  Install it from the SmarAct MCS2 SDK, e.g.:\n"
+            "    pip install \"C:/SmarAct/MCS2/SDK/Python/packages/smaract.ctl-<ver>.zip\""
         )
         raise SystemExit(1)
 

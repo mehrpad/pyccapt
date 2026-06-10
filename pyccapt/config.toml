@@ -63,6 +63,11 @@ default_ex_name = "test"
 # Set the interval to 0 to disable the live calibration entirely; the
 # spectrum will then always show uncalibrated mc/tof.
 live_calibration_refit_interval_s = 15.0
+# Preferred cadence: re-fit every N NEW events instead of on a timer. The
+# GUI passes its running ion counter to the worker, which re-fits each time
+# this many fresh events have arrived (keeps the calibration tracking drift
+# without the spectrum constantly resetting). Set <=0 to ignore.
+live_calibration_refit_event_interval = 1000
 # Minimum events required before the worker bothers to fit. Below this
 # count the GUI shows uncalibrated data with a "calibrating…" status.
 live_calibration_min_events = 5000
@@ -87,14 +92,17 @@ live_calibration_mass_window_max = 60.0
 # live_calibration_target_mass = 56.0    # e.g. Fe+ at 56 Da
 # Voltage-fit window size: number of consecutive ions per bin used to
 # compute the mean (V, t/peak) sample for the polynomial fit. Mirrors
-# ``sample_size`` in the offline pipeline (mode='ion_seq').
-live_calibration_volt_sample_size = 500
+# ``sample_size`` in the offline pipeline (mode='ion_seq'). Larger = fewer
+# windows = faster/cheaper fits (the quadratic needs only ~5-10 windows);
+# increase this and the bowl tile size below to lower the live-cal CPU cost.
+live_calibration_volt_sample_size = 1000
 # Polar-tile size (mm) for the bowl correction. The detector is split
-# into rings of this width and each ring into 8..96 angular sectors;
-# one (x_med, y_med, t_mean/peak) sample is taken per non-empty cell
-# and a global 6-parameter polynomial is fit to the samples. Mirrors
-# ``sample_size`` in calibration.bowl_correction(sampling_mode='polar').
-live_calibration_bowl_sample_size_mm = 4.0
+# into rings of this width and each ring into angular sectors; one
+# (x_med, y_med, t_mean/peak) sample is taken per non-empty cell and a
+# 5-parameter radial polynomial (the offline polar default) is fit to the
+# samples. Larger tiles = fewer cells = faster. Matches the offline
+# workflow default (5 mm).
+live_calibration_bowl_sample_size_mm = 5.0
 # EMA smoothing window: average the last N successful parameter sets
 # before the GUI applies them. Damps jitter in the displayed spectrum
 # from event-pool noise across successive refits. Set to 1 to disable.

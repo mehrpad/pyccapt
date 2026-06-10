@@ -776,16 +776,16 @@ class Ui_Visualization(object):
         return
 
     def _fdm_last_events_toggle(self):
-	    """Swap the FDM display between the entire map and the last-N map.
+        """Swap the FDM display between the entire map and the last-N map.
 
-		Both accumulators are maintained every tick (see the FDM block in
-		update_graphs_helper), so this is a pure display swap: neither the
-		entire histogram nor the sliding window is cleared, and toggling
-		back and forth never loses data.
+        Both accumulators are maintained every tick (see the FDM block in
+        update_graphs_helper), so this is a pure display swap: neither the
+        entire histogram nor the sliding window is cleared, and toggling
+        back and forth never loses data.
 
-		Default (button up)  - show the entire FDM (every ion ever).
-		Toggled on (green)   - show only the most recent fdm_max_ions hits.
-		"""
+        Default (button up)  - show the entire FDM (every ion ever).
+        Toggled on (green)   - show only the most recent fdm_max_ions hits.
+        """
         self._fdm_use_last_events = self.fdm_last_events_switch.isChecked()
         if self._fdm_use_last_events:
             self.fdm_last_events_switch.setStyleSheet("QPushButton{background: rgb(0, 255, 26)}")
@@ -976,13 +976,13 @@ class Ui_Visualization(object):
                     x_le = self.last_100_thousand_det_x[-self.num_event_mc_tof :]
                     y_le = self.last_100_thousand_det_y[-self.num_event_mc_tof :]
                     if self.conf["visualization"] == "tof":
-	                    params = None if self.uncalibrated_mode else self._calib_params_tof
-	                    vals = self._apply_axis(params, "tof", t_le, v_le, x_le, y_le, t_0)
-	                    hist_tof_last_events, _ = np.histogram(vals, bins=self.bins_tof)
+                        params = None if self.uncalibrated_mode else self._calib_params_tof
+                        vals = self._apply_axis(params, "tof", t_le, v_le, x_le, y_le, t_0)
+                        hist_tof_last_events, _ = np.histogram(vals, bins=self.bins_tof)
                     else:  # "mc"
-	                    params = None if self.uncalibrated_mode else self._calib_params_mc
-	                    vals = self._apply_axis(params, "mc", t_le, v_le, x_le, y_le, t_0)
-	                    hist_mc_last_events, _ = np.histogram(vals, bins=self.bins_mc)
+                        params = None if self.uncalibrated_mode else self._calib_params_mc
+                        vals = self._apply_axis(params, "mc", t_le, v_le, x_le, y_le, t_0)
+                        hist_mc_last_events, _ = np.histogram(vals, bins=self.bins_mc)
 
                 # Four cumulative spectra, every one updated each tick so
                 # switching the displayed view is a pure swap that never
@@ -997,16 +997,16 @@ class Ui_Visualization(object):
                 batch_y = yy[mask_t]
                 tof_raw = batch_t
                 mc_raw = tof2mc_simple.tof_2_mc(
-	                batch_t, t_0, batch_v, batch_x, batch_y,
-	                flightPathLength=self.conf["flight_path_length"],
+                    batch_t, t_0, batch_v, batch_x, batch_y,
+                    flightPathLength=self.conf["flight_path_length"],
                 )
                 self.hist_tof_uncalib += np.histogram(tof_raw, bins=self.bins_tof)[0]
                 self.hist_mc_uncalib += np.histogram(mc_raw, bins=self.bins_mc)[0]
                 tof_cal = self._apply_axis(
-	                self._calib_params_tof, "tof", batch_t, batch_v, batch_x, batch_y, t_0
+                    self._calib_params_tof, "tof", batch_t, batch_v, batch_x, batch_y, t_0
                 )
                 mc_cal = self._apply_axis(
-	                self._calib_params_mc, "mc", batch_t, batch_v, batch_x, batch_y, t_0
+                    self._calib_params_mc, "mc", batch_t, batch_v, batch_x, batch_y, t_0
                 )
                 self.hist_tof += np.histogram(tof_cal, bins=self.bins_tof)[0]
                 self.hist_mc += np.histogram(mc_cal, bins=self.bins_mc)[0]
@@ -1135,8 +1135,8 @@ class Ui_Visualization(object):
                 self.hist_fdm = np.log10(win_hist + 1)
                 self.fdm_count.setText(str(int(self._fdm_window_x.size)))
             else:
-	            self.hist_fdm = self._fdm_hist_all
-	            self.fdm_count.setText(str(self._fdm_count_all))
+                self.hist_fdm = self._fdm_hist_all
+                self.fdm_count.setText(str(self._fdm_count_all))
 
             img_fdm = pg.ImageItem()
             img_fdm.setImage(np.copy(self.hist_fdm))
@@ -1277,9 +1277,9 @@ class Ui_Visualization(object):
             if self.change_detection_rate_range:
                 self.detection_rate_range_switch.click()
             if self.conf["visualization"] == "tof":
-	            # Force the MC view for a consistent exported screenshot,
-	            # keeping the current calibrated/raw choice.
-	            self._select_spectrum_view("mc", self.uncalibrated_mode)
+                # Force the MC view for a consistent exported screenshot,
+                # keeping the current calibrated/raw choice.
+                self._select_spectrum_view("mc", self.uncalibrated_mode)
 
             self.update_graphs_helper()
 
@@ -1312,56 +1312,56 @@ class Ui_Visualization(object):
             self.variables.last_screen_shot = False
 
     def _select_spectrum_view(self, visualization, uncalibrated):
-	    """Select which of the four live spectra is displayed.
+        """Select which of the four live spectra is displayed.
 
-		``visualization`` is "mc" or "tof"; ``uncalibrated`` True picks
-		the raw series, False the calibrated one. This is a pure display
-		swap — it never clears an accumulator or restarts a fitter, so
-		the four spectra keep filling in the background and switching is
-		instant. Only the "Last Events" button limits what is shown.
-		"""
-	    self.conf["visualization"] = visualization
-	    self.uncalibrated_mode = uncalibrated
-	    if visualization == "tof":
+        ``visualization`` is "mc" or "tof"; ``uncalibrated`` True picks
+        the raw series, False the calibrated one. This is a pure display
+        swap — it never clears an accumulator or restarts a fitter, so
+        the four spectra keep filling in the background and switching is
+        instant. Only the "Last Events" button limits what is shown.
+        """
+        self.conf["visualization"] = visualization
+        self.uncalibrated_mode = uncalibrated
+        if visualization == "tof":
             self.histogram.setLabel("bottom", "Time", units='ns', **self.styles)
         else:
-	        self.histogram.setLabel("bottom", "m/c", units='Da', **self.styles)
-	    self._highlight_active_view_button()
+            self.histogram.setLabel("bottom", "m/c", units='Da', **self.styles)
+        self._highlight_active_view_button()
 
     def _highlight_active_view_button(self):
-	    """Paint the active view button green, the other three default."""
-	    buttons = {
-		    ("mc", True): self.btn_view_mc,
-		    ("tof", True): self.btn_view_tof,
-		    ("mc", False): self.btn_view_mc_cal,
-		    ("tof", False): self.btn_view_tof_cal,
-	    }
-	    active = buttons.get((self.conf.get("visualization", "mc"), self.uncalibrated_mode))
-	    for button in buttons.values():
-		    if button is active:
-			    button.setStyleSheet("QPushButton{background: rgb(0, 255, 26)}")
-		    else:
-			    button.setStyleSheet(self.original_button_style)
+        """Paint the active view button green, the other three default."""
+        buttons = {
+            ("mc", True): self.btn_view_mc,
+            ("tof", True): self.btn_view_tof,
+            ("mc", False): self.btn_view_mc_cal,
+            ("tof", False): self.btn_view_tof_cal,
+        }
+        active = buttons.get((self.conf.get("visualization", "mc"), self.uncalibrated_mode))
+        for button in buttons.values():
+            if button is active:
+                button.setStyleSheet("QPushButton{background: rgb(0, 255, 26)}")
+            else:
+                button.setStyleSheet(self.original_button_style)
 
     # ---------------------------------------------------------------- live cal
 
     def _apply_axis(self, params, want, t, v, x, y, t_0):
-	    """Return the requested axis ("tof" or "mc") for these events.
+        """Return the requested axis ("tof" or "mc") for these events.
 
-		Applies ``params`` when available (the matching mode's live fit),
-		otherwise falls back to the geometry-only raw value so the
-		calibrated accumulator still fills before the first fit lands.
-		"""
-	    if params is not None:
-		    corrected = live_calibration.apply_corrections(t, v, x, y, params)
-		    if corrected is not None:
-			    t_corr, mc_corr = corrected
-			    return t_corr if want == "tof" else mc_corr
-	    if want == "tof":
-		    return t
-	    return tof2mc_simple.tof_2_mc(
-		    t, t_0, v, x, y, flightPathLength=self.conf["flight_path_length"],
-	    )
+        Applies ``params`` when available (the matching mode's live fit),
+        otherwise falls back to the geometry-only raw value so the
+        calibrated accumulator still fills before the first fit lands.
+        """
+        if params is not None:
+            corrected = live_calibration.apply_corrections(t, v, x, y, params)
+            if corrected is not None:
+                t_corr, mc_corr = corrected
+                return t_corr if want == "tof" else mc_corr
+        if want == "tof":
+            return t
+        return tof2mc_simple.tof_2_mc(
+            t, t_0, v, x, y, flightPathLength=self.conf["flight_path_length"],
+        )
 
     def _calibration_snapshot(self):
         """Snapshot callback handed to the LiveCalibrationWorker.
@@ -1394,13 +1394,13 @@ class Ui_Visualization(object):
             return None
 
     def _start_live_calibration_worker(self):
-	    """Spin up one background fitter per mode, unless disabled in config.
+        """Spin up one background fitter per mode, unless disabled in config.
 
-		The mc and tof calibrations are independent fits, so we run two
-		workers in parallel and keep both parameter sets live. That is
-		what lets the four view buttons switch instantly without ever
-		refitting or clearing an accumulator.
-		"""
+        The mc and tof calibrations are independent fits, so we run two
+        workers in parallel and keep both parameter sets live. That is
+        what lets the four view buttons switch instantly without ever
+        refitting or clearing an accumulator.
+        """
         try:
             interval = float(self.conf.get("live_calibration_refit_interval_s", 15.0))
         except (TypeError, ValueError):
@@ -1411,30 +1411,30 @@ class Ui_Visualization(object):
             self._calib_status["mc"] = "disabled"
             self._calib_status_dirty = True
             return
-	    # Tell the workers which t_0 to use by hinting at the active pulse mode.
+        # Tell the workers which t_0 to use by hinting at the active pulse mode.
         try:
             pulse_mode = str(getattr(self.variables, "pulse_mode", "")).strip()
             self.conf["_active_pulse_mode_is_laser"] = pulse_mode in {"Laser", "VoltageLaser"}
         except Exception:
             self.conf["_active_pulse_mode_is_laser"] = False
-	    # LiveCalibrationWorker captures its mode from conf at construction
-	    # (the two pipelines differ — TOF starts with a sqrt(V/V̄)
-	    # prescaling, MC with a bowl-only initial step), so set the mode
-	    # immediately before building each worker.
-	    self.conf["live_calibration_mode"] = "tof"
-	    self._calib_worker_tof = live_calibration.LiveCalibrationWorker(
-		    self._calibration_snapshot, self.conf,
-	    )
-	    self._calib_worker_tof.parameters_updated.connect(self._on_calib_params_tof)
-	    self._calib_worker_tof.status_changed.connect(self._on_calib_status_tof)
-	    self.conf["live_calibration_mode"] = "mc"
-	    self._calib_worker_mc = live_calibration.LiveCalibrationWorker(
-		    self._calibration_snapshot, self.conf,
+        # LiveCalibrationWorker captures its mode from conf at construction
+        # (the two pipelines differ — TOF starts with a sqrt(V/V̄)
+        # prescaling, MC with a bowl-only initial step), so set the mode
+        # immediately before building each worker.
+        self.conf["live_calibration_mode"] = "tof"
+        self._calib_worker_tof = live_calibration.LiveCalibrationWorker(
+            self._calibration_snapshot, self.conf,
         )
-	    self._calib_worker_mc.parameters_updated.connect(self._on_calib_params_mc)
-	    self._calib_worker_mc.status_changed.connect(self._on_calib_status_mc)
-	    self._calib_worker_tof.start()
-	    self._calib_worker_mc.start()
+        self._calib_worker_tof.parameters_updated.connect(self._on_calib_params_tof)
+        self._calib_worker_tof.status_changed.connect(self._on_calib_status_tof)
+        self.conf["live_calibration_mode"] = "mc"
+        self._calib_worker_mc = live_calibration.LiveCalibrationWorker(
+            self._calibration_snapshot, self.conf,
+        )
+        self._calib_worker_mc.parameters_updated.connect(self._on_calib_params_mc)
+        self._calib_worker_mc.status_changed.connect(self._on_calib_status_mc)
+        self._calib_worker_tof.start()
+        self._calib_worker_mc.start()
 
     # --- live-calibration slots (may run on a worker thread) -------------
     # PyQt delivers these in the *emitting* worker's thread (the receiver
@@ -1443,76 +1443,76 @@ class Ui_Visualization(object):
     # arrays. The GUI thread picks the work up in _drain_calib_updates()
     # on the next render tick.
     def _on_calib_params_tof(self, params):
-	    self._calib_params_tof = params  # atomic reference swap
-	    self._calib_reset_tof = True  # GUI thread zeroes hist_tof
-	    self._calib_status["tof"] = self._params_status(params)
-	    self._calib_status_dirty = True
+        self._calib_params_tof = params  # atomic reference swap
+        self._calib_reset_tof = True  # GUI thread zeroes hist_tof
+        self._calib_status["tof"] = self._params_status(params)
+        self._calib_status_dirty = True
 
     def _on_calib_params_mc(self, params):
-	    self._calib_params_mc = params
-	    self._calib_reset_mc = True
-	    self._calib_status["mc"] = self._params_status(params)
-	    self._calib_status_dirty = True
+        self._calib_params_mc = params
+        self._calib_reset_mc = True
+        self._calib_status["mc"] = self._params_status(params)
+        self._calib_status_dirty = True
 
     def _on_calib_status_tof(self, text):
-	    self._calib_status["tof"] = text
-	    self._calib_status_dirty = True
+        self._calib_status["tof"] = text
+        self._calib_status_dirty = True
 
     def _on_calib_status_mc(self, text):
-	    self._calib_status["mc"] = text
-	    self._calib_status_dirty = True
+        self._calib_status["mc"] = text
+        self._calib_status_dirty = True
 
     @staticmethod
     def _params_status(params):
-	    if params is None:
-		    return "raw (no fit)"
-	    return f"R²={params.fit_quality:.2f} n={params.num_events_used}"
+        if params is None:
+            return "raw (no fit)"
+        return f"R²={params.fit_quality:.2f} n={params.num_events_used}"
 
     def _drain_calib_updates(self):
-	    """Apply pending live-calibration updates on the GUI thread.
+        """Apply pending live-calibration updates on the GUI thread.
 
-		Zeroing a calibrated accumulator (its old bins were binned under
-		now-superseded params) and updating the status banner happen here
-		so the histogram arrays and Qt widgets are only ever touched from
-		the GUI thread. The raw accumulators never reset — their bin
-		meanings don't depend on any fit.
-		"""
-	    if self._calib_reset_tof:
-		    self._calib_reset_tof = False
-		    try:
-			    self.hist_tof.fill(0)
-		    except Exception:
-			    pass
-	    if self._calib_reset_mc:
-		    self._calib_reset_mc = False
-		    try:
-			    self.hist_mc.fill(0)
-		    except Exception:
-			    pass
-	    if self._calib_status_dirty:
-		    self._calib_status_dirty = False
-		    try:
-			    ok = any(s.startswith("R²") for s in self._calib_status.values())
-			    color = "#0a7d20" if ok else "#666666"
-			    self.calib_status_label.setText(
-				    f"live cal — tof: {self._calib_status['tof']} | mc: {self._calib_status['mc']}"
-			    )
-			    self.calib_status_label.setStyleSheet(f"QLabel{{color:{color};}}")
-		    except Exception:
-			    pass
+        Zeroing a calibrated accumulator (its old bins were binned under
+        now-superseded params) and updating the status banner happen here
+        so the histogram arrays and Qt widgets are only ever touched from
+        the GUI thread. The raw accumulators never reset — their bin
+        meanings don't depend on any fit.
+        """
+        if self._calib_reset_tof:
+            self._calib_reset_tof = False
+            try:
+                self.hist_tof.fill(0)
+            except Exception:
+                pass
+        if self._calib_reset_mc:
+            self._calib_reset_mc = False
+            try:
+                self.hist_mc.fill(0)
+            except Exception:
+                pass
+        if self._calib_status_dirty:
+            self._calib_status_dirty = False
+            try:
+                ok = any(s.startswith("R²") for s in self._calib_status.values())
+                color = "#0a7d20" if ok else "#666666"
+                self.calib_status_label.setText(
+                    f"live cal — tof: {self._calib_status['tof']} | mc: {self._calib_status['mc']}"
+                )
+                self.calib_status_label.setStyleSheet(f"QLabel{{color:{color};}}")
+            except Exception:
+                pass
 
     def _stop_live_calibration_worker(self):
-	    """Stop both background fitters cleanly; called from .stop()."""
-	    for attr in ("_calib_worker_tof", "_calib_worker_mc"):
-		    worker = getattr(self, attr, None)
-		    setattr(self, attr, None)
-		    if worker is None:
-			    continue
-		    try:
-			    worker.stop()
-			    worker.wait(2000)  # ms
-		    except Exception:
-			    pass
+        """Stop both background fitters cleanly; called from .stop()."""
+        for attr in ("_calib_worker_tof", "_calib_worker_mc"):
+            worker = getattr(self, attr, None)
+            setattr(self, attr, None)
+            if worker is None:
+                continue
+            try:
+                worker.stop()
+                worker.wait(2000)  # ms
+            except Exception:
+                pass
 
     def spectrum_last_events(self):
         """

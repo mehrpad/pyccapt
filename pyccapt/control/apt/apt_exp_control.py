@@ -2,6 +2,9 @@ import copy
 import datetime
 import multiprocessing
 import time
+from pathlib import Path
+
+import numpy as np
 
 import serial.tools.list_ports
 from simple_pid import PID
@@ -84,6 +87,11 @@ class APT_Exp_Control:
         self.access_override_enabled = False
         self.override_disabled_devices = set()
 
+        # apt/* metadata chunk state: how many items have already been flushed
+        # to disk and which chunk file ID to use next.
+        self._apt_meta_flush_offset = 0
+        self._apt_meta_chunk_id = 0
+
     def _is_config_enabled(self, key):
         value = str(self.conf.get(key, "off")).strip().lower()
         return value in {"on", "enabled", "true", "1"}
@@ -127,6 +135,45 @@ class APT_Exp_Control:
         self.hsd_process = self.detector_runtime.hsd_process
         if self.tdc_process is None and self.hsd_process is None:
             print("No counter source selected")
+
+    # Flush apt/* metadata to a chunk file every this many main-loop steps
+    # (~20 s at the default 5 Hz rate).  Smaller = more frequent checkpoints
+    # but slightly more disk I/O.
+    _APT_META_CHUNK_SIZE = 100
+
+    def _flush_apt_meta_chunks(self, time_counter: list, time_ex: list) -> None:
+        """Write accumulated apt/* metadata items (since last flush) to a chunk file.
+
+        Uses a half-open slice [_apt_meta_flush_offset : current_len] so
+        successive calls each write only the NEW items.  The in-memory lists
+        are NOT cleared, which means append_main_loop_results() still works
+        normally if chunk recovery is not needed.
+        """
+        start = self._apt_meta_flush_offset
+        end = len(time_counter)
+        if end <= start:
+            return
+        try:
+            chunk_dir = Path(self.variables.path) / "temp_data" / "chunks"
+            chunk_dir.mkdir(parents=True, exist_ok=True)
+            self._apt_meta_chunk_id += 1
+            cid = self._apt_meta_chunk_id
+
+            def _save(stem: str, seq, dtype) -> None:
+                arr = np.asarray(seq[start:end], dtype=dtype)
+                np.save(chunk_dir / f"{stem}_chunk_{cid}.npy", arr)
+
+            _save("apt_id",              time_counter,             np.uint64)
+            _save("apt_timestamps",      time_ex,                  np.float64)
+            _save("apt_num_events",      self.main_counter,        np.uint32)
+            _save("apt_num_raw_signals", self.main_raw_counter,    np.uint32)
+            _save("apt_temperature",     self.main_temperature,    np.float64)
+            _save("apt_vacuum",          self.main_chamber_vacuum, np.float64)
+
+            self._apt_meta_flush_offset = end
+        except Exception as exc:
+            if self.log_apt is not None:
+                self.log_apt.warning("apt meta chunk flush failed (chunk %d): %s", self._apt_meta_chunk_id, exc)
 
     def main_ex_loop(
         self,
@@ -699,6 +746,10 @@ class APT_Exp_Control:
 
                 steps += 1
 
+                # Periodic apt/* metadata checkpoint so the data survives a crash.
+                if steps % self._APT_META_CHUNK_SIZE == 0:
+                    self._flush_apt_meta_chunks(time_counter, time_ex)
+
         self.variables.start_flag = False  # Set the START flag
         time.sleep(1)
 
@@ -734,6 +785,9 @@ class APT_Exp_Control:
                 f"properly{initialize_devices.bcolors.ENDC}"
             )
             print(exc)
+
+        # Final apt/* metadata checkpoint (the tail that did not fill a full chunk).
+        self._flush_apt_meta_chunks(time_counter, time_ex)
 
         append_main_loop_results(
             self.variables,

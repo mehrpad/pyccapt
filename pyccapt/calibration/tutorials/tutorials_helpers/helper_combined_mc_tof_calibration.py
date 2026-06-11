@@ -72,15 +72,15 @@ def build_combined_mc_tof_calibration_panel(
     ]:
         widgets.link((src, 'value'), (dst, 'value'))
 
-    plot_button = widgets.Button(description='Plot hist', layout=label_layout)
-    auto_fast_button = widgets.Button(description='Auto calibration fast', layout=label_layout)
-    auto_best_button = widgets.Button(description='Auto calibration best', layout=label_layout)
+    plot_button = widgets.Button(description='Plot hist', layout=label_layout, button_style='primary')
+    auto_fast_button = widgets.Button(description='Auto calibration fast', layout=label_layout, button_style='info')
+    auto_best_button = widgets.Button(description='Auto calibration best', layout=label_layout, button_style='info')
     save_button = widgets.Button(description='Save correction', layout=label_layout)
-    back_button = widgets.Button(description='Back to saved', layout=label_layout)
-    reset_button = widgets.Button(description='Reset correction', layout=label_layout)
-    clear_button = widgets.Button(description='Clear plots', layout=label_layout)
+    back_button = widgets.Button(description='Back to saved', layout=label_layout, button_style='warning')
+    reset_button = widgets.Button(description='Reset correction', layout=label_layout, button_style='danger')
+    clear_button = widgets.Button(description='Clear plots', layout=label_layout, button_style='warning')
     gaussian_button = widgets.Button(description='MRP', layout=label_layout)
-    stat_button = widgets.Button(description='Plot stat', layout=label_layout)
+    stat_button = widgets.Button(description='Plot stat', layout=label_layout, button_style='primary')
 
     def _mode_specs():
         return (('mc_calib', 'm/c', combined_lim_mc.value), ('tof_calib', 'ToF', combined_lim_tof.value))

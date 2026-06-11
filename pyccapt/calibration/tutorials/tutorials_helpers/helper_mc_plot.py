@@ -152,7 +152,7 @@ def call_mc_plot(variables, selector):
         gaussian_mrp_button.disabled = False
 
     # Create a button widget to trigger the function
-    button_plot = widgets.Button(description='Plot')
+    button_plot = widgets.Button(description='Plot', button_style='primary')
 
     def on_button_click(_, variables, selector):
         # Disable the button while the code is running

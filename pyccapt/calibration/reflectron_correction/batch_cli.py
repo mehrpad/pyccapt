@@ -36,7 +36,10 @@ Notes
 - The instrument name accepts either the preset key (e.g. ``5000xr_oxford_5083_23091``)
   or the human-readable display name (case/space/dash-insensitive).
 - Output files are written beside each input as ``<input_stem>_corrected.h5``
-  (and ``<input_stem>_corrected.epos`` when ``--save-epos`` is set).
+  (and ``<input_stem>_corrected.epos`` when ``--save-epos`` is set). With
+  ``--plain-h5`` the uncorrected dataset is also written as ``<input_stem>.h5``;
+  with ``--with-matlab-range`` the ranging is written as ``<input_stem>_range.h5``
+  (ranging is m/c-based, so it is shared by the plain and the corrected dataset).
 - Existing outputs are **skipped automatically** on re-runs, so you can re-invoke
   the same command to retry only the files that failed previously. Use
   ``--overwrite`` to force a fresh write.
@@ -142,15 +145,16 @@ def _format_size(n_bytes: int) -> str:
     return f"{n:.1f} PiB"
 
 
-def _disk_has_room(out_path: Path, source_path: Path) -> tuple[bool, int, int]:
+def _disk_has_room(out_path: Path, source_path: Path, copies: int = 1) -> tuple[bool, int, int]:
     """Return ``(ok, free_bytes, needed_bytes)`` for a planned write.
 
-    We require roughly the source EPOS size plus a fixed headroom -- the
-    corrected HDF5 ends up similar in size to the raw EPOS, and pytables also
-    needs scratch room while it builds its chunks.
+    We require roughly ``copies`` times the source EPOS size plus a fixed
+    headroom -- each HDF5 we write (the corrected one, and optionally the plain
+    one) ends up similar in size to the raw EPOS, and pytables also needs
+    scratch room while it builds its chunks.
     """
     try:
-        needed = source_path.stat().st_size + _PER_FILE_DISK_HEADROOM_BYTES
+        needed = source_path.stat().st_size * max(copies, 1) + _PER_FILE_DISK_HEADROOM_BYTES
     except OSError:
         needed = _PER_FILE_DISK_HEADROOM_BYTES
     free = _free_bytes(out_path)
@@ -195,7 +199,12 @@ def _write_matlab_range_for(epos_path: Path, h5_path: Path, *, pattern: str, max
     fig_path = _find_matlab_range_fig(epos_path, pattern, max_depth)
     if fig_path is None:
         return None
-    range_h5 = h5_path.with_name(f"{h5_path.stem}_range.h5")
+    # Ranging is defined on m/c, which the reflectron correction (a detector
+    # x/y remap) does not change, so one range file serves both the plain and
+    # the corrected dataset. Name it after the EPOS stem (``<stem>_range.h5``)
+    # so it pairs with the plain ``<stem>.h5`` via the data loader's
+    # ``<dataset>_range.h5`` auto-pickup convention.
+    range_h5 = epos_path.with_name(f"{epos_path.stem}_range.h5")
     if range_h5.exists() and not overwrite:
         return {"status": "skipped", "fig": str(fig_path), "range_h5": str(range_h5)}
     frame = matlab_fig_range.fig_to_range_dataframe(fig_path)
@@ -238,62 +247,22 @@ def _correct_single_file(
     *,
     save_epos: bool,
     overwrite: bool,
+    plain_h5: bool = False,
     with_matlab_range: bool = False,
     matlab_range_pattern: str = "Massspectrum*.fig",
     matlab_range_depth: int = _DEFAULT_FIG_SEARCH_DEPTH,
 ) -> dict:
     h5_path = epos_path.with_name(f"{epos_path.stem}_corrected.h5")
     epos_out_path = epos_path.with_name(f"{epos_path.stem}_corrected.epos")
+    plain_h5_path = epos_path.with_name(f"{epos_path.stem}.h5")
 
-    if not overwrite and h5_path.exists() and (not save_epos or epos_out_path.exists()):
-        result: dict = {"status": "skipped", "h5": str(h5_path)}
-        if with_matlab_range:
-            range_info = _write_matlab_range_for(
-                epos_path,
-                h5_path,
-                pattern=matlab_range_pattern,
-                max_depth=matlab_range_depth,
-                overwrite=overwrite,
-            )
-            if range_info is not None:
-                result["matlab_range"] = range_info
-        return result
+    need_corrected = overwrite or not h5_path.exists()
+    need_corrected_epos = save_epos and (overwrite or not epos_out_path.exists())
+    need_plain = plain_h5 and (overwrite or not plain_h5_path.exists())
 
-    # Pre-flight: if there's clearly no room for this write, bail out with a
-    # clean message instead of letting pytables die mid-stream with errno=28.
-    ok, free, needed = _disk_has_room(h5_path, epos_path)
-    if not ok:
-        raise OSError(
-            f"Disk full: only {_format_size(free)} free on output drive but "
-            f"~{_format_size(needed)} required for {h5_path.name}. Free space "
-            "and re-run -- already-written outputs are skipped automatically."
-        )
-
-    written: dict = {"status": "ok"}
-
-    # When --save-epos is set we still need the full corrected DataFrame to
-    # write the binary EPOS, so we fall back to the eager in-memory path. When
-    # only the HDF5 output is requested (the common case), use the streaming
-    # corrector that keeps peak RAM bounded to a single chunk regardless of
-    # the EPOS size.
-    if save_epos:
-        raw = reflectron_core.load_epos_for_reflectron_correction(epos_path)
-        corrected = reflectron_core.apply_reflectron_correction_to_ccapt(raw, mesh)
-        if overwrite or not h5_path.exists():
-            _write_dataframe_to_hdf(corrected, h5_path)
-        if overwrite or not epos_out_path.exists():
-            ccapt_tools.ccapt_to_epos(
-                corrected,
-                path=str(epos_out_path.parent) + "\\",
-                name=epos_out_path.name,
-            )
-            written["epos"] = str(epos_out_path)
-    else:
-        if overwrite or not h5_path.exists():
-            reflectron_core.correct_epos_streaming(epos_path, mesh, h5_path)
-    written["h5"] = str(h5_path)
-
-    if with_matlab_range:
+    def _attach_range(target: dict) -> None:
+        if not with_matlab_range:
+            return
         range_info = _write_matlab_range_for(
             epos_path,
             h5_path,
@@ -302,8 +271,58 @@ def _correct_single_file(
             overwrite=overwrite,
         )
         if range_info is not None:
-            written["matlab_range"] = range_info
+            target["matlab_range"] = range_info
 
+    if not (need_corrected or need_corrected_epos or need_plain):
+        result: dict = {"status": "skipped", "h5": str(h5_path)}
+        if plain_h5:
+            result["plain_h5"] = str(plain_h5_path)
+        _attach_range(result)
+        return result
+
+    # Pre-flight: if there's clearly no room for the planned write(s), bail out
+    # with a clean message instead of letting pytables die mid-stream with
+    # errno=28. Each fresh HDF5 (corrected and/or plain) costs ~one EPOS size.
+    n_writes = int(need_corrected) + int(need_plain)
+    ok, free, needed = _disk_has_room(h5_path, epos_path, copies=max(n_writes, 1))
+    if not ok:
+        raise OSError(
+            f"Disk full: only {_format_size(free)} free on output drive but "
+            f"~{_format_size(needed)} required for {epos_path.stem}. Free space "
+            "and re-run -- already-written outputs are skipped automatically."
+        )
+
+    written: dict = {"status": "ok"}
+
+    # Plain (uncorrected) EPOS -> PyCCAPT HDF5, always via the streaming path so
+    # multi-GB inputs stay memory-bounded.
+    if need_plain:
+        ccapt_tools.epos_to_ccapt_h5_streaming(epos_path, plain_h5_path)
+    if plain_h5:
+        written["plain_h5"] = str(plain_h5_path)
+
+    # Corrected HDF5 (+ optional corrected EPOS). When --save-epos is set we need
+    # the full corrected DataFrame in memory to write the binary EPOS, so we fall
+    # back to the eager path; otherwise the streaming corrector keeps peak RAM
+    # bounded to a single chunk regardless of EPOS size.
+    if need_corrected or need_corrected_epos:
+        if save_epos:
+            raw = reflectron_core.load_epos_for_reflectron_correction(epos_path)
+            corrected = reflectron_core.apply_reflectron_correction_to_ccapt(raw, mesh)
+            if need_corrected:
+                _write_dataframe_to_hdf(corrected, h5_path)
+            if need_corrected_epos:
+                ccapt_tools.ccapt_to_epos(
+                    corrected,
+                    path=str(epos_out_path.parent) + "\\",
+                    name=epos_out_path.name,
+                )
+                written["epos"] = str(epos_out_path)
+        elif need_corrected:
+            reflectron_core.correct_epos_streaming(epos_path, mesh, h5_path)
+    written["h5"] = str(h5_path)
+
+    _attach_range(written)
     return written
 
 
@@ -343,6 +362,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Also write a corrected .epos file next to the .h5 output.",
     )
     parser.add_argument(
+        "--plain-h5",
+        action="store_true",
+        help=(
+            "Also write the plain, uncorrected EPOS as a PyCCAPT <stem>.h5 next to "
+            "the corrected <stem>_corrected.h5 (streamed, memory-bounded)."
+        ),
+    )
+    parser.add_argument(
         "--overwrite",
         action="store_true",
         help="Overwrite existing _corrected outputs (otherwise files are skipped).",
@@ -379,7 +406,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "After writing each *_corrected.h5, search up to "
             f"{_DEFAULT_FIG_SEARCH_DEPTH} parent levels above the EPOS for a MATLAB "
             "Atom-Probe-Toolbox range figure and convert it to a pyccapt-style "
-            "<stem>_corrected_range.h5 next to the corrected output."
+            "<stem>_range.h5 next to the outputs."
         ),
     )
     parser.add_argument(
@@ -452,6 +479,7 @@ def main(argv: list[str] | None = None) -> int:
                 mesh,
                 save_epos=args.save_epos,
                 overwrite=args.overwrite,
+                plain_h5=args.plain_h5,
                 with_matlab_range=args.with_matlab_range,
                 matlab_range_pattern=args.matlab_range_pattern,
                 matlab_range_depth=args.matlab_range_depth,
@@ -468,6 +496,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"    skipped (output exists): {result['h5']}")
         else:
             n_ok += 1
+            if "plain_h5" in result:
+                print(f"    wrote: {result['plain_h5']}")
             print(f"    wrote: {result['h5']}")
             if "epos" in result:
                 print(f"    wrote: {result['epos']}")

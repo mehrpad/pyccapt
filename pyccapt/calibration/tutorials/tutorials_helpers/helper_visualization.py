@@ -42,17 +42,17 @@ def call_visualization(variables, colab=False):
             variables.range_data['name'] = [f'range_{idx}' for idx in range(len(variables.range_data))]
         print("Range table did not include 'name'; generated it from legacy ion labels.")
 
-    plot_mc_button = widgets.Button(description='Plot mc')
-    plot_3d_button = widgets.Button(description='Plot 3D')
-    plot_3d_button_iso = widgets.Button(description='Plot 3D iso surface')
-    plot_heatmap_button = widgets.Button(description='Plot heatmap')
-    plot_projection_button = widgets.Button(description='Plot projection')
-    clear_button = widgets.Button(description='Clear plots')
-    plot_fdm_button = widgets.Button(description="Plot FDM")
-    plot_experiment_button = widgets.Button(description="Plot experiment history")
-    density_map_button = widgets.Button(description="Plot density map")
-    plot_sdm_button = widgets.Button(description='Plot SDM')
-    plot_rdf_button = widgets.Button(description='Plot RDF')
+    plot_mc_button = widgets.Button(description='Plot mc', button_style='primary')
+    plot_3d_button = widgets.Button(description='Plot 3D', button_style='primary')
+    plot_3d_button_iso = widgets.Button(description='Plot 3D iso surface', button_style='primary')
+    plot_heatmap_button = widgets.Button(description='Plot heatmap', button_style='primary')
+    plot_projection_button = widgets.Button(description='Plot projection', button_style='primary')
+    clear_button = widgets.Button(description='Clear plots', button_style='warning')
+    plot_fdm_button = widgets.Button(description="Plot FDM", button_style='primary')
+    plot_experiment_button = widgets.Button(description="Plot experiment history", button_style='primary')
+    density_map_button = widgets.Button(description="Plot density map", button_style='primary')
+    plot_sdm_button = widgets.Button(description='Plot SDM', button_style='primary')
+    plot_rdf_button = widgets.Button(description='Plot RDF', button_style='primary')
     show_color = widgets.Button(description='Show color')
     change_color = widgets.Button(description='Change color')
 
@@ -681,7 +681,7 @@ def call_visualization(variables, colab=False):
     figure_size_y_anim = widgets.FloatText(value=5.0)
     ranged_anim = widgets.Dropdown(options=[('False', False), ('True', True)])
 
-    plot_animated_heatmap_button = widgets.Button(description="Plot animated heatmap")
+    plot_animated_heatmap_button = widgets.Button(description="Plot animated heatmap", button_style='primary')
 
     def plot_animated_heatmap(b, variables, out):
 
@@ -1472,7 +1472,7 @@ def call_visualization(variables, colab=False):
             plot_3d_button_iso.disabled = False
 
     #############
-    plot_proxigram_button = widgets.Button(description='Plot proxigram')
+    plot_proxigram_button = widgets.Button(description='Plot proxigram', button_style='primary')
     figname_proxigram = widgets.Text(value='proxigram')
     proxigram_isosurface_dic = widgets.Textarea(
         value="{Al: [3,3,3]}",
@@ -1890,7 +1890,7 @@ def call_visualization(variables, colab=False):
         [
             widgets.VBox(
                 [
-                    widgets.HBox([widgets.Label(value='Element percentage:', layout=label_layout), element_percentage_p3]),
+                    widgets.HBox([widgets.Label(value='Display fraction:', layout=label_layout), element_percentage_p3]),
                     widgets.HBox([widgets.Label(value='Element alphas:', layout=label_layout), element_alpha_p3]),
                     widgets.HBox([widgets.Label(value='Opacity:', layout=label_layout), opacity]),
                     widgets.HBox(

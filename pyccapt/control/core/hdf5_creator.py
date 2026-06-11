@@ -33,6 +33,49 @@ def _sorted_chunk_files(chunk_dir: Path, stem: str) -> list[Path]:
     return [path for _, path in sorted(files_with_ids)]
 
 
+# Stems written by APT_Exp_Control._flush_apt_meta_chunks() during the run.
+# Each maps to: (hdf5_dataset_path, numpy_dtype)
+_APT_CHUNK_STEMS: list[tuple[str, str, str]] = [
+    ("apt_id",              "apt/id",                          "uint64"),
+    ("apt_timestamps",      "apt/timestamps",                  "float64"),
+    ("apt_num_events",      "apt/num_events",                  "uint32"),
+    ("apt_num_raw_signals", "apt/num_raw_signals",             "uint32"),
+    ("apt_temperature",     "apt/temperature",                 "float64"),
+    ("apt_vacuum",          "apt/experiment_chamber_vacuum",   "float64"),
+]
+
+
+def _load_apt_from_chunks(chunk_dir: Path) -> dict[str, np.ndarray] | None:
+    """Load apt/* metadata from chunk files.
+
+    Returns a dict {hdf5_path: array} if at least one apt chunk stem is present,
+    or None if no apt chunk files exist (so callers can fall back to in-memory data).
+    """
+    result: dict[str, np.ndarray] = {}
+    any_found = False
+    for stem, ds_path, dtype in _APT_CHUNK_STEMS:
+        files = _sorted_chunk_files(chunk_dir, stem)
+        if not files:
+            continue
+        any_found = True
+        target = np.dtype(dtype)
+        parts: list[np.ndarray] = []
+        for f in files:
+            try:
+                arr = np.load(f, mmap_mode="r")
+                if arr.size == 0:
+                    continue
+                if arr.dtype != target:
+                    arr = arr.astype(target)
+                parts.append(arr.copy())
+                del arr
+            except Exception:
+                pass
+        if parts:
+            result[ds_path] = np.concatenate(parts)
+    return result if any_found else None
+
+
 def _write_chunked_dataset(hdf_file, dataset_name: str, chunk_files: list[Path], dtype) -> None:
     # First pass: size each chunk via a memory-mapped header read (no full
     # load) and cache the sizes so the write pass doesn't re-open files.
@@ -176,12 +219,36 @@ def hdf_creator(variables, conf, time_counter, time_ex):
     tdc_model = normalize_tdc_model(conf.get("tdc_model")) if conf.get("tdc") == "on" else ""
     try:
         with h5py.File(tmp_path, "w") as hdf_file:
-            _create_dataset(hdf_file, "apt/id", time_counter, np.uint64)
-            _create_dataset(hdf_file, "apt/num_events", variables.main_counter, np.uint32)
-            _create_dataset(hdf_file, "apt/num_raw_signals", variables.main_raw_counter, np.uint32)
-            _create_dataset(hdf_file, "apt/temperature", variables.main_temperature, np.float64)
-            _create_dataset(hdf_file, "apt/experiment_chamber_vacuum", variables.main_chamber_vacuum, np.float64)
-            _create_dataset(hdf_file, "apt/timestamps", time_ex, np.float64)
+            # apt/* group: prefer chunk files written during the run (crash-safe),
+            # fall back to the in-memory lists for backwards-compatibility with
+            # experiments that ran before chunk flushing was introduced.
+            apt_from_chunks = _load_apt_from_chunks(chunk_dir)
+            if apt_from_chunks is not None:
+                for ds_path, arr in apt_from_chunks.items():
+                    hdf_file.create_dataset(ds_path, data=arr)
+                # Fill any stems that had no chunk files with in-memory data so
+                # the apt group is always structurally complete.
+                written = set(apt_from_chunks.keys())
+                if "apt/id"                         not in written:
+                    _create_dataset(hdf_file, "apt/id", time_counter, np.uint64)
+                if "apt/num_events"                 not in written:
+                    _create_dataset(hdf_file, "apt/num_events", variables.main_counter, np.uint32)
+                if "apt/num_raw_signals"            not in written:
+                    _create_dataset(hdf_file, "apt/num_raw_signals", variables.main_raw_counter, np.uint32)
+                if "apt/temperature"                not in written:
+                    _create_dataset(hdf_file, "apt/temperature", variables.main_temperature, np.float64)
+                if "apt/experiment_chamber_vacuum"  not in written:
+                    _create_dataset(hdf_file, "apt/experiment_chamber_vacuum", variables.main_chamber_vacuum, np.float64)
+                if "apt/timestamps"                 not in written:
+                    _create_dataset(hdf_file, "apt/timestamps", time_ex, np.float64)
+            else:
+                # No apt chunks: use the in-memory lists (pre-chunk-flush experiments).
+                _create_dataset(hdf_file, "apt/id", time_counter, np.uint64)
+                _create_dataset(hdf_file, "apt/num_events", variables.main_counter, np.uint32)
+                _create_dataset(hdf_file, "apt/num_raw_signals", variables.main_raw_counter, np.uint32)
+                _create_dataset(hdf_file, "apt/temperature", variables.main_temperature, np.float64)
+                _create_dataset(hdf_file, "apt/experiment_chamber_vacuum", variables.main_chamber_vacuum, np.float64)
+                _create_dataset(hdf_file, "apt/timestamps", time_ex, np.float64)
 
             if conf["tdc"] == "on" and tdc_model == "Surface_Concept" and variables.counter_source == "TDC":
                 _write_surface_concept_detector_data(hdf_file, variables)

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import imageio
 import plotly
 import plotly.io as pio
 
@@ -59,7 +58,19 @@ def write_plotly_image(
 
 def save_gif(images, variables, filename: str, *, fps: int = 2) -> None:
     """Save a sequence of frames to GIF inside the reconstruction result directory."""
-    imageio.mimsave(resolve_result_file(variables, filename), images, fps=fps)
+    from PIL import Image
+
+    path = resolve_result_file(variables, filename)
+    duration_ms = int(1000 / fps)
+    frames = [Image.fromarray(img) if not isinstance(img, Image.Image) else img for img in images]
+    frames[0].save(
+        path,
+        save_all=True,
+        append_images=frames[1:],
+        optimize=True,
+        loop=0,
+        duration=duration_ms,
+    )
 
 
 def save_plotly_animation(

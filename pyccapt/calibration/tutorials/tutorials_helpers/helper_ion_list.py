@@ -528,7 +528,8 @@ def call_ion_list(variables, selector, mode, path='../../../files/'):
 
 
 def reset_back_on_click(variables, mode):
-    if mode.value == 'tof':
+    mode_val = getattr(mode, 'value', mode)
+    if mode_val == 'tof':
         variables.dld_t_calib = np.copy(variables.dld_t_calib_backup)
-    elif mode.value == 'mc':
+    elif mode_val == 'mc':
         variables.mc_calib = np.copy(variables.mc_calib_backup)

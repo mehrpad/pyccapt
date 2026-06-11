@@ -29,7 +29,7 @@ def call_fine_tune_t_0(variables, flightPathLength, pulse_mode, t0):
     fig_name = widgets.Text(value='t0_tune')
 
     # Create a button widget to trigger the function
-    button_plot = widgets.Button(description="Plot")
+    button_plot = widgets.Button(description="Plot", button_style='primary')
 
     out = Output()
 

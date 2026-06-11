@@ -47,7 +47,7 @@ def call_x_y_z_calculation(variables, flight_path_length, element_selected, cola
     cluster_labels_widget = widgets.Text(value='', placeholder='Ni3Al, Al')
 
     # Create a button widget to trigger the function
-    button_calculate_plot = widgets.Button(description="Reconstruct & plot")
+    button_calculate_plot = widgets.Button(description="Reconstruct & plot", button_style='primary')
 
     def on_button_click(b, variables, flight_path_length):
         # Disable the button while the code is running

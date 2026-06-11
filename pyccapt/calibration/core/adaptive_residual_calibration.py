@@ -593,7 +593,7 @@ def adaptive_residual_calibration(
     min_window_ions=40,
     min_cell_ions=35,
     max_rounds=8,
-    verbose=True,
+    verbose=False,
     above_ceiling_strategy='nan',
     fast_candidate_score=False,
     coarse_to_fine_top_k=None,

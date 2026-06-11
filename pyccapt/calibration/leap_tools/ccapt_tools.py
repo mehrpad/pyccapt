@@ -1,5 +1,6 @@
 import struct
 from itertools import chain
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -220,6 +221,50 @@ def epos_lazy_to_ccapt_chunks(epos_table, chunk_size: int = 1 << 20):
                 'start_counter': np.zeros(length, dtype=np.int32),
             }
         )
+
+
+def epos_to_ccapt_h5_streaming(epos_path, h5_output_path, *, chunk_size: int = 1 << 20, progress_callback=None):
+    """Stream-convert an EPOS file to an uncorrected PyCCAPT HDF5.
+
+    This is the plain (no reflectron correction) sibling of
+    :func:`pyccapt.calibration.reflectron_correction.core.correct_epos_streaming`.
+    It memory-maps the EPOS via :func:`leap_tools.read_epos_lazy`, converts it to
+    the PyCCAPT 15-column convention one chunk at a time, and appends each chunk
+    to the output HDF5 with ``format='table'``. Peak resident memory is bounded
+    by ``chunk_size`` rows instead of the whole file, so a multi-GB EPOS converts
+    comfortably on a small-RAM machine.
+
+    The output is written under key ``"df"`` -- the same key the calibration
+    data loader expects -- and is readable both with ``pd.read_hdf(path, key='df')``
+    and in iterator mode (``store.select('df', iterator=True, chunksize=...)``).
+
+    Args:
+        epos_path: Path to the ``.epos`` input.
+        h5_output_path: Destination ``.h5`` path.
+        chunk_size: Number of rows per chunk (default 1<<20 ~ 1M rows).
+        progress_callback: Optional ``callable(rows_done, total_rows)`` fired
+            after each chunk is written.
+
+    Returns:
+        dict with ``'h5'`` (output path) and ``'rows'`` (total rows written).
+    """
+    epos_path = Path(epos_path).expanduser()
+    h5_output_path = Path(h5_output_path).expanduser()
+    h5_output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    rows_written = 0
+    with leap_tools.read_epos_lazy(epos_path) as epos_table:
+        total_rows = epos_table.n_rows
+        with pd.HDFStore(str(h5_output_path), mode="w") as store:
+            for chunk in epos_lazy_to_ccapt_chunks(epos_table, chunk_size=chunk_size):
+                if len(chunk) == 0:
+                    continue
+                store.append("df", chunk, format="table", index=False)
+                rows_written += len(chunk)
+                if progress_callback is not None:
+                    progress_callback(rows_written, total_rows)
+
+    return {"h5": str(h5_output_path), "rows": rows_written}
 
 
 def apt_to_ccapt(file_path):

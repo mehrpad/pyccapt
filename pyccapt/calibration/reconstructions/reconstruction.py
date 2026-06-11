@@ -25,6 +25,7 @@ from pyccapt.calibration.reconstructions.rotation_tools import (
     rotary_fig,
     rotate_z,
 )
+from pyccapt.calibration.reconstructions.plot_bounds import range_cube_from_mask, sample_mask
 
 def _normalize_plotly_color(value):
     """Return a Plotly-safe color string from stored range colors."""
@@ -345,13 +346,6 @@ def reconstruction_plot(
     mc_up = variables.range_data['mc_up'].tolist()
     ion = variables.range_data['ion'].tolist()
 
-    # Draw an edge of cube around the 3D plot. ``min``/``max`` builtins
-    # propagate NaN; partial-recovered rows have NaN (x, y, z) and would
-    # blank out the cube. Use nanmin/nanmax.
-    x_range = [float(np.nanmin(variables.x)), float(np.nanmax(variables.x))]
-    y_range = [float(np.nanmin(variables.y)), float(np.nanmax(variables.y))]
-    z_range = [float(np.nanmin(variables.z)), float(np.nanmax(variables.z))]
-    range_cube = [x_range, y_range, z_range]
     if element_alpha is None:
         element_alpha = [float(opacity)] * len(ion)
     else:
@@ -360,6 +354,25 @@ def reconstruction_plot(
             element_alpha.extend([float(opacity)] * (len(ion) - len(element_alpha)))
 
     cluster_only = cluster_result is not None and str(cluster_display_mode).strip().lower() == 'clusters-only'
+    n_points = len(mask_f)
+    sampled_masks = []
+    if not cluster_only:
+        for index, _element in enumerate(ion):
+            mask = (variables.mc > mc_low[index]) & (variables.mc < mc_up[index])
+            mask = mask & mask_f
+            sampled_masks.append(sample_mask(mask, element_percentage[index], n_points))
+
+    if sampled_masks:
+        plotted_mask = np.logical_or.reduce(sampled_masks)
+    else:
+        plotted_mask = np.asarray(mask_f, dtype=bool)
+    if cluster_result is not None:
+        cluster_mask = np.asarray(mask_f, dtype=bool)
+        if not cluster_only:
+            cluster_mask = cluster_mask & (cluster_result.labels >= 0)
+        plotted_mask = plotted_mask | cluster_mask
+
+    range_cube = range_cube_from_mask(variables, plotted_mask, fallback_mask=mask_f)
 
     # Create a subplots with shared axes
     if ions_individually_plots:
@@ -376,22 +389,7 @@ def reconstruction_plot(
                 index = col + row * 3
                 if index == len(ion):
                     break
-                mask = (variables.mc > mc_low[index]) & (variables.mc < mc_up[index])
-                mask = mask & mask_f
-                size = int(len(mask[mask == True]) * float(element_percentage[index]))
-                # Find indices where the original mask is True
-                true_indices = np.where(mask)[0]
-                # Randomly choose 100 indices from the true indices
-                # Seeded RNG keyed on the input length so re-plots are
-                # deterministic (replaces a global-state np.random.choice).
-                random_true_indices = np.random.default_rng(int(len(true_indices))).choice(
-                    true_indices, size=size, replace=False)
-                # Create a new mask with the same length as the original, initialized with False
-                new_mask = np.full(len(variables.dld_t), False)
-                # Set the selected indices to True in the new mask
-                new_mask[random_true_indices] = True
-                # Apply the new mask to the original mask
-                mask = mask & new_mask
+                mask = sampled_masks[index]
 
                 scatter = go.Scatter3d(
                     x=variables.x[mask],
@@ -414,23 +412,8 @@ def reconstruction_plot(
     else:
         fig = go.Figure()
         if not cluster_only:
-            for index, elemen in enumerate(ion):
-                mask = (variables.mc > mc_low[index]) & (variables.mc < mc_up[index])
-                mask = mask & mask_f
-                size = int(len(mask[mask == True]) * float(element_percentage[index]))
-                # Find indices where the original mask is True
-                true_indices = np.where(mask)[0]
-                # Randomly choose 100 indices from the true indices
-                # Seeded RNG keyed on the input length so re-plots are
-                # deterministic (replaces a global-state np.random.choice).
-                random_true_indices = np.random.default_rng(int(len(true_indices))).choice(
-                    true_indices, size=size, replace=False)
-                # Create a new mask with the same length as the original, initialized with False
-                new_mask = np.full(len(variables.dld_t), False)
-                # Set the selected indices to True in the new mask
-                new_mask[random_true_indices] = True
-                # Apply the new mask to the original mask
-                mask = mask & new_mask
+            for index, _element in enumerate(ion):
+                mask = sampled_masks[index]
 
                 fig.add_trace(
                     go.Scatter3d(

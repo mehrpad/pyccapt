@@ -35,19 +35,19 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     out = Output()
     out_status = Output()
 
-    plot_button = widgets.Button(description='Plot hist', layout=label_layout)
-    plot_stat_button = widgets.Button(description='Plot stat', layout=label_layout)
-    reset_back_button = widgets.Button(description='Back to saved', layout=label_layout)
-    reset_button = widgets.Button(description='Reset correction', layout=label_layout)
+    plot_button = widgets.Button(description='Plot hist', layout=label_layout, button_style='primary')
+    plot_stat_button = widgets.Button(description='Plot stat', layout=label_layout, button_style='primary')
+    reset_back_button = widgets.Button(description='Back to saved', layout=label_layout, button_style='warning')
+    reset_button = widgets.Button(description='Reset correction', layout=label_layout, button_style='danger')
     save_button = widgets.Button(description='Save correction', layout=label_layout)
     bowl_button = widgets.Button(description='Bowl correction', layout=label_layout)
     vol_button = widgets.Button(description='Voltage correction', layout=label_layout)
-    auto_button = widgets.Button(description='Auto calibration', layout=label_layout)
-    auto_button_bowl = widgets.Button(description='Auto bowl calibration', layout=label_layout)
+    auto_button = widgets.Button(description='Auto calibration', layout=label_layout, button_style='info')
+    auto_button_bowl = widgets.Button(description='Auto bowl calibration', layout=label_layout, button_style='info')
     gaussian_mrp_button = widgets.Button(description='MRP', layout=label_layout)
-    hybrid_button = widgets.Button(description='Hybrid auto + residual', layout=label_layout)
+    hybrid_button = widgets.Button(description='Hybrid auto + residual', layout=label_layout, button_style='info')
     initial_calib_button = widgets.Button(description='Initial calibration', layout=label_layout)
-    clear_plot = widgets.Button(description="Clear plots", layout=label_layout)
+    clear_plot = widgets.Button(description="Clear plots", layout=label_layout, button_style='warning')
 
     calibration_mode = widgets.Dropdown(
         options=[('mass_to_charge', 'mc_calib'), ('time_of_flight', 'tof_calib')], description='Calibration mode:'
@@ -1482,15 +1482,15 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     widgets.link((simple_fig_w, 'value'), (figure_mc_size_x, 'value'))
     widgets.link((simple_fig_h, 'value'), (figure_mc_size_y, 'value'))
 
-    simple_plot_button = widgets.Button(description='Plot hist', layout=label_layout)
+    simple_plot_button = widgets.Button(description='Plot hist', layout=label_layout, button_style='primary')
     simple_save_button = widgets.Button(description='Save correction', layout=label_layout)
-    simple_reset_back_button = widgets.Button(description='Back to saved', layout=label_layout)
-    simple_reset_button = widgets.Button(description='Reset correction', layout=label_layout)
-    simple_clear_button = widgets.Button(description='Clear plots', layout=label_layout)
+    simple_reset_back_button = widgets.Button(description='Back to saved', layout=label_layout, button_style='warning')
+    simple_reset_button = widgets.Button(description='Reset correction', layout=label_layout, button_style='danger')
+    simple_clear_button = widgets.Button(description='Clear plots', layout=label_layout, button_style='warning')
     simple_gaussian_button = widgets.Button(description='MRP', layout=label_layout)
-    simple_plot_stat_button = widgets.Button(description='Plot stat', layout=label_layout)
-    simple_auto_button = widgets.Button(description='Auto calibration', layout=label_layout)
-    simple_hybrid_button = widgets.Button(description='Hybrid auto + residual', layout=label_layout)
+    simple_plot_stat_button = widgets.Button(description='Plot stat', layout=label_layout, button_style='primary')
+    simple_auto_button = widgets.Button(description='Auto calibration', layout=label_layout, button_style='info')
+    simple_hybrid_button = widgets.Button(description='Hybrid auto + residual', layout=label_layout, button_style='info')
 
     simple_plot_button.on_click(lambda _: hist_plot(None, variables, out, calibration_mode))
     simple_save_button.on_click(lambda _: save_on_click(variables, calibration_mode))
@@ -1558,7 +1558,9 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         _render_top_content()
 
     adaptive_panel, run_adaptive_for_mode, _adaptive_apply_profile = build_adaptive_residual_calibration_panel(
-        variables, det_diam, flight_path_length, pulse_mode
+        variables, det_diam, flight_path_length, pulse_mode,
+        run_mc_auto_calibration=run_mc_auto_calibration,
+        run_tof_auto_calibration=run_tof_auto_calibration,
     )
     combined_panel = build_combined_mc_tof_calibration_panel(
         variables,
@@ -1710,16 +1712,11 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     # (automatic_calibration, on_hybrid_auto_residual, initial_calibration).
     profile_note = widgets.HTML(
         value=(
-            '<div style="font-size:11px; color:#444; '
+            '<div style="font-size:13px; color:#444; '
             'background:#f7f7f7; border:1px solid #ddd; padding:6px 8px; '
-            'border-radius:4px; max-width:720px; line-height:1.45;">'
-            '<b>What this preset changes</b><br>'
-            'Every button now uses the same well-behaved <b>legacy '
-            'sequential V+Bowl</b> path (Voltage&rarr;Bowl iterative '
-            'optimiser). The preset only changes what <b>Hybrid auto + '
-            'residual</b> (and the combined <b>BEST</b>) does <i>after</i> '
-            'the V+Bowl stage:'
-            '<ul style="margin:4px 0 4px 16px;">'
+            'border-radius:4px; max-width:720px; line-height:1.5;">'
+            '<b>What this preset changes:</b>'
+            '<ol style="margin:4px 0 4px 28px; font-size:13px;">'
             '<li><b>Adaptive residual (default)</b>: V+Bowl &rarr; '
             'adaptive residual with coarse-to-fine top_k=1 (audited '
             'safe; ~3x faster residual than legacy).</li>'
@@ -1732,6 +1729,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             'residual without the coarse-to-fine speedup. Slower but '
             'matches the pre-2026 reference behaviour exactly if you '
             'need bit-identical results.</li>'
+            '</ol></div>'
         ),
         layout=widgets.Layout(width='720px'),
     )

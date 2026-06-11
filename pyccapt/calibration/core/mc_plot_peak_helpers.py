@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
@@ -29,6 +30,41 @@ def _fast_uniform_histogram(data, n_bins, lo, hi):
     edges = np.linspace(float(lo), float(hi), int(n_bins) + 1)
     counts, _ = np.histogram(data, bins=edges)
     return counts
+
+# ---------------------------------------------------------------------------
+# Timing instrumentation — set _TIMING_ENABLED = True to activate.
+# Call print_timing_report() after a calibration run to see the breakdown.
+# ---------------------------------------------------------------------------
+_TIMING_ENABLED = False
+_TIMING: dict = {}
+
+
+def _record(key: str, elapsed: float) -> None:
+    """Accumulate *elapsed* seconds into the named timing bucket."""
+    if key not in _TIMING:
+        _TIMING[key] = {'calls': 0, 'total_s': 0.0}
+    _TIMING[key]['calls'] += 1
+    _TIMING[key]['total_s'] += elapsed
+
+
+def print_timing_report() -> None:
+    """Print a sorted timing summary and clear the accumulated data."""
+    if not _TIMING:
+        print('[PyCCAPT timing] No data (set mc_plot_peak_helpers._TIMING_ENABLED = True first).')
+        return
+    rows = sorted(_TIMING.items(), key=lambda kv: kv[1]['total_s'], reverse=True)
+    grand_total = sum(r['total_s'] for _, r in rows)
+    print(f'\n[PyCCAPT timing report]  grand total = {grand_total * 1000:.1f} ms')
+    print(f'  {"Operation":<48} {"calls":>6}  {"total ms":>10}  {"avg ms":>9}  {"share":>7}')
+    print('  ' + '-' * 87)
+    for name, rec in rows:
+        calls = rec['calls']
+        tot_ms = rec['total_s'] * 1000.0
+        avg_ms = tot_ms / calls if calls else 0.0
+        share = 100.0 * rec['total_s'] / grand_total if grand_total else 0.0
+        print(f'  {name:<48} {calls:>6}  {tot_ms:>10.2f}  {avg_ms:>9.3f}  {share:>6.1f}%')
+    _TIMING.clear()
+
 
 _MRP_INTERNAL_BIN_SIZE = 0.01
 _BOX_SELECTION_BIN_SIZE = 0.1
@@ -934,18 +970,26 @@ def calculate_mrp(plotter):
     if plotter.peaks is None or plotter.peak_widths is None or plotter.prominences is None or len(plotter.peaks) == 0:
         return mrp_peak, mrp
     idx_max = int(np.argmax(plotter.prominences[0]))
+    if _TIMING_ENABLED:
+        _t0 = time.perf_counter()
     dominant_seed = _internal_peak_seed(
         plotter.mc_tof,
         percent=getattr(plotter, 'percent', 50),
         bin_size=_BOX_SELECTION_BIN_SIZE,
     )
+    if _TIMING_ENABLED:
+        _record('calculate_mrp: _internal_peak_seed', time.perf_counter() - _t0)
     if dominant_seed is not None:
         x_axis = plotter.x_centers if getattr(plotter, 'x_centers', None) is not None else plotter.x[:-1]
         peak_centers = x_axis[plotter.peaks]
         idx_max = int(np.argmin(np.abs(peak_centers - float(dominant_seed['center']))))
     # Reuse the same auto-pick window the MRP button uses, so the legend value
     # matches the PEAK PROFILE MRP REPORT for the dominant peak.
+    if _TIMING_ENABLED:
+        _t0 = time.perf_counter()
     auto_dominant_window = _auto_mrp_window_from_array(plotter.mc_tof)
+    if _TIMING_ENABLED:
+        _record('calculate_mrp: _auto_mrp_window_from_array', time.perf_counter() - _t0)
     peak_reports = []
     for i in range(len(plotter.peaks)):
         if i == idx_max:
@@ -957,6 +1001,8 @@ def calculate_mrp(plotter):
                 peak_left = float(dominant_seed['left'])
                 peak_right = float(dominant_seed['right'])
                 peak_center = float(dominant_seed['center'])
+            if _TIMING_ENABLED:
+                _t0 = time.perf_counter()
             report = gaussian_mrp_report(
                 plotter.mc_tof,
                 peak_left,
@@ -964,17 +1010,23 @@ def calculate_mrp(plotter):
                 bin_size=_AUTO_MRP_BIN_SIZE,
                 peak_center=peak_center,
             )
+            if _TIMING_ENABLED:
+                _record('calculate_mrp: gaussian_mrp_report [dominant peak]', time.perf_counter() - _t0)
             if report is not None:
                 peak_reports.append(report)
                 continue
 
         peak_left, peak_right, peak_center = _plotter_peak_window(plotter, i)
+        if _TIMING_ENABLED:
+            _t0 = time.perf_counter()
         mrp_values = fast_mrp(
             plotter.mc_tof,
             peak_left,
             peak_right,
             bin_size=_MRP_INTERNAL_BIN_SIZE,
         )
+        if _TIMING_ENABLED:
+            _record('calculate_mrp: fast_mrp [non-dominant peaks]', time.perf_counter() - _t0)
         peak_reports.append(
             {
                 'histogram_mrp': mrp_values,
@@ -1144,20 +1196,32 @@ def _gaussian_mrp_report_core(
     requested_x1 = float(min(x1, x2))
     requested_x2 = float(max(x1, x2))
     requested_center = float(peak_center) if peak_center is not None else 0.5 * (requested_x1 + requested_x2)
+    if _TIMING_ENABLED:
+        _t0 = time.perf_counter()
     used_x1, used_x2, window_expanded = _expand_mrp_window(values, requested_x1, requested_x2, bin_size)
+    if _TIMING_ENABLED:
+        _record('mrp_core: _expand_mrp_window', time.perf_counter() - _t0)
     data = values[(values > used_x1) & (values < used_x2)]
     if len(data) < 10:
         return None
 
     n_bins = max(_MRP_MIN_BINS, int(np.ceil((used_x2 - used_x1) / max(bin_size, 1e-6))))
     edges = np.linspace(used_x1, used_x2, n_bins + 1)
+    if _TIMING_ENABLED:
+        _t0 = time.perf_counter()
     y = _fast_uniform_histogram(data, n_bins, used_x1, used_x2)
+    if _TIMING_ENABLED:
+        _record('mrp_core: histogram (fine)', time.perf_counter() - _t0)
     x = (edges[:-1] + edges[1:]) * 0.5
 
+    if _TIMING_ENABLED:
+        _t0 = time.perf_counter()
     try:
         peaks, _ = find_peaks(y, height=0)
     except ValueError:
         return None
+    if _TIMING_ENABLED:
+        _record('mrp_core: find_peaks (fine)', time.perf_counter() - _t0)
     if len(peaks) == 0:
         return None
 
@@ -1165,9 +1229,19 @@ def _gaussian_mrp_report_core(
     if peak_idx is None:
         return None
 
+    if _TIMING_ENABLED:
+        _t0 = time.perf_counter()
     gauss_mrp, gauss_ok = _fit_gaussian_mrp(x, y, peaks[peak_idx])
+    if _TIMING_ENABLED:
+        _record('mrp_core: _fit_gaussian_mrp', time.perf_counter() - _t0)
+        _t0 = time.perf_counter()
     voigt_mrp, voigt_ok, voigt_fwhm, profile_type = _fit_voigt_mrp(x, y, peaks[peak_idx])
+    if _TIMING_ENABLED:
+        _record('mrp_core: _fit_voigt_mrp', time.perf_counter() - _t0)
+        _t0 = time.perf_counter()
     asym_mrp, asym_ok, asym_fwhm = _fit_asymmetric_mrp(x, y, peaks[peak_idx])
+    if _TIMING_ENABLED:
+        _record('mrp_core: _fit_asymmetric_mrp', time.perf_counter() - _t0)
 
     # scipy.signal.peak_widths walks outward from the apex bin and interpolates
     # the first downward crossing. When the histogram bin is much finer than
@@ -1183,12 +1257,20 @@ def _gaussian_mrp_report_core(
         coarse_bin = HIST_COMPARISON_MIN_BIN
         coarse_n_bins = max(_MRP_MIN_BINS, int(np.ceil((used_x2 - used_x1) / coarse_bin)))
         coarse_edges = np.linspace(used_x1, used_x2, coarse_n_bins + 1)
+        if _TIMING_ENABLED:
+            _t0 = time.perf_counter()
         coarse_y = _fast_uniform_histogram(data, coarse_n_bins, used_x1, used_x2)
+        if _TIMING_ENABLED:
+            _record('mrp_core: histogram (coarse, cross-check)', time.perf_counter() - _t0)
         coarse_x = (coarse_edges[:-1] + coarse_edges[1:]) * 0.5
+        if _TIMING_ENABLED:
+            _t0 = time.perf_counter()
         try:
             coarse_peaks, _ = find_peaks(coarse_y, height=0)
         except ValueError:
             coarse_peaks = np.array([], dtype=int)
+        if _TIMING_ENABLED:
+            _record('mrp_core: find_peaks (coarse, cross-check)', time.perf_counter() - _t0)
         coarse_peak_idx = _select_peak_index(coarse_x, coarse_peaks, requested_center) if len(coarse_peaks) else None
         if coarse_peak_idx is not None:
             hist_x = coarse_x
@@ -1204,6 +1286,8 @@ def _gaussian_mrp_report_core(
     hist_mrp = []
     histogram_peak_sides = []
     histogram_widths = []
+    if _TIMING_ENABLED:
+        _t0 = time.perf_counter()
     for rel in [0.5, 0.9, 0.99]:
         try:
             pw = peak_widths(hist_y, hist_peaks, rel_height=rel)
@@ -1224,6 +1308,8 @@ def _gaussian_mrp_report_core(
             histogram_peak_sides.append([float('nan'), float('nan')])
             histogram_widths.append(float('nan'))
 
+    if _TIMING_ENABLED:
+        _record('mrp_core: peak_widths x3 (hist MRP)', time.perf_counter() - _t0)
     histogram_widths, hist_mrp = _sanitize_tail_widths(
         histogram_widths,
         hist_mrp,
@@ -1264,6 +1350,8 @@ def _gaussian_mrp_report_core(
     report_peak_position = peak_position
     robustness_warning = ''
     if _reference_guard and bin_size < _MRP_REFERENCE_BIN_SIZE:
+        if _TIMING_ENABLED:
+            _t0 = time.perf_counter()
         reference_report = gaussian_mrp_report(
             values,
             requested_x1,
@@ -1272,6 +1360,8 @@ def _gaussian_mrp_report_core(
             peak_center=requested_center,
             _reference_guard=False,
         )
+        if _TIMING_ENABLED:
+            _record('mrp_core: reference_guard gaussian_mrp_report (0.01 Da)', time.perf_counter() - _t0)
         if reference_report is not None:
             highres_width = _mrp_width_from_fwhm(report_peak_position, recommended_mrp)
             reference_width = _mrp_width_from_fwhm(reference_report['peak_position'], reference_report['recommended_mrp'])
@@ -1345,11 +1435,21 @@ def find_peaks_and_widths(plotter, prominence=None, distance=None, percent=50):
     plotter.distance = distance
     x_axis = plotter.x_centers if getattr(plotter, 'x_centers', None) is not None else plotter.x[:-1]
     try:
+        if _TIMING_ENABLED:
+            _t0 = time.perf_counter()
         plotter.peaks, plotter.properties = find_peaks(
             plotter.y, prominence=plotter.prominence, distance=plotter.distance, height=0
         )
+        if _TIMING_ENABLED:
+            _record('find_peaks_and_widths: find_peaks', time.perf_counter() - _t0)
+            _t0 = time.perf_counter()
         plotter.peak_widths = peak_widths(plotter.y, plotter.peaks, rel_height=(rel_percent / 100), prominence_data=None)
+        if _TIMING_ENABLED:
+            _record('find_peaks_and_widths: peak_widths', time.perf_counter() - _t0)
+            _t0 = time.perf_counter()
         plotter.prominences = peak_prominences(plotter.y, plotter.peaks, wlen=None)
+        if _TIMING_ENABLED:
+            _record('find_peaks_and_widths: peak_prominences', time.perf_counter() - _t0)
 
         x_peaks = x_axis[plotter.peaks]
         y_peaks = plotter.y[plotter.peaks]

@@ -229,14 +229,17 @@ def call_ion_selection(variables, colab=False, show_gaussian_controls=False):
     ##############################################
     plot_button_p = widgets.Button(
         description='Plot hist',
+        button_style='primary',
     )
 
     plot_button_r = widgets.Button(
         description='Plot hist',
+        button_style='primary',
     )
 
     plot_button = widgets.Button(
         description='Plot hist',
+        button_style='primary',
     )
 
     find_elem_button = widgets.Button(
@@ -245,6 +248,7 @@ def call_ion_selection(variables, colab=False, show_gaussian_controls=False):
 
     plot_element = widgets.Button(
         description='Plot element',
+        button_style='primary',
     )
 
     formula_button = widgets.Button(
@@ -269,7 +273,7 @@ def call_ion_selection(variables, colab=False, show_gaussian_controls=False):
     )
 
     del_row_index = widgets.IntText(value=0, description='Del. row:')
-    delete_row_button = widgets.Button(description='Delete')
+    delete_row_button = widgets.Button(description='Delete', button_style='danger')
 
     color_picker = widgets.ColorPicker(description='Select a color:')
     row_index = widgets.IntText(value=0, description='Index row:')

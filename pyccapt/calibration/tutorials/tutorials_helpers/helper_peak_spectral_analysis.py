@@ -47,14 +47,14 @@ def build_peak_spectral_analysis_panel(variables, label_layout=None):
     )
     deconv_fwhm = widgets.FloatText(value=0.08)
 
-    plot_button = widgets.Button(description="Plot hist")
+    plot_button = widgets.Button(description="Plot hist", button_style='primary')
     load_selection_button = widgets.Button(description="Load selection")
     suggest_bg_button = widgets.Button(description="Suggest sidebands")
     copy_peak_to_ppm_button = widgets.Button(description="Copy peak -> ppm")
     fit_background_button = widgets.Button(description="Fit peak background")
     estimate_ppm_button = widgets.Button(description="Estimate background ppm")
     deconvolve_button = widgets.Button(description="Deconvolve peak")
-    clear_button = widgets.Button(description="Clear plots")
+    clear_button = widgets.Button(description="Clear plots", button_style='warning')
 
     def _resolve_values():
         if variables.data is None or len(variables.data) == 0:

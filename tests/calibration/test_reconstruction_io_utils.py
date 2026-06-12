@@ -31,14 +31,12 @@ def test_resolve_result_file_falls_back_to_result_path(tmp_path: Path):
     assert Path(resolved) == tmp_path / "demo.png"
 
 
-def test_save_gif_uses_resolved_output_path(tmp_path: Path):
+def test_save_gif_writes_file_to_resolved_path(tmp_path: Path):
+    import numpy as np
     variables = _DummyVariables(result_path=str(tmp_path))
-    with patch("pyccapt.calibration.reconstructions.io_utils.imageio.mimsave") as mock_save:
-        io_utils.save_gif([object()], variables, "movie.gif", fps=5)
-    mock_save.assert_called_once()
-    call_args = mock_save.call_args
-    assert Path(call_args.args[0]) == tmp_path / "movie.gif"
-    assert call_args.kwargs["fps"] == 5
+    frame = np.zeros((10, 10, 3), dtype=np.uint8)
+    io_utils.save_gif([frame, frame], variables, "movie.gif", fps=5)
+    assert (tmp_path / "movie.gif").exists()
 
 
 def test_save_plotly_animation_uses_resolved_output_path(tmp_path: Path):

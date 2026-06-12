@@ -202,16 +202,16 @@ COM_PORT_thorlab_motor = "27261754"
 #   * stage_smartact_laser  -> laser focusing stage (Laser Control window)
 # Set either one to "" (empty string) to disable that GUI's stage section
 # without showing any error - useful when only one MCS2 is plugged in.
-stage_smartact_main = "network:sn:MCS2-00017939"
-stage_smartact_laser = "network:sn:MCS2-00017944"
+stage_smartact_main = "network:sn:MCS2-00017944"
+stage_smartact_laser = "network:sn:MCS2-00017939"
 
 # Default "home" position for the Home button on the stage / laser GUIs.
 # Values are in millimetres.  The Home button moves all three axes to these
 # coordinates after referencing has run (or immediately if the controller
 # already knows its reference).
 stage_home_x_mm = 1.615
-stage_home_y_mm = 2.2357
-stage_home_z_mm = -3.405
+stage_home_y_mm = 2.235
+stage_home_z_mm = -7.124
 laser_stage_home_x_mm = 0.0
 laser_stage_home_y_mm = 0.0
 laser_stage_home_z_mm = 0.0

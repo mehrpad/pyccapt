@@ -13,6 +13,32 @@ from pyccapt.control.tdc_surface_concept import scTDC
 QUEUE_DATA = 0
 QUEUE_ENDOFMEAS = 1
 CHUNK_SIZE = 100_000  # Adjust the chunk size if needed
+
+# Canonical on-disk dtype for each chunk stem, matching the HDF5 schema in
+# core/hdf5_creator.py (chunk_mapping).  The integer stems are built from
+# Python ints via list.extend(...), so a bare np.array(...) would infer the
+# platform default int64.  hdf_creator._write_chunked_dataset declares these
+# datasets as uint64/uint32 and (since the strict-dtype guard was added)
+# refused to finalize when the chunk dtype did not match -- which broke every
+# experiment longer than CHUNK_SIZE.  Pinning the dtype here keeps the writer
+# and the HDF5 schema in agreement.  Stems absent from this map (e.g. the
+# *_bin raw arrays, which hdf_creator does not consume) keep NumPy's inferred
+# dtype.
+CHUNK_DTYPES = {
+	"x": np.float64,
+	"y": np.float64,
+	"t": np.float64,
+	"voltage": np.float64,
+	"voltage_pulse": np.float64,
+	"laser_pulse": np.float64,
+	"start_counter": np.uint64,
+	"channel": np.uint32,
+	"time": np.uint64,
+	"tdc_start_counter": np.uint64,
+	"voltage_tdc": np.float64,
+	"voltage_pulse_tdc": np.float64,
+	"laser_pulse_tdc": np.float64,
+}
 # Per-queue blocking-get timeout (s).  Two callbacks fire at different
 # rates (DLD vs raw); using a small timeout instead of an indefinite
 # wait avoids a deadlock when one queue is empty while the other is
@@ -109,7 +135,12 @@ def save_chunk_worker(save_queue):
         chunk_id, path, chunk_data = task  # Extract data
         try:
             for key, data in chunk_data.items():
-                np.save(os.path.join(path, f"chunks/{key}_chunk_{chunk_id}.npy"), np.array(data))
+	            target_dtype = CHUNK_DTYPES.get(key)
+	            if target_dtype is not None:
+		            arr = np.asarray(data, dtype=target_dtype)
+	            else:
+		            arr = np.array(data)
+	            np.save(os.path.join(path, f"chunks/{key}_chunk_{chunk_id}.npy"), arr)
             print(f"Chunk {chunk_id} saved.")
         except Exception as e:
             print(f"Error saving chunk {chunk_id}: {e}")

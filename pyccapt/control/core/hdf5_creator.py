@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 from pathlib import Path
@@ -8,6 +9,8 @@ import h5py
 import numpy as np
 
 from pyccapt.control.apt.detector_models import normalize_tdc_model
+
+logger = logging.getLogger("apt")
 
 _INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -76,6 +79,48 @@ def _load_apt_from_chunks(chunk_dir: Path) -> dict[str, np.ndarray] | None:
     return result if any_found else None
 
 
+def _coerce_chunk_to_target(values: np.ndarray, target_dtype: np.dtype,
+                            chunk_file: Path, dataset_name: str) -> np.ndarray:
+	"""Return *values* as *target_dtype*, casting only when it is lossless.
+
+	The detector chunk writer (tdc_surface_concept.save_chunk_worker) builds
+	integer counter/channel/time arrays from Python ints, so older chunks were
+	saved as the platform default int64 while the HDF5 schema declares
+	uint64/uint32.  That widening is lossless for the non-negative values
+	acquisition produces, so we perform it rather than refusing the whole file.
+
+	A cast that would actually lose information is still refused -- that signals
+	genuinely corrupt or incompatible data, not the benign int64-vs-uint64 label
+	difference:
+	  * negative value into an unsigned dataset, or any out-of-range overflow
+	  * a fractional float into an integer dataset
+	"""
+	src_dtype = np.dtype(values.dtype)
+	if src_dtype == target_dtype:
+		return values
+
+	if np.issubdtype(src_dtype, np.floating) and np.issubdtype(target_dtype, np.integer):
+		if not np.all(np.isfinite(values)) or np.any(values != np.rint(values)):
+			raise ValueError(
+				f"Chunk {chunk_file.name} for dataset {dataset_name!r} holds "
+				f"non-integer values incompatible with {target_dtype}. "
+				f"Refusing to truncate acquisition data."
+			)
+
+	if np.issubdtype(target_dtype, np.integer) and values.size:
+		info = np.iinfo(target_dtype)
+		vmin = int(values.min())
+		vmax = int(values.max())
+		if vmin < info.min or vmax > info.max:
+			raise ValueError(
+				f"Chunk {chunk_file.name} for dataset {dataset_name!r} holds "
+				f"values [{vmin}, {vmax}] outside the {target_dtype} range "
+				f"[{info.min}, {info.max}]. Refusing to wrap acquisition data."
+			)
+
+	return values.astype(target_dtype)
+
+
 def _write_chunked_dataset(hdf_file, dataset_name: str, chunk_files: list[Path], dtype) -> None:
     # First pass: size each chunk via a memory-mapped header read (no full
     # load) and cache the sizes so the write pass doesn't re-open files.
@@ -92,22 +137,29 @@ def _write_chunked_dataset(hdf_file, dataset_name: str, chunk_files: list[Path],
 
     dataset = hdf_file.create_dataset(dataset_name, (total_size,), dtype=target_dtype)
     offset = 0
+    cast_from: np.dtype | None = None
     for chunk_file, chunk_size in zip(chunk_files, chunk_sizes):
-        # Stream the chunk via mmap so the whole file isn't pulled into
-        # RAM at once; h5py copies from the mapped view. Assert the chunk
-        # dtype matches the destination -- a mismatched chunk (e.g. an
-        # interrupted run restarted under new code) would otherwise be
-        # silently up/down-cast or wrap.
+	    # Stream the chunk via mmap so the whole file isn't pulled into RAM at
+	    # once.  A chunk whose dtype differs from the destination (e.g. the
+	    # int64 counters older writers produced, or a run restarted under new
+	    # code) is cast *only when that cast is provably lossless* -- otherwise
+	    # _coerce_chunk_to_target raises rather than silently wrap/truncate.
         chunk_array = np.load(chunk_file, mmap_mode="r")
         if np.dtype(chunk_array.dtype) != target_dtype:
-            raise ValueError(
-                f"Chunk {chunk_file.name} has dtype {chunk_array.dtype}, "
-                f"expected {target_dtype} for dataset {dataset_name!r}. "
-                f"Refusing to silently cast acquisition data."
-            )
-        dataset[offset : offset + chunk_size] = chunk_array[...]
+	        cast_from = np.dtype(chunk_array.dtype)
+	    values = _coerce_chunk_to_target(
+		    np.asarray(chunk_array), target_dtype, chunk_file, dataset_name
+	    )
+	    dataset[offset: offset + chunk_size] = values
         offset += chunk_size
-        del chunk_array
+	    del chunk_array, values
+
+    if cast_from is not None:
+	    logger.warning(
+		    "Dataset %r: chunk dtype %s differed from schema %s; values were "
+		    "losslessly cast on write (chunk-writer dtype drift).",
+		    dataset_name, cast_from, target_dtype,
+	    )
 
 
 def _coerce_numeric_array(data, dtype):

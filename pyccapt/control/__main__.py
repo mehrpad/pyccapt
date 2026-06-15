@@ -4,7 +4,7 @@ import sys
 
 from PyQt6 import QtGui, QtWidgets
 
-from pyccapt.control.core import runtime
+from pyccapt.control.core import loggi, runtime
 from pyccapt.control.gui import gui_main
 
 
@@ -43,14 +43,31 @@ def main():
     Returns:
             None
     """
+    # Put this process in a kill-on-close Job Object so every worker
+    # subprocess (camera, visualization, experiment, Manager) is terminated
+    # if the GUI dies WITHOUT running cleanup() - e.g. PyCharm's red Stop
+    # button or a crash. Must run before any subprocess is spawned.
+    runtime.install_kill_children_on_exit()
+
     try:
-        conf, _ = runtime.load_project_config()
+        conf, project_root = runtime.load_project_config()
     except Exception as exc:
         print("Cannot load the configuration file")
         print(exc)
         sys.exit()
 
+    # Configure application-wide logging BEFORE building the GUI so that
+    # device probing during window construction (e.g. the SmarAct stage
+    # connect in wins_init) is captured to <project_root>/files/logs/gui/.
+    # gui_main.py's own __main__ block does this; the package entry point
+    # (python -m pyccapt.control / running __main__.py) must do it too, or
+    # the GUI process logs are lost and only print to the console via
+    # logging's bare lastResort handler (no timestamp, no file).
+    gui_logger = loggi.setup_application_logging(project_root)
+    loggi.log_configuration_snapshot(gui_logger, conf)
+
     shared = runtime.create_shared_context(conf)
+    shared.variables.log_path = str(project_root)
 
     # Set the Windows taskbar app id BEFORE the QApplication is created so
     # the taskbar uses the PyCCAPT logo instead of the Python icon.

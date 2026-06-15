@@ -5,7 +5,6 @@ import time
 from pathlib import Path
 
 import numpy as np
-
 import serial.tools.list_ports
 from simple_pid import PID
 
@@ -81,6 +80,13 @@ class APT_Exp_Control:
         self.main_raw_counter = []
         self.main_temperature = []
         self.main_chamber_vacuum = []
+        # Per-iteration stage positions (meters), logged into apt/*.
+        self.main_laser_x = []
+        self.main_laser_y = []
+        self.main_laser_z = []
+        self.main_stage_x = []
+        self.main_stage_y = []
+        self.main_stage_z = []
 
         self.initialization_error = False
         self.detector_runtime = DetectorRuntime()
@@ -169,6 +175,12 @@ class APT_Exp_Control:
             _save("apt_num_raw_signals", self.main_raw_counter,    np.uint32)
             _save("apt_temperature",     self.main_temperature,    np.float64)
             _save("apt_vacuum",          self.main_chamber_vacuum, np.float64)
+            _save("apt_laser_x", self.main_laser_x, np.float64)
+            _save("apt_laser_y", self.main_laser_y, np.float64)
+            _save("apt_laser_z", self.main_laser_z, np.float64)
+            _save("apt_stage_x", self.main_stage_x, np.float64)
+            _save("apt_stage_y", self.main_stage_y, np.float64)
+            _save("apt_stage_z", self.main_stage_z, np.float64)
 
             self._apt_meta_flush_offset = end
         except Exception as exc:
@@ -211,6 +223,14 @@ class APT_Exp_Control:
         self.main_raw_counter.extend([count_raw_signals_temp])
         self.main_temperature.extend([self.variables.temperature])
         self.main_chamber_vacuum.extend([self.variables.vacuum_main])
+        # Stage positions (meters) for this iteration, published by the
+        # laser/stage GUIs. Read once per loop, like temperature/vacuum.
+        self.main_laser_x.extend([self.variables.laser_pos_x])
+        self.main_laser_y.extend([self.variables.laser_pos_y])
+        self.main_laser_z.extend([self.variables.laser_pos_z])
+        self.main_stage_x.extend([self.variables.stage_pos_x])
+        self.main_stage_y.extend([self.variables.stage_pos_y])
+        self.main_stage_z.extend([self.variables.stage_pos_z])
 
         # Re-read the algorithm choice every iteration so the user can
         # switch between Proportional / Aggressive / Adaptive / PID live
@@ -764,16 +784,26 @@ class APT_Exp_Control:
         )
 
         if self.variables.counter_source == 'TDC' and self.detector_runtime.tdc_process is not None:
-            print('Waiting for TDC process to be finished for maximum 60 seconds...')
-            for i in range(900):
+	        # Teardown cost does NOT scale with total ion count: the bulk data is
+	        # streamed to temp_data/chunks/ continuously during the run (the save
+	        # worker sustains ~200k events/s, far above any APT detection rate, so
+	        # it never backs up). At shutdown only the final residual chunk
+	        # (< CHUNK_SIZE) is written and the device is deinitialized before
+	        # flag_finished_tdc is set -- a few seconds even for 100M+ ion runs.
+	        # 60 s is generous headroom. Timing out is non-fatal: the residual
+	        # chunk is already on disk before flag_finished_tdc would be set, and
+	        # join_detector_processes() below joins (never kills) the worker.
+	        tdc_finish_timeout_s = 60
+	        print('Waiting for TDC process to be finished for maximum %s seconds...' % tdc_finish_timeout_s)
+	        for i in range(tdc_finish_timeout_s):
                 if self.variables.flag_finished_tdc:
                     print('TDC process is finished')
                     break
                 print('%s seconds passed' % i)
                 time.sleep(1)
-                if i == 599:
-                    print('TDC process is not finished')
-                    self.log_apt.warning('TDC process is not finished after 15 minutes')
+	        else:
+		        print('TDC process is not finished after %s seconds' % tdc_finish_timeout_s)
+		        self.log_apt.warning('TDC process is not finished after %s seconds', tdc_finish_timeout_s)
         else:
             self.variables.flag_finished_tdc = True
 
@@ -806,6 +836,30 @@ class APT_Exp_Control:
         # This flag set to True to save the last screenshot of the experiment in the GUI visualization
         self.variables.last_screen_shot = True
         validate_detector_data_lengths(self.variables, self.conf, self.log_apt)
+
+        # Sanity check: stage/laser positions are published by the Stage Control
+        # and Laser Control GUIs' poll timers. If a SmarAct stage was not
+        # connected during the run those values stay at their 0.0 default, so
+        # apt/stage_* (or apt/laser_*) is written all-zero. Surface that here so
+        # it shows up in apt.log instead of only being discovered later in the
+        # HDF5 file (the GUI session log records *why* the stage didn't connect).
+        if self.log_apt is not None:
+	        if self.main_stage_x and not (
+			        any(self.main_stage_x) or any(self.main_stage_y) or any(self.main_stage_z)
+	        ):
+		        self.log_apt.warning(
+			        "Specimen-stage position was 0 for the whole run: the Stage "
+			        "Control GUI never published a position (SmarAct main stage "
+			        "not connected?). apt/stage_* will be all zero."
+		        )
+	        if self.main_laser_x and not (
+			        any(self.main_laser_x) or any(self.main_laser_y) or any(self.main_laser_z)
+	        ):
+		        self.log_apt.warning(
+			        "Laser-stage position was 0 for the whole run: the Laser "
+			        "Control GUI never published a position (SmarAct laser stage "
+			        "not connected?). apt/laser_* will be all zero."
+		        )
 
         try:
             self.variables.end_time = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")

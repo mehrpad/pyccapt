@@ -19,6 +19,16 @@ Control-loop metadata recorded each iteration.
 - `temperature` `(n,)` (`K`, `float64`): sample temperature
 - `experiment_chamber_vacuum` `(n,)` (`mbar`, `float64`): main-chamber vacuum
 - `timestamps` `(n,)` (`UNIX s`, `float64`): acquisition timestamp
+- `stage_x`, `stage_y`, `stage_z` `(n,)` (`m`, `float64`): specimen-stage position
+  (SmarAct MCS2 `stage_smartact_main`), one sample per control-loop iteration
+- `laser_x`, `laser_y`, `laser_z` `(n,)` (`m`, `float64`): laser-focusing-stage
+  position (SmarAct MCS2 `stage_smartact_laser`), one sample per control-loop iteration
+
+> Stage/laser positions are in **meters**. They are published by the Stage Control
+> and Laser Control GUIs' poll timers and read by the experiment loop each
+> iteration. If a SmarAct stage is not connected (or not referenced) during the
+> run, its axes are written as the `0.0` default — see the GUI session log for the
+> connection outcome.
 
 ## Group `dld`
 

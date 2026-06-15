@@ -133,6 +133,16 @@ class Variables:
         # the experiment subprocess can refuse to start in laser pulse
         # mode when the laser was never reached on CLI.
         "flag_laser_connected": ("main", ("exp",)),
+	    # --- Stage positions (meters) --------------------------------------
+	    # The laser-control and stage-control GUIs poll their stages every
+	    # ~500 ms and publish the current position here so the experiment
+	    # loop can log it per iteration into the apt/* metadata group.
+	    "laser_pos_x": ("main", ("exp",)),
+	    "laser_pos_y": ("main", ("exp",)),
+	    "laser_pos_z": ("main", ("exp",)),
+	    "stage_pos_x": ("main", ("exp",)),
+	    "stage_pos_y": ("main", ("exp",)),
+	    "stage_pos_z": ("main", ("exp",)),
         # --- Gates ---------------------------------------------------------
         "flag_main_gate": ("main", ("exp",)),
         "flag_load_gate": ("main", ("exp",)),
@@ -446,6 +456,13 @@ class Variables:
         "laser_freq": 0,
         "laser_division_factor": 0,
         "laser_average_power": 0,
+	    # Stage positions in meters (published by the laser/stage GUIs).
+	    "laser_pos_x": 0.0,
+	    "laser_pos_y": 0.0,
+	    "laser_pos_z": 0.0,
+	    "stage_pos_x": 0.0,
+	    "stage_pos_y": 0.0,
+	    "stage_pos_z": 0.0,
         # Set True by the laser GUI when a CLI session is open and
         # responsive; False (the default) means the laser is either not
         # configured, the COM port is unavailable, or the laser is

@@ -1,3 +1,4 @@
+import logging
 import sys
 import threading
 
@@ -6,6 +7,11 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from pyccapt.control.core import runtime
 from pyccapt.control.gui import tooltips
 from pyccapt.control.smaract_mcs2 import mcs2_stage
+
+# GUI session logger (lands in meta_data/files/logs/gui/). Used so a silent
+# SmarAct connection failure - which leaves the specimen-stage position at 0
+# and therefore writes apt/stage_* as all-zero - is recorded and diagnosable.
+_log = logging.getLogger("pyccapt.gui")
 
 
 class _ReferenceWorker(QtCore.QThread):
@@ -349,22 +355,56 @@ class Ui_Stage_Control(object):
             self._connect_error = "No SmarAct stage locator configured (stage_smartact_main in config.toml)."
             self._set_error(self._connect_error)
             self._set_movement_enabled(False)
+            _log.warning(
+	            "Stage Control: %s Specimen-stage position will be logged as 0 in apt/stage_*.",
+	            self._connect_error,
+            )
             return
         try:
+	        # Catch any exception (not just SmarActStageError): the SmarAct SDK
+	        # can fail in unexpected ways, and a connection problem must never
+	        # crash GUI startup (this runs from wins_init -> setupUi).
             self.stage_device = mcs2_stage.SmarActStage(self._locator)
-        except mcs2_stage.SmarActStageError as exc:
+        except Exception as exc:
             self.stage_device = None
             self._connect_error = str(exc)
             self._set_error(self._connect_error)
             self._set_movement_enabled(False)
+            _log.warning(
+	            "Stage Control: could not connect to SmarAct main stage '%s': %s "
+	            "Specimen-stage position will be logged as 0 in apt/stage_* for "
+	            "experiments started now.",
+	            self._locator, exc,
+            )
             return
         self._set_error("")
         self._set_movement_enabled(True)
+        _log.info(
+	        "Stage Control: connected to SmarAct main stage '%s'; publishing "
+	        "position to apt/stage_*.",
+	        self._locator,
+        )
         self._poll_timer = QtCore.QTimer()
         self._poll_timer.setInterval(500)
         self._poll_timer.timeout.connect(self._refresh_position)
         self._poll_timer.start()
         self._refresh_position()
+
+    def reconnect(self):
+	    """Retry the SmarAct connection if not currently connected.
+
+		The stage is connected once at GUI startup; if the controller was
+		powered off / busy / holding a stale handle then, it stays
+		disconnected until the whole GUI is restarted. This lets the user
+		recover (e.g. after power-cycling the controller) by simply opening
+		the Stage Control window, without restarting the application.
+
+		No-op when already connected, so it is safe to call on every open.
+		"""
+	    if self.stage_device is not None:
+		    return
+	    _log.info("Stage Control: retrying connection to SmarAct main stage '%s'...", self._locator)
+	    self._connect_device()
 
     def _set_movement_enabled(self, enabled):
         for btn in (
@@ -671,6 +711,14 @@ class Ui_Stage_Control(object):
         self._set_axis_display(pos['x'], self.stage_x_mm, self.stage_x_um, self.stage_x_nm, self.stage_x_cord)
         self._set_axis_display(pos['y'], self.stage_y_mm, self.stage_y_um, self.stage_y_nm, self.stage_y_cord)
         self._set_axis_display(pos['z'], self.stage_z_mm, self.stage_z_um, self.stage_z_nm, self.stage_z_cord)
+        # Publish to shared variables (meters) so the experiment loop can log
+        # the specimen-stage position per iteration into apt/*. Best-effort.
+        try:
+	        self.variables.stage_pos_x = float(pos['x'])
+	        self.variables.stage_pos_y = float(pos['y'])
+	        self.variables.stage_pos_z = float(pos['z'])
+        except Exception:
+	        pass
 
     @staticmethod
     def _set_axis_display(value_m, mm_lcd, um_lcd, nm_lcd, single_lcd):

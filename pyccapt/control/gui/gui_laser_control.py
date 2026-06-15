@@ -803,21 +803,54 @@ class Ui_Laser_Control(object):
             self._set_stage_movement_enabled(False)
             for sl_lbl in (self.laser_speed_x_label, self.laser_speed_y_label, self.laser_speed_z_label):
                 sl_lbl.setEnabled(False)
+            logging.getLogger("pyccapt.gui").info(
+	            "Laser Control: no laser-stage locator configured "
+	            "(stage_smartact_laser); apt/laser_* will be logged as 0."
+            )
             return
         try:
+	        # Catch any exception (not just SmarActStageError): a connection
+	        # problem must never crash GUI startup (runs from setupUi).
             self.stage_device = mcs2_stage.SmarActStage(self._stage_locator)
-        except mcs2_stage.SmarActStageError as exc:
+        except Exception as exc:
             self.stage_device = None
             self._stage_connect_error = str(exc)
             self.error_message(self._stage_connect_error)
             self._set_stage_movement_enabled(False)
+            logging.getLogger("pyccapt.gui").warning(
+	            "Laser Control: could not connect to SmarAct laser stage '%s': %s "
+	            "Laser-stage position will be logged as 0 in apt/laser_* for "
+	            "experiments started now.",
+	            self._stage_locator, exc,
+            )
             return
         self._set_stage_movement_enabled(True)
+        logging.getLogger("pyccapt.gui").info(
+	        "Laser Control: connected to SmarAct laser stage '%s'; publishing "
+	        "position to apt/laser_*.",
+	        self._stage_locator,
+        )
         self._stage_poll_timer = QtCore.QTimer()
         self._stage_poll_timer.setInterval(500)
         self._stage_poll_timer.timeout.connect(self._refresh_stage_position)
         self._stage_poll_timer.start()
         self._refresh_stage_position()
+
+    def reconnect_stage(self):
+	    """Retry the laser-stage SmarAct connection if not connected.
+
+		Lets the user recover a laser stage that was off/busy at GUI startup
+		by re-opening the Laser Control window, instead of restarting the
+		whole app. No-op when already connected (and when no laser-stage
+		locator is configured), so safe to call on every open.
+		"""
+	    if self.stage_device is not None or not self._stage_locator:
+		    return
+	    logging.getLogger("pyccapt.gui").info(
+		    "Laser Control: retrying connection to SmarAct laser stage '%s'...",
+		    self._stage_locator,
+	    )
+	    self._connect_stage_device()
 
     def _set_stage_movement_enabled(self, enabled):
         # The laser focusing stage is a SEPARATE device from the laser
@@ -1077,6 +1110,15 @@ class Ui_Laser_Control(object):
         self._set_stage_axis(pos['x'], self.laser_x_mm, self.laser_x_um, self.laser_x_nm, self.laser_x_cord)
         self._set_stage_axis(pos['y'], self.laser_y_mm, self.laser_y_um, self.laser_y_nm, self.laser_y_cord)
         self._set_stage_axis(pos['z'], self.laser_z_mm, self.laser_z_um, self.laser_z_nm, self.laser_z_cord)
+        # Publish to shared variables (meters) so the experiment loop can log
+        # the laser-stage position per iteration into apt/*. Best-effort: a
+        # Manager hiccup must never break the position display.
+        try:
+	        self.variables.laser_pos_x = float(pos['x'])
+	        self.variables.laser_pos_y = float(pos['y'])
+	        self.variables.laser_pos_z = float(pos['z'])
+        except Exception:
+	        pass
 
     @staticmethod
     def _set_stage_axis(value_m, mm_lcd, um_lcd, nm_lcd, single_lcd):

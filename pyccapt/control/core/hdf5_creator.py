@@ -45,6 +45,13 @@ _APT_CHUNK_STEMS: list[tuple[str, str, str]] = [
     ("apt_num_raw_signals", "apt/num_raw_signals",             "uint32"),
     ("apt_temperature",     "apt/temperature",                 "float64"),
     ("apt_vacuum",          "apt/experiment_chamber_vacuum",   "float64"),
+	# Stage positions in meters, logged once per experiment iteration.
+	("apt_laser_x", "apt/laser_x", "float64"),
+	("apt_laser_y", "apt/laser_y", "float64"),
+	("apt_laser_z", "apt/laser_z", "float64"),
+	("apt_stage_x", "apt/stage_x", "float64"),
+	("apt_stage_y", "apt/stage_y", "float64"),
+	("apt_stage_z", "apt/stage_z", "float64"),
 ]
 
 
@@ -121,6 +128,28 @@ def _coerce_chunk_to_target(values: np.ndarray, target_dtype: np.dtype,
     return values.astype(target_dtype)
 
 
+# HDF5 chunk size (in elements) for compressed 1-D datasets. ~8 MiB per
+# chunk for an 8-byte dtype: large enough that lzf compresses the
+# channel-0-dominated raw arrays and the tiled per-pulse columns well,
+# small enough that the calibration pipeline's partial reads stay cheap.
+_HDF5_COMPRESS_CHUNK = 1 << 20  # 1,048,576 elements
+
+
+def _compression_opts(n_elements: int) -> dict:
+	"""h5py create_dataset kwargs enabling lzf compression for large arrays.
+
+	Compression requires chunked storage, which adds overhead that isn't
+	worth it for small datasets (apt/*, short dld/*). Only arrays at least
+	one chunk long are compressed. lzf is h5py's BUILT-IN filter (no
+	external dependency, always readable wherever h5py is installed) and is
+	fast enough not to bottleneck finalization. Read is transparent -- the
+	calibration pipeline needs no change.
+	"""
+	if n_elements < _HDF5_COMPRESS_CHUNK:
+		return {}
+	return {"compression": "lzf", "chunks": (_HDF5_COMPRESS_CHUNK,)}
+
+
 def _write_chunked_dataset(hdf_file, dataset_name: str, chunk_files: list[Path], dtype) -> None:
     # First pass: size each chunk via a memory-mapped header read (no full
     # load) and cache the sizes so the write pass doesn't re-open files.
@@ -135,7 +164,9 @@ def _write_chunked_dataset(hdf_file, dataset_name: str, chunk_files: list[Path],
         # Release the mmap handle promptly.
         del chunk_array
 
-    dataset = hdf_file.create_dataset(dataset_name, (total_size,), dtype=target_dtype)
+    dataset = hdf_file.create_dataset(
+	    dataset_name, (total_size,), dtype=target_dtype, **_compression_opts(total_size)
+    )
     offset = 0
     cast_from: np.dtype | None = None
     for chunk_file, chunk_size in zip(chunk_files, chunk_sizes):
@@ -198,53 +229,49 @@ def _coerce_numeric_array(data, dtype):
 
 def _create_dataset(hdf_file, dataset_name: str, data, dtype) -> None:
     dataset_data = _coerce_numeric_array(data, dtype)
-    hdf_file.create_dataset(dataset_name, data=dataset_data, dtype=dtype)
+    hdf_file.create_dataset(
+	    dataset_name, data=dataset_data, dtype=dtype, **_compression_opts(dataset_data.size)
+    )
 
 
 def _write_surface_concept_detector_data(hdf_file, variables) -> None:
-    temp_data_dir = Path(variables.path) / "temp_data"
-    chunk_dir = temp_data_dir / "chunks"
-    chunk_mode = chunk_dir.is_dir() and any(chunk_dir.glob("*_chunk_*.npy"))
+	chunk_dir = Path(variables.path) / "temp_data" / "chunks"
+	chunk_dir_exists = chunk_dir.is_dir()
 
-    chunk_mapping = (
-        ("dld/x", "x", np.float64),
-        ("dld/y", "y", np.float64),
-        ("dld/t", "t", np.float64),
-        ("dld/high_voltage", "voltage", np.float64),
-        ("dld/voltage_pulse", "voltage_pulse", np.float64),
-        ("dld/laser_pulse", "laser_pulse", np.float64),
-        ("dld/start_counter", "start_counter", np.uint64),
-        ("tdc/channel", "channel", np.uint32),
-        ("tdc/time_data", "time", np.uint64),
-        ("tdc/start_counter", "tdc_start_counter", np.uint64),
-        ("tdc/high_voltage", "voltage_tdc", np.float64),
-        ("tdc/voltage_pulse", "voltage_pulse_tdc", np.float64),
-        ("tdc/laser_pulse", "laser_pulse_tdc", np.float64),
-    )
-    fallback_mapping = (
-        ("dld/x", variables.x, np.float64),
-        ("dld/y", variables.y, np.float64),
-        ("dld/t", variables.t, np.float64),
-        ("dld/high_voltage", variables.main_v_dc_dld, np.float64),
-        ("dld/voltage_pulse", variables.main_v_p_dld, np.float64),
-        ("dld/laser_pulse", variables.main_l_p_dld, np.float64),
-        ("dld/start_counter", variables.dld_start_counter, np.uint64),
-        ("tdc/channel", variables.channel, np.uint32),
-        ("tdc/time_data", variables.time_data, np.uint64),
-        ("tdc/start_counter", variables.tdc_start_counter, np.uint64),
-        ("tdc/high_voltage", variables.main_v_dc_tdc, np.float64),
-        ("tdc/voltage_pulse", variables.main_v_p_tdc, np.float64),
-        ("tdc/laser_pulse", variables.main_l_p_tdc, np.float64),
+	# (hdf5 dataset, chunk stem, in-memory fallback attr on `variables`, dtype).
+	# The DLD and raw/TDC streams have DIFFERENT lengths (one DLD event can
+	# yield several raw channel hits, and many raw hits never complete a DLD
+	# event) and are chunked INDEPENDENTLY by the acquisition process. Each
+	# dataset is therefore resolved on its own: use its chunk files if any
+	# exist, otherwise fall back to the in-memory array. This correctly
+	# handles a run that chunked the fast raw stream but not the smaller DLD
+	# stream (or vice versa) -- the old all-or-nothing chunk_mode wrote
+	# NOTHING for the un-chunked stream, silently dropping it.
+	combined_mapping = (
+		("dld/x", "x", "x", np.float64),
+		("dld/y", "y", "y", np.float64),
+		("dld/t", "t", "t", np.float64),
+		("dld/high_voltage", "voltage", "main_v_dc_dld", np.float64),
+		("dld/voltage_pulse", "voltage_pulse", "main_v_p_dld", np.float64),
+		("dld/laser_pulse", "laser_pulse", "main_l_p_dld", np.float64),
+		("dld/start_counter", "start_counter", "dld_start_counter", np.uint64),
+		("tdc/channel", "channel", "channel", np.uint32),
+		("tdc/time_data", "time", "time_data", np.uint64),
+		("tdc/start_counter", "tdc_start_counter", "tdc_start_counter", np.uint64),
+		("tdc/high_voltage", "voltage_tdc", "main_v_dc_tdc", np.float64),
+		("tdc/voltage_pulse", "voltage_pulse_tdc", "main_v_p_tdc", np.float64),
+		("tdc/laser_pulse", "laser_pulse_tdc", "main_l_p_tdc", np.float64),
     )
 
-    if chunk_mode:
-        for dataset_name, chunk_stem, dtype in chunk_mapping:
-            chunk_files = _sorted_chunk_files(chunk_dir, chunk_stem)
-            if chunk_files:
-                _write_chunked_dataset(hdf_file, dataset_name, chunk_files, dtype)
-    else:
-        for dataset_name, values, dtype in fallback_mapping:
-            _create_dataset(hdf_file, dataset_name, values, dtype)
+	for dataset_name, chunk_stem, var_attr, dtype in combined_mapping:
+		chunk_files = _sorted_chunk_files(chunk_dir, chunk_stem) if chunk_dir_exists else []
+		if chunk_files:
+			_write_chunked_dataset(hdf_file, dataset_name, chunk_files, dtype)
+		else:
+			# Lazy: only fetch the (possibly large, Manager-backed) array when
+			# this stream was NOT chunked, so a fully-chunked run never pulls
+			# the bulk acquisition arrays back through the Manager.
+			_create_dataset(hdf_file, dataset_name, getattr(variables, var_attr), dtype)
 
 
 def hdf_creator(variables, conf, time_counter, time_ex):
@@ -269,6 +296,7 @@ def hdf_creator(variables, conf, time_counter, time_ex):
     # deleted manually.
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     tdc_model = normalize_tdc_model(conf.get("tdc_model")) if conf.get("tdc") == "on" else ""
+    chunk_dir = Path(variables.path) / "temp_data" / "chunks"
     try:
         with h5py.File(tmp_path, "w") as hdf_file:
             # apt/* group: prefer chunk files written during the run (crash-safe),

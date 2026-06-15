@@ -796,15 +796,13 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         bowl_button.disabled = False
 
     def _mark_initial_done(mode_value):
+        # Kept for diagnostics / dataset-reload tracking (sync_from_data resets
+        # these). No longer gates the auto routine: _ensure_initial_calibration
+        # now rebuilds the initial baseline on every press.
         if mode_value == 'tof_calib':
             variables.initial_calibration_done_tof = True
         else:
             variables.initial_calibration_done_mc = True
-
-    def _initial_done(mode_value):
-        if mode_value == 'tof_calib':
-            return bool(getattr(variables, 'initial_calibration_done_tof', False))
-        return bool(getattr(variables, 'initial_calibration_done_mc', False))
 
     def initial_calibration(_, variables, calibration_mode_widget, flight_path_length_value):
         initial_calib_button.disabled = True
@@ -829,6 +827,16 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                 _run_bowl_correction(plot_override=False, save_override=False)
                 print('Initial ToF calibration + bowl correction is done')
             else:
+                # m/c has no flight-path/naive step; its raw baseline is the
+                # uncalibrated ``mc_uc (Da)`` column (the same baseline the
+                # Reset buttons restore). Reset to it FIRST so that -- exactly
+                # like the ToF branch above -- every initial-calibration run
+                # rebuilds from a clean, reproducible starting point instead of
+                # stacking another bowl correction on top of the previous
+                # result. Without this, calling initial calibration repeatedly
+                # (which _ensure_initial_calibration now does on every Auto
+                # press) compounds bowl corrections on m/c.
+                variables.mc_calib = variables.data['mc_uc (Da)'].to_numpy()
                 # Always re-pick the peak window for *this* mode before
                 # running bowl correction. Otherwise, when called from the
                 # combined mc+tof FAST/BEST flow, variables.selected_x1/x2
@@ -838,29 +846,39 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                 _force_reselect_peak_window()
                 _prepare_locked_selection()
                 _run_bowl_correction(plot_override=False, save_override=False)
-                print('Initial m/c tab action applied bowl correction')
+                print('Initial m/c calibration: reset to raw mc_uc + bowl correction')
         _mark_initial_done(calibration_mode_widget.value)
         initial_calib_button.disabled = False
 
     def _ensure_initial_calibration():
-        """Run the per-mode initial calibration if it hasn't been done yet,
+        """Always run the per-mode initial calibration before the auto routine,
         then refresh the auto-picked peak window from the current histogram.
 
         Used by every auto-* button so users don't need to remember to click
-        "Initial calibration" first. Tracking is per-mode (mc vs tof) because
-        the two have different initial-calibration steps.
+        "Initial calibration" first.
 
-        The trailing ``_force_reselect_peak_window()`` always re-runs peak
-        detection on the post-calibration data, so the auto routine starts
-        from a fresh peak window regardless of whether we just ran the
-        initial calibration or skipped it.
+        Previously this was gated on the per-mode
+        ``initial_calibration_done_{mc,tof}`` flag: a second Auto/Hybrid press
+        (or any press once the flag was already True) SKIPPED the initial
+        rebuild and ran the iterative V+Bowl optimizer on top of whatever
+        ``dld_t_calib`` / ``mc_calib`` happened to hold. That made Auto
+        non-reproducible -- the result depended on prior presses, and a
+        degraded array (e.g. left behind by an earlier optimizer run, or a
+        reset that didn't go through this widget) was never rebuilt, so the
+        greedy optimizer started from a bad baseline and could not recover.
+
+        We now ALWAYS rebuild the clean initial baseline first (reset to raw ->
+        naive flight-path/voltage-factor correction -> voltage -> bowl), so
+        every Auto press is exactly "initial calibration, then V+Bowl
+        iteratively" from the same well-conditioned starting point. The flag is
+        still maintained by ``initial_calibration`` for diagnostics / dataset-
+        reload tracking, but it no longer gates whether the rebuild runs.
         """
-        if not _initial_done(calibration_mode.value):
-            mode_label = 'ToF' if calibration_mode.value == 'tof_calib' else 'm/c'
-            print(f'Auto-running initial calibration for {mode_label} (had not been done yet).')
-            initial_calibration(None, variables, calibration_mode, flight_path_length)
-        # Always recompute the peak window after initial calibration so the
-        # auto routine starts from a freshly-detected dominant peak. Use
+        mode_label = 'ToF' if calibration_mode.value == 'tof_calib' else 'm/c'
+        print(f'Running initial calibration for {mode_label} before the auto routine.')
+        initial_calibration(None, variables, calibration_mode, flight_path_length)
+        # Recompute the peak window after initial calibration so the auto
+        # routine starts from a freshly-detected dominant peak. Use
         # initial_peak_selection=False so the resulting window matches what
         # the manual workflow produces when the user presses the "Plot"
         # button between Initial calibration and Auto calibration. With

@@ -92,12 +92,12 @@ APT_MAPPING: list[tuple[str, str, str]] = [
     ("apt/num_raw_signals",           "apt_num_raw_signals", "uint32"),
     ("apt/temperature",               "apt_temperature",     "float64"),
     ("apt/experiment_chamber_vacuum", "apt_vacuum",          "float64"),
-	("apt/laser_x", "apt_laser_x", "float64"),
-	("apt/laser_y", "apt_laser_y", "float64"),
-	("apt/laser_z", "apt_laser_z", "float64"),
-	("apt/stage_x", "apt_stage_x", "float64"),
-	("apt/stage_y", "apt_stage_y", "float64"),
-	("apt/stage_z", "apt_stage_z", "float64"),
+    ("apt/laser_x", "apt_laser_x", "float64"),
+    ("apt/laser_y", "apt_laser_y", "float64"),
+    ("apt/laser_z", "apt_laser_z", "float64"),
+    ("apt/stage_x", "apt_stage_x", "float64"),
+    ("apt/stage_y", "apt_stage_y", "float64"),
+    ("apt/stage_z", "apt_stage_z", "float64"),
 ]
 
 ALL_MAPPING = DLD_MAPPING + TDC_MAPPING
@@ -166,17 +166,17 @@ def load_from_chunks(chunk_dir: Path, stem: str, dtype: str) -> np.ndarray | Non
 # misnomer, unrelated to the apt main_raw_counter (num_raw_signals) counter.
 # Map chunk stem -> extra flat filenames to try, newest canonical name first.
 _FLAT_ALIASES: dict[str, list[str]] = {
-	"tdc_start_counter": ["main_raw_counter"],
+    "tdc_start_counter": ["main_raw_counter"],
 }
 
 
 def load_from_flat(temp_dir: Path, stem: str, dtype: str) -> np.ndarray | None:
-	"""Load a single flat temp_data/<stem>.npy file (with legacy-name fallbacks)."""
-	for name in (stem, *_FLAT_ALIASES.get(stem, [])):
-		p = temp_dir / f"{name}.npy"
-		if p.exists():
-			return _load_one_npy(p, np.dtype(dtype))
-	return None
+    """Load a single flat temp_data/<stem>.npy file (with legacy-name fallbacks)."""
+    for name in (stem, *_FLAT_ALIASES.get(stem, [])):
+        p = temp_dir / f"{name}.npy"
+        if p.exists():
+            return _load_one_npy(p, np.dtype(dtype))
+    return None
 
 
 def load_dataset(chunk_dir: Path, temp_dir: Path, stem: str, dtype: str) -> np.ndarray | None:
@@ -289,9 +289,9 @@ _COMPRESS_CHUNK = 1 << 20  # 1,048,576 elements
 
 
 def _compress_opts(n_elements: int) -> dict:
-	if n_elements < _COMPRESS_CHUNK:
-		return {}
-	return {"compression": "lzf", "chunks": (_COMPRESS_CHUNK,)}
+    if n_elements < _COMPRESS_CHUNK:
+        return {}
+    return {"compression": "lzf", "chunks": (_COMPRESS_CHUNK,)}
 
 
 def write_hdf5(
@@ -303,12 +303,12 @@ def write_hdf5(
     tmp_path = output_path.with_suffix(output_path.suffix + ".tmp")
     print(f"\nWriting to {tmp_path} ...")
     with h5py.File(tmp_path, "w") as hf:
-	    # apt/* group: keys are already full HDF5 paths (apt/id, apt/timestamps, ...)
+        # apt/* group: keys are already full HDF5 paths (apt/id, apt/timestamps, ...)
         for ds_path, arr in apt.items():
-	        hf.create_dataset(ds_path, data=arr, **_compress_opts(np.asarray(arr).size))
+            hf.create_dataset(ds_path, data=arr, **_compress_opts(np.asarray(arr).size))
         # dld/* and tdc/* groups
         for ds_name, arr in datasets.items():
-	        hf.create_dataset(ds_name, data=arr, **_compress_opts(np.asarray(arr).size))
+            hf.create_dataset(ds_name, data=arr, **_compress_opts(np.asarray(arr).size))
     os.replace(tmp_path, output_path)
     print(f"Renamed  -> {output_path}")
 
@@ -357,14 +357,14 @@ def _check_logs(exp_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 
 def main(exp_path: str | None = None) -> int:
-	# Windows consoles default to cp1252; force UTF-8 with replacement so a
-	# non-ASCII character in status output or a file path can never abort the
-	# recovery (a cosmetic print must not lose recovered data).
-	for _stream in (sys.stdout, sys.stderr):
-		try:
-			_stream.reconfigure(encoding="utf-8", errors="replace")
-		except Exception:
-			pass
+    # Windows consoles default to cp1252; force UTF-8 with replacement so a
+    # non-ASCII character in status output or a file path can never abort the
+    # recovery (a cosmetic print must not lose recovered data).
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 
     if exp_path is None:
         exp_path = sys.argv[1] if len(sys.argv) > 1 else "."
@@ -431,7 +431,7 @@ def main(exp_path: str | None = None) -> int:
         return 1
 
     # ---- reconcile group lengths ----------------------------------------
-	print("\nReconciling group lengths ...")
+    print("\nReconciling group lengths ...")
     dld_clean = reconcile_lengths("dld", all_datasets, DLD_MAPPING)
     tdc_clean = reconcile_lengths("tdc", all_datasets, TDC_MAPPING)
 
@@ -458,7 +458,7 @@ def main(exp_path: str | None = None) -> int:
             print(f"  {ds}")
 
     # ---- load or synthesize apt/* group ---------------------------------
-	print("\nLoading apt/* metadata chunks ...")
+    print("\nLoading apt/* metadata chunks ...")
     apt = load_apt_from_chunks(chunk_dir, temp_dir)
     if apt:
         # Reconcile apt group lengths the same way as dld/tdc

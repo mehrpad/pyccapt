@@ -25,19 +25,19 @@ CHUNK_SIZE = 100_000  # Adjust the chunk size if needed
 # *_bin raw arrays, which hdf_creator does not consume) keep NumPy's inferred
 # dtype.
 CHUNK_DTYPES = {
-	"x": np.float64,
-	"y": np.float64,
-	"t": np.float64,
-	"voltage": np.float64,
-	"voltage_pulse": np.float64,
-	"laser_pulse": np.float64,
-	"start_counter": np.uint64,
-	"channel": np.uint32,
-	"time": np.uint64,
-	"tdc_start_counter": np.uint64,
-	"voltage_tdc": np.float64,
-	"voltage_pulse_tdc": np.float64,
-	"laser_pulse_tdc": np.float64,
+    "x": np.float64,
+    "y": np.float64,
+    "t": np.float64,
+    "voltage": np.float64,
+    "voltage_pulse": np.float64,
+    "laser_pulse": np.float64,
+    "start_counter": np.uint64,
+    "channel": np.uint32,
+    "time": np.uint64,
+    "tdc_start_counter": np.uint64,
+    "voltage_tdc": np.float64,
+    "voltage_pulse_tdc": np.float64,
+    "laser_pulse_tdc": np.float64,
 }
 # Per-queue blocking-get timeout (s).  Two callbacks fire at different
 # rates (DLD vs raw); using a small timeout instead of an indefinite
@@ -135,12 +135,12 @@ def save_chunk_worker(save_queue):
         chunk_id, path, chunk_data = task  # Extract data
         try:
             for key, data in chunk_data.items():
-	            target_dtype = CHUNK_DTYPES.get(key)
-	            if target_dtype is not None:
-		            arr = np.asarray(data, dtype=target_dtype)
-	            else:
-		            arr = np.array(data)
-	            np.save(os.path.join(path, f"chunks/{key}_chunk_{chunk_id}.npy"), arr)
+                target_dtype = CHUNK_DTYPES.get(key)
+                if target_dtype is not None:
+                    arr = np.asarray(data, dtype=target_dtype)
+                else:
+                    arr = np.array(data)
+                np.save(os.path.join(path, f"chunks/{key}_chunk_{chunk_id}.npy"), arr)
         except Exception as e:
             print(f"Error saving chunk {chunk_id}: {e}")
 
@@ -439,8 +439,8 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
         # through the Manager every flush -- O(N) IPC -- which throttled
         # acquisition and OOM'd the Manager on large runs.)
         if len(xx) >= CHUNK_SIZE:
-	        dld_chunk_id += 1
-	        dld_chunk = {
+            dld_chunk_id += 1
+            dld_chunk = {
                 "x_bin": xx_list_bin[:CHUNK_SIZE],
                 "x": xx[:CHUNK_SIZE],
                 "y_bin": yy_list_bin[:CHUNK_SIZE],
@@ -451,12 +451,12 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
                 "voltage_pulse": voltage_pulse_data[:CHUNK_SIZE],
                 "laser_pulse": laser_pulse_data[:CHUNK_SIZE],
                 "start_counter": start_counter[:CHUNK_SIZE],
-	        }
-	        save_queue.put((dld_chunk_id, path, dld_chunk))
-	        del xx[:CHUNK_SIZE], yy[:CHUNK_SIZE], tt[:CHUNK_SIZE]
-	        del xx_list_bin[:CHUNK_SIZE], yy_list_bin[:CHUNK_SIZE], tt_list_bin[:CHUNK_SIZE]
-	        del voltage_data[:CHUNK_SIZE], voltage_pulse_data[:CHUNK_SIZE], laser_pulse_data[:CHUNK_SIZE]
-	        del start_counter[:CHUNK_SIZE]
+            }
+            save_queue.put((dld_chunk_id, path, dld_chunk))
+            del xx[:CHUNK_SIZE], yy[:CHUNK_SIZE], tt[:CHUNK_SIZE]
+            del xx_list_bin[:CHUNK_SIZE], yy_list_bin[:CHUNK_SIZE], tt_list_bin[:CHUNK_SIZE]
+            del voltage_data[:CHUNK_SIZE], voltage_pulse_data[:CHUNK_SIZE], laser_pulse_data[:CHUNK_SIZE]
+            del start_counter[:CHUNK_SIZE]
 
         # Flush the raw/TDC stream INDEPENDENTLY -- it grows much faster than
         # the DLD stream (many raw hits per DLD event), so it reaches
@@ -464,8 +464,8 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
         # under-flushed the raw lists: they grew unbounded (OOM) and only
         # CHUNK_SIZE of the millions of raw rows were ever written per chunk.
         if len(channel_data) >= CHUNK_SIZE:
-	        tdc_chunk_id += 1
-	        tdc_chunk = {
+            tdc_chunk_id += 1
+            tdc_chunk = {
                 "channel": channel_data[:CHUNK_SIZE],
                 "time": time_data[:CHUNK_SIZE],
                 "tdc_start_counter": tdc_start_counter[:CHUNK_SIZE],
@@ -473,10 +473,10 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
                 "voltage_pulse_tdc": voltage_pulse_data_tdc[:CHUNK_SIZE],
                 "laser_pulse_tdc": laser_pulse_data_tdc[:CHUNK_SIZE],
             }
-	        save_queue.put((tdc_chunk_id, path, tdc_chunk))
-	        del channel_data[:CHUNK_SIZE], time_data[:CHUNK_SIZE], tdc_start_counter[:CHUNK_SIZE]
-	        del voltage_data_tdc[:CHUNK_SIZE], voltage_pulse_data_tdc[:CHUNK_SIZE]
-	        del laser_pulse_data_tdc[:CHUNK_SIZE]
+            save_queue.put((tdc_chunk_id, path, tdc_chunk))
+            del channel_data[:CHUNK_SIZE], time_data[:CHUNK_SIZE], tdc_start_counter[:CHUNK_SIZE]
+            del voltage_data_tdc[:CHUNK_SIZE], voltage_pulse_data_tdc[:CHUNK_SIZE]
+            del laser_pulse_data_tdc[:CHUNK_SIZE]
 
         if time.time() - start_time_loop > loop_time:
             loop_delay_counter += 1
@@ -497,14 +497,14 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
     # acquisition loop, so it never touches the live hot path. flush=True
     # so each line survives even if the process is later force-joined.
     def _tlog(msg):
-	    print("[TDC teardown] %s" % msg, flush=True)
+        print("[TDC teardown] %s" % msg, flush=True)
 
     _teardown_t0 = time.time()
     _tlog(
-	    "begin: dld_chunk_id=%d (DLD residual=%d), tdc_chunk_id=%d (raw residual=%d), "
-	    "stop_event=%s, tdc_failure=%s"
-	    % (dld_chunk_id, len(xx), tdc_chunk_id, len(channel_data),
-	       stop_event.is_set(), getattr(variables, "flag_tdc_failure", "?"))
+        "begin: dld_chunk_id=%d (DLD residual=%d), tdc_chunk_id=%d (raw residual=%d), "
+        "stop_event=%s, tdc_failure=%s"
+        % (dld_chunk_id, len(xx), tdc_chunk_id, len(channel_data),
+           stop_event.is_set(), getattr(variables, "flag_tdc_failure", "?"))
     )
 
     # Final residual chunks -- whatever is still in the in-memory lists after
@@ -513,25 +513,25 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
     # faster raw stream is saved completely. A stream that already produced
     # chunks during the run just appends its final partial chunk here.
     if dld_chunk_id > 0 and len(xx) > 0:
-	    dld_chunk_id += 1
-	    save_queue.put((dld_chunk_id, path, {
-		    "x_bin": xx_list_bin, "x": xx,
-		    "y_bin": yy_list_bin, "y": yy,
-		    "t_bin": tt_list_bin, "t": tt,
-		    "voltage": voltage_data, "voltage_pulse": voltage_pulse_data,
-		    "laser_pulse": laser_pulse_data, "start_counter": start_counter,
-	    }))
-	    _tlog("queued residual DLD chunk #%d (%d rows)" % (dld_chunk_id, len(xx)))
+        dld_chunk_id += 1
+        save_queue.put((dld_chunk_id, path, {
+            "x_bin": xx_list_bin, "x": xx,
+            "y_bin": yy_list_bin, "y": yy,
+            "t_bin": tt_list_bin, "t": tt,
+            "voltage": voltage_data, "voltage_pulse": voltage_pulse_data,
+            "laser_pulse": laser_pulse_data, "start_counter": start_counter,
+        }))
+        _tlog("queued residual DLD chunk #%d (%d rows)" % (dld_chunk_id, len(xx)))
     if tdc_chunk_id > 0 and len(channel_data) > 0:
-	    tdc_chunk_id += 1
-	    save_queue.put((tdc_chunk_id, path, {
-		    "channel": channel_data, "time": time_data,
-		    "tdc_start_counter": tdc_start_counter,
-		    "voltage_tdc": voltage_data_tdc,
-		    "voltage_pulse_tdc": voltage_pulse_data_tdc,
-		    "laser_pulse_tdc": laser_pulse_data_tdc,
-	    }))
-	    _tlog("queued residual raw/TDC chunk #%d (%d rows)" % (tdc_chunk_id, len(channel_data)))
+        tdc_chunk_id += 1
+        save_queue.put((tdc_chunk_id, path, {
+            "channel": channel_data, "time": time_data,
+            "tdc_start_counter": tdc_start_counter,
+            "voltage_tdc": voltage_data_tdc,
+            "voltage_pulse_tdc": voltage_pulse_data_tdc,
+            "laser_pulse_tdc": laser_pulse_data_tdc,
+        }))
+        _tlog("queued residual raw/TDC chunk #%d (%d rows)" % (tdc_chunk_id, len(channel_data)))
 
     _tlog("waiting for save worker to drain queue (save_process.join)...")
     _save_join_t = time.time()
@@ -547,9 +547,9 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
     # (or vice versa) only mirrors the SMALL un-chunked stream, never the
     # large one already on disk -- avoiding the O(N) Manager blow-up.
     if dld_chunk_id == 0 and len(xx) > 0:
-	    _tlog("DLD fallback: mirroring %d rows into Manager + flat .npy ..." % len(xx))
-	    _t = time.time()
-	    try:
+        _tlog("DLD fallback: mirroring %d rows into Manager + flat .npy ..." % len(xx))
+        _t = time.time()
+        try:
             variables.extend_to('x', xx)
             variables.extend_to('y', yy)
             variables.extend_to('t', tt)
@@ -557,8 +557,8 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
             variables.extend_to('main_v_dc_dld', voltage_data)
             variables.extend_to('main_v_p_dld', voltage_pulse_data)
             variables.extend_to('main_l_p_dld', laser_pulse_data)
-	    except Exception as exc:
-		    print(f"TDC: DLD residual extend_to failed (non-fatal): {exc}")
+        except Exception as exc:
+            print(f"TDC: DLD residual extend_to failed (non-fatal): {exc}")
         try:
             np.save(variables.path + "/temp_data/x.npy", np.array(xx))
             np.save(variables.path + "/temp_data/y.npy", np.array(yy))
@@ -571,22 +571,22 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
             np.save(variables.path + "/temp_data/y_bin.npy", np.array(yy_list_bin))
             np.save(variables.path + "/temp_data/t_bin.npy", np.array(tt_list_bin))
         except Exception as exc:
-	        print(f"TDC: DLD single-shot .npy save failed: {exc}")
-	    _tlog("DLD fallback done in %.1fs" % (time.time() - _t))
+            print(f"TDC: DLD single-shot .npy save failed: {exc}")
+        _tlog("DLD fallback done in %.1fs" % (time.time() - _t))
 
     if tdc_chunk_id == 0 and len(channel_data) > 0:
-	    _tlog("raw/TDC fallback: mirroring %d rows into Manager + flat .npy ..." % len(channel_data))
-	    _t = time.time()
-	    try:
-		    variables.extend_to('channel', channel_data)
-		    variables.extend_to('time_data', time_data)
-		    variables.extend_to('tdc_start_counter', tdc_start_counter)
-		    variables.extend_to('main_v_dc_tdc', voltage_data_tdc)
-		    variables.extend_to('main_v_p_tdc', voltage_pulse_data_tdc)
-		    variables.extend_to('main_l_p_tdc', laser_pulse_data_tdc)
-	    except Exception as exc:
-		    print(f"TDC: raw residual extend_to failed (non-fatal): {exc}")
-	    try:
+        _tlog("raw/TDC fallback: mirroring %d rows into Manager + flat .npy ..." % len(channel_data))
+        _t = time.time()
+        try:
+            variables.extend_to('channel', channel_data)
+            variables.extend_to('time_data', time_data)
+            variables.extend_to('tdc_start_counter', tdc_start_counter)
+            variables.extend_to('main_v_dc_tdc', voltage_data_tdc)
+            variables.extend_to('main_v_p_tdc', voltage_pulse_data_tdc)
+            variables.extend_to('main_l_p_tdc', laser_pulse_data_tdc)
+        except Exception as exc:
+            print(f"TDC: raw residual extend_to failed (non-fatal): {exc}")
+        try:
             np.save(variables.path + "/temp_data/channel.npy", np.array(channel_data))
             np.save(variables.path + "/temp_data/time.npy", np.array(time_data))
             # Canonical name matches the chunk stem (was the misnamed
@@ -596,8 +596,8 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
             np.save(variables.path + "/temp_data/voltage_pulse_tdc.npy", np.array(voltage_pulse_data_tdc))
             np.save(variables.path + "/temp_data/laser_pulse_tdc.npy", np.array(laser_pulse_data_tdc))
         except Exception as exc:
-	        print(f"TDC: raw single-shot .npy save failed: {exc}")
-	    _tlog("raw/TDC fallback done in %.1fs" % (time.time() - _t))
+            print(f"TDC: raw single-shot .npy save failed: {exc}")
+        _tlog("raw/TDC fallback done in %.1fs" % (time.time() - _t))
 
     print("data saved in share variables")
     time.sleep(0.1)

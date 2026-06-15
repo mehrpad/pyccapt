@@ -784,26 +784,26 @@ class APT_Exp_Control:
         )
 
         if self.variables.counter_source == 'TDC' and self.detector_runtime.tdc_process is not None:
-	        # Teardown cost does NOT scale with total ion count: the bulk data is
-	        # streamed to temp_data/chunks/ continuously during the run (the save
-	        # worker sustains ~200k events/s, far above any APT detection rate, so
-	        # it never backs up). At shutdown only the final residual chunk
-	        # (< CHUNK_SIZE) is written and the device is deinitialized before
-	        # flag_finished_tdc is set -- a few seconds even for 100M+ ion runs.
-	        # 60 s is generous headroom. Timing out is non-fatal: the residual
-	        # chunk is already on disk before flag_finished_tdc would be set, and
-	        # join_detector_processes() below joins (never kills) the worker.
-	        tdc_finish_timeout_s = 60
-	        print('Waiting for TDC process to be finished for maximum %s seconds...' % tdc_finish_timeout_s)
-	        for i in range(tdc_finish_timeout_s):
+            # Teardown cost does NOT scale with total ion count: the bulk data is
+            # streamed to temp_data/chunks/ continuously during the run (the save
+            # worker sustains ~200k events/s, far above any APT detection rate, so
+            # it never backs up). At shutdown only the final residual chunk
+            # (< CHUNK_SIZE) is written and the device is deinitialized before
+            # flag_finished_tdc is set -- a few seconds even for 100M+ ion runs.
+            # 60 s is generous headroom. Timing out is non-fatal: the residual
+            # chunk is already on disk before flag_finished_tdc would be set, and
+            # join_detector_processes() below joins (never kills) the worker.
+            tdc_finish_timeout_s = 60
+            print('Waiting for TDC process to be finished for maximum %s seconds...' % tdc_finish_timeout_s)
+            for i in range(tdc_finish_timeout_s):
                 if self.variables.flag_finished_tdc:
                     print('TDC process is finished')
                     break
                 print('%s seconds passed' % i)
                 time.sleep(1)
-	        else:
-		        print('TDC process is not finished after %s seconds' % tdc_finish_timeout_s)
-		        self.log_apt.warning('TDC process is not finished after %s seconds', tdc_finish_timeout_s)
+            else:
+                print('TDC process is not finished after %s seconds' % tdc_finish_timeout_s)
+                self.log_apt.warning('TDC process is not finished after %s seconds', tdc_finish_timeout_s)
         else:
             self.variables.flag_finished_tdc = True
 
@@ -844,22 +844,22 @@ class APT_Exp_Control:
         # it shows up in apt.log instead of only being discovered later in the
         # HDF5 file (the GUI session log records *why* the stage didn't connect).
         if self.log_apt is not None:
-	        if self.main_stage_x and not (
-			        any(self.main_stage_x) or any(self.main_stage_y) or any(self.main_stage_z)
-	        ):
-		        self.log_apt.warning(
-			        "Specimen-stage position was 0 for the whole run: the Stage "
-			        "Control GUI never published a position (SmarAct main stage "
-			        "not connected?). apt/stage_* will be all zero."
-		        )
-	        if self.main_laser_x and not (
-			        any(self.main_laser_x) or any(self.main_laser_y) or any(self.main_laser_z)
-	        ):
-		        self.log_apt.warning(
-			        "Laser-stage position was 0 for the whole run: the Laser "
-			        "Control GUI never published a position (SmarAct laser stage "
-			        "not connected?). apt/laser_* will be all zero."
-		        )
+            if self.main_stage_x and not (
+                    any(self.main_stage_x) or any(self.main_stage_y) or any(self.main_stage_z)
+            ):
+                self.log_apt.warning(
+                    "Specimen-stage position was 0 for the whole run: the Stage "
+                    "Control GUI never published a position (SmarAct main stage "
+                    "not connected?). apt/stage_* will be all zero."
+                )
+            if self.main_laser_x and not (
+                    any(self.main_laser_x) or any(self.main_laser_y) or any(self.main_laser_z)
+            ):
+                self.log_apt.warning(
+                    "Laser-stage position was 0 for the whole run: the Laser "
+                    "Control GUI never published a position (SmarAct laser stage "
+                    "not connected?). apt/laser_* will be all zero."
+                )
 
         try:
             self.variables.end_time = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")

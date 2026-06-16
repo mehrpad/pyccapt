@@ -286,6 +286,16 @@ def _clip_isosurface_to_specimen_envelope(mesh, grid_vec, voxel_counts, smoothin
     if cell_keep.size == 0:
         return tri_mesh
     if not np.any(cell_keep):
+        # Every cell was clipped away -- the iso-surface fell entirely
+        # outside the specimen envelope. Warn loudly: silently returning
+        # an empty mesh makes a legitimate iso-surface disappear from the
+        # plot with no diagnostic (common on small-cell-count specimens).
+        print(
+            '[_clip_isosurface_to_specimen_envelope] WARNING: all '
+            f'{cell_keep.size} iso-surface cells fell outside the specimen '
+            'envelope and were clipped; returning an empty mesh. Check the '
+            'min_atoms_per_voxel / smoothing parameters or the iso value.'
+        )
         return pv.PolyData()
 
     clipped = tri_mesh.extract_cells(np.flatnonzero(cell_keep))
@@ -308,6 +318,15 @@ def calculate_element_isosurface(
     """Create a filtered isosurface mesh for a single interface element."""
     if base_mask is None:
         base_mask = np.ones(len(variables.x), dtype=bool)
+    # Drop partial-recovered rows from the base mask. Their (x, y, z) is
+    # NaN because the detector position was incomplete -- including them
+    # in ``coords`` poisons the voxel-binning / scipy isosurface step.
+    finite_xyz = (
+        np.isfinite(np.asarray(variables.x))
+        & np.isfinite(np.asarray(variables.y))
+        & np.isfinite(np.asarray(variables.z))
+    )
+    base_mask = base_mask & finite_xyz
     if not np.any(base_mask):
         raise ValueError('No ions are available inside the requested plotting range')
 
@@ -453,10 +472,13 @@ def reconstruction_plot(
     else:
         print('element_percentage should be a list')
 
-    # Draw an edge of cube around the 3D plot
-    x_range = [min(variables.x), max(variables.x)]
-    y_range = [min(variables.y), max(variables.y)]
-    z_range = [min(variables.z), max(variables.z)]
+    # Draw an edge of cube around the 3D plot. Use nanmin/nanmax so
+    # partial-recovered rows (NaN x/y/z from undefined reconstruction)
+    # don't poison the cube edges; Python's builtin min/max return NaN
+    # if any element is NaN.
+    x_range = [float(np.nanmin(variables.x)), float(np.nanmax(variables.x))]
+    y_range = [float(np.nanmin(variables.y)), float(np.nanmax(variables.y))]
+    z_range = [float(np.nanmin(variables.z)), float(np.nanmax(variables.z))]
     range_cube = [x_range, y_range, z_range]
 
     def _safe_random_subset(mask_s, fraction):
@@ -474,7 +496,13 @@ def reconstruction_plot(
         if size == len(true_indices):
             chosen = true_indices
         else:
-            chosen = np.random.choice(true_indices, size=size, replace=False)
+            # Seed the local Generator from the input mask's length so
+            # repeated plots of the same data give the same subsample
+            # (the previous ``np.random.choice`` used the global state
+            # and the same notebook re-run produced different scatter
+            # points each time).
+            _rng = np.random.default_rng(int(len(true_indices)))
+            chosen = _rng.choice(true_indices, size=size, replace=False)
 
         sampled_mask = np.zeros_like(mask_s, dtype=bool)
         sampled_mask[chosen] = True
@@ -693,9 +721,13 @@ def reconstruction_plot(
                             faces = isosurf.faces.reshape(-1, 4)[:, 1:]
                             ion_name = ion[index].rsplit('$', 1)[0]
                             ion_name = ion_name + '_{iso}$'
+                            # Axis order MUST match the per-ion-grid branch
+                            # above (vertices[:, 0]=x, vertices[:, 1]=y);
+                            # the previous swap reflected every iso-surface
+                            # across y=x relative to the underlying scatter.
                             mesh = go.Mesh3d(
-                                x=vertices[:, 1],
-                                y=vertices[:, 0],
+                                x=vertices[:, 0],
+                                y=vertices[:, 1],
                                 z=vertices[:, 2],
                                 i=faces[:, 0],
                                 j=faces[:, 1],
@@ -765,7 +797,10 @@ def reconstruction_plot(
             print('The maximum number of ions is not provided, setting it to 100,000')
             max_num_ions = 100_000
         sample_size = min(len(variables.x), int(max_num_ions))
-        mask = np.random.choice(len(variables.x), size=sample_size, replace=False)
+        # Same reproducibility seed as _safe_random_subset above: keyed
+        # on the dataset length, so re-plots are deterministic.
+        _rng = np.random.default_rng(int(len(variables.x)))
+        mask = _rng.choice(len(variables.x), size=sample_size, replace=False)
         fig = go.Figure()
         fig.add_trace(
             go.Scatter3d(
@@ -1013,10 +1048,18 @@ def bin_vectors_from_distance(dist, bin_values, mode='distance'):
     # Constant bin distance interval
     if is_constant_distance:
         for dim in range(num_dim):
-            # dmin = dist[:, dim].min()
-            # dmax = dist[:, dim].max()
-            # Generate raw bin vector
-            bin_vector_raw = np.linspace(0, 10000 * bin_values[dim], 10001)
+            # Size the raw bin vector from the ACTUAL data span instead of
+            # a fixed 10001-entry grid capped at 10000*bin. The old fixed
+            # grid silently clipped any point beyond +/- 500 nm (e.g. a
+            # 600 nm specimen with 0.05 nm bins), lumping out-of-range
+            # ions into the end bin -- a silently wrong histogram -- while
+            # also over-allocating 20001 entries for small specimens.
+            bin = float(bin_values[dim])
+            dmin = float(dist[:, dim].min())
+            dmax = float(dist[:, dim].max())
+            reach = max(abs(dmin), abs(dmax)) + bin
+            n_steps = max(1, int(np.ceil(reach / bin)))
+            bin_vector_raw = np.arange(0, (n_steps + 1)) * bin
             bin_vector_raw = np.concatenate((-np.flip(bin_vector_raw[1:]), bin_vector_raw))
 
             # Filter bin centers within the distance range
@@ -1121,7 +1164,13 @@ def pos_to_voxel(data, grid_vec, species=None):
     for i in range(loc.shape[0]):
         vox[tuple(loc[i])] += 1
 
-    return vox.T
+    # ``vox`` is indexed [ix, iy, iz] (matches np.meshgrid(..., indexing='ij'));
+    # the downstream ``isosurface`` builder also assumes 'ij' ordering and
+    # flattens the data with the same convention. Returning ``vox.T`` here
+    # silently transposed to [iz, iy, ix] and put voxel concentration at the
+    # wrong spatial coordinate. Mirror the leap-clustering copy in
+    # clustering/isosurface.py and return ``vox`` directly.
+    return vox
 
 
 def isosurface(gridVec, data, isovalue):

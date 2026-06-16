@@ -63,13 +63,25 @@ default_ex_name = "test"
 # Set the interval to 0 to disable the live calibration entirely; the
 # spectrum will then always show uncalibrated mc/tof.
 live_calibration_refit_interval_s = 15.0
+# Preferred cadence: re-fit every N NEW events instead of on a timer. The
+# GUI passes its running ion counter to the worker, which re-fits each time
+# this many fresh events have arrived (keeps the calibration tracking drift
+# without the spectrum constantly resetting). Set <=0 to ignore.
+live_calibration_refit_event_interval = 1000
 # Minimum events required before the worker bothers to fit. Below this
 # count the GUI shows uncalibrated data with a "calibrating…" status.
 live_calibration_min_events = 5000
 # Voltage-fit R² floor. Fits below this quality are rejected and the
 # previous good parameters are kept (or none, if there are no previous
-# good parameters).
-live_calibration_min_fit_quality = 0.5
+# good parameters). After several consecutive weak fits, the worker
+# *invalidates* the cached parameters (see
+# live_calibration_max_consecutive_failures) so the spectrum falls
+# back to the raw view rather than displaying a stale bad fit.
+live_calibration_min_fit_quality = 0.7
+# After this many consecutive weak fits, drop the cached parameters
+# and let the spectrum fall back to raw. At the default 15 s refit
+# cadence this is ~75 s of bad fits before we give up.
+live_calibration_max_consecutive_failures = 5
 # Mass window (Da) inside which the dominant peak is searched for. Pick
 # a window where you expect a strong, well-known peak for your sample.
 live_calibration_mass_window_min = 1.0
@@ -80,14 +92,17 @@ live_calibration_mass_window_max = 60.0
 # live_calibration_target_mass = 56.0    # e.g. Fe+ at 56 Da
 # Voltage-fit window size: number of consecutive ions per bin used to
 # compute the mean (V, t/peak) sample for the polynomial fit. Mirrors
-# ``sample_size`` in the offline pipeline (mode='ion_seq').
-live_calibration_volt_sample_size = 500
+# ``sample_size`` in the offline pipeline (mode='ion_seq'). Larger = fewer
+# windows = faster/cheaper fits (the quadratic needs only ~5-10 windows);
+# increase this and the bowl tile size below to lower the live-cal CPU cost.
+live_calibration_volt_sample_size = 1000
 # Polar-tile size (mm) for the bowl correction. The detector is split
-# into rings of this width and each ring into 8..96 angular sectors;
-# one (x_med, y_med, t_mean/peak) sample is taken per non-empty cell
-# and a global 6-parameter polynomial is fit to the samples. Mirrors
-# ``sample_size`` in calibration.bowl_correction(sampling_mode='polar').
-live_calibration_bowl_sample_size_mm = 4.0
+# into rings of this width and each ring into angular sectors; one
+# (x_med, y_med, t_mean/peak) sample is taken per non-empty cell and a
+# 5-parameter radial polynomial (the offline polar default) is fit to the
+# samples. Larger tiles = fewer cells = faster. Matches the offline
+# workflow default (5 mm).
+live_calibration_bowl_sample_size_mm = 5.0
 # EMA smoothing window: average the last N successful parameter sets
 # before the GUI applies them. Damps jitter in the displayed spectrum
 # from event-pool noise across successive refits. Set to 1 to disable.
@@ -125,6 +140,18 @@ visualization = "mc"
 tdc = "enabled"
 tdc_model = "Surface_Consept"
 camera = "enabled"
+# Camera view assignment by Basler serial number.
+# Each view is pinned to one physical camera so the same camera always drives
+# the same view - no more swapping cables or disconnect/reconnect in the GUI.
+# Find the serials in the camera panel, or in the terminal on attach
+# ("Camera attached in slot N (serial=...)"). Leave a value blank ("") to let
+# that view auto-fill from any unassigned camera (legacy first-come behaviour).
+# Slot order is fixed: side -> slot 0, top -> slot 1, angle -> slot 2.
+# The angle view currently mirrors the side image; once a third physical
+# camera is installed, set camera_serial_angle to make it a real feed.
+camera_serial_side = ""
+camera_serial_top = ""
+camera_serial_angle = ""
 pump_ll = "enabled"
 pump_cll = "enabled"
 gates = "enabled"
@@ -148,10 +175,10 @@ COM_PORT_cryo = "COM7"
 # Cryo sensor mapping: label and which output word index (0-based) comes from the device
 # Change cryo_sensor_X_index to remap which physical output position feeds that display slot.
 cryo_sensor_1 = "cryo_head_outside"
-cryo_sensor_1_index = 2
+cryo_sensor_1_index = 0
 
 cryo_sensor_2 = "cryo_head_inside"
-cryo_sensor_2_index = 0
+cryo_sensor_2_index = 2
 
 cryo_sensor_3 = "stage"
 cryo_sensor_3_index = 1
@@ -175,16 +202,16 @@ COM_PORT_thorlab_motor = "27261754"
 #   * stage_smartact_laser  -> laser focusing stage (Laser Control window)
 # Set either one to "" (empty string) to disable that GUI's stage section
 # without showing any error - useful when only one MCS2 is plugged in.
-stage_smartact_main = "network:sn:MCS2-00017939"
-stage_smartact_laser = "network:sn:MCS2-00017944"
+stage_smartact_main = "network:sn:MCS2-00017944"
+stage_smartact_laser = "network:sn:MCS2-00017939"
 
 # Default "home" position for the Home button on the stage / laser GUIs.
 # Values are in millimetres.  The Home button moves all three axes to these
 # coordinates after referencing has run (or immediately if the controller
 # already knows its reference).
 stage_home_x_mm = 1.615
-stage_home_y_mm = 1.032
-stage_home_z_mm = -3.930
+stage_home_y_mm = 2.235
+stage_home_z_mm = -7.124
 laser_stage_home_x_mm = 0.0
 laser_stage_home_y_mm = 0.0
 laser_stage_home_z_mm = 0.0

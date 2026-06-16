@@ -6,6 +6,7 @@ import multiprocessing
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from pyccapt.control.apt.detector_models import HSD_MODEL, ROENTDEK_MODEL, normalize_tdc_model
 from pyccapt.control.drs import drs
 from pyccapt.control.tdc_roentdek import tdc_roentdek
 from pyccapt.control.tdc_surface_concept import tdc_surface_concept
@@ -37,7 +38,9 @@ def start_detector_processes(
     if conf.get("tdc") != "on":
         return runtime
 
-    if conf.get("tdc_model") == "Surface_Consept" and variables.counter_source == "TDC":
+    tdc_model = normalize_tdc_model(conf.get("tdc_model"))
+
+    if tdc_model == "Surface_Concept" and variables.counter_source == "TDC":
         runtime.stop_event = event_factory()
         runtime.tdc_process = process_factory(
             target=tdc_surface_concept.experiment_measure,
@@ -46,7 +49,7 @@ def start_detector_processes(
         runtime.tdc_process.start()
         return runtime
 
-    if conf.get("tdc_model") == "RoentDek" and variables.counter_source == "TDC":
+    if tdc_model == ROENTDEK_MODEL and variables.counter_source == "TDC":
         runtime.stop_event = event_factory()
         runtime.tdc_process = process_factory(
             target=tdc_roentdek.experiment_measure,
@@ -55,7 +58,7 @@ def start_detector_processes(
         runtime.tdc_process.start()
         return runtime
 
-    if conf.get("tdc_model") == "HSD" and variables.counter_source == "HSD":
+    if tdc_model == HSD_MODEL and variables.counter_source == "HSD":
         runtime.hsd_process = process_factory(target=drs.experiment_measure, args=(variables,))
         runtime.hsd_process.start()
 

@@ -14,6 +14,19 @@ else:
     _PYPYLON_IMPORT_ERROR = None
 
 
+def _normalize_serial(value) -> str | None:
+    """Coerce a config serial value to a clean string, or None if blank.
+
+    Serials may be written in config.toml as a quoted string or a bare
+    number; both are accepted. An empty/whitespace value means "not
+    configured" and returns None.
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def check_camera_backend() -> tuple[bool, str]:
     """Return whether the Basler camera backend is usable on this host.
 
@@ -62,41 +75,67 @@ class CameraWorker(QObject):
 
     finished = pyqtSignal()
 
-    SLOT_COUNT = 2
+    # One slot per logical GUI view, in fixed order: 0 = side, 1 = top,
+    # 2 = angle. Only side and top are physical today; angle mirrors the
+    # side image until a third camera is configured (see VIEW_ORDER).
+    SLOT_COUNT = 3
+    VIEW_ORDER = ("side", "top", "angle")
     RECONNECT_INTERVAL = 3.0
 
-    def __init__(self, variables, emitter):
+    # Manual-exposure presets (microseconds), per view [side, top, angle].
+    # Used when auto-exposure is off and the user has NOT selected the
+    # "Manual Exposure Time" mode; the worker picks the row by light state.
+    PRESET_EXPOSURE_DARK = (2_000_000, 1_000_000, 2_000_000)  # light off
+    PRESET_EXPOSURE_LIGHT = (100_000, 50_000, 100_000)  # light on
+
+    def __init__(self, variables, emitter, conf=None):
         super().__init__()
-        self.flag_default_exposure_time = None
-        # Cameras start with ExposureAuto = Continuous so the user gets a
-        # usable image even before they touch the exposure inputs. The
-        # GUI's auto-exposure button toggles this back to manual ('Off').
-        self.exposure_auto = True
-        self.exposure_mode = 'Continuous'
+        # Cameras start in manual mode (ExposureAuto = 'Off') with the
+        # light-dependent presets applied, matching the GUI's Auto Exposure
+        # Time button which starts deselected. Clicking that button toggles
+        # the worker into Continuous (firmware auto) and back.
+        self.exposure_auto = False
+        self.exposure_mode = 'Off'
         self.emitter = emitter
         self.variables = variables
 
+        # Pin each view to a physical camera by serial number, read from
+        # config.toml (camera_serial_side / _top / _angle). A blank/missing
+        # value leaves that slot to auto-fill from any unassigned camera,
+        # which reproduces the legacy first-come behaviour. Order must match
+        # VIEW_ORDER / the slot layout (side=0, top=1, angle=2).
+        conf = conf or {}
+        self._configured_serials = [
+            _normalize_serial(conf.get(f"camera_serial_{view}"))
+            for view in self.VIEW_ORDER
+        ]
+        # Serials explicitly assigned to a view never fill a different slot.
+        self._configured_serial_set = {s for s in self._configured_serials if s}
+
         self.running = False
         self.index_save_image = 0
-        # Defaults for the "light off" case (microseconds). 2,000,000 µs
-        # (2 s) is the value the user previously dialled in by hand to
-        # see the puck in the dark — matches the new auto-exposure
-        # upper limit and the default reset button.
-        self.exposure_time_cam_1 = 2_000_000
-        self.exposure_time_cam_1_light = 10000
-        self.exposure_time_cam_2 = 2_000_000
-        self.exposure_time_cam_2_light = 20000
-        self.exposure_time_cam_3 = 2_000_000
-        self.exposure_time_cam_3_light = 10000
+        # User-entered manual exposure values (microseconds), per view
+        # [side, top, angle]. Used only in user-manual mode; preset mode
+        # uses PRESET_EXPOSURE_DARK / PRESET_EXPOSURE_LIGHT instead. Seeded
+        # with the dark presets so the GUI fields start with sane values.
+        self.exposure_time_cam_1 = self.PRESET_EXPOSURE_DARK[0]
+        self.exposure_time_cam_2 = self.PRESET_EXPOSURE_DARK[1]
+        self.exposure_time_cam_3 = self.PRESET_EXPOSURE_DARK[2]
+        # Manual-exposure source (only relevant when exposure_auto is off):
+        #   False -> light-dependent presets (default), True -> user values.
+        self.manual_user_mode = False
 
         self.emitter.cam_1_exposure_time.connect(self.set_exposure_time_1)
         self.emitter.cam_2_exposure_time.connect(self.set_exposure_time_2)
         self.emitter.cam_3_exposure_time.connect(self.set_exposure_time_3)
-        self.emitter.default_exposure_time.connect(self.set_default_exposure_time)
+        self.emitter.default_exposure_time.connect(self.set_manual_exposure_mode)
         self.emitter.auto_exposure_time.connect(self.set_auto_exposure_time)
 
         self._slots = [None] * self.SLOT_COUNT
-        self._slot_serials = [None] * self.SLOT_COUNT
+        # Pre-seed each slot with its configured serial so the slot only ever
+        # binds to that physical camera; unconfigured slots stay None and keep
+        # the first-come fill behaviour.
+        self._slot_serials = list(self._configured_serials)
         self._applied_exposure = [None] * self.SLOT_COUNT
         self._applied_exposure_mode = [None] * self.SLOT_COUNT
         self._last_reconnect_attempt = 0.0
@@ -156,27 +195,18 @@ class CameraWorker(QObject):
         self.running = False
 
     @pyqtSlot(bool)
-    def set_default_exposure_time(self):
-        if not self.exposure_auto:
-            self.exposure_time_cam_1 = 2_000_000
-            self.exposure_time_cam_1_light = 10000
-            self.exposure_time_cam_2 = 2_000_000
-            self.exposure_time_cam_2_light = 20000
-            self.exposure_time_cam_3 = 2_000_000
-            self.exposure_time_cam_3_light = 10000
+    @pyqtSlot(bool)
+    def set_manual_exposure_mode(self, manual):
+        """Choose the manual-exposure source (only used when auto is off).
 
-            self.flag_default_exposure_time = True
-            if self.variables.light:
-                exposure_times = [
-                    self.exposure_time_cam_1_light,
-                    self.exposure_time_cam_2_light,
-                    self.exposure_time_cam_3_light,
-                ]
-            else:
-                exposure_times = [self.exposure_time_cam_1, self.exposure_time_cam_2, self.exposure_time_cam_3]
-            self.emitter.cams_exposure_time_default.emit(exposure_times)
-        else:
-            print('Cannot set the default exposure time when auto exposure is on')
+        manual=True  -> use the user-entered exposure_time_cam_N values.
+        manual=False -> use the light-dependent presets (PRESET_EXPOSURE_*).
+        Invalidate the applied-exposure cache so _apply_exposure_changes
+        re-pushes the right value on the next tick.
+        """
+        self.manual_user_mode = bool(manual)
+        for slot in range(self.SLOT_COUNT):
+            self._applied_exposure[slot] = None
 
     @pyqtSlot(bool)
     def set_auto_exposure_time(self):
@@ -200,11 +230,13 @@ class CameraWorker(QObject):
         self.exposure_time_cam_3 = exposure_time
 
     def _exposure_for_slot(self, slot):
-        if slot == 0:
-            return self.exposure_time_cam_1
-        if slot == 1:
-            return self.exposure_time_cam_2
-        return self.exposure_time_cam_3
+        if self.manual_user_mode:
+            # User-entered values from the GUI fields.
+            return (self.exposure_time_cam_1, self.exposure_time_cam_2, self.exposure_time_cam_3)[slot]
+        # Preset mode: light-dependent defaults (side, top, angle).
+        light_on = bool(getattr(self.variables, 'light', False))
+        presets = self.PRESET_EXPOSURE_LIGHT if light_on else self.PRESET_EXPOSURE_DARK
+        return presets[slot]
 
     def _close_slot(self, slot):
         cam = self._slots[slot]
@@ -277,6 +309,11 @@ class CameraWorker(QObject):
 
         for sn, dev in by_serial.items():
             if sn in used_serials or sn in self._user_disabled_serials:
+                continue
+            # A serial pinned to a view in config.toml is only ever attached
+            # to its own slot (handled by the first pass above); never let it
+            # first-come into a different view.
+            if sn in self._configured_serial_set:
                 continue
             for slot in range(self.SLOT_COUNT):
                 if self._slots[slot] is not None:
@@ -483,7 +520,7 @@ class CameraWorker(QObject):
         # visible. Feature names vary across Basler model families
         # (ace2/dart use AutoExposureTimeUpperLimit, older ace uses
         # AutoExposureTimeAbsUpperLimit, …), so each set is wrapped.
-        DARK_EXPOSURE_UPPER_US = 3_000_000  # 3 s — covers "light off" alignment.
+        DARK_EXPOSURE_UPPER_US = 2_000_000  # 2 s — same as the manual light-off default.
         SHORT_EXPOSURE_LOWER_US = 100       # 100 µs — fast end for "light on".
         TARGET_BRIGHTNESS = 0.6             # 0..1, default ~0.5; lift dark scenes.
 
@@ -686,6 +723,7 @@ class CameraWorker(QObject):
                     self._last_grab_error[slot] = None
 
             self._emit_images(grabbed_images)
+            self._emit_current_exposures()
 
             if self.variables.clear_index_save_image:
                 self.variables.clear_index_save_image = False
@@ -696,10 +734,9 @@ class CameraWorker(QObject):
                 last_save_time = now
                 self._save_screenshots(grabbed_images)
 
-            if self.variables.light_switch or self.flag_default_exposure_time:
+            if self.variables.light_switch:
                 self.light_switch()
                 self.variables.light_switch = False
-                self.flag_default_exposure_time = False
 
             time.sleep(0.5)
 
@@ -711,18 +748,57 @@ class CameraWorker(QObject):
         self.finished.emit()
 
     def _emit_images(self, images):
-        # Slot 0 -> img0 (side overview), Slot 1 -> img1 (top overview).
-        # img2 mirrors slot 0 so the existing 'angle' view doesn't go blank
-        # when only one camera is connected.
+        # Slot 0 -> img0 (side overview), slot 1 -> img1 (top overview),
+        # slot 2 -> img2 (angle). When no third camera is attached, the
+        # angle view mirrors slot 0 so it doesn't go blank.
         img0 = images[0] if len(images) > 0 else None
         img1 = images[1] if len(images) > 1 else None
+        img2 = images[2] if len(images) > 2 else None
         if img0 is not None:
             self.emitter.img0_orig.emit(np.swapaxes(img0, 0, 1))
         if img1 is not None:
             self.emitter.img1_orig.emit(np.swapaxes(img1, 0, 1))
-        angle_src = img0 if img0 is not None else img1
+        angle_src = img2 if img2 is not None else (img0 if img0 is not None else img1)
         if angle_src is not None:
             self.emitter.img2_orig.emit(np.swapaxes(angle_src, 0, 1))
+
+    def _emit_current_exposures(self):
+        """Publish each camera's live ExposureTime to the GUI.
+
+        Reads ExposureTime back from the hardware once per tick so the
+        line-edit fields always reflect what the camera is *actually*
+        using — most importantly in auto mode, where the firmware is
+        the one picking the value. ``None`` is published for any slot
+        that isn't currently attached.
+
+        The mapping is slot 0 → cam_1 (side), slot 1 → cam_2 (top),
+        slot 2 → cam_3 (angle). When no third camera is attached the angle
+        view mirrors slot 0, so its exposure is reported as the side value.
+        """
+
+        def _read(slot):
+            cam = self._slots[slot] if slot < self.SLOT_COUNT else None
+            if cam is None:
+                return None
+            try:
+                return int(cam.ExposureTime.GetValue())
+            except Exception:
+                return None
+
+        t0 = _read(0)
+        t1 = _read(1)
+        # Angle reports its own camera when present, else mirrors the side feed.
+        t2 = _read(2)
+        if t2 is None:
+            t2 = t0
+        # Nothing useful to report if no slots are attached.
+        if t0 is None and t1 is None:
+            return
+        try:
+            self.emitter.cams_exposure_time_current.emit([t0, t1, t2])
+        except Exception:
+            # Emitter might be torn down during shutdown.
+            pass
 
     def _save_screenshots(self, images):
         path_meta = self.variables.path_meta
@@ -743,21 +819,12 @@ class CameraWorker(QObject):
         time.sleep(0.5)
 
     def light_switch(self):
+        # In preset mode the exposure depends on the light state, so a
+        # light toggle changes the target. Invalidate the applied-exposure
+        # cache and let _apply_exposure_changes re-push the (now light-aware)
+        # value from _exposure_for_slot on the next tick. No effect in auto
+        # mode, and in user-manual mode the user's value is light-independent.
         if self.exposure_auto:
             return
-        try:
-            light_on = bool(self.variables.light)
-            slot_targets = (
-                self.exposure_time_cam_1_light if light_on else self.exposure_time_cam_1,
-                self.exposure_time_cam_2_light if light_on else self.exposure_time_cam_2,
-                self.exposure_time_cam_3_light if light_on else self.exposure_time_cam_3,
-            )
-            for slot in range(self.SLOT_COUNT):
-                cam = self._slots[slot]
-                if cam is None:
-                    continue
-                target = slot_targets[slot]
-                cam.ExposureTime.SetValue(target)
-                self._applied_exposure[slot] = target
-        except Exception as e:
-            print(f"Error in switching the light: {e}")
+        for slot in range(self.SLOT_COUNT):
+            self._applied_exposure[slot] = None

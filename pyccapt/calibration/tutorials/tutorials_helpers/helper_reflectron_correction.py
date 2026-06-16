@@ -48,16 +48,12 @@ def call_reflectron_correction_workflow(variables=None):
     output_directory_browse = widgets.Button(description="Browse")
     output_stem = widgets.Text(value="", description="", layout=path_layout)
     output_stem_browse = widgets.Button(description="Browse")
-    save_epos = widgets.Dropdown(options=[("True", True), ("False", False)], value=True)
+    save_epos = widgets.Dropdown(options=[("True", True), ("False", False)], value=False)
     save_h5 = widgets.Dropdown(options=[("True", True), ("False", False)], value=True)
     bins = widgets.IntText(value=256, description="", layout=field_layout)
 
     def _autofill_outputs_from_dataset(path_value: str) -> None:
-        """Pre-fill output directory and stem from the EPOS path.
-
-        Only fills fields the user has not already edited so we never clobber a
-        custom choice.
-        """
+        """Refresh output directory and stem from the EPOS path."""
         if not path_value:
             return
         try:
@@ -66,10 +62,8 @@ def call_reflectron_correction_workflow(variables=None):
             return
         if not path.name:
             return
-        if not output_directory.value:
-            output_directory.value = str(path.parent)
-        if not output_stem.value:
-            output_stem.value = f"{path.stem}_corrected"
+        output_directory.value = str(path.parent)
+        output_stem.value = f"{path.stem}_corrected"
 
     def on_browse(_):
         try:

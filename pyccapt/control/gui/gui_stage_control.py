@@ -1,3 +1,4 @@
+import logging
 import sys
 import threading
 
@@ -6,6 +7,11 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from pyccapt.control.core import runtime
 from pyccapt.control.gui import tooltips
 from pyccapt.control.smaract_mcs2 import mcs2_stage
+
+# GUI session logger (lands in meta_data/files/logs/gui/). Used so a silent
+# SmarAct connection failure - which leaves the specimen-stage position at 0
+# and therefore writes apt/stage_* as all-zero - is recorded and diagnosable.
+_log = logging.getLogger("pyccapt.gui")
 
 
 class _ReferenceWorker(QtCore.QThread):
@@ -320,12 +326,25 @@ class Ui_Stage_Control(object):
         self.stage_speed_y.valueChanged.connect(lambda _v: self._update_speed_label(self.stage_speed_y))
         self.stage_speed_z.valueChanged.connect(lambda _v: self._update_speed_label(self.stage_speed_z))
 
-        self.stage_left.clicked.connect(lambda: self._jog_axis(mcs2_stage.AXIS_X, -1))
-        self.stage_right.clicked.connect(lambda: self._jog_axis(mcs2_stage.AXIS_X, +1))
-        self.stage_up.clicked.connect(lambda: self._jog_axis(mcs2_stage.AXIS_Y, +1))
-        self.stage_down.clicked.connect(lambda: self._jog_axis(mcs2_stage.AXIS_Y, -1))
-        self.stage_forward.clicked.connect(lambda: self._jog_axis(mcs2_stage.AXIS_Z, +1))
-        self.stage_backward.clicked.connect(lambda: self._jog_axis(mcs2_stage.AXIS_Z, -1))
+        # Direction buttons: jog continuously while the user holds the
+        # button. pressed starts a timer that fires _jog_axis every
+        # click_duration_s seconds (the same step the old single-click
+        # jog used), so consecutive steps chain back-to-back into
+        # smooth motion at the slider-selected velocity. released
+        # stops the timer and sends a Stop to truncate any in-flight
+        # step so motion ends within one click_duration.
+        for button, axis, sign in (
+            (self.stage_left, mcs2_stage.AXIS_X, -1),
+            (self.stage_right, mcs2_stage.AXIS_X, +1),
+            (self.stage_up, mcs2_stage.AXIS_Y, +1),
+            (self.stage_down, mcs2_stage.AXIS_Y, -1),
+            (self.stage_forward, mcs2_stage.AXIS_Z, +1),
+            (self.stage_backward, mcs2_stage.AXIS_Z, -1),
+        ):
+            button.pressed.connect(
+                lambda a=axis, s=sign: self._start_continuous_jog(a, s)
+            )
+            button.released.connect(self._stop_continuous_jog)
         self.stage_home.clicked.connect(self._go_home)
         self.stage_reference.clicked.connect(self._reference)
         self.stage_stop.clicked.connect(self._stop_stage)
@@ -336,22 +355,56 @@ class Ui_Stage_Control(object):
             self._connect_error = "No SmarAct stage locator configured (stage_smartact_main in config.toml)."
             self._set_error(self._connect_error)
             self._set_movement_enabled(False)
+            _log.warning(
+	            "Stage Control: %s Specimen-stage position will be logged as 0 in apt/stage_*.",
+	            self._connect_error,
+            )
             return
         try:
+	        # Catch any exception (not just SmarActStageError): the SmarAct SDK
+	        # can fail in unexpected ways, and a connection problem must never
+	        # crash GUI startup (this runs from wins_init -> setupUi).
             self.stage_device = mcs2_stage.SmarActStage(self._locator)
-        except mcs2_stage.SmarActStageError as exc:
+        except Exception as exc:
             self.stage_device = None
             self._connect_error = str(exc)
             self._set_error(self._connect_error)
             self._set_movement_enabled(False)
+            _log.warning(
+	            "Stage Control: could not connect to SmarAct main stage '%s': %s "
+	            "Specimen-stage position will be logged as 0 in apt/stage_* for "
+	            "experiments started now.",
+	            self._locator, exc,
+            )
             return
         self._set_error("")
         self._set_movement_enabled(True)
+        _log.info(
+	        "Stage Control: connected to SmarAct main stage '%s'; publishing "
+	        "position to apt/stage_*.",
+	        self._locator,
+        )
         self._poll_timer = QtCore.QTimer()
         self._poll_timer.setInterval(500)
         self._poll_timer.timeout.connect(self._refresh_position)
         self._poll_timer.start()
         self._refresh_position()
+
+    def reconnect(self):
+	    """Retry the SmarAct connection if not currently connected.
+
+		The stage is connected once at GUI startup; if the controller was
+		powered off / busy / holding a stale handle then, it stays
+		disconnected until the whole GUI is restarted. This lets the user
+		recover (e.g. after power-cycling the controller) by simply opening
+		the Stage Control window, without restarting the application.
+
+		No-op when already connected, so it is safe to call on every open.
+		"""
+	    if self.stage_device is not None:
+		    return
+	    _log.info("Stage Control: retrying connection to SmarAct main stage '%s'...", self._locator)
+	    self._connect_device()
 
     def _set_movement_enabled(self, enabled):
         for btn in (
@@ -437,6 +490,63 @@ class Ui_Stage_Control(object):
             )
         except mcs2_stage.SmarActStageError as exc:
             self._set_error(f"Move failed: {exc}")
+
+    def _start_continuous_jog(self, axis, sign):
+        """Begin firing single-step jogs at the click cadence.
+
+        Each tick is just a normal ``_jog_axis`` call, so the velocity
+        the user picked with the speed slider is still honoured and a
+        per-step error gets reported in the status banner. Tick period
+        equals ``_click_duration_s`` (typically 200 ms) so consecutive
+        steps butt up against each other and the user perceives the
+        motion as continuous.
+        """
+        if self.stage_device is None:
+            self._set_error(self._connect_error or "Stage not connected.")
+            return
+        # Defensive: a second pressed event before the first released
+        # (e.g. user mashes two buttons) just retargets.
+        timer = getattr(self, "_continuous_jog_timer", None)
+        if timer is None:
+            # Ui_Stage_Control is a plain Python class (Qt Designer-style
+            # helper), not a QObject, so we can't parent the timer to
+            # `self`. The existing _poll_timer in this file uses the
+            # same parentless pattern.
+            timer = QtCore.QTimer()
+            timer.setSingleShot(False)
+            self._continuous_jog_timer = timer
+        else:
+            try:
+                timer.timeout.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+        self._continuous_jog_axis = axis
+        self._continuous_jog_sign = sign
+        # Fire one step immediately so a quick tap still moves.
+        self._jog_axis(axis, sign)
+        timer.timeout.connect(lambda: self._jog_axis(axis, sign))
+        interval_ms = max(50, int(self._click_duration_s * 1000))
+        timer.start(interval_ms)
+
+    def _stop_continuous_jog(self):
+        """Stop the held-jog timer and truncate any in-flight step."""
+        timer = getattr(self, "_continuous_jog_timer", None)
+        if timer is not None and timer.isActive():
+            timer.stop()
+        try:
+            timer.timeout.disconnect()
+        except (TypeError, RuntimeError, AttributeError):
+            pass
+        # Truncate the last (still-running) relative step so the stage
+        # stops within click_duration of the release rather than
+        # overshooting by a full step.
+        if self.stage_device is not None:
+            try:
+                self.stage_device.stop()
+            except Exception:
+                pass
+        self._continuous_jog_axis = None
+        self._continuous_jog_sign = 0
 
     def _go_home(self):
         if self.stage_device is None:
@@ -601,6 +711,14 @@ class Ui_Stage_Control(object):
         self._set_axis_display(pos['x'], self.stage_x_mm, self.stage_x_um, self.stage_x_nm, self.stage_x_cord)
         self._set_axis_display(pos['y'], self.stage_y_mm, self.stage_y_um, self.stage_y_nm, self.stage_y_cord)
         self._set_axis_display(pos['z'], self.stage_z_mm, self.stage_z_um, self.stage_z_nm, self.stage_z_cord)
+        # Publish to shared variables (meters) so the experiment loop can log
+        # the specimen-stage position per iteration into apt/*. Best-effort.
+        try:
+	        self.variables.stage_pos_x = float(pos['x'])
+	        self.variables.stage_pos_y = float(pos['y'])
+	        self.variables.stage_pos_z = float(pos['z'])
+        except Exception:
+	        pass
 
     @staticmethod
     def _set_axis_display(value_m, mm_lcd, um_lcd, nm_lcd, single_lcd):

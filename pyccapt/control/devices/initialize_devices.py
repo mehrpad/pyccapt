@@ -287,7 +287,7 @@ def initialize_pfeiffer_gauges(variables):
     variables.vacuum_buffer = float(value)
 
 
-def state_update(conf, variables, emitter):
+def state_update(conf, variables, emitter, stop_event=None):
     """
     Read gauge parameters and update variables.
 
@@ -295,6 +295,13 @@ def state_update(conf, variables, emitter):
         conf: Configuration parameters.
         variables: Variables instance.
         emitter: Emitter instance.
+        stop_event: Optional ``threading.Event``. When set, the polling
+            loop exits cleanly. Previously the loop tested
+            ``emitter.bool_flag_while_loop`` directly, but that attribute
+            is a ``pyqtSignal(bool)`` -- a bound signal object is always
+            truthy, so the thread could never be stopped (cleanup tried
+            to emit False, but nothing listened). Callers should pass a
+            real ``threading.Event`` and ``.set()`` it during shutdown.
 
     Returns:
         None
@@ -377,7 +384,20 @@ def state_update(conf, variables, emitter):
         vacuum_cryo_load_lock_backing = -1.0
         set_temperature_tmp_cryo = 0
         set_temperature_tmp_ll = 0
-        while emitter.bool_flag_while_loop:
+        # Loop until either an external stop_event is set OR the
+        # legacy emitter flag goes False. The flag remains supported
+        # for backward compatibility but is unreliable (it's a pyqtSignal,
+        # always truthy); new callers should pass ``stop_event``.
+        def _should_continue() -> bool:
+            if stop_event is not None and stop_event.is_set():
+                return False
+            flag = getattr(emitter, 'bool_flag_while_loop', True)
+            # If it's a bound signal, fall back to True; otherwise honor the value.
+            if hasattr(flag, 'emit') and not isinstance(flag, bool):
+                return True
+            return bool(flag)
+
+        while _should_continue():
             if conf['cryo'] == "on" and com_port_cryovac is None:
                 now = time.time()
                 if now - last_cryovac_reconnect_attempt >= cryovac_reconnect_interval:

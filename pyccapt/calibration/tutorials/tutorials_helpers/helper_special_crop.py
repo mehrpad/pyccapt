@@ -22,7 +22,6 @@ def _apply_manual_spatial_values(variables, center_x, center_y, radius):
 
 def apply_crop(variables, out, use_manual_values, center_x_widget, center_y_widget, radius_widget):
     with out:
-        out.clear_output()
         try:
             if use_manual_values.value:
                 _apply_manual_spatial_values(
@@ -85,9 +84,9 @@ def call_plot_crop_fdm(variables):
     figname_widget = widgets.Text(value='fdm_ini')
     figname_label = widgets.Label(value="Figure Name:", layout=label_layout)
 
-    button_plot = widgets.Button(description="Plot")
+    button_plot = widgets.Button(description="Plot", button_style='primary')
     button_apply = widgets.Button(description="Apply crop")
-    button_reset = widgets.Button(description="Reset")
+    button_reset = widgets.Button(description="Reset", button_style='danger')
     button_sync = widgets.Button(description="Load drawn values")
 
     out = Output()

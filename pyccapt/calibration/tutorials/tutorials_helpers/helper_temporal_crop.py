@@ -21,7 +21,6 @@ def _apply_manual_temporal_values(variables, start_idx, end_idx):
 
 def apply_crop(variables, out, use_manual_values, start_widget, end_widget):
     with out:
-        out.clear_output()
         try:
             if use_manual_values.value:
                 _apply_manual_temporal_values(variables, start_widget.value, end_widget.value)
@@ -81,9 +80,9 @@ def call_plot_crop_experiment(variables, pulse_mode):
     figname_widget = widgets.Text(value='hist_ini')
     figname_label = widgets.Label(value="Figure Name:", layout=label_layout)
 
-    button_plot = widgets.Button(description="Plot")
+    button_plot = widgets.Button(description="Plot", button_style='primary')
     button_apply = widgets.Button(description="Apply crop")
-    button_reset = widgets.Button(description="Reset")
+    button_reset = widgets.Button(description="Reset", button_style='danger')
     button_sync = widgets.Button(description="Load drawn values")
 
     out = Output()

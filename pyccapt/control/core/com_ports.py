@@ -14,4 +14,9 @@ def list_com_ports():
     return com_ports
 
 
-print(list_com_ports())
+if __name__ == "__main__":
+    # Previously this print ran at IMPORT, so any module that did
+    # ``from pyccapt.control.core import com_ports`` (or *) printed
+    # the full COM port list to stdout on every Python start. Move
+    # behind __main__ so the module can be imported safely.
+    print(list_com_ports())

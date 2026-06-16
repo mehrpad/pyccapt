@@ -133,6 +133,16 @@ class Variables:
         # the experiment subprocess can refuse to start in laser pulse
         # mode when the laser was never reached on CLI.
         "flag_laser_connected": ("main", ("exp",)),
+	    # --- Stage positions (meters) --------------------------------------
+	    # The laser-control and stage-control GUIs poll their stages every
+	    # ~500 ms and publish the current position here so the experiment
+	    # loop can log it per iteration into the apt/* metadata group.
+	    "laser_pos_x": ("main", ("exp",)),
+	    "laser_pos_y": ("main", ("exp",)),
+	    "laser_pos_z": ("main", ("exp",)),
+	    "stage_pos_x": ("main", ("exp",)),
+	    "stage_pos_y": ("main", ("exp",)),
+	    "stage_pos_z": ("main", ("exp",)),
         # --- Gates ---------------------------------------------------------
         "flag_main_gate": ("main", ("exp",)),
         "flag_load_gate": ("main", ("exp",)),
@@ -446,6 +456,13 @@ class Variables:
         "laser_freq": 0,
         "laser_division_factor": 0,
         "laser_average_power": 0,
+	    # Stage positions in meters (published by the laser/stage GUIs).
+	    "laser_pos_x": 0.0,
+	    "laser_pos_y": 0.0,
+	    "laser_pos_z": 0.0,
+	    "stage_pos_x": 0.0,
+	    "stage_pos_y": 0.0,
+	    "stage_pos_z": 0.0,
         # Set True by the laser GUI when a CLI session is open and
         # responsive; False (the default) means the laser is either not
         # configured, the COM port is unavailable, or the laser is
@@ -540,11 +557,21 @@ class Variables:
         except AttributeError as exc:
             raise AttributeError(f"{type(self).__name__!s} has no attribute {name!r}") from exc
 
-        if hasattr(namespace, field):
-            lock = self._lock_for_field(field)
-            with lock:
+        # PERF: the namespace is a multiprocessing.Manager proxy, so every
+        # attribute touch is an IPC round-trip to the Manager process. The
+        # previous ``hasattr(...)`` then ``getattr(...)`` did TWO round-trips
+        # per read; this is the single hottest path in the control app
+        # (the TDC drain loop reads many flags per tick). Do a single
+        # ``getattr`` under the lock and translate a missing field into the
+        # same AttributeError -- one IPC instead of two, identical semantics.
+        lock = self._lock_for_field(field)
+        with lock:
+            try:
                 return getattr(namespace, field)
-        raise AttributeError(f"{type(self).__name__!s} has no attribute {name!r}")
+            except AttributeError:
+                raise AttributeError(
+                    f"{type(self).__name__!s} has no attribute {name!r}"
+                )
 
     def __setattr__(self, name: str, value: Any) -> None:
         if name in self._INTERNAL_ATTRS or name.startswith("_"):
@@ -558,36 +585,46 @@ class Variables:
             self._known_fields.add(field)
 
     def extend_to(self, variable_name: str, value: Iterable[Any]) -> None:
-        """Extend a shared list attribute with iterable values."""
+        """Extend a shared list attribute with iterable values.
+
+        NOTE: each call fetches the WHOLE list from the Manager, extends a
+        local copy, and ships it all back -- O(current length) IPC per
+        call. For multi-million-element acquisition arrays this makes the
+        Manager process the throughput bottleneck. The bulk acquisition
+        arrays should live in shared memory / on-disk npy chunks rather
+        than the Manager namespace; only short scalars/status belong here.
+        Tracked as a follow-up refactor (CC2).
+        """
         field = self._resolve_field_name(variable_name)
 
-        if not hasattr(self.ns, field):
-            raise ValueError(f"{variable_name!r} is not an attribute of the namespace.")
+        if isinstance(value, (str, bytes)):
+            raise TypeError("value must be an iterable of elements, not a string.")
+        if not isinstance(value, list):
+            try:
+                value = list(value)
+            except TypeError as exc:
+                raise TypeError("value must be iterable.") from exc
 
         with self.lock_lists:
-            current_value = getattr(self.ns, field)
+            # Single getattr round-trip (was hasattr + getattr = two).
+            try:
+                current_value = getattr(self.ns, field)
+            except AttributeError:
+                raise ValueError(f"{variable_name!r} is not an attribute of the namespace.")
             if not isinstance(current_value, list):
                 raise TypeError(f"{variable_name!r} is not a list.")
-
-            if isinstance(value, (str, bytes)):
-                raise TypeError("value must be an iterable of elements, not a string.")
-
-            if not isinstance(value, list):
-                try:
-                    value = list(value)
-                except TypeError as exc:
-                    raise TypeError("value must be iterable.") from exc
-
             current_value.extend(value)
             setattr(self.ns, field, current_value)
 
     def clear_to(self, variable_name: str) -> None:
         """Clear a shared list attribute by replacing it with an empty list."""
         field = self._resolve_field_name(variable_name)
-        if not hasattr(self.ns, field):
-            raise ValueError(f"{variable_name!r} is not an attribute of the namespace.")
-
         with self.lock_lists:
+            # Single getattr round-trip (was hasattr + setattr).
+            try:
+                getattr(self.ns, field)
+            except AttributeError:
+                raise ValueError(f"{variable_name!r} is not an attribute of the namespace.")
             setattr(self.ns, field, [])
 
     def snapshot(self) -> dict[str, Any]:

@@ -1,3 +1,23 @@
+"""Shared mutable state for the calibration workflow.
+
+The notebook helpers and the calibration core pass a single ``Variables``
+instance around instead of threading dozens of arrays through every
+function. It holds, for the dataset currently loaded:
+
+- the working arrays (``dld_t``, ``dld_high_voltage``, ``dld_x_det`` /
+  ``dld_y_det``, ``mc``, ``mc_uc``, ``x``/``y``/``z``, ...),
+- the per-mode calibrated arrays ``dld_t_calib`` (tof) and ``mc_calib``
+  (m/c), plus ``*_backup`` snapshots used to revert a correction,
+- the active peak range and per-mode calibration selection masks, and
+- the ``initial_calibration_done_{mc,tof}`` flags that tell the
+  auto-calibration buttons whether the global t0/flight-path step has
+  already run on THIS dataset.
+
+``sync_from_data`` rebuilds all of the above from a dataframe after a
+load / crop / reset; it resets the per-dataset flags so a freshly loaded
+dataset is not mistaken for an already-calibrated one. State/validation
+problems raise the explicit calibration exceptions from ``exceptions``.
+"""
 from __future__ import annotations
 
 import os
@@ -70,6 +90,32 @@ class SharedVariablesBase:
         if values.size == 0:
             raise CalibrationStateError(f"{self._CALIBRATION_ATTR[mode]!r} is empty")
         return values
+
+    def position_capable_mask(self) -> np.ndarray:
+        """Boolean mask of rows with both detector axes reconstructed.
+
+        After ``merge_partial_tdc=True`` the DLD frame contains
+        partial-recovered rows with ``NaN`` on ``x_det (cm)`` or
+        ``y_det (cm)``. Any analysis that needs the detector position
+        (bowl correction, adaptive spatial residual, 3-D reconstruction,
+        FDM) MUST filter via this mask first; otherwise the NaN poisons
+        polynomial fits, histogram-bin estimates, and clustering.
+
+        Returns a boolean ndarray aligned with ``self.dld_x_det`` /
+        ``self.dld_y_det``. When neither array is populated the result
+        is an empty bool array.
+        """
+        x_det = np.asarray(getattr(self, "dld_x_det", []), dtype=float)
+        y_det = np.asarray(getattr(self, "dld_y_det", []), dtype=float)
+        if x_det.size == 0 or y_det.size == 0:
+            return np.zeros(max(x_det.size, y_det.size), dtype=bool)
+        if x_det.shape != y_det.shape:
+            return np.zeros(min(x_det.size, y_det.size), dtype=bool)
+        return np.isfinite(x_det) & np.isfinite(y_det)
+
+    def position_capable_count(self) -> int:
+        """Number of rows with both detector axes finite."""
+        return int(self.position_capable_mask().sum())
 
     def set_peak_range(self, left: float, right: float) -> None:
         """Set selected peak window after validating numeric order."""
@@ -239,6 +285,12 @@ class SharedVariablesBase:
         self.h_line_pos = []
         self.clear_calibration_selection_mask()
         self.clear_calibration_peak_range()
+        # The "initial calibration has been run" flags are per-dataset; they
+        # MUST be reset on dataset reload, otherwise the auto-calibration
+        # helpers will skip initial calibration on the new dataset and apply
+        # V/Bowl correction on top of uncalibrated t (ns).
+        self.initial_calibration_done_mc = False
+        self.initial_calibration_done_tof = False
         if clear_selection:
             self.clear_peak_range()
             self.selected_x_fdm = 0

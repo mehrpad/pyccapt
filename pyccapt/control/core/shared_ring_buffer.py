@@ -11,8 +11,15 @@ Design
   ring as a 1-D numpy array of fixed dtype + capacity.
 * A second small block holds two ``int64`` indices: ``write_idx`` and
   ``read_idx`` (monotonically increasing, modulo `capacity` for ring
-  arithmetic).  On x86-64 aligned 8-byte writes are atomic, which is all
-  SPSC needs.
+  arithmetic).  On x86-64 aligned 8-byte writes are atomic and store
+  order is preserved (TSO), which is what this SPSC design relies on.
+  STRICT SPSC discipline: ``write_idx`` is written ONLY by the producer
+  and ``read_idx`` ONLY by the consumer. The producer never advances the
+  read index (lapping is resolved on the consumer side via clamping);
+  this avoids a lost-update race on the shared index. On weakly-ordered
+  architectures (e.g. some ARM) a fence would be required between the
+  data store and the index publish -- not added here because the control
+  rig is x86-64.
 * Producer (TDC): :meth:`write` copies samples into the ring at
   ``write_idx % capacity`` and advances ``write_idx``.  If the producer
   laps the consumer the *oldest* samples in the lapped window are
@@ -129,11 +136,19 @@ class SharedRingBuffer:
             self._data[start:] = arr[:split]
             self._data[: end - self.capacity] = arr[split:]
         new_write = write_idx + n
+        # Publish the new write index LAST, after the data stores above,
+        # so a consumer that observes the advanced index also sees the
+        # data (store-order is preserved on x86-64 TSO; see module note).
         self._idx[0] = new_write
-        # If we lapped the consumer, drag its read pointer forward so it
-        # sees only the freshest `capacity` samples on the next read.
-        if new_write - int(self._idx[1]) > self.capacity:
-            self._idx[1] = new_write - self.capacity
+        # NOTE: the producer deliberately does NOT touch ``self._idx[1]``
+        # (the read index). Doing so made the producer a second writer of
+        # the consumer's index, racing the consumer's own update in
+        # ``read_all`` -- a lost-update bug that could make the consumer
+        # re-read consumed data or skip fresh data. Lapping is handled
+        # entirely on the consumer side: ``read_all`` and ``pending``
+        # clamp to ``capacity`` when ``write_idx - read_idx`` exceeds it,
+        # so the consumer still sees only the freshest ``capacity``
+        # samples. This keeps the read index strictly single-writer.
 
     def read_all(self) -> np.ndarray:
         """Return a copy of every sample produced since the last call."""

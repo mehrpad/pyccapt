@@ -276,15 +276,39 @@ class Ui_Gates(object):
             Returns:
                 None
             """
-            with nidaqmx.Task() as task:
-                if self.conf["gates"] != "off":
-                    task.do_channels.add_do_chan(self.conf["COM_PORT_gates"] + 'line%s' % num)
-                    task.start()
-                    task.write([True])
-                    time.sleep(0.5)
+            if self.conf["gates"] == "off":
+                print('The gates control is off')
+                return
+
+            # Hardware sequence: drive the gate line high, wait 500 ms,
+            # then drive it low. The previous synchronous ``time.sleep``
+            # froze the entire GUI for the half-second; operators
+            # toggling multiple gates in quick succession could stack
+            # several seconds of UI lockup. Schedule the low write via
+            # QTimer.singleShot so the Qt event loop stays responsive.
+            task = nidaqmx.Task()
+            try:
+                task.do_channels.add_do_chan(self.conf["COM_PORT_gates"] + 'line%s' % num)
+                task.start()
+                task.write([True])
+            except Exception:
+                # Ensure the task is closed if the high-write blew up.
+                try:
+                    task.close()
+                except Exception:
+                    pass
+                raise
+
+            def _finish_gate_pulse():
+                try:
                     task.write([False])
-                else:
-                    print('The gates control is off')
+                finally:
+                    try:
+                        task.close()
+                    except Exception:
+                        pass
+
+            QTimer.singleShot(500, _finish_gate_pulse)
 
         def error_gate():
             """

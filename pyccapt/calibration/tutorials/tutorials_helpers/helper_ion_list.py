@@ -15,7 +15,7 @@ from pyccapt.calibration.data_tools import data_tools
 label_layout = widgets.Layout(width='200px')
 
 
-def call_ion_list(variables, selector, path='../../../files/'):
+def call_ion_list(variables, selector, mode, path='../../../files/'):
     try:
         isotopeTableFile = path + 'isotopeTable.h5'
         dataframe = data_tools.read_range(isotopeTableFile)
@@ -101,59 +101,73 @@ def call_ion_list(variables, selector, path='../../../files/'):
     bin_size_widget = widgets.FloatText(value=0.1)
     log_widget = widgets.Dropdown(options=[('True', True), ('False', False)])
     mode_widget = widgets.Dropdown(options=[('False', False), ('True', True)])
-    prominence_widget = widgets.IntText(value=80)
-    distance_widget = widgets.IntText(value=100)
-    lim_widget = widgets.IntText(value=10000)
+    prominence_widget = widgets.IntText(value=40)
+    distance_widget = widgets.IntText(value=20)
+    if mode == 'tof':
+        max_tof = variables.max_tof
+    elif mode == 'mc':
+        max_tof = 400
+    lim_widget = widgets.IntText(value=max_tof)
     percent_widget = widgets.IntText(value=50)
     figname_widget = widgets.Text(value='hist')
     figure_mc_size_x = widgets.FloatText(value=9.0)
     figure_mc_size_y = widgets.FloatText(value=5.0)
 
     # Create a button widget to trigger the function
-    button_plot = widgets.Button(description="Plot")
-    reset_back_button = widgets.Button(description='Reset back correction', layout=label_layout)
+    button_plot = widgets.Button(description="Plot", button_style='primary')
+    reset_back_button = widgets.Button(description='Reset back correction', layout=label_layout, button_style='danger')
     button_fit = widgets.Button(description="Fit")
-    calibration_mode = widgets.Dropdown(options=[('mass_to_charge', 'mc_calib'), ('time_of_flight', 'tof_calib')])
-
-    # Fit-method selector. Two algorithms:
-    #   * 'parametric' (default): the legacy curve_fit-based 2-/3-parameter
-    #     polynomial mapping observed peak picks -> ideal m/c. Requires the
-    #     user to click each peak in the plot before pressing Fit.
-    #   * 'nist': NIST-inspired scipy.optimize.least_squares fit. Auto-detects
-    #     peaks, greedily matches them to the ideal m/c values the user
-    #     added via the ADD button, and fits a tightly-clipped multiplicative
-    #     correction factor f(V, x, y, t). No peak-click needed; internal
-    #     accept/revert gate prevents damage. See
-    #     pyccapt/calibration/core/reference_optimizer.py.
-    fit_method_widget = widgets.Dropdown(
-        options=[
-            ('Parametric (default)', 'parametric'),
-            ('NIST reference (auto-match)', 'nist'),
-        ],
-        value='parametric',
-        description='Fit method:',
-        style={'description_width': 'initial'},
-        layout=widgets.Layout(width='400px'),
-    )
-    fit_method_help = widgets.HTML(
-        value=(
-            '<div style="font-size:11px; color:#555; max-width:600px;">'
-            '<b>Parametric</b>: fits the polynomial <code>mc<sup>a</sup> + b&middot;mc + c</code> '
-            '(or the 2-parameter variant) using the peaks you <i>click</i> in the plot. '
-            'Requires manual peak picking.<br>'
-            '<b>NIST reference</b>: the <b>same polynomial</b> but with '
-            '<i>automatic</i> peak matching &mdash; greedy nearest-neighbour '
-            'between detected peaks and the ideal m/c values you added via ADD '
-            '(0.3 Da tolerance). No peak clicking needed.<br>'
-            'Both methods only rescale m/c &mdash; they do <b>not</b> redo V / '
-            'Bowl / drift correction, so they are safe to run on a fully '
-            'calibrated spectrum without undoing the V+Bowl pipeline. '
-            'Includes NaN / collapsed-spread sanity check that reverts if the '
-            'fit destroys the spectrum. mc only (tof has no universal '
-            'reference table).'
-            '</div>'
+    if mode=='tof':
+        calibration_mode = widgets.Dropdown(options=[('tof_calib', 'tof_calib')])
+        fit_method_widget = widgets.Dropdown(
+            options=[
+                ('Parametric', 'parametric'),
+            ],
+            value='parametric',
         )
-    )
+        fit_method_help = widgets.HTML(
+            value=(
+                ''
+            )
+        )
+    elif mode=='mc':
+        calibration_mode = widgets.Dropdown(options=[('mc_calib', 'mc_calib')])
+
+        # Fit-method selector. Two algorithms:
+        #   * 'parametric' (default): the legacy curve_fit-based 2-/3-parameter
+        #     polynomial mapping observed peak picks -> ideal m/c. Requires the
+        #     user to click each peak in the plot before pressing Fit.
+        #   * 'nist': NIST-inspired scipy.optimize.least_squares fit. Auto-detects
+        #     peaks, greedily matches them to the ideal m/c values the user
+        #     added via the ADD button, and fits a tightly-clipped multiplicative
+        #     correction factor f(V, x, y, t). No peak-click needed; internal
+        #     accept/revert gate prevents damage. See
+        #     pyccapt/calibration/core/reference_optimizer.py.
+        fit_method_widget = widgets.Dropdown(
+            options=[
+                ('NIST reference (auto-match)', 'nist'),
+                ('Parametric', 'parametric'),
+            ],
+            value='nist',
+            layout=widgets.Layout(width='400px'),
+        )
+        fit_method_help = widgets.HTML(
+            value=(
+                '<div style="font-size:13px; color:#555; max-width:600px; line-height:1.5;">'
+                '<ol style="margin:4px 0 4px 28px; font-size:13px;">'
+                '<li><b>NIST reference</b>: the <b>same polynomial</b> but with '
+                '<i>automatic</i> peak matching &mdash; greedy nearest-neighbour '
+                'between detected peaks and the ideal m/c values you added via ADD '
+                '(5 Da tolerance). No peak clicking needed.</li>'
+                '<li><b>Parametric</b>: fits the polynomial '
+                '<code>mc<sup>a</sup> + b&middot;mc + c</code> '
+                '(or the 2-parameter variant) using the peaks you <i>click</i> in '
+                'the plot. Requires manual peak picking.</li>'
+                '</ol></div>'
+            )
+        )
+
+
 
     def parametric_fit(variables, calibration_mode, out_mc):
 
@@ -210,7 +224,7 @@ def call_ion_list(variables, selector, path='../../../files/'):
                 print('parametric fit done')
         button_fit.disabled = False
 
-    button_plot_result = widgets.Button(description="Plot result")
+    button_plot_result = widgets.Button(description="Plot result", button_style='primary')
 
     def plot_fit_result(b, variables, calibration_mode, out_mc):
         button_plot_result.disabled = True
@@ -367,8 +381,8 @@ def call_ion_list(variables, selector, path='../../../files/'):
 
                 # --- Greedy nearest-neighbour match: each ideal m/c
                 # paired with at most one observed peak within tolerance ---
-                tolerance = 0.30  # Da; intentionally a bit wide to handle
-                                  # slightly-off post-calibration centres.
+                tolerance = 5.0   # Da; wide enough to handle poorly-calibrated
+                                  # spectra where peaks may be several Da off.
                 ideal_pairs = []
                 observed_pairs = []
                 used_obs = set()
@@ -407,12 +421,20 @@ def call_ion_list(variables, selector, path='../../../files/'):
                 # --- Fit the SAME 2-/3-parameter polynomial as parametric_fit ---
                 # NO V, no bowl, no drift -- only m/c rescaling, so this
                 # cannot undo the Hybrid V+Bowl+drift pipeline.
+                #
+                # IMPORTANT: peaks were detected in the CURRENT mc_calib
+                # (which may already include Hybrid V+Bowl+drift corrections);
+                # the rescale must therefore be applied to mc_calib, NOT to
+                # mc_calib_backup. Applying to the backup would silently
+                # erase the prior Hybrid pipeline output every time the
+                # user clicks NIST.
+                source_arr = np.asarray(variables.mc_calib, dtype=float)
                 if n_matched >= 3:
                     def shift_3(mc, a, b, c):
                         return mc**a + b * mc + c
                     try:
                         popt, _ = curve_fit(shift_3, observed_pairs, ideal_pairs, maxfev=2000)
-                        corrected = shift_3(variables.mc_calib_backup, *popt)
+                        corrected = shift_3(source_arr, *popt)
                     except Exception as exc:
                         print(f'NIST fit (3-param) failed: {exc}')
                         return
@@ -422,7 +444,7 @@ def call_ion_list(variables, selector, path='../../../files/'):
                         return mc**a + b
                     try:
                         popt, _ = curve_fit(shift_2, observed_pairs, ideal_pairs, maxfev=2000)
-                        corrected = shift_2(variables.mc_calib_backup, *popt)
+                        corrected = shift_2(source_arr, *popt)
                     except Exception as exc:
                         print(f'NIST fit (2-param) failed: {exc}')
                         return
@@ -433,7 +455,7 @@ def call_ion_list(variables, selector, path='../../../files/'):
                 # (i.e. all ions mapped to a tiny range, the classic
                 # 'one giant peak' failure mode).
                 finite = corrected[np.isfinite(corrected)]
-                pre_std = float(np.nanstd(variables.mc_calib_backup))
+                pre_std = float(np.nanstd(source_arr))
                 post_std = float(np.nanstd(finite)) if finite.size else 0.0
                 if finite.size < len(corrected) * 0.95:
                     print(f'NIST fit reverted: {len(corrected) - finite.size} '
@@ -456,14 +478,27 @@ def call_ion_list(variables, selector, path='../../../files/'):
         else:
             parametric_fit(variables, calibration_mode, out_mc)
 
+    clear_button = widgets.Button(description="Clear plots", button_style='warning')
+    clear_button.on_click(lambda _: out_mc.clear_output())
+
+    def _sync_lim(*_):
+        if calibration_mode.value == 'tof_calib':
+            lim_widget.value = int(variables.max_tof) if variables.max_tof is not None else 10000
+        else:
+            lim_widget.value = 400
+
+    calibration_mode.observe(_sync_lim, names='value')
+
     button_plot.on_click(lambda b: on_button_click(b, variables, selector))
     button_fit.on_click(_dispatch_fit)
-    reset_back_button.on_click(lambda b: reset_back_on_click(variables))
+    reset_back_button.on_click(lambda b: reset_back_on_click(variables, mode))
     button_plot_result.on_click(lambda b: plot_fit_result(b, variables, calibration_mode, out_mc))
 
     widget_container = widgets.VBox(
         [
-            widgets.HBox([widgets.Label(value="Calibration mde:", layout=label_layout), calibration_mode]),
+            widgets.HBox([widgets.Label(value="Fitting target:", layout=label_layout), calibration_mode]),
+            widgets.HBox([widgets.Label(value="Fit method:", layout=label_layout), fit_method_widget]),
+            fit_method_help,
             widgets.HBox([widgets.Label(value="Bin Size:", layout=label_layout), bin_size_widget]),
             widgets.HBox([widgets.Label(value="Log:", layout=label_layout), log_widget]),
             widgets.HBox([widgets.Label(value="Normalize:", layout=label_layout), mode_widget]),
@@ -474,9 +509,7 @@ def call_ion_list(variables, selector, path='../../../files/'):
             widgets.HBox([widgets.Label(value="Figname:", layout=label_layout), figname_widget]),
             widgets.HBox([widgets.Label(value="Fig. size W:", layout=label_layout), figure_mc_size_x]),
             widgets.HBox([widgets.Label(value="Fig. size H:", layout=label_layout), figure_mc_size_y]),
-            widgets.HBox([widgets.Label(value="Fit method:", layout=label_layout), fit_method_widget]),
-            fit_method_help,
-            widgets.HBox([button_plot, button_fit, button_plot_result, reset_back_button]),
+            widgets.HBox([button_plot, button_fit, button_plot_result, reset_back_button, clear_button]),
         ]
     )
 
@@ -494,6 +527,9 @@ def call_ion_list(variables, selector, path='../../../files/'):
     display(display_layout, output_layout)
 
 
-def reset_back_on_click(variables):
-    variables.dld_t_calib = np.copy(variables.dld_t_calib_backup)
-    variables.mc_calib = np.copy(variables.mc_calib_backup)
+def reset_back_on_click(variables, mode):
+    mode_val = getattr(mode, 'value', mode)
+    if mode_val == 'tof':
+        variables.dld_t_calib = np.copy(variables.dld_t_calib_backup)
+    elif mode_val == 'mc':
+        variables.mc_calib = np.copy(variables.mc_calib_backup)

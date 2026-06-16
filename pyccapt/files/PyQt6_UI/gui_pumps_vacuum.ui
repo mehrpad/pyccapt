@@ -666,7 +666,7 @@
                                                 </font>
                                             </property>
                                             <property name="text">
-                                                <string>LL Backing Time (min)</string>
+                                                <string>LL Baking Time (min)</string>
                                             </property>
                                         </widget>
                                     </item>

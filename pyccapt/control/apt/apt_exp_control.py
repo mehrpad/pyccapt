@@ -2,7 +2,9 @@ import copy
 import datetime
 import multiprocessing
 import time
+from pathlib import Path
 
+import numpy as np
 import serial.tools.list_ports
 from simple_pid import PID
 
@@ -78,11 +80,23 @@ class APT_Exp_Control:
         self.main_raw_counter = []
         self.main_temperature = []
         self.main_chamber_vacuum = []
+        # Per-iteration stage positions (meters), logged into apt/*.
+        self.main_laser_x = []
+        self.main_laser_y = []
+        self.main_laser_z = []
+        self.main_stage_x = []
+        self.main_stage_y = []
+        self.main_stage_z = []
 
         self.initialization_error = False
         self.detector_runtime = DetectorRuntime()
         self.access_override_enabled = False
         self.override_disabled_devices = set()
+
+        # apt/* metadata chunk state: how many items have already been flushed
+        # to disk and which chunk file ID to use next.
+        self._apt_meta_flush_offset = 0
+        self._apt_meta_chunk_id = 0
 
     def _is_config_enabled(self, key):
         value = str(self.conf.get(key, "off")).strip().lower()
@@ -128,6 +142,51 @@ class APT_Exp_Control:
         if self.tdc_process is None and self.hsd_process is None:
             print("No counter source selected")
 
+    # Flush apt/* metadata to a chunk file every this many main-loop steps
+    # (~20 s at the default 5 Hz rate).  Smaller = more frequent checkpoints
+    # but slightly more disk I/O.
+    _APT_META_CHUNK_SIZE = 100
+
+    def _flush_apt_meta_chunks(self, time_counter: list, time_ex: list) -> None:
+        """Write accumulated apt/* metadata items (since last flush) to a chunk file.
+
+        Uses a half-open slice [_apt_meta_flush_offset : current_len] so
+        successive calls each write only the NEW items.  The in-memory lists
+        are NOT cleared, which means append_main_loop_results() still works
+        normally if chunk recovery is not needed.
+        """
+        start = self._apt_meta_flush_offset
+        end = len(time_counter)
+        if end <= start:
+            return
+        try:
+            chunk_dir = Path(self.variables.path) / "temp_data" / "chunks"
+            chunk_dir.mkdir(parents=True, exist_ok=True)
+            self._apt_meta_chunk_id += 1
+            cid = self._apt_meta_chunk_id
+
+            def _save(stem: str, seq, dtype) -> None:
+                arr = np.asarray(seq[start:end], dtype=dtype)
+                np.save(chunk_dir / f"{stem}_chunk_{cid}.npy", arr)
+
+            _save("apt_id",              time_counter,             np.uint64)
+            _save("apt_timestamps",      time_ex,                  np.float64)
+            _save("apt_num_events",      self.main_counter,        np.uint32)
+            _save("apt_num_raw_signals", self.main_raw_counter,    np.uint32)
+            _save("apt_temperature",     self.main_temperature,    np.float64)
+            _save("apt_vacuum",          self.main_chamber_vacuum, np.float64)
+            _save("apt_laser_x", self.main_laser_x, np.float64)
+            _save("apt_laser_y", self.main_laser_y, np.float64)
+            _save("apt_laser_z", self.main_laser_z, np.float64)
+            _save("apt_stage_x", self.main_stage_x, np.float64)
+            _save("apt_stage_y", self.main_stage_y, np.float64)
+            _save("apt_stage_z", self.main_stage_z, np.float64)
+
+            self._apt_meta_flush_offset = end
+        except Exception as exc:
+            if self.log_apt is not None:
+                self.log_apt.warning("apt meta chunk flush failed (chunk %d): %s", self._apt_meta_chunk_id, exc)
+
     def main_ex_loop(
         self,
     ):
@@ -164,6 +223,14 @@ class APT_Exp_Control:
         self.main_raw_counter.extend([count_raw_signals_temp])
         self.main_temperature.extend([self.variables.temperature])
         self.main_chamber_vacuum.extend([self.variables.vacuum_main])
+        # Stage positions (meters) for this iteration, published by the
+        # laser/stage GUIs. Read once per loop, like temperature/vacuum.
+        self.main_laser_x.extend([self.variables.laser_pos_x])
+        self.main_laser_y.extend([self.variables.laser_pos_y])
+        self.main_laser_z.extend([self.variables.laser_pos_z])
+        self.main_stage_x.extend([self.variables.stage_pos_x])
+        self.main_stage_y.extend([self.variables.stage_pos_y])
+        self.main_stage_z.extend([self.variables.stage_pos_z])
 
         # Re-read the algorithm choice every iteration so the user can
         # switch between Proportional / Aggressive / Adaptive / PID live
@@ -517,10 +584,12 @@ class APT_Exp_Control:
 
                 self.total_ions = self.variables.total_ions
                 self.total_raw_signals = self.variables.total_raw_signals
-                # here we check if tdc is failed or not by checking if the total number of ions is
-                # constant for 100 iteration
-                detector_running = self.variables.counter_source != 'TDC' or self.detector_runtime.tdc_process is not None
-                if detector_running and total_ions_tmp == self.total_ions and not self.variables.vdc_hold:
+                # TDC failure detection should only run for an active TDC
+                # process and only after the detector has produced at least
+                # one event. Early zero-ion ramp-up is physically valid.
+                detector_running = self.variables.counter_source == 'TDC' and self.detector_runtime.tdc_process is not None
+                has_seen_tdc_events = self.total_ions > 0 or total_ions_tmp > 0
+                if detector_running and has_seen_tdc_events and total_ions_tmp == self.total_ions and not self.variables.vdc_hold:
                     index_tdc_failure += 1
                     if index_tdc_failure > 200:
                         self.variables.flag_tdc_failure = True
@@ -697,6 +766,10 @@ class APT_Exp_Control:
 
                 steps += 1
 
+                # Periodic apt/* metadata checkpoint so the data survives a crash.
+                if steps % self._APT_META_CHUNK_SIZE == 0:
+                    self._flush_apt_meta_chunks(time_counter, time_ex)
+
         self.variables.start_flag = False  # Set the START flag
         time.sleep(1)
 
@@ -711,16 +784,26 @@ class APT_Exp_Control:
         )
 
         if self.variables.counter_source == 'TDC' and self.detector_runtime.tdc_process is not None:
-            print('Waiting for TDC process to be finished for maximum 60 seconds...')
-            for i in range(900):
+            # Teardown cost does NOT scale with total ion count: the bulk data is
+            # streamed to temp_data/chunks/ continuously during the run (the save
+            # worker sustains ~200k events/s, far above any APT detection rate, so
+            # it never backs up). At shutdown only the final residual chunk
+            # (< CHUNK_SIZE) is written and the device is deinitialized before
+            # flag_finished_tdc is set -- a few seconds even for 100M+ ion runs.
+            # 60 s is generous headroom. Timing out is non-fatal: the residual
+            # chunk is already on disk before flag_finished_tdc would be set, and
+            # join_detector_processes() below joins (never kills) the worker.
+            tdc_finish_timeout_s = 60
+            print('Waiting for TDC process to be finished for maximum %s seconds...' % tdc_finish_timeout_s)
+            for i in range(tdc_finish_timeout_s):
                 if self.variables.flag_finished_tdc:
                     print('TDC process is finished')
                     break
                 print('%s seconds passed' % i)
                 time.sleep(1)
-                if i == 599:
-                    print('TDC process is not finished')
-                    self.log_apt.warning('TDC process is not finished after 15 minutes')
+            else:
+                print('TDC process is not finished after %s seconds' % tdc_finish_timeout_s)
+                self.log_apt.warning('TDC process is not finished after %s seconds', tdc_finish_timeout_s)
         else:
             self.variables.flag_finished_tdc = True
 
@@ -732,6 +815,9 @@ class APT_Exp_Control:
                 f"properly{initialize_devices.bcolors.ENDC}"
             )
             print(exc)
+
+        # Final apt/* metadata checkpoint (the tail that did not fill a full chunk).
+        self._flush_apt_meta_chunks(time_counter, time_ex)
 
         append_main_loop_results(
             self.variables,
@@ -750,6 +836,30 @@ class APT_Exp_Control:
         # This flag set to True to save the last screenshot of the experiment in the GUI visualization
         self.variables.last_screen_shot = True
         validate_detector_data_lengths(self.variables, self.conf, self.log_apt)
+
+        # Sanity check: stage/laser positions are published by the Stage Control
+        # and Laser Control GUIs' poll timers. If a SmarAct stage was not
+        # connected during the run those values stay at their 0.0 default, so
+        # apt/stage_* (or apt/laser_*) is written all-zero. Surface that here so
+        # it shows up in apt.log instead of only being discovered later in the
+        # HDF5 file (the GUI session log records *why* the stage didn't connect).
+        if self.log_apt is not None:
+            if self.main_stage_x and not (
+                    any(self.main_stage_x) or any(self.main_stage_y) or any(self.main_stage_z)
+            ):
+                self.log_apt.warning(
+                    "Specimen-stage position was 0 for the whole run: the Stage "
+                    "Control GUI never published a position (SmarAct main stage "
+                    "not connected?). apt/stage_* will be all zero."
+                )
+            if self.main_laser_x and not (
+                    any(self.main_laser_x) or any(self.main_laser_y) or any(self.main_laser_z)
+            ):
+                self.log_apt.warning(
+                    "Laser-stage position was 0 for the whole run: the Laser "
+                    "Control GUI never published a position (SmarAct laser stage "
+                    "not connected?). apt/laser_* will be all zero."
+                )
 
         try:
             self.variables.end_time = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
@@ -829,8 +939,11 @@ class APT_Exp_Control:
 
         try:
             if self._signal_generator_active():
-                # Turn off the signal generator
-                signal_generator.turn_off_signal_generator()
+                # Turn off the signal generator. Pass variables so the
+                # VISA resource address comes from config; the previous
+                # hardcoded serial number silently no-op'd on every
+                # rig except the original developer machine.
+                signal_generator.turn_off_signal_generator(self.variables)
 
         except Exception as e:
             print(e)

@@ -207,7 +207,16 @@ def filter_peak_regression_table(
 
 
 def compute_effective_voltage(high_voltage_v, pulse_v, pulse_mode: str) -> np.ndarray:
-    """Return the effective accelerating voltage used in the mass conversion model."""
+    """Return the effective accelerating voltage used in the mass conversion model.
+
+    Raises only when *every* row would be invalid (the model has nothing to
+    work with). Real datasets routinely contain a handful of zero/NaN
+    voltage rows from hardware glitches, and the previous all-or-nothing
+    raise made those datasets unloadable. Caller-side downstream code is
+    expected to mask out non-finite / non-positive entries (or the
+    matching-row callers can filter using the returned mask via
+    np.isfinite()/>0).
+    """
     high_voltage = np.asarray(high_voltage_v, dtype=float)
     pulse = np.asarray(pulse_v, dtype=float)
     if pulse_mode == "laser":
@@ -217,8 +226,24 @@ def compute_effective_voltage(high_voltage_v, pulse_v, pulse_mode: str) -> np.nd
     else:
         raise ValueError(f"Unsupported pulse mode: {pulse_mode!r}")
 
-    if np.any(~np.isfinite(effective_voltage)) or np.any(effective_voltage <= 0):
-        raise ValueError("Effective accelerating voltage must stay finite and positive.")
+    if effective_voltage.size == 0:
+        raise ValueError("Effective accelerating voltage array is empty.")
+    bad = (~np.isfinite(effective_voltage)) | (effective_voltage <= 0)
+    n_bad = int(np.sum(bad))
+    if n_bad == effective_voltage.size:
+        raise ValueError(
+            "Every row has invalid effective accelerating voltage "
+            "(non-finite or <= 0); cannot compute mass conversion."
+        )
+    if n_bad > 0:
+        # Warn loudly the first time but keep going; the bad rows will
+        # propagate NaN through the downstream sqrt/divide and the caller
+        # filters them at the cropping stage.
+        print(
+            f"[compute_effective_voltage] {n_bad} of {effective_voltage.size} "
+            f"row(s) have invalid voltage (non-finite or <= 0); they will "
+            f"produce NaN in the derived mass values."
+        )
     return effective_voltage
 
 
@@ -379,12 +404,24 @@ def preview_mass_spectrum_after_t0(
     bin_width: float = 0.1,
 ) -> plt.Figure:
     """Preview the recalculated mass spectrum after applying a candidate t0."""
+    # Partial-recovered rows (NaN x_det / y_det) yield NaN mc here; they
+    # are filtered out of the histogram by ``mask_recalculated`` below.
+    # Surface a notice so the t0-preview's lower count is not a mystery.
+    _x_det = np.asarray(variables.dld_x_det, dtype=float)
+    _y_det = np.asarray(variables.dld_y_det, dtype=float)
+    _n_partial = int(np.sum(~(np.isfinite(_x_det) & np.isfinite(_y_det))))
+    if _n_partial > 0:
+        print(
+            f'[preview_mass_spectrum_after_t0] {_n_partial} partial-recovered rows '
+            'have NaN x_det / y_det and will be excluded from the preview histogram.'
+        )
+
     recalculated = mc_tools.tof2mc(
         np.asarray(variables.dld_t, dtype=float),
         float(t0_ns),
         np.asarray(variables.dld_high_voltage, dtype=float),
-        np.asarray(variables.dld_x_det, dtype=float),
-        np.asarray(variables.dld_y_det, dtype=float),
+        _x_det,
+        _y_det,
         float(flight_path_length_mm),
         np.asarray(getattr(variables, "dld_pulse_v", np.zeros_like(variables.dld_high_voltage)), dtype=float),
         mode=pulse_mode,

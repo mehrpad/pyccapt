@@ -10,7 +10,7 @@ from matplotlib.widgets import RectangleSelector, EllipseSelector
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
 from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
 
-from pyccapt.calibration.data_tools import data_tools, selectors_data
+from pyccapt.calibration.data_tools import data_tools, hdf5_schema, selectors_data
 from pyccapt.calibration.path_utils import save_figure
 
 EXTRACT_MODE_ALIASES = {
@@ -31,6 +31,17 @@ def _normalize_extract_mode(extract_mode: str) -> str:
 
 EVENT_GROUP_ID_COLUMN = "event_group_id"
 TDC_HAS_DLD_MATCH_COLUMN = "has_dld_match"
+
+
+def _first_hdf5_column(hdf5_data, aliases, *, default_length=None):
+    """Return the first present HDF5 dataset for a list of aliases."""
+    for alias in aliases:
+        if alias in hdf5_data:
+            return hdf5_data[alias].to_numpy()
+    if default_length is None:
+        raise KeyError(f"None of the HDF5 aliases exist: {aliases}")
+    return np.zeros((default_length, 1))
+
 
 def _run_starts(values: np.ndarray) -> np.ndarray:
     """Index boundaries of consecutive equal-value runs.
@@ -94,14 +105,29 @@ def build_event_group_mapping(
                 continue
         # Orphan tdc run: keep gid = -1, has_match = False.
     if j < n_dld_runs:
-        # dld rows with no matching tdc run indicate inconsistent inputs.
-        # Assign them unique negative ids so they remain distinguishable.
-        unmatched = dld_runs[j + 1] - dld_runs[j]
-        raise ValueError(
-            "Found dld rows without a matching tdc start_counter run "
-            f"(at least {unmatched} rows starting at dld index {dld_runs[j]}). "
-            "Are the dld and tdc datasets from the same acquisition?"
+        # Acquisition crashes mid-run routinely produce a few dld events
+        # whose corresponding tdc rows were never flushed (or were
+        # already truncated by a partial-write recovery). Previously this
+        # raised ValueError and the file became completely unloadable --
+        # which is exactly the situation partial_recovery.py was added
+        # for, but it can't help if the loader fails first. Demote to a
+        # warning and assign the orphan dld rows a fresh NEGATIVE GID
+        # range so they stay distinguishable; downstream filters can
+        # drop them by predicate (gid < 0) if needed.
+        unmatched_total = int(n_dld_runs - j)
+        first_orphan_start = int(dld_runs[j])
+        first_orphan_size = int(dld_runs[j + 1] - dld_runs[j])
+        print(
+            f"[build_event_group_mapping] WARNING: {unmatched_total} dld run(s) "
+            f"have no matching tdc start_counter. First orphan starts at dld "
+            f"index {first_orphan_start} (size {first_orphan_size}). Loading "
+            f"with negative event_group_id for the orphan rows; check that "
+            f"the dld and tdc datasets are from the same acquisition."
         )
+        # Assign each orphan dld run a unique negative gid: -1, -2, -3, ...
+        for orphan_idx, k in enumerate(range(j, n_dld_runs)):
+            d_start, d_end = int(dld_runs[k]), int(dld_runs[k + 1])
+            dld_gid[d_start:d_end] = -(orphan_idx + 1)
     return dld_gid, tdc_gid, tdc_has_match
 
 def fetch_dataset_with_tdc(
@@ -191,11 +217,11 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld', *, lazy: bool 
             else:
                 dld_pulse_v = np.zeros(len(dld_high_voltage))
                 dld_pulse_v = np.expand_dims(dld_pulse_v, axis=1)
-            if 'dld/laser_intensity' in hdf5_data:
-                dld_pulse_l = hdf5_data['dld/laser_intensity'].to_numpy()
-            else:
-                dld_pulse_l = np.zeros(len(dld_high_voltage))
-                dld_pulse_l = np.expand_dims(dld_pulse_l, axis=1)
+            dld_pulse_l = _first_hdf5_column(
+                hdf5_data,
+                hdf5_schema.DLD_GROUP_ALIASES["pulse_l (pJ)"],
+                default_length=len(dld_high_voltage),
+            )
             if 'dld/start_counter' in hdf5_data:
                 dld_start_counter = hdf5_data['dld/start_counter'].to_numpy()
             else:
@@ -204,9 +230,13 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld', *, lazy: bool 
             dld_t = hdf5_data['dld/t'].to_numpy()
             dld_x = hdf5_data['dld/x'].to_numpy()
             dld_y = hdf5_data['dld/y'].to_numpy()
-            dld_group_array = np.concatenate(
-                (dld_high_voltage, dld_pulse_v, dld_pulse_l, dld_start_counter, dld_t, dld_x, dld_y),
-                axis=1,
+            # Assemble via the schema helper, which normalises each column
+            # to 1-D before stacking. This works whether the writer emitted
+            # (N,) or (N, 1) datasets; the previous np.concatenate(axis=1)
+            # raised AxisError if any column came back 1-D. Column order
+            # MUST match hdf5_schema.DLD_COLUMNS / create_pandas_dataframe.
+            dld_group_array = hdf5_schema.stack_columns(
+                (dld_high_voltage, dld_pulse_v, dld_pulse_l, dld_start_counter, dld_t, dld_x, dld_y)
             )
             dld_group_storage = create_pandas_dataframe(
                 dld_group_array, mode='dld', flag_old_pyccpat_data=flag_old_pyccpat_data
@@ -240,9 +270,10 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld', *, lazy: bool 
                 laser_pulse = laser_pulse.reshape(-1, 1)
             time_data = hdf5_data['tdc/time_data'].to_numpy()
 
-            dld_group_array = np.concatenate(
-                (channel, start_counter, high_voltage, voltage_pulse, laser_pulse, time_data),
-                axis=1,
+            # Shape-robust stack (see DLD branch). Column order MUST match
+            # hdf5_schema.TDC_COLUMNS / create_pandas_dataframe('tdc_*').
+            dld_group_array = hdf5_schema.stack_columns(
+                (channel, start_counter, high_voltage, voltage_pulse, laser_pulse, time_data)
             )
             dld_group_storage = create_pandas_dataframe(dld_group_array, mode=extract_mode)
             return dld_group_storage
@@ -274,6 +305,7 @@ def _fetch_dataset_from_dld_grp_lazy(filename: str, extract_mode: str):
             'dld/pulse': 'pulse_v (V)',
             'dld/voltage_pulse': 'pulse_v (V)',
             'dld/pulse_voltage': 'pulse_v (V)',
+            'dld/laser_pulse': 'pulse_l (pJ)',
             'dld/laser_intensity': 'pulse_l (pJ)',
             'dld/start_counter': 'start_counter',
             'dld/t': 't (ns)',
@@ -526,6 +558,25 @@ def plot_crop_fdm(
     Returns:
         None
     """
+    # When the dataset has been merged with recovered partial-hit rows
+    # (``merge_partial_tdc=True``), partials carry NaN on x_det or y_det
+    # because only one delay-line axis was reconstructable. NaNs cannot be
+    # binned into a 2-D histogram (matplotlib silently drops them, but the
+    # length-mismatch with ``mask`` below would then misalign rows). Filter
+    # them up front and emit a one-line notice so the user knows the FDM
+    # was built from the position-capable subset only.
+    x = np.asarray(x)
+    y = np.asarray(y)
+    nan_mask = np.isnan(x) | np.isnan(y)
+    if nan_mask.any():
+        n_dropped = int(nan_mask.sum())
+        print(
+            f'[plot_crop_fdm] Skipping {n_dropped} partial-recovered rows '
+            'with NaN on x_det or y_det (the 2-D histogram requires both axes).'
+        )
+        x = x[~nan_mask]
+        y = y[~nan_mask]
+
     if range_sequence or range_mc or range_detx or range_dety or range_x or range_y or range_z:
         if range_sequence:
             mask_sequence = np.zeros(len(x), dtype=bool)
@@ -799,17 +850,40 @@ def crop_data_after_selection(data_crop, variables):
     x = data_crop['x_det (cm)'].to_numpy()
     y = data_crop['y_det (cm)'].to_numpy()
 
-    x_min, x_max = float(np.min(x)), float(np.max(x))
-    y_min, y_max = float(np.min(y)), float(np.max(y))
+    # Partial-recovered rows (merge_partial_tdc=True) carry NaN on the
+    # delay-line axis that could not be reconstructed. Their detector
+    # position is *unknown*, not "outside the ROI" -- silently dropping
+    # them would throw away ToF / mass / pulse info that is still valid.
+    # Build the in/out mask only from rows where both axes are finite,
+    # and force partials to pass through unconditionally so the spatial
+    # crop is non-destructive to them.
+    finite_mask = np.isfinite(x) & np.isfinite(y)
+    partial_mask = ~finite_mask
+    n_partials = int(partial_mask.sum())
+
+    x_finite = x[finite_mask]
+    y_finite = y[finite_mask]
+    if x_finite.size == 0:
+        raise ValueError('Spatial crop has no rows with both detector axes (only partials present)')
+
+    x_min, x_max = float(np.min(x_finite)), float(np.max(x_finite))
+    y_min, y_max = float(np.min(y_finite)), float(np.max(y_finite))
     if center_x < x_min or center_x > x_max or center_y < y_min or center_y > y_max:
         raise ValueError(
             f'Crop center must stay inside detector bounds: x in [{x_min:.4f}, {x_max:.4f}], y in [{y_min:.4f}, {y_max:.4f}]'
         )
 
-    detector_dist = np.sqrt((x - center_x) ** 2 + (y - center_y) ** 2)
-    mask_fdm = detector_dist <= radius
-    if not np.any(mask_fdm):
-        raise ValueError('Spatial crop does not contain any detector hits')
+    detector_dist = np.full(len(data_crop), np.inf, dtype=np.float64)
+    detector_dist[finite_mask] = np.sqrt((x_finite - center_x) ** 2 + (y_finite - center_y) ** 2)
+    mask_fdm = (detector_dist <= radius) | partial_mask  # keep partials always
+    if not np.any(mask_fdm & finite_mask):
+        raise ValueError('Spatial crop does not contain any position-capable detector hits')
+
+    if n_partials > 0:
+        print(
+            f'[crop_data_after_selection] Keeping {n_partials} partial-recovered rows '
+            '(NaN x_det/y_det) unconditionally; spatial-only analyses must still filter them.'
+        )
 
     cropped = data_crop.loc[mask_fdm].copy()
     cropped.reset_index(inplace=True, drop=True)
@@ -848,25 +922,31 @@ def create_pandas_dataframe(data_crop, mode='dld', flag_old_pyccpat_data=False):
             columns=['high_voltage (V)', 'pulse_v (V)', 'pulse_l (pJ)', 'start_counter', 't (ns)', 'x_det (cm)', 'y_det (cm)'],
         )
 
-        hdf_dataframe['start_counter'] = hdf_dataframe['start_counter'].astype('uint32')
+        for column in ['high_voltage (V)', 'pulse_v (V)', 'pulse_l (pJ)', 't (ns)', 'x_det (cm)', 'y_det (cm)']:
+            hdf_dataframe[column] = hdf_dataframe[column].astype('float64')
+        hdf_dataframe['start_counter'] = hdf_dataframe['start_counter'].astype('uint64')
     elif mode == 'tdc_sc':
         hdf_dataframe = pd.DataFrame(
             data=data_crop,
             columns=['channel', 'start_counter', 'high_voltage (V)', 'pulse_v (V)', 'pulse_l (pJ)', 'time_data'],
         )
 
+        for column in ['high_voltage (V)', 'pulse_v (V)', 'pulse_l (pJ)']:
+            hdf_dataframe[column] = hdf_dataframe[column].astype('float64')
         hdf_dataframe['channel'] = hdf_dataframe['channel'].astype('uint32')
-        hdf_dataframe['start_counter'] = hdf_dataframe['start_counter'].astype('uint32')
-        hdf_dataframe['time_data'] = hdf_dataframe['time_data'].astype('uint32')
+        hdf_dataframe['start_counter'] = hdf_dataframe['start_counter'].astype('uint64')
+        hdf_dataframe['time_data'] = hdf_dataframe['time_data'].astype('uint64')
     elif mode == 'tdc_ro':
         hdf_dataframe = pd.DataFrame(
             data=data_crop,
             columns=['channel', 'start_counter', 'high_voltage (V)', 'pulse_v (V)', 'pulse_l (pJ)', 'time_data'],
         )
 
+        for column in ['high_voltage (V)', 'pulse_v (V)', 'pulse_l (pJ)']:
+            hdf_dataframe[column] = hdf_dataframe[column].astype('float64')
         hdf_dataframe['channel'] = hdf_dataframe['channel'].astype('uint32')
-        hdf_dataframe['start_counter'] = hdf_dataframe['start_counter'].astype('uint32')
-        hdf_dataframe['time_data'] = hdf_dataframe['time_data'].astype('uint32')
+        hdf_dataframe['start_counter'] = hdf_dataframe['start_counter'].astype('uint64')
+        hdf_dataframe['time_data'] = hdf_dataframe['time_data'].astype('uint64')
     else:
         raise ValueError(f"Unsupported mode: {mode!r}")
 

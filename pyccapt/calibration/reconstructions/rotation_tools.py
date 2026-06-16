@@ -20,7 +20,9 @@ def rotate_z(x, y, z, theta):
 
 def plotly_fig2array(fig):
     """Convert a Plotly figure into an ndarray frame."""
-    fig_bytes = pio.to_image(fig, format="jpeg", scale=5, engine="kaleido")
+    # scale=2 renders 6× fewer pixels than scale=5, making kaleido ~5–6× faster.
+    # PNG avoids JPEG lossy artefacts that would be amplified by GIF colour quantisation.
+    fig_bytes = pio.to_image(fig, format="png", scale=2, engine="kaleido")
     buffer = io.BytesIO(fig_bytes)
     image = Image.open(buffer)
     return np.asarray(image)

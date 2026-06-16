@@ -147,13 +147,29 @@ def test_build_event_group_mapping_empty_inputs():
     assert has_match.size == 0
 
 
-def test_build_event_group_mapping_raises_when_dld_has_no_tdc_match():
-    """A dld pulse without a corresponding tdc run signals inconsistent inputs."""
+def test_build_event_group_mapping_warns_when_dld_has_no_tdc_match():
+    """A dld pulse without a corresponding tdc run was previously a hard
+    error, but acquisition crashes mid-run routinely produce a few orphan
+    dld rows. The loader now assigns those rows a NEGATIVE event_group_id
+    so the file stays loadable; downstream code can filter by ``gid < 0``.
+
+    NOTE: the underlying mapping is a single linear scan, so once a dld
+    pulse fails to match the current tdc run, every subsequent dld pulse
+    also gets a negative gid (the scan can't look ahead). This is a
+    deliberate trade-off: lossy is still better than completely
+    unloadable.
+    """
     dld_sc = np.array([1, 2, 3])
     tdc_sc = np.array([1, 1, 3, 3])  # dld pulse 2 has no tdc rows
 
-    with pytest.raises(ValueError, match="without a matching tdc"):
-        data_loadcrop.build_event_group_mapping(dld_sc, tdc_sc)
+    dld_gid, tdc_gid, has_match = data_loadcrop.build_event_group_mapping(dld_sc, tdc_sc)
+
+    # The 1<->1 pulse matches normally (gid 0); the orphan rows at
+    # dld index 1 and 2 get unique negative gids (-1, -2).
+    assert dld_gid[0] == 0
+    assert dld_gid[1] < 0, "orphan dld row should have a negative event_group_id"
+    assert dld_gid[2] < 0, "orphan dld row should have a negative event_group_id"
+    assert dld_gid[1] != dld_gid[2], "each orphan run should get a unique negative gid"
 
 
 # ---------------------------------------------------------------------------

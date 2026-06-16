@@ -117,11 +117,20 @@ def rdf(
         if len(valid_particles) == 0:
             continue
 
-        counts = 0.0
-        for particle in valid_particles:
-            outer = tree.query_ball_point(particle, r + dr - eps, return_length=True)
-            inner = tree.query_ball_point(particle, r, return_length=True)
-            counts += outer - inner
+        # Vectorised shell count: query_ball_point accepts the full
+        # (M, n_dim) array of valid particles and returns an (M,) array
+        # of neighbour counts in one C-level call. The previous Python
+        # loop did two query_ball_point calls PER particle PER radius --
+        # O(N_radii * M * log N) with all the per-call Python overhead.
+        # Semantics are identical (same r-dependent valid_particles set,
+        # same outer-minus-inner shell difference).
+        outer = np.asarray(
+            tree.query_ball_point(valid_particles, r + dr - eps, return_length=True)
+        )
+        inner = np.asarray(
+            tree.query_ball_point(valid_particles, r, return_length=True)
+        )
+        counts = float(np.sum(outer - inner))
 
         if normalize:
             if n_dim == 3:

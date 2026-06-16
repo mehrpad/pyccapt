@@ -137,11 +137,16 @@ def animate(i):
     ax2.legend(['MC_vacuum', 'BC_vacuum'], loc='upper right')
 
 
+# Previously these module-level lines created a matplotlib figure at
+# IMPORT time -- anyone who did ``from pyccapt.control.core import
+# baking_loging`` (or a sibling that does ``from ... import *``) popped
+# a figure window. ``animate`` and ``plot_baking`` need ``fig/ax1/ax2``,
+# so we lazy-create them inside the ``__main__`` block below (and keep
+# module-level names initialised to None so the symbols stay importable).
 style.use('fivethirtyeight')
-
-fig = plt.figure()
-ax1 = fig.add_subplot(2, 1, 1)
-ax2 = fig.add_subplot(2, 1, 2)
+fig = None  # set under __main__ guard
+ax1 = None
+ax2 = None
 
 
 def plot_baking(df, window=0):
@@ -181,6 +186,13 @@ def plot_baking(df, window=0):
 
 
 if __name__ == '__main__':
+    # Lazy-create the matplotlib figure here so importing this module
+    # does not pop a window. ``animate`` references these names as
+    # globals; the script context binds them before FuncAnimation runs.
+    fig = plt.figure()
+    ax1 = fig.add_subplot(2, 1, 1)
+    ax2 = fig.add_subplot(2, 1, 2)
+
     # Set recording and plotting flags
     recording = True
     ploting = False

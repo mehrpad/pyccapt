@@ -1,3 +1,37 @@
+"""Mass-calibration core for atom probe tomography data.
+
+This module turns detector hits (time-of-flight, high voltage, detector
+position) into a calibrated mass-to-charge (m/c) spectrum. The standard
+pipeline, in order, is:
+
+1. Initial calibration (``diagnostics.initial_calibration``): a global
+   t0 / flight-path estimate converts time-of-flight to a first m/c.
+2. Voltage correction (``voltage_corr_main``): corrects the per-event
+   m/c for the slow change in standing voltage during evaporation, fit
+   over ion-index or voltage segments.
+3. Bowl correction (``bowl_correction_main``): corrects the residual
+   position-dependent flight-time difference across the detector
+   ("bowl"), sampled in Cartesian or polar cells.
+4. Optional time-drift correction (``new_methods.voltage_corr_time_dependent``):
+   a multiplicative per-ion-index correction that cancels HV / temperature
+   drift left after steps 2-3 in long runs.
+5. Adaptive residual calibration (``adaptive_residual_calibration``):
+   a per-peak temporal + spatial residual fit that tightens mass
+   resolution after the parametric corrections.
+
+The notebook helpers expose three configuration presets that only change
+what happens after the shared voltage+bowl stage:
+``new`` (adaptive residual, default), ``best`` (adds step 4), and
+``old`` (legacy adaptive residual without the coarse-to-fine speedup).
+A separate NIST reference fit in the ion-list helper rescales the
+already-calibrated m/c onto reference masses without re-fitting V/bowl/drift.
+
+Peak locations are read from histograms at BIN CENTERS (not bin edges)
+and histogram bins are anchored to the requested bin width. Hot paths
+(bowl polar sampling, the voltage-correction segment loop) parallelise
+across CPU cores via ``parallel_map`` when the workload is large enough.
+"""
+
 from collections.abc import Mapping
 from copy import copy
 
@@ -66,12 +100,23 @@ def _build_histogram_bins(values, bin_size):
     edges = np.linspace(lower, upper, n_bins + 1)
     return edges, n_bins
 
-def _resolve_peak_location(values, method, bin_size, fast_calibration=False):
-    """Resolve the reference peak location by histogram/mean/median."""
+def _resolve_peak_location(values, method, bin_size, fast_calibration=False, rng=None):
+    """Resolve the reference peak location by histogram/mean/median.
+
+    Parameters
+    ----------
+    rng : optional ``numpy.random.Generator``
+        Generator used by the ``fast_calibration`` subsample path. Defaults
+        to a seeded generator so the same input produces the same peak
+        location across runs (the previous implementation used the global
+        ``np.random`` state, making fast-mode calibrations non-reproducible).
+    """
     ensure_choice(method, field_name="maximum_cal_method", allowed=SAMPLE_METHODS)
     data = ensure_non_empty_array(values, field_name="peak_values")
     if fast_calibration and data.size > 10:
-        data = np.random.choice(data, int(data.size * 0.1), replace=False)
+        if rng is None:
+            rng = np.random.default_rng(0)
+        data = rng.choice(data, int(data.size * 0.1), replace=False)
 
     if method == "mean":
         return float(np.mean(data))
@@ -88,7 +133,12 @@ def _resolve_peak_location(values, method, bin_size, fast_calibration=False):
     if len(peaks) == 0:
         return float(np.mean(data))
     index_peak_max_ini = np.argmax(properties["peak_heights"])
-    return float(bins[peaks[index_peak_max_ini]])
+    # ``bins`` is the edges array (length n_bins+1); ``peaks`` indexes the
+    # counts array (length n_bins). bins[peak] returns the LEFT edge of the
+    # bin, biasing the peak location low by half a bin width. Use the bin
+    # center instead.
+    peak_idx = int(peaks[index_peak_max_ini])
+    return float(0.5 * (bins[peak_idx] + bins[peak_idx + 1]))
 
 def _radial_bowl_corr(data_xy, a, b, c, d, e):
     """Radial-dominant bowl model where r^2 drives the primary curvature."""
@@ -158,7 +208,11 @@ def voltage_correction(
     # per-segment evaluation through parallel_map(gil_releasing=True) and let
     # the auto-serial fallback kick in for tiny datasets.
     if mode == 'ion_seq':
-        num_segments = int(len(dld_highVoltage_peak) / sample_size) + 1
+        # Use ceildiv (not int(len/sample_size) + 1) so a trailing empty
+        # segment is not generated on exact divisibility. The empty
+        # segment is filtered downstream, but the printed segment count
+        # then disagreed with the number of (V, t) points the fit saw.
+        num_segments = (len(dld_highVoltage_peak) + sample_size - 1) // sample_size
 
         def _segment_indices(i: int):
             start = i * sample_size
@@ -169,7 +223,14 @@ def voltage_correction(
     elif mode == 'voltage':
         v_min = np.min(dld_highVoltage_peak)
         v_max = np.max(dld_highVoltage_peak)
-        num_segments = int((v_max - v_min) / sample_size) + 1
+        # Ceildiv on the voltage range; sample_size is the V step in this
+        # mode. Need to handle zero-range data (all the same voltage)
+        # explicitly so we don't underflow to zero segments.
+        v_range = float(v_max - v_min)
+        if v_range <= 0:
+            num_segments = 1
+        else:
+            num_segments = max(1, int(np.ceil(v_range / float(sample_size))))
 
         def _segment_by_voltage(i: int):
             lo = v_min + i * sample_size
@@ -193,22 +254,31 @@ def voltage_correction(
                 bins, _ = _build_histogram_bins(t_selected, bin_size)
                 y, x = np.histogram(t_selected, bins=bins)
                 peaks, properties = find_peaks(y, height=0)
+                # find_peaks returns an empty array when no local maxima
+                # exist; np.argmax on the empty 'peak_heights' raises
+                # ValueError. Make this branch explicit so we don't rely on
+                # an exception handler for normal flow.
+                if peaks.size == 0:
+                    raise ValueError("no peaks in segment")
                 index_peak_max_ini = np.argmax(properties['peak_heights'])
-                max_peak = peaks[index_peak_max_ini]
-                t_value = x[max_peak] / maximum_location
+                max_peak = int(peaks[index_peak_max_ini])
+                # ``x`` is the edges array (length n_bins+1); index it via
+                # the bin CENTER, not the left edge.
+                peak_center = 0.5 * (x[max_peak] + x[max_peak + 1])
+                t_value = peak_center / maximum_location
                 mask_v = np.logical_and(
-                    t_selected >= x[max_peak] - bin_size,
-                    t_selected <= x[max_peak] + bin_size,
+                    t_selected >= peak_center - bin_size,
+                    t_selected <= peak_center + bin_size,
                 )
                 if mode == 'ion_seq' and v_selected[mask_v].size == 0:
                     mask_v = np.logical_and(
-                        t_selected >= x[max_peak] - 2 * bin_size,
-                        t_selected <= x[max_peak] + 2 * bin_size,
+                        t_selected >= peak_center - 2 * bin_size,
+                        t_selected <= peak_center + 2 * bin_size,
                     )
                     if v_selected[mask_v].size == 0:
                         mask_v = np.logical_and(
-                            t_selected >= x[max_peak] - 4 * bin_size,
-                            t_selected <= x[max_peak] + 4 * bin_size,
+                            t_selected >= peak_center - 4 * bin_size,
+                            t_selected <= peak_center + 4 * bin_size,
                         )
                 v_value = float(np.mean(v_selected[mask_v]))
             except ValueError:
@@ -336,7 +406,10 @@ def voltage_corr_main(
 
     print('The number of ions is:', len(dld_highVoltage_peak_v))
     sample_size = _resolve_sample_size(sample_size, len(dld_highVoltage_peak_v))
-    print('The number of samples is:', int(len(dld_highVoltage_peak_v) / sample_size))
+    # Match the ceildiv used inside ``voltage_correction`` so the printed
+    # count agrees with the actual number of (V, t) segments the fit sees.
+    _printed_segments = (len(dld_highVoltage_peak_v) + sample_size - 1) // sample_size
+    print('The number of samples is:', int(_printed_segments))
 
     if peak_maximum == 0:
         maximum_location = _resolve_peak_location(
@@ -524,7 +597,11 @@ def _cell_peak_value(values, maximum_location, sample_range_max, bin_size):
     if len(peaks) == 0:
         return float(np.mean(values)) / maximum_location
     index_peak_max_ini = np.argmax(properties['peak_heights'])
-    return float(bins[peaks[index_peak_max_ini]]) / maximum_location
+    # ``bins`` is the edges array (length n_bins+1); ``peaks`` indexes the
+    # counts array. Use the bin CENTER, not the left edge.
+    peak_idx = int(peaks[index_peak_max_ini])
+    peak_center = 0.5 * (bins[peak_idx] + bins[peak_idx + 1])
+    return float(peak_center) / maximum_location
 
 def _iter_polar_cells(radial_distance, sample_size, det_diam):
     r_max_data = float(np.max(radial_distance)) if len(radial_distance) else 0.0
@@ -711,6 +788,22 @@ def bowl_correction(
         dld_t_bowl,
         field_names=("dld_x_bowl", "dld_y_bowl", "dld_t_bowl"),
     )
+
+    # Drop partial-recovered rows (NaN x_det or y_det). The bowl
+    # polynomial fit cannot ingest NaN coordinates -- a single partial
+    # ion poisons every coefficient. Partials retain their uncorrected
+    # ``t (ns)`` downstream because the apply step uses an array-wise
+    # mask elsewhere.
+    _finite_xy = np.isfinite(np.asarray(dld_x_bowl, dtype=float)) & np.isfinite(np.asarray(dld_y_bowl, dtype=float))
+    if not _finite_xy.all():
+        _n_dropped = int((~_finite_xy).sum())
+        print(
+            f'[bowl_correction] Excluding {_n_dropped} partial-recovered rows '
+            '(NaN x_det / y_det) from the fit; they keep their uncorrected t.'
+        )
+        dld_x_bowl = np.asarray(dld_x_bowl, dtype=float)[_finite_xy]
+        dld_y_bowl = np.asarray(dld_y_bowl, dtype=float)[_finite_xy]
+        dld_t_bowl = np.asarray(dld_t_bowl, dtype=float)[_finite_xy]
 
     sampling_mode = _resolve_sampling_mode(sampling_mode, variables)
     samples = _collect_spatial_samples(
@@ -965,6 +1058,12 @@ def bowl_correction_main(
             )
 
     mask_fv = np.ones_like(dld_x, dtype=bool)
+    # Partial-recovered rows (NaN x_det / y_det) cannot have a
+    # position-dependent correction applied -- predicting bowl(NaN,NaN)
+    # would return NaN and we'd lose the row's uncalibrated t/mc. Skip
+    # them in the apply step so their value passes through unchanged.
+    _finite_xy_apply = np.isfinite(dld_x) & np.isfinite(dld_y)
+    mask_fv = mask_fv & _finite_xy_apply
 
     f_bowl = _predict_bowl_model(fit_mode, parameters, dld_x[mask_fv], dld_y[mask_fv])
 
@@ -1424,6 +1523,15 @@ def multi_peak_bowl_corr_main(
     dld_x_mm = np.asarray(dld_x) * 10
     dld_y_mm = np.asarray(dld_y) * 10
 
+    # Track partial-recovered rows so the fit excludes them but the
+    # apply step preserves their values.
+    _finite_xy_mp = np.isfinite(dld_x_mm) & np.isfinite(dld_y_mm)
+    if not _finite_xy_mp.all():
+        print(
+            f'[multi_peak_bowl_corr_main] Excluding {int((~_finite_xy_mp).sum())} '
+            'partial-recovered rows (NaN x_det / y_det) from peak-sample collection.'
+        )
+
     detected = _auto_detect_peaks(
         calib_arr,
         n_peaks=n_peaks,
@@ -1438,7 +1546,7 @@ def multi_peak_bowl_corr_main(
 
     for pk in detected:
         x1, x2 = pk['x1'], pk['x2']
-        mask = (calib_arr > x1) & (calib_arr < x2)
+        mask = (calib_arr > x1) & (calib_arr < x2) & _finite_xy_mp
         peak_t = calib_arr[mask]
         peak_x = dld_x_mm[mask]
         peak_y = dld_y_mm[mask]
@@ -1519,14 +1627,17 @@ def multi_peak_bowl_corr_main(
     if not is_finite:
         raise CalibrationInputError("Bowl fit returned invalid parameters")
 
-    f_bowl = np.clip(
-        _predict_bowl_model(fit_mode, parameters, dld_x_mm, dld_y_mm),
-        np.finfo(float).eps,
-        None,
-    )
-
+    # Apply only on position-capable rows. Partials keep their
+    # uncalibrated value rather than being divided by NaN.
     source = variables.dld_t_calib if calibration_mode == 'tof' else variables.mc_calib
-    calibration_mc_tof = source / f_bowl
+    calibration_mc_tof = np.array(source, dtype=float, copy=True)
+    if _finite_xy_mp.any():
+        f_bowl_subset = np.clip(
+            _predict_bowl_model(fit_mode, parameters, dld_x_mm[_finite_xy_mp], dld_y_mm[_finite_xy_mp]),
+            np.finfo(float).eps,
+            None,
+        )
+        calibration_mc_tof[_finite_xy_mp] = calibration_mc_tof[_finite_xy_mp] / f_bowl_subset
 
     if calibration_mode == 'tof':
         variables.dld_t_calib = calibration_mc_tof
@@ -1606,6 +1717,15 @@ def joint_voltage_bowl_corr_main(
     sample_size = int(ensure_positive(sample_size, field_name="sample_size"))
     bin_size = ensure_positive(bin_size, field_name="bin_size")
 
+    # Track partial rows so they're excluded from the joint fit but
+    # their values pass through the apply step unchanged.
+    _finite_xy_jv = np.isfinite(dld_x_mm) & np.isfinite(dld_y_mm)
+    if not _finite_xy_jv.all():
+        print(
+            f'[joint_voltage_bowl_corr_main] Excluding {int((~_finite_xy_jv).sum())} '
+            'partial-recovered rows (NaN x_det / y_det) from peak-sample collection.'
+        )
+
     detected = _auto_detect_peaks(
         calib_arr,
         n_peaks=n_peaks,
@@ -1621,7 +1741,7 @@ def joint_voltage_bowl_corr_main(
     peak_info = []
 
     for peak in detected:
-        mask = (calib_arr > peak['x1']) & (calib_arr < peak['x2'])
+        mask = (calib_arr > peak['x1']) & (calib_arr < peak['x2']) & _finite_xy_jv
         peak_t = calib_arr[mask]
         peak_x = dld_x_mm[mask]
         peak_y = dld_y_mm[mask]
@@ -1685,17 +1805,21 @@ def joint_voltage_bowl_corr_main(
     if not np.all(np.isfinite(parameters)):
         raise CalibrationInputError("Joint voltage/bowl fit returned invalid parameters")
 
-    all_features = _joint_feature_matrix(
-        dld_highVoltage,
-        dld_x_mm,
-        dld_y_mm,
-        voltage_center,
-        voltage_scale,
-        spatial_scale,
-    )
-    correction = np.clip(all_features @ parameters, np.finfo(float).eps, None)
+    # Apply only on position-capable rows. Partials keep their
+    # uncalibrated value rather than being multiplied by NaN features.
     source = variables.dld_t_calib if calibration_mode == 'tof' else variables.mc_calib
-    corrected = source / correction
+    corrected = np.array(source, dtype=float, copy=True)
+    if _finite_xy_jv.any():
+        sub_features = _joint_feature_matrix(
+            dld_highVoltage[_finite_xy_jv],
+            dld_x_mm[_finite_xy_jv],
+            dld_y_mm[_finite_xy_jv],
+            voltage_center,
+            voltage_scale,
+            spatial_scale,
+        )
+        sub_correction = np.clip(sub_features @ parameters, np.finfo(float).eps, None)
+        corrected[_finite_xy_jv] = corrected[_finite_xy_jv] / sub_correction
 
     if calibration_mode == 'tof':
         variables.dld_t_calib = corrected

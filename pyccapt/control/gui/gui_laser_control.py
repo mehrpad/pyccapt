@@ -734,8 +734,27 @@ class Ui_Laser_Control(object):
         self.variables.laser_intensity = 0.0
         self._open_laser_cli(self.com_port_laser, initial_open=True)
 
-        self.worker = Worker(self.check_laser_status)
-        self.worker.start()
+        # Laser status loop.
+        #
+        # SAFETY: this loop both reads the laser state over serial AND
+        # mutates GUI widgets (LED pixmaps, button enabled-states) that
+        # operators rely on to know whether the laser is emitting. PyQt6
+        # widget operations are only valid on the GUI thread; the previous
+        # implementation ran ``check_laser_status`` inside a Worker
+        # QThread, mutating widgets cross-thread, which can corrupt Qt's
+        # internal state and produce undefined LED behaviour.
+        #
+        # Run it on the GUI thread via a QTimer instead (mirrors the
+        # existing _stage_poll_timer). The serial transaction is short
+        # (~once per second), and a re-entrancy guard prevents a slow
+        # poll from stacking. This trades the cross-thread-widget hazard
+        # for brief serial I/O on the GUI thread -- a deliberate, strictly
+        # safer trade for laser status.
+        self._laser_status_in_progress = False
+        self._laser_status_timer = QtCore.QTimer()
+        self._laser_status_timer.setInterval(1000)
+        self._laser_status_timer.timeout.connect(self._poll_laser_status)
+        self._laser_status_timer.start()
 
         # ----- SmarAct laser focusing stage --------------------------------
         self.stage_device = None
@@ -747,12 +766,22 @@ class Ui_Laser_Control(object):
         self.laser_speed_x.valueChanged.connect(lambda _v: self._update_stage_speed_label(self.laser_speed_x))
         self.laser_speed_y.valueChanged.connect(lambda _v: self._update_stage_speed_label(self.laser_speed_y))
         self.laser_speed_z.valueChanged.connect(lambda _v: self._update_stage_speed_label(self.laser_speed_z))
-        self.laser_left.clicked.connect(lambda: self._stage_jog_axis(mcs2_stage.AXIS_X, -1))
-        self.leser_right.clicked.connect(lambda: self._stage_jog_axis(mcs2_stage.AXIS_X, +1))
-        self.laser_up.clicked.connect(lambda: self._stage_jog_axis(mcs2_stage.AXIS_Y, +1))
-        self.laser_down.clicked.connect(lambda: self._stage_jog_axis(mcs2_stage.AXIS_Y, -1))
-        self.laser_forward.clicked.connect(lambda: self._stage_jog_axis(mcs2_stage.AXIS_Z, +1))
-        self.laser_backward.clicked.connect(lambda: self._stage_jog_axis(mcs2_stage.AXIS_Z, -1))
+        # Direction buttons: continuous jog while held — see the stage
+        # control GUI for the rationale. Tick interval matches
+        # click_duration_s so consecutive relative steps chain into
+        # smooth motion at the slider-selected velocity.
+        for button, axis, sign in (
+            (self.laser_left, mcs2_stage.AXIS_X, -1),
+            (self.leser_right, mcs2_stage.AXIS_X, +1),
+            (self.laser_up, mcs2_stage.AXIS_Y, +1),
+            (self.laser_down, mcs2_stage.AXIS_Y, -1),
+            (self.laser_forward, mcs2_stage.AXIS_Z, +1),
+            (self.laser_backward, mcs2_stage.AXIS_Z, -1),
+        ):
+            button.pressed.connect(
+                lambda a=axis, s=sign: self._start_continuous_stage_jog(a, s)
+            )
+            button.released.connect(self._stop_continuous_stage_jog)
         self.laser_home.clicked.connect(self._stage_go_home)
         self.laser_stage_reference.clicked.connect(self._stage_reference)
         self.laser_stage_stop.clicked.connect(self._stage_stop)
@@ -774,23 +803,64 @@ class Ui_Laser_Control(object):
             self._set_stage_movement_enabled(False)
             for sl_lbl in (self.laser_speed_x_label, self.laser_speed_y_label, self.laser_speed_z_label):
                 sl_lbl.setEnabled(False)
+            logging.getLogger("pyccapt.gui").info(
+	            "Laser Control: no laser-stage locator configured "
+	            "(stage_smartact_laser); apt/laser_* will be logged as 0."
+            )
             return
         try:
+	        # Catch any exception (not just SmarActStageError): a connection
+	        # problem must never crash GUI startup (runs from setupUi).
             self.stage_device = mcs2_stage.SmarActStage(self._stage_locator)
-        except mcs2_stage.SmarActStageError as exc:
+        except Exception as exc:
             self.stage_device = None
             self._stage_connect_error = str(exc)
             self.error_message(self._stage_connect_error)
             self._set_stage_movement_enabled(False)
+            logging.getLogger("pyccapt.gui").warning(
+	            "Laser Control: could not connect to SmarAct laser stage '%s': %s "
+	            "Laser-stage position will be logged as 0 in apt/laser_* for "
+	            "experiments started now.",
+	            self._stage_locator, exc,
+            )
             return
         self._set_stage_movement_enabled(True)
+        logging.getLogger("pyccapt.gui").info(
+	        "Laser Control: connected to SmarAct laser stage '%s'; publishing "
+	        "position to apt/laser_*.",
+	        self._stage_locator,
+        )
         self._stage_poll_timer = QtCore.QTimer()
         self._stage_poll_timer.setInterval(500)
         self._stage_poll_timer.timeout.connect(self._refresh_stage_position)
         self._stage_poll_timer.start()
         self._refresh_stage_position()
 
+    def reconnect_stage(self):
+	    """Retry the laser-stage SmarAct connection if not connected.
+
+		Lets the user recover a laser stage that was off/busy at GUI startup
+		by re-opening the Laser Control window, instead of restarting the
+		whole app. No-op when already connected (and when no laser-stage
+		locator is configured), so safe to call on every open.
+		"""
+	    if self.stage_device is not None or not self._stage_locator:
+		    return
+	    logging.getLogger("pyccapt.gui").info(
+		    "Laser Control: retrying connection to SmarAct laser stage '%s'...",
+		    self._stage_locator,
+	    )
+	    self._connect_stage_device()
+
     def _set_stage_movement_enabled(self, enabled):
+        # The laser focusing stage is a SEPARATE device from the laser
+        # source, so its jog/Home buttons are deliberately NOT gated on the
+        # stage connection (nor on the laser): they stay enabled and each
+        # click handler shows a clear "Laser stage not connected" message if
+        # the SmarAct controller is absent. This keeps the panel usable and
+        # independent when the stage connects late or its SDK/locator isn't
+        # set. ``enabled`` is ignored here, kept only for call-site
+        # compatibility.
         for btn in (
             self.laser_up,
             self.laser_down,
@@ -800,10 +870,10 @@ class Ui_Laser_Control(object):
             self.laser_backward,
             self.laser_home,
         ):
-            btn.setEnabled(enabled)
-        # Reference stays gated behind Override Access (and also requires
-        # the device to be connected).
-        self.laser_stage_reference.setEnabled(enabled and self.flag_super_user_stage)
+            btn.setEnabled(True)
+        # Reference is gated solely behind Override Access; _stage_reference()
+        # guards against a missing device.
+        self.laser_stage_reference.setEnabled(self.flag_super_user_stage)
         # STOP stays clickable so the user can always abort.
 
     def _stage_super_user_access(self):
@@ -839,7 +909,7 @@ class Ui_Laser_Control(object):
             self.flag_super_user_stage = False
             self.laser_stage_superuser.setStyleSheet(self._original_laser_stage_superuser_style)
             self.error_message("!!! Override Access deactivated !!!")
-        self.laser_stage_reference.setEnabled(self.flag_super_user_stage and self.stage_device is not None)
+        self.laser_stage_reference.setEnabled(self.flag_super_user_stage)
         self.nktpbus_mode_switch.setEnabled(self.flag_super_user_stage)
         self.switch_to_cli_button.setEnabled(self.flag_super_user_stage)
 
@@ -887,6 +957,52 @@ class Ui_Laser_Control(object):
         except mcs2_stage.SmarActStageError as exc:
             self.error_message(f"Move failed: {exc}")
 
+    def _start_continuous_stage_jog(self, axis, sign):
+        """Hold-to-jog start: fire _stage_jog_axis on a timer.
+
+        Mirrors the stage control window's behaviour — see
+        gui_stage_control._start_continuous_jog for the full rationale.
+        Tick period = click_duration_s so the per-step relative moves
+        chain into smooth motion at the slider velocity.
+        """
+        if self.stage_device is None:
+            self.error_message(self._stage_connect_error or "Laser stage not connected.")
+            return
+        timer = getattr(self, "_continuous_stage_jog_timer", None)
+        if timer is None:
+            # Ui_Laser_Control is a plain Python class, not a QObject,
+            # so parenting the timer to `self` is a TypeError. Match
+            # the existing parentless QTimer pattern used elsewhere in
+            # this file.
+            timer = QtCore.QTimer()
+            timer.setSingleShot(False)
+            self._continuous_stage_jog_timer = timer
+        else:
+            try:
+                timer.timeout.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+        # Fire one step immediately so a quick tap still moves.
+        self._stage_jog_axis(axis, sign)
+        timer.timeout.connect(lambda: self._stage_jog_axis(axis, sign))
+        interval_ms = max(50, int(self._click_duration_s * 1000))
+        timer.start(interval_ms)
+
+    def _stop_continuous_stage_jog(self):
+        """Hold-to-jog stop: kill the timer and truncate the in-flight step."""
+        timer = getattr(self, "_continuous_stage_jog_timer", None)
+        if timer is not None and timer.isActive():
+            timer.stop()
+        try:
+            timer.timeout.disconnect()
+        except (TypeError, RuntimeError, AttributeError):
+            pass
+        if self.stage_device is not None:
+            try:
+                self.stage_device.stop()
+            except Exception:
+                pass
+
     def _stage_go_home(self):
         if self.stage_device is None:
             self.error_message(self._stage_connect_error or "Laser stage not connected.")
@@ -932,7 +1048,7 @@ class Ui_Laser_Control(object):
         self._stage_reference_worker = None
         self._stage_reference_cancel = None
         self._set_stage_jog_enabled(True)
-        self.laser_stage_reference.setEnabled(self.flag_super_user_stage and self.stage_device is not None)
+        self.laser_stage_reference.setEnabled(self.flag_super_user_stage)
         self._last_stage_position_error = ""
         self._consecutive_stage_position_errors = 0
         self.error_message("Reference complete.")
@@ -941,11 +1057,16 @@ class Ui_Laser_Control(object):
         self._stage_reference_worker = None
         self._stage_reference_cancel = None
         self._set_stage_jog_enabled(True)
-        self.laser_stage_reference.setEnabled(self.flag_super_user_stage and self.stage_device is not None)
+        self.laser_stage_reference.setEnabled(self.flag_super_user_stage)
         self.error_message(f"Reference failed: {message}")
 
     def _set_stage_jog_enabled(self, enabled):
-        """Enable/disable jog + Home for the duration of a reference run."""
+        """Enable/disable jog + Home for the duration of a reference run.
+
+        Only the referencing lock toggles these (so the operator can't jog
+        mid-reference); the connection state is handled by the click
+        handlers, not by greying the buttons out.
+        """
         for btn in (
             self.laser_up,
             self.laser_down,
@@ -955,7 +1076,7 @@ class Ui_Laser_Control(object):
             self.laser_backward,
             self.laser_home,
         ):
-            btn.setEnabled(enabled and self.stage_device is not None)
+            btn.setEnabled(enabled)
 
     def _stage_stop(self):
         # Abort an in-flight reference search FIRST, then stop the axes.
@@ -989,6 +1110,15 @@ class Ui_Laser_Control(object):
         self._set_stage_axis(pos['x'], self.laser_x_mm, self.laser_x_um, self.laser_x_nm, self.laser_x_cord)
         self._set_stage_axis(pos['y'], self.laser_y_mm, self.laser_y_um, self.laser_y_nm, self.laser_y_cord)
         self._set_stage_axis(pos['z'], self.laser_z_mm, self.laser_z_um, self.laser_z_nm, self.laser_z_cord)
+        # Publish to shared variables (meters) so the experiment loop can log
+        # the laser-stage position per iteration into apt/*. Best-effort: a
+        # Manager hiccup must never break the position display.
+        try:
+	        self.variables.laser_pos_x = float(pos['x'])
+	        self.variables.laser_pos_y = float(pos['y'])
+	        self.variables.laser_pos_z = float(pos['z'])
+        except Exception:
+	        pass
 
     @staticmethod
     def _set_stage_axis(value_m, mm_lcd, um_lcd, nm_lcd, single_lcd):
@@ -1178,6 +1308,24 @@ class Ui_Laser_Control(object):
         """
         repetition_rates = {4: 400000, 5: 500000, 6: 579710, 7: 720720, 8: 800000, 9: 898876, 10: 1000000}
         return repetition_rates.get(index, "Invalid index")
+
+    def _poll_laser_status(self):
+        """Main-thread QTimer slot that drives the laser status loop.
+
+        Wraps ``check_laser_status`` with a re-entrancy guard so a slow
+        serial transaction can't cause overlapping polls to stack, and
+        swallows transient errors so a single failed read doesn't stop
+        the timer (mirrors the old Worker.run try/except).
+        """
+        if self._laser_status_in_progress:
+            return
+        self._laser_status_in_progress = True
+        try:
+            self.check_laser_status()
+        except Exception as exc:
+            print(f"Laser status poll failed (non-fatal): {exc}")
+        finally:
+            self._laser_status_in_progress = False
 
     def check_laser_status(self):
         if self.laser_device is not None:
@@ -1942,12 +2090,20 @@ class Ui_Laser_Control(object):
         """Stop background workers and release device handles.
 
         Called from gui_main.cleanup() when the user closes the main GUI;
-        without this the laser status Worker QThread (while True loop)
-        keeps running and prevents the Python process from exiting.
+        without this the laser status loop keeps running and prevents the
+        Python process from exiting cleanly.
         """
-        # Stop the laser-status QThread.  Worker.run() checks _stop_flag
-        # at every iteration; we then wait briefly for it to finish so we
-        # don't get a "destroyed while still running" warning from Qt.
+        # Stop the laser-status QTimer (now a main-thread timer instead of
+        # a Worker QThread; see _poll_laser_status). Stopping the timer is
+        # synchronous so there's no thread to join.
+        status_timer = getattr(self, '_laser_status_timer', None)
+        if status_timer is not None:
+            try:
+                status_timer.stop()
+            except Exception:
+                pass
+        # Back-compat: if an old-style Worker QThread is still present
+        # (e.g. a subclass or hot-reload), stop it too.
         worker = getattr(self, 'worker', None)
         if worker is not None:
             try:
@@ -1985,8 +2141,26 @@ class Ui_Laser_Control(object):
             self.stage_device = None
 
         # Close the laser serial port if we still own it.
+        # SAFETY: before closing, force the laser to a known-off state so
+        # it can't continue emitting after the GUI has exited. The
+        # previous code went straight to close_port() and the laser
+        # stayed in whatever state the operator had set (potentially
+        # state 129 = output enabled) until the rig was power-cycled.
+        # We disable the AOM (kills the output gate), set its level to
+        # zero, then issue Standby (firmware moves to state 33). Each
+        # call is wrapped individually so a stuck command doesn't
+        # block the rest of the safe-off sequence.
         laser_dev = getattr(self, 'laser_device', None)
         if laser_dev is not None:
+            for safe_call, label in (
+                (lambda: laser_dev.AOMDisable(), 'AOMDisable'),
+                (lambda: laser_dev.AOM(0), 'AOM(0)'),
+                (lambda: laser_dev.Standby(), 'Standby'),
+            ):
+                try:
+                    safe_call()
+                except Exception as exc:
+                    print(f"laser safe-off: {label} failed (non-fatal): {exc}")
             try:
                 laser_dev.close_port()
             except Exception:

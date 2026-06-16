@@ -216,7 +216,10 @@ def test_mrp_calculation_is_independent_of_display_bin_width():
     variables = Variables()
     mrp_values = []
 
-    for bin_width in (0.1, 0.01):
+    # Both bin widths must give enough bins to detect a peak over the
+    # ~0.14 Da spread of the synthetic data; pick widths small enough that
+    # find_peaks has room to work but coarser-vs-finer is meaningfully tested.
+    for bin_width in (0.005, 0.001):
         plotter = mc_plot.AptHistPlotter(data, variables)
         plotter.plot_histogram(bin_width=bin_width, plot_show=False, fast=True)
         plotter.find_peaks_and_widths(prominence=10, distance=2, percent=50)
@@ -224,6 +227,8 @@ def test_mrp_calculation_is_independent_of_display_bin_width():
         mrp_values.append(mrp[0])
 
     assert np.isfinite(mrp_values).all()
+    # The MRP calculation rebins onto a fixed internal grid, so the
+    # display bin width should not move the reported MRP much.
     assert abs(mrp_values[0] - mrp_values[1]) < 1.0
 
 

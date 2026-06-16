@@ -353,10 +353,8 @@ class Ui_PyCCAPT(object):
         self.label_176.setSizePolicy(sizePolicy)
         self.label_176.setObjectName("label_176")
         self.gridLayout_3.addWidget(self.label_176, 0, 0, 1, 1)
-        self.set_min_voltage = QtWidgets.QPushButton(parent=self.centralwidget)
-        self.set_min_voltage.setMinimumSize(QtCore.QSize(0, 20))
-        self.set_min_voltage.setObjectName("set_min_voltage")
-        self.gridLayout_3.addWidget(self.set_min_voltage, 3, 1, 1, 2)
+        # NOTE: the "Set" (set_min_voltage) button moved to the Visualization
+        # window, next to "Hold DC Voltage" (see gui_visualization.set_dc_voltage).
         self.ex_time = QtWidgets.QLineEdit(parent=self.centralwidget)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Minimum)
         sizePolicy.setHorizontalStretch(0)
@@ -1069,8 +1067,7 @@ class Ui_PyCCAPT(object):
         PyCCAPT.setTabOrder(self.criteria_ions, self.max_ions)
         PyCCAPT.setTabOrder(self.max_ions, self.criteria_vdc)
         PyCCAPT.setTabOrder(self.criteria_vdc, self.vdc_max)
-        PyCCAPT.setTabOrder(self.vdc_max, self.set_min_voltage)
-        PyCCAPT.setTabOrder(self.set_min_voltage, self.vdc_min)
+        PyCCAPT.setTabOrder(self.vdc_max, self.vdc_min)
         PyCCAPT.setTabOrder(self.vdc_min, self.pulse_mode)
         PyCCAPT.setTabOrder(self.pulse_mode, self.pulse_fraction)
         PyCCAPT.setTabOrder(self.pulse_fraction, self.pulse_frequency)
@@ -1128,6 +1125,16 @@ class Ui_PyCCAPT(object):
         # Create a QTimer to hide the warning message after 8 seconds
         self.timer = QtCore.QTimer()
         self.timer.timeout.connect(self.hideMessage)
+        # Auto-dismiss the status-bar laser warning in the MAIN GUI after a
+        # while: the laser may simply be unavailable, so it shouldn't nag
+        # here forever. The Laser Control GUI keeps its own warning shown
+        # permanently (handled there, untouched). ``_laser_warning_dismissed``
+        # suppresses re-showing for the same continuous disconnect episode;
+        # it is reset when the laser reconnects so a later drop warns again.
+        self._laser_warning_dismissed = False
+        self._laser_warning_timer = QtCore.QTimer()
+        self._laser_warning_timer.setSingleShot(True)
+        self._laser_warning_timer.timeout.connect(self._dismiss_laser_warning)
         self.camera_close_check_timer = QtCore.QTimer()
         self.camera_close_check_timer.timeout.connect(self.check_closed_events)
         QtWidgets.QApplication.instance().aboutToQuit.connect(self.cleanup)
@@ -1165,7 +1172,6 @@ class Ui_PyCCAPT(object):
         ###
         self.start_button.clicked.connect(self.start_experiment_clicked)
         self.stop_button.clicked.connect(self.stop_experiment_clicked)
-        self.set_min_voltage.clicked.connect(self.set_min_voltage_clicked)
         self.superuser.clicked.connect(self.super_user_access)
 
         self.emitter.elapsed_time.connect(self.update_elapsed_time)
@@ -1236,7 +1242,6 @@ class Ui_PyCCAPT(object):
         self.label_2.setText(_translate("PyCCAPT", "Stop at"))
         self.label_3.setText(_translate("PyCCAPT", "Stop at"))
         self.label_176.setText(_translate("PyCCAPT", "Max. Experiment Time (s)"))
-        self.set_min_voltage.setText(_translate("PyCCAPT", "Set"))
         self.ex_time.setText(_translate("PyCCAPT", "3600"))
         self.label_179.setText(_translate("PyCCAPT", "DC Min. Voltage (V)"))
         self.vdc_max.setText(_translate("PyCCAPT", "4000"))
@@ -1677,17 +1682,41 @@ class Ui_PyCCAPT(object):
             return
         connected = bool(getattr(self.variables, "flag_laser_connected", False))
         if not connected:
+            # Already auto-dismissed for this continuous disconnect episode:
+            # don't keep re-posting it on every statistics tick.
+            if self._laser_warning_dismissed:
+                return
             current = statusbar.currentMessage()
             if current.startswith("Vacuum warning"):
                 # Don't clobber an active vacuum warning.
                 return
-            statusbar.setStyleSheet("color: red; font-weight: bold;")
-            statusbar.showMessage(
-                "Laser warning: not connected on CLI (open Laser Control "
-                "and use Override Access -> Switch to CLI, or check the "
-                "COM port)."
-            )
-        elif statusbar.currentMessage().startswith("Laser warning"):
+            if not current.startswith("Laser warning"):
+                # First post of this episode -- show it and arm the
+                # one-shot auto-dismiss so it clears after a while.
+                statusbar.setStyleSheet("color: red; font-weight: bold;")
+                statusbar.showMessage(
+                    "Laser warning: not connected on CLI (open Laser Control "
+                    "and use Override Access -> Switch to CLI, or check the "
+                    "COM port)."
+                )
+                self._laser_warning_timer.start(10000)
+        else:
+            # Laser reconnected: clear any laser warning and re-arm so a
+            # future disconnect warns again.
+            self._laser_warning_dismissed = False
+            self._laser_warning_timer.stop()
+            if statusbar.currentMessage().startswith("Laser warning"):
+                statusbar.clearMessage()
+                statusbar.setStyleSheet("")
+
+    def _dismiss_laser_warning(self):
+        """One-shot timeout: hide the main-GUI laser warning and stop
+        re-posting it until the laser reconnects (see _update_laser_warning).
+        The Laser Control GUI's own warning is unaffected.
+        """
+        self._laser_warning_dismissed = True
+        statusbar = getattr(self, "statusbar", None)
+        if statusbar is not None and statusbar.currentMessage().startswith("Laser warning"):
             statusbar.clearMessage()
             statusbar.setStyleSheet("")
 
@@ -2065,22 +2094,6 @@ class Ui_PyCCAPT(object):
         elif not self.variables.vdc_hold:
             self.pulse_mode.setEnabled(False)  # Enable the pulse mode
 
-    def set_min_voltage_clicked(self):
-        """
-        Set the minimum voltage
-
-        Args:
-                None
-
-        Return:
-                None
-        """
-
-        if self.variables.vdc_hold:
-            self.variables.flag_new_min_voltage = True
-        else:
-            self.error_message("Hold the DC voltage first")
-
     def wins_init(self):
         available_ports = device_checks.list_available_serial_ports()
         serial_issues = device_checks.collect_configured_serial_port_issues(
@@ -2282,6 +2295,15 @@ class Ui_PyCCAPT(object):
         Return:
                 None
         """
+        # Retry the laser-stage SmarAct connection if it failed at startup
+        # (e.g. controller was off/busy) so the user can recover by simply
+        # re-opening this window. No-op when already connected.
+        gui = getattr(self, "gui_laser_control", None)
+        if gui is not None and hasattr(gui, "reconnect_stage"):
+            try:
+                gui.reconnect_stage()
+            except Exception as exc:
+                print(f"Laser stage reconnect attempt failed (non-fatal): {exc}")
         if hasattr(self, 'Laser_control') and self.Laser_control.isVisible():
             self._show_sub_window(self.Laser_control, self.laser_control)
         else:
@@ -2297,6 +2319,15 @@ class Ui_PyCCAPT(object):
         Return:
                 None
         """
+        # Retry the SmarAct connection if it failed at startup (e.g. the
+        # controller was off/busy/holding a stale handle) so the user can
+        # recover by re-opening this window. No-op when already connected.
+        gui = getattr(self, "gui_stage_control", None)
+        if gui is not None and hasattr(gui, "reconnect"):
+            try:
+                gui.reconnect()
+            except Exception as exc:
+                print(f"Stage reconnect attempt failed (non-fatal): {exc}")
         if hasattr(self, 'Stage_control') and self.Stage_control.isVisible():
             self._show_sub_window(self.Stage_control, self.stage_control)
         else:
@@ -2423,15 +2454,23 @@ class Ui_PyCCAPT(object):
 
         if hasattr(self, "SignalEmitter_Pumps_Vacuum"):
             try:
+                # Legacy emit -- no consumer, kept for back-compat.
                 self.SignalEmitter_Pumps_Vacuum.bool_flag_while_loop.emit(False)
             except Exception:
                 pass
 
-        # Daemon thread - join briefly so it gets a chance to honour the
-        # stop signal, but don't hang if it's wedged on a serial read.
+        # Signal the gauge thread via a real threading.Event (the legacy
+        # pyqtSignal flag is always truthy and never actually stopped the
+        # loop). Give it slightly longer to wake up since the inner sleep
+        # in initialize_devices.state_update can be up to ~1 s.
+        if hasattr(self, 'gui_pumps_vacuum') and hasattr(self.gui_pumps_vacuum, 'gauges_stop_event'):
+            try:
+                self.gui_pumps_vacuum.gauges_stop_event.set()
+            except Exception:
+                pass
         if hasattr(self, 'gui_pumps_vacuum') and hasattr(self.gui_pumps_vacuum, 'gauges_thread'):
             try:
-                self.gui_pumps_vacuum.gauges_thread.join(0.5)
+                self.gui_pumps_vacuum.gauges_thread.join(2.0)
             except Exception:
                 pass
 
@@ -2520,21 +2559,33 @@ class MyPyCCAPT(QtWidgets.QMainWindow):
         )
 
         if reply == QtWidgets.QMessageBox.StandardButton.Yes:
-            # Hard watchdog: fire os._exit after 5 s no matter what.
+            # Hard watchdog: fire os._exit after 10 s no matter what.
             # cleanup() can hang indefinitely if a SmarAct ctl.Close
             # call collides with an in-flight Reference (the SDK is
             # not thread-safe) or if a serial port refuses to release.
             # We can't fix every possible blocker individually, so a
             # daemon thread that calls os._exit is the only guarantee
             # the user's "X" click actually closes the program.
+            #
+            # Raised from 5 s to 10 s so the laser-control safe-off
+            # sequence (AOMDisable -> AOM(0) -> Standby, each followed
+            # by ~100 ms serial sleeps inside origamiClassCLI) has time
+            # to complete before the watchdog kills the process. A laser
+            # left emitting because the safe-off was cut short is a
+            # real safety problem.
             import os as _os
             import threading as _threading
+
+            _WATCHDOG_SECONDS = 10.0
 
             def _force_exit():
                 import time as _time
 
-                _time.sleep(5.0)
-                print("Close watchdog: forcing os._exit after 5 s")
+                _time.sleep(_WATCHDOG_SECONDS)
+                print(
+                    f"Close watchdog: forcing os._exit after "
+                    f"{_WATCHDOG_SECONDS} s"
+                )
                 _os._exit(0)
 
             t = _threading.Thread(target=_force_exit, daemon=True)
@@ -2549,6 +2600,11 @@ class MyPyCCAPT(QtWidgets.QMainWindow):
 
 
 if __name__ == "__main__":
+    # Put this process in a kill-on-close Job Object so worker subprocesses
+    # are terminated if the GUI dies without running cleanup() (PyCharm Stop
+    # button, crash). Must run before any subprocess is spawned.
+    runtime.install_kill_children_on_exit()
+
     try:
         conf, project_root = runtime.load_project_config()
     except Exception as exc:

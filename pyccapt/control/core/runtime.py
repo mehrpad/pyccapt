@@ -4,10 +4,16 @@ from __future__ import annotations
 
 import multiprocessing
 import os
+import sys
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+# Keeps the kill-on-close Job Object handle alive for the whole process
+# lifetime. If this is garbage-collected/closed the job closes and would
+# kill our own children prematurely, so it must live as a module global.
+_kill_on_exit_job = None
 
 from pyccapt.control.core import read_files, share_variables
 from pyccapt.control.core.shared_ring_buffer import SharedRingBuffer
@@ -93,6 +99,108 @@ def load_project_config(
     if change_cwd:
         os.chdir(project_root)
     return conf, project_root
+
+
+def install_kill_children_on_exit() -> bool:
+	"""Ensure all child processes die when *this* process dies (Windows).
+
+	The GUI spawns worker subprocesses (camera, visualization, experiment)
+	and a multiprocessing Manager. On a clean window-X close,
+	``MyPyCCAPT.cleanup()`` terminates them. But when the GUI is killed
+	*without* running cleanup - PyCharm's red Stop button, a crash, Task
+	Manager - those children are orphaned and linger (we have seen a dozen
+	such leaks accumulate over days, each potentially holding a SmarAct
+	controller / COM port open).
+
+	This puts the current process into a Windows Job Object configured with
+	``JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE``. Child processes created
+	afterwards are automatically associated with the job (Python's
+	``multiprocessing`` does not request break-away), so when the last
+	handle to the job closes - which the OS does for us when this process
+	exits for *any* reason - Windows terminates every remaining process in
+	the job. Call this once, as early as possible, before spawning workers.
+
+	Returns True if the job was installed, False otherwise (non-Windows,
+	already installed, or the OS refused - all non-fatal).
+	"""
+	global _kill_on_exit_job
+	if sys.platform != "win32":
+		return False
+	if _kill_on_exit_job is not None:
+		return True  # idempotent: re-running runfile() in the same console
+	try:
+		import ctypes
+		from ctypes import wintypes
+
+		kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+		JobObjectExtendedLimitInformation = 9
+		JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+
+		class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
+			_fields_ = [
+				("PerProcessUserTimeLimit", wintypes.LARGE_INTEGER),
+				("PerJobUserTimeLimit", wintypes.LARGE_INTEGER),
+				("LimitFlags", wintypes.DWORD),
+				("MinimumWorkingSetSize", ctypes.c_size_t),
+				("MaximumWorkingSetSize", ctypes.c_size_t),
+				("ActiveProcessLimit", wintypes.DWORD),
+				("Affinity", ctypes.POINTER(wintypes.ULONG)),
+				("PriorityClass", wintypes.DWORD),
+				("SchedulingClass", wintypes.DWORD),
+			]
+
+		class IO_COUNTERS(ctypes.Structure):
+			_fields_ = [
+				("ReadOperationCount", ctypes.c_ulonglong),
+				("WriteOperationCount", ctypes.c_ulonglong),
+				("OtherOperationCount", ctypes.c_ulonglong),
+				("ReadTransferCount", ctypes.c_ulonglong),
+				("WriteTransferCount", ctypes.c_ulonglong),
+				("OtherTransferCount", ctypes.c_ulonglong),
+			]
+
+		class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
+			_fields_ = [
+				("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
+				("IoInfo", IO_COUNTERS),
+				("ProcessMemoryLimit", ctypes.c_size_t),
+				("JobMemoryLimit", ctypes.c_size_t),
+				("PeakProcessMemoryUsed", ctypes.c_size_t),
+				("PeakJobMemoryUsed", ctypes.c_size_t),
+			]
+
+		kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+		kernel32.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
+		kernel32.SetInformationJobObject.restype = wintypes.BOOL
+		kernel32.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD]
+		kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+		kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+		kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+
+		job = kernel32.CreateJobObjectW(None, None)
+		if not job:
+			return False
+
+		info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+		info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+		if not kernel32.SetInformationJobObject(
+				job, JobObjectExtendedLimitInformation, ctypes.byref(info), ctypes.sizeof(info)
+		):
+			kernel32.CloseHandle(job)
+			return False
+
+		if not kernel32.AssignProcessToJobObject(job, kernel32.GetCurrentProcess()):
+			# Most likely already in a job that forbids nesting; harmless.
+			kernel32.CloseHandle(job)
+			return False
+
+		# Keep the handle open for the process lifetime (see module global).
+		_kill_on_exit_job = job
+		return True
+	except Exception:
+		# Never let process-tree hardening break startup.
+		return False
 
 
 def create_shared_context(conf: dict[str, Any]) -> SharedContext:

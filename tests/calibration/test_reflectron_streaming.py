@@ -99,6 +99,31 @@ def test_streaming_supports_chunked_read_back(synthetic_dataset, tmp_path):
         np.testing.assert_array_equal(streamed_iter[col].to_numpy(), streamed_direct[col].to_numpy())
 
 
+def test_plain_streaming_h5_matches_eager_epos_to_ccapt(synthetic_dataset, tmp_path):
+    """The plain (uncorrected) streaming converter must produce an HDF5 whose
+    contents match the eager ``epos_to_ccapt`` -- this is the ``--plain-h5``
+    output of the batch CLI, the uncorrected sibling of the corrected stream."""
+    epos_path, _ = synthetic_dataset
+
+    eager = ccapt_tools.epos_to_ccapt(str(epos_path)).reset_index(drop=True)
+
+    out_path = tmp_path / "plain.h5"
+    result = ccapt_tools.epos_to_ccapt_h5_streaming(epos_path, out_path, chunk_size=512)
+    assert result["rows"] == len(eager)
+    assert Path(result["h5"]) == out_path
+
+    streamed = pd.read_hdf(out_path, key="df").reset_index(drop=True)
+    assert list(streamed.columns) == list(eager.columns)
+    for col in eager.columns:
+        np.testing.assert_allclose(
+            streamed[col].to_numpy(),
+            eager[col].to_numpy(),
+            rtol=1e-6,
+            atol=1e-6,
+            err_msg=f"Mismatch in column {col!r}",
+        )
+
+
 def test_epos_lazy_to_ccapt_chunks_matches_eager(synthetic_dataset):
     """The streaming epos_to_ccapt helper must produce the same DataFrame
     (column-by-column, dtypes intact) as the eager :func:`epos_to_ccapt`."""

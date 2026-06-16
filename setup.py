@@ -38,6 +38,7 @@ common_deps = [
     "requests",
     "scipy",
     "tables",
+    "tomli; python_version < '3.11'",
     "wget",
 ]
 

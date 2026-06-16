@@ -25,6 +25,7 @@ from pyccapt.calibration.reconstructions.rotation_tools import (
     rotary_fig,
     rotate_z,
 )
+from pyccapt.calibration.reconstructions.plot_bounds import range_cube_from_mask, sample_mask
 
 def _normalize_plotly_color(value):
     """Return a Plotly-safe color string from stored range colors."""
@@ -345,11 +346,6 @@ def reconstruction_plot(
     mc_up = variables.range_data['mc_up'].tolist()
     ion = variables.range_data['ion'].tolist()
 
-    # Draw an edge of cube around the 3D plot
-    x_range = [min(variables.x), max(variables.x)]
-    y_range = [min(variables.y), max(variables.y)]
-    z_range = [min(variables.z), max(variables.z)]
-    range_cube = [x_range, y_range, z_range]
     if element_alpha is None:
         element_alpha = [float(opacity)] * len(ion)
     else:
@@ -358,6 +354,25 @@ def reconstruction_plot(
             element_alpha.extend([float(opacity)] * (len(ion) - len(element_alpha)))
 
     cluster_only = cluster_result is not None and str(cluster_display_mode).strip().lower() == 'clusters-only'
+    n_points = len(mask_f)
+    sampled_masks = []
+    if not cluster_only:
+        for index, _element in enumerate(ion):
+            mask = (variables.mc > mc_low[index]) & (variables.mc < mc_up[index])
+            mask = mask & mask_f
+            sampled_masks.append(sample_mask(mask, element_percentage[index], n_points))
+
+    if sampled_masks:
+        plotted_mask = np.logical_or.reduce(sampled_masks)
+    else:
+        plotted_mask = np.asarray(mask_f, dtype=bool)
+    if cluster_result is not None:
+        cluster_mask = np.asarray(mask_f, dtype=bool)
+        if not cluster_only:
+            cluster_mask = cluster_mask & (cluster_result.labels >= 0)
+        plotted_mask = plotted_mask | cluster_mask
+
+    range_cube = range_cube_from_mask(variables, plotted_mask, fallback_mask=mask_f)
 
     # Create a subplots with shared axes
     if ions_individually_plots:
@@ -374,19 +389,7 @@ def reconstruction_plot(
                 index = col + row * 3
                 if index == len(ion):
                     break
-                mask = (variables.mc > mc_low[index]) & (variables.mc < mc_up[index])
-                mask = mask & mask_f
-                size = int(len(mask[mask == True]) * float(element_percentage[index]))
-                # Find indices where the original mask is True
-                true_indices = np.where(mask)[0]
-                # Randomly choose 100 indices from the true indices
-                random_true_indices = np.random.choice(true_indices, size=size, replace=False)
-                # Create a new mask with the same length as the original, initialized with False
-                new_mask = np.full(len(variables.dld_t), False)
-                # Set the selected indices to True in the new mask
-                new_mask[random_true_indices] = True
-                # Apply the new mask to the original mask
-                mask = mask & new_mask
+                mask = sampled_masks[index]
 
                 scatter = go.Scatter3d(
                     x=variables.x[mask],
@@ -409,20 +412,8 @@ def reconstruction_plot(
     else:
         fig = go.Figure()
         if not cluster_only:
-            for index, elemen in enumerate(ion):
-                mask = (variables.mc > mc_low[index]) & (variables.mc < mc_up[index])
-                mask = mask & mask_f
-                size = int(len(mask[mask == True]) * float(element_percentage[index]))
-                # Find indices where the original mask is True
-                true_indices = np.where(mask)[0]
-                # Randomly choose 100 indices from the true indices
-                random_true_indices = np.random.choice(true_indices, size=size, replace=False)
-                # Create a new mask with the same length as the original, initialized with False
-                new_mask = np.full(len(variables.dld_t), False)
-                # Set the selected indices to True in the new mask
-                new_mask[random_true_indices] = True
-                # Apply the new mask to the original mask
-                mask = mask & new_mask
+            for index, _element in enumerate(ion):
+                mask = sampled_masks[index]
 
                 fig.add_trace(
                     go.Scatter3d(
@@ -632,7 +623,8 @@ def scatter_plot(data, range_data, variables, element_percentage, selected_area,
         df_s = df_s[(df_s['mc_c (Da)'] > mc_low[index]) & (df_s['mc_c (Da)'] < mc_up[index])]
         df_s.reset_index(inplace=True, drop=True)
         remove_n = int(len(df_s) - (len(df_s) * float(element_percentage[index])))
-        drop_indices = np.random.choice(df_s.index, remove_n, replace=False)
+        drop_indices = np.random.default_rng(int(len(df_s))).choice(
+            df_s.index, remove_n, replace=False)
         df_subset = df_s.drop(drop_indices)
         if phases[index] == 'unranged':
             name_element = 'unranged'
@@ -752,7 +744,8 @@ def projection(
         # Find indices where the original mask is True
         true_indices = np.where(mask)[0]
         # Randomly choose 100 indices from the true indices
-        random_true_indices = np.random.choice(true_indices, size=size, replace=False)
+        random_true_indices = np.random.default_rng(int(len(true_indices))).choice(
+            true_indices, size=size, replace=False)
         # Create a new mask with the same length as the original, initialized with False
         new_mask = np.full(len(variables.dld_t), False)
         # Set the selected indices to True in the new mask
@@ -875,7 +868,8 @@ def heatmap(
         # Find indices where the original mask is True
         true_indices = np.where(mask_s)[0]
         # Randomly choose 100 indices from the true indices
-        random_true_indices = np.random.choice(true_indices, size=size, replace=False)
+        random_true_indices = np.random.default_rng(int(len(true_indices))).choice(
+            true_indices, size=size, replace=False)
         # Create a new mask with the same length as the original, initialized with False
         new_mask = np.full(len(variables.mc), False)
 
@@ -994,7 +988,8 @@ def reconstruction_2d_histogram(
 
     num_elements_to_select = int(len(x) * percentage)
     # Randomly select elements
-    indices = np.random.choice(len(x), num_elements_to_select, replace=False)
+    indices = np.random.default_rng(int(len(x))).choice(
+        len(x), num_elements_to_select, replace=False)
     x = x[indices]
     y = y[indices]
     # Check if the bin is a tuple
@@ -1190,8 +1185,24 @@ def x_y_z_calculation_and_plot(
         dld_Voltage = variables.dld_high_voltage
     elif variables.pulse_mode == 'voltage':
         dld_Voltage = variables.dld_high_voltage + variables.dld_pulse_v
-    dld_x = variables.dld_x_det
-    dld_y = variables.dld_y_det
+    dld_x = np.asarray(variables.dld_x_det, dtype=float)
+    dld_y = np.asarray(variables.dld_y_det, dtype=float)
+    # Partial-recovered rows lack one detector axis -- 3-D reconstruction
+    # is undefined for them (no (x_det, y_det) -> (px, py, pz) mapping).
+    # The element-wise formulas below naturally yield NaN for those rows
+    # (NaN inputs propagate through sqrt/divide/atan2); downstream
+    # clustering / RDF / density-map already filter NaN. Just inform the
+    # user how many ions were excluded so the missing count isn't a
+    # mystery.
+    _finite_xy_recon = np.isfinite(dld_x) & np.isfinite(dld_y)
+    _n_partial = int((~_finite_xy_recon).sum())
+    if _n_partial > 0:
+        print(
+            f'[x_y_z_calculation_and_plot] Excluding {_n_partial} partial-recovered '
+            'rows (NaN x_det / y_det) from 3-D reconstruction; their (x, y, z) will '
+            'be NaN. Downstream analyses (clustering, RDF, density map) drop them.'
+        )
+
     if mode == 'Geiser':
         px, py, pz = atom_probe_recons_from_detector_Geiser_et_al(
             dld_x, dld_y, dld_Voltage, flight_path_length, kf, det_eff, icf, field_evap, avg_dens

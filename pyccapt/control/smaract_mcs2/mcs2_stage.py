@@ -80,10 +80,12 @@ def _hint_for(code: int, locator: str = "") -> str:
         0xF00C: ("SA_CTL_ERROR_DEVICE_LIMIT_REACHED - too many open handles. Close other sessions first."),
         0xF010: ("SA_CTL_ERROR_NOT_REFERENCED - the channel must be referenced before this command works."),
         0xF01A: (
-            "SA_CTL_ERROR_NETWORK_TIMEOUT - controller found but TCP "
-            "connection timed out.  Check that the MCS2 is powered on, "
-            "that no other process holds an open handle, and that port "
-            "55551 is not blocked by a firewall."
+	        "SA_CTL_ERROR_NETWORK_TIMEOUT - the controller answers discovery/"
+	        "ping but its TCP control port (55550) refused the connection. "
+	        "Almost always its single connection slot is already held by a "
+	        "stale/half-open session (a previously killed process, the SmarAct "
+	        "Service Tool, or another control PC). Power-cycle the controller "
+	        "to clear it. Less commonly: firewall blocking 55550, or powered off."
         ),
     }
     return hints.get(code, "")

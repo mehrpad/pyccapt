@@ -90,24 +90,88 @@
                                     </property>
                                 </widget>
                             </item>
-                            <item row="2" column="0" colspan="2">
-                                <widget class="QPushButton" name="dc_hold">
-                                    <property name="minimumSize">
-                                        <size>
-                                            <width>100</width>
-                                            <height>20</height>
-                                        </size>
-                                    </property>
-                                    <property name="maximumSize">
-                                        <size>
-                                            <width>100</width>
-                                            <height>16777215</height>
-                                        </size>
-                                    </property>
-                                    <property name="text">
-                                        <string>Hold DC Voltage</string>
-                                    </property>
-                                </widget>
+                            <item row="2" column="0" colspan="3">
+                                <layout class="QHBoxLayout" name="dc_hold_row">
+                                    <item>
+                                        <widget class="QPushButton" name="dc_hold">
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>100</width>
+                                                    <height>20</height>
+                                                </size>
+                                            </property>
+                                            <property name="maximumSize">
+                                                <size>
+                                                    <width>100</width>
+                                                    <height>16777215</height>
+                                                </size>
+                                            </property>
+                                            <property name="text">
+                                                <string>Hold DC Voltage</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item>
+                                        <widget class="QPushButton" name="set_dc_voltage">
+                                            <property name="enabled">
+                                                <bool>false</bool>
+                                            </property>
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>0</width>
+                                                    <height>20</height>
+                                                </size>
+                                            </property>
+                                            <property name="maximumSize">
+                                                <size>
+                                                    <width>120</width>
+                                                    <height>16777215</height>
+                                                </size>
+                                            </property>
+                                            <property name="text">
+                                                <string>Set DC Voltage</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item>
+                                        <widget class="QLineEdit" name="set_dc_voltage_value">
+                                            <property name="enabled">
+                                                <bool>false</bool>
+                                            </property>
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>80</width>
+                                                    <height>20</height>
+                                                </size>
+                                            </property>
+                                            <property name="maximumSize">
+                                                <size>
+                                                    <width>100</width>
+                                                    <height>16777215</height>
+                                                </size>
+                                            </property>
+                                            <property name="styleSheet">
+                                                <string notr="true">QLineEdit{background: rgb(223,223,233)}</string>
+                                            </property>
+                                            <property name="text">
+                                                <string>500</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item>
+                                        <spacer name="dc_hold_row_spacer">
+                                            <property name="orientation">
+                                                <enum>Qt::Horizontal</enum>
+                                            </property>
+                                            <property name="sizeHint" stdset="0">
+                                                <size>
+                                                    <width>40</width>
+                                                    <height>20</height>
+                                                </size>
+                                            </property>
+                                        </spacer>
+                                    </item>
+                                </layout>
                             </item>
                         </layout>
                     </item>
@@ -419,7 +483,7 @@
                             <item row="2" column="0">
                                 <layout class="QHBoxLayout" name="horizontalLayout">
                                     <item>
-                                        <widget class="QPushButton" name="spectrum_switch">
+                                        <widget class="QPushButton" name="btn_view_mc_cal">
                                             <property name="minimumSize">
                                                 <size>
                                                     <width>0</width>
@@ -428,12 +492,88 @@
                                             </property>
                                             <property name="maximumSize">
                                                 <size>
-                                                    <width>60</width>
+                                                    <width>90</width>
                                                     <height>16777215</height>
                                                 </size>
                                             </property>
                                             <property name="text">
-                                                <string>mc/tof</string>
+                                                <string>MC cal.</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item>
+                                        <widget class="QPushButton" name="btn_view_mc">
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>0</width>
+                                                    <height>20</height>
+                                                </size>
+                                            </property>
+                                            <property name="maximumSize">
+                                                <size>
+                                                    <width>70</width>
+                                                    <height>16777215</height>
+                                                </size>
+                                            </property>
+                                            <property name="text">
+                                                <string>MC</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item>
+                                        <widget class="QPushButton" name="btn_view_tof_cal">
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>0</width>
+                                                    <height>20</height>
+                                                </size>
+                                            </property>
+                                            <property name="maximumSize">
+                                                <size>
+                                                    <width>90</width>
+                                                    <height>16777215</height>
+                                                </size>
+                                            </property>
+                                            <property name="text">
+                                                <string>TOF cal.</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item>
+                                        <widget class="QPushButton" name="btn_view_tof">
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>0</width>
+                                                    <height>20</height>
+                                                </size>
+                                            </property>
+                                            <property name="maximumSize">
+                                                <size>
+                                                    <width>70</width>
+                                                    <height>16777215</height>
+                                                </size>
+                                            </property>
+                                            <property name="text">
+                                                <string>TOF</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item>
+                                        <widget class="QLabel" name="calib_status_label">
+                                            <property name="minimumSize">
+                                                <size>
+                                                    <width>120</width>
+                                                    <height>20</height>
+                                                </size>
+                                            </property>
+                                            <property name="font">
+                                                <font>
+                                                    <pointsize>8</pointsize>
+                                                    <italic>true</italic>
+                                                </font>
+                                            </property>
+                                            <property name="text">
+                                                <string>live cal: calibrating…</string>
                                             </property>
                                         </widget>
                                     </item>
@@ -624,7 +764,10 @@
         <tabstop>hitmap_plot_size</tabstop>
         <tabstop>hit_displayed</tabstop>
         <tabstop>heatmap_fdm_switch</tabstop>
-        <tabstop>spectrum_switch</tabstop>
+        <tabstop>btn_view_mc_cal</tabstop>
+        <tabstop>btn_view_mc</tabstop>
+        <tabstop>btn_view_tof_cal</tabstop>
+        <tabstop>btn_view_tof</tabstop>
         <tabstop>spectrum_last_events_switch</tabstop>
         <tabstop>num_last_events</tabstop>
         <tabstop>max_mc</tabstop>

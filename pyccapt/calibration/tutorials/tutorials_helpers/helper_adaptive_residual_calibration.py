@@ -18,7 +18,14 @@ from pyccapt.calibration.core.mc_plot_peak_helpers import gaussian_mrp_report
 _LABEL_LAYOUT = widgets.Layout(width="300px")
 
 
-def build_adaptive_residual_calibration_panel(variables, det_diam, flight_path_length, pulse_mode):
+def build_adaptive_residual_calibration_panel(
+    variables,
+    det_diam,
+    flight_path_length,
+    pulse_mode,
+    run_mc_auto_calibration=None,
+    run_tof_auto_calibration=None,
+):
     out = Output()
     out_status = Output()
 
@@ -57,17 +64,27 @@ def build_adaptive_residual_calibration_panel(variables, det_diam, flight_path_l
     min_window_ions = widgets.IntText(value=40, description="Min win ions:", layout=_LABEL_LAYOUT)
     min_cell_ions = widgets.IntText(value=35, description="Min cell ions:", layout=_LABEL_LAYOUT)
     verbose = widgets.Dropdown(
-        options=[("True", True), ("False", False)], value=True, description="Verbose:", layout=_LABEL_LAYOUT
+        options=[("True", True), ("False", False)], value=False, description="Verbose:", layout=_LABEL_LAYOUT
     )
 
-    plot_button = widgets.Button(description="Plot hist", layout=_LABEL_LAYOUT)
+    plot_button = widgets.Button(description="Plot hist", layout=_LABEL_LAYOUT, button_style="primary")
+    auto_calib_button = widgets.Button(description="Auto calibration", layout=_LABEL_LAYOUT, button_style="info")
     run_button = widgets.Button(description="Run adaptive residual calibration", layout=_LABEL_LAYOUT, button_style="success")
     save_button = widgets.Button(description="Save correction", layout=_LABEL_LAYOUT)
-    back_button = widgets.Button(description="Back to saved", layout=_LABEL_LAYOUT)
-    reset_button = widgets.Button(description="Reset correction", layout=_LABEL_LAYOUT)
-    clear_button = widgets.Button(description="Clear plots", layout=_LABEL_LAYOUT)
+    back_button = widgets.Button(description="Back to saved", layout=_LABEL_LAYOUT, button_style="warning")
+    reset_button = widgets.Button(description="Reset correction", layout=_LABEL_LAYOUT, button_style="danger")
+    clear_button = widgets.Button(description="Clear plots", layout=_LABEL_LAYOUT, button_style="warning")
     gaussian_button = widgets.Button(description="MRP", layout=_LABEL_LAYOUT)
-    stat_button = widgets.Button(description="Plot stat", layout=_LABEL_LAYOUT)
+    stat_button = widgets.Button(description="Plot stat", layout=_LABEL_LAYOUT, button_style="primary")
+
+    _all_buttons = [
+        plot_button, auto_calib_button, run_button, save_button,
+        back_button, reset_button, clear_button, gaussian_button, stat_button,
+    ]
+
+    def _set_all_disabled(state: bool) -> None:
+        for btn in _all_buttons:
+            btn.disabled = state
 
     def _verbosity_context():
         return nullcontext() if verbose.value else redirect_stdout(io.StringIO())
@@ -192,7 +209,7 @@ def build_adaptive_residual_calibration_panel(variables, det_diam, flight_path_l
             )
 
     def _run_adaptive(_, mirror_output=None):
-        run_button.disabled = True
+        _set_all_disabled(True)
         try:
             with ExitStack() as stack:
                 stack.enter_context(out_status)
@@ -249,12 +266,25 @@ def build_adaptive_residual_calibration_panel(variables, det_diam, flight_path_l
                     f"Holdout score: {result['baseline_quality']['holdout_score']:.2f} -> {result['final_quality']['holdout_score']:.2f}"
                 )
         finally:
-            run_button.disabled = False
+            _set_all_disabled(False)
+
+    def _run_auto_calibration(_):
+        _set_all_disabled(True)
+        try:
+            if target.value == "tof_calib":
+                if run_tof_auto_calibration is not None:
+                    run_tof_auto_calibration()
+            else:
+                if run_mc_auto_calibration is not None:
+                    run_mc_auto_calibration()
+        finally:
+            _set_all_disabled(False)
 
     target.observe(_sync_lim, names="value")
     _sync_lim()
 
     plot_button.on_click(lambda _: _plot_hist())
+    auto_calib_button.on_click(_run_auto_calibration)
     run_button.on_click(_run_adaptive)
     save_button.on_click(lambda _: _save_current())
     back_button.on_click(lambda _: _restore_saved())
@@ -271,6 +301,16 @@ def build_adaptive_residual_calibration_panel(variables, det_diam, flight_path_l
         ),
         layout=widgets.Layout(width="920px"),
     )
+    warning_label = widgets.HTML(
+        value=(
+            '<div style="color: red; font-weight: bold; padding: 4px 0;">'
+            "&#9888; A base calibration (voltage + bowl correction) must be completed in the mc or tof tab "
+            "before running adaptive residual calibration. "
+            "Use the <em>Auto calibration</em> button below, or run it in the mc / tof tab first."
+            "</div>"
+        ),
+        layout=widgets.Layout(width="920px"),
+    )
     left = widgets.VBox([target, bin_size, lim_value, percent, bin_fdm, plot_peak, index_fig, save_fig, fig_w, fig_h])
     center = widgets.VBox([n_peaks, prominence, distance, n_windows, overlap, template_bin, smoothing, verbose])
     right = widgets.VBox(
@@ -280,6 +320,7 @@ def build_adaptive_residual_calibration_panel(variables, det_diam, flight_path_l
             min_window_ions,
             min_cell_ions,
             plot_button,
+            auto_calib_button,
             run_button,
             save_button,
             back_button,
@@ -289,7 +330,7 @@ def build_adaptive_residual_calibration_panel(variables, det_diam, flight_path_l
             stat_button,
         ]
     )
-    panel = widgets.VBox([description, widgets.HBox([left, center, right]), widgets.VBox([out, out_status])])
+    panel = widgets.VBox([description, warning_label, widgets.HBox([left, center, right]), widgets.VBox([out, out_status])])
 
     def run_for_mode(mode_key, mirror_output=None):
         """Programmatically run the adaptive residual button for one mode.

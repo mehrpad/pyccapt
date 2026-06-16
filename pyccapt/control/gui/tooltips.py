@@ -82,7 +82,6 @@ MAIN_TOOLTIPS = {
     "never command above this.  Hard-capped by max_vdc "
     "in config.toml.",
     "vdc_min": "DC voltage starting / lower limit (V).",
-    "set_min_voltage": "Apply the DC Min. Voltage value to the supply now (without starting the experiment).",
     "speciemen_voltage": "Live read-back of the specimen DC voltage (V).",
     # --- Pulse parameters -------------------------------------------------
     "pulse_mode": "Pulse source: Voltage (HV pulser) or Laser (NKT/origami).",
@@ -404,13 +403,19 @@ VISUALIZATION_TOOLTIPS = {
     "this field is ignored and every ion is "
     "accumulated forever.  Default 1000000.",
     # --- Spectrum view --------------------------------------------------
-    "spectrum_switch": "Toggle the spectrum X axis between mass-to-charge (mc, Da) and time-of-flight (tof, ns).",
+	"btn_view_mc": "Show the raw (uncalibrated) mass-to-charge spectrum (Da).",
+	"btn_view_tof": "Show the raw (uncalibrated) time-of-flight spectrum (ns).",
+	"btn_view_mc_cal": "Show the live-calibrated mass-to-charge spectrum (Da).",
+	"btn_view_tof_cal": "Show the live-calibrated time-of-flight spectrum (ns). "
+	                    "All four spectra accumulate in parallel; switching is instant and never resets data.",
     "spectrum_last_events_switch": "Show only the last N events in the spectrum (rolling window).",
     "num_last_events": "Number of most-recent events used by the 'Last Events' spectrum mode.",
     "max_mc": "Upper limit of the mass spectrum X axis (Da).",
     "max_tof": "Upper limit of the time-of-flight spectrum X axis (ns).",
     # --- Hold + range ---------------------------------------------------
     "dc_hold": "Hold the DC voltage at its current value (pause feedback control).",
+    "set_dc_voltage_value": "Target DC voltage (V) to apply to the supply. Enabled only while DC is held; limited to the config min/max DC range.",
+    "set_dc_voltage": "Apply the entered DC voltage to the supply now. Enabled only while DC voltage is held.",
     "detection_rate_range_switch": "Toggle the detection-rate display between Short and Long Range.",
     "Error": "Status messages from the visualization process.",
 }

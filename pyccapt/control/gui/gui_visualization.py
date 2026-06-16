@@ -4,7 +4,6 @@ import time
 import numpy as np
 import pyqtgraph as pg
 import pyqtgraph.exporters
-
 # from numba import njit
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import QTimer
@@ -82,17 +81,36 @@ class Ui_Visualization(object):
         self.update_timer.timeout.connect(self.update_graphs)  # Connect it to the update_graphs slot
 
         # ----- Live calibration state -------------------------------------
-        # Default: show CALIBRATED data (uncalibrated_mode = False).
-        # The "Uncalibrate" toggle in the GUI flips this flag. Calibration
-        # parameters are refit by a background QThread (see
-        # pyccapt.control.core.live_calibration) and atomically swapped
-        # in here on the GUI thread. Until the first successful fit
-        # self._calib_params stays None and the apply path falls back
-        # to the raw uncalibrated formulas.
+        # Four spectra are accumulated live and in parallel: raw mc, raw
+        # tof, calibrated mc, calibrated tof. The user picks which one is
+        # *displayed* with the four view buttons; switching is a pure
+        # display swap and never resets data or refits.
+        #
+        # `uncalibrated_mode` + `conf["visualization"]` together pick the
+        # displayed accumulator (see the four display branches further
+        # down). uncalibrated_mode=True -> raw series, False -> calibrated.
+        #
+        # The mc and tof calibrations are independent fits, so we run TWO
+        # background QThreads — one per mode — and keep their parameter
+        # sets side by side. Each fitter emits new params every
+        # refit_interval_s; the GUI thread (never the worker) applies them
+        # so the histogram arrays are only ever mutated from one thread
+        # (see _drain_calib_updates). Until a mode's first successful fit
+        # its params stay None and that axis falls back to the raw formula.
         self.uncalibrated_mode = False
-        self._calib_params = None
-        self._calib_worker = None
-        self._calib_status_text = "calibrating..."
+        self._calib_params_tof = None
+        self._calib_params_mc = None
+        self._calib_worker_tof = None
+        self._calib_worker_mc = None
+        # Set by the worker-thread slots, consumed on the GUI thread: a
+        # request to zero the matching calibrated accumulator because its
+        # bins were binned under now-superseded parameters.
+        self._calib_reset_tof = False
+        self._calib_reset_mc = False
+        # Latest human-readable status per fitter, rendered into the GUI
+        # banner by the GUI thread when _calib_status_dirty is set.
+        self._calib_status = {"tof": "calibrating…", "mc": "calibrating…"}
+        self._calib_status_dirty = True
 
         # Lock that protects every write to / read of the
         # ``last_100_thousand_*`` ring buffer. The GUI thread mutates
@@ -173,7 +191,28 @@ class Ui_Visualization(object):
         self.dc_hold.setMinimumSize(QtCore.QSize(100, 20))
         self.dc_hold.setMaximumSize(QtCore.QSize(100, 16777215))
         self.dc_hold.setObjectName("dc_hold")
-        self.gridLayout_4.addWidget(self.dc_hold, 2, 0, 1, 2)
+        # Row: Hold DC Voltage | Set DC Voltage | [target voltage field].
+        # The Set button + field are disabled until the DC voltage is held
+        # (enabled in dc_hold_clicked). Set applies the entered value to the
+        # supply via the existing flag_new_min_voltage mechanism.
+        self.dc_hold_row = QtWidgets.QHBoxLayout()
+        self.dc_hold_row.setObjectName("dc_hold_row")
+        self.dc_hold_row.addWidget(self.dc_hold)
+        self.set_dc_voltage = QtWidgets.QPushButton(parent=Visualization)
+        self.set_dc_voltage.setMinimumSize(QtCore.QSize(0, 20))
+        self.set_dc_voltage.setMaximumSize(QtCore.QSize(120, 16777215))
+        self.set_dc_voltage.setObjectName("set_dc_voltage")
+        self.set_dc_voltage.setEnabled(False)
+        self.dc_hold_row.addWidget(self.set_dc_voltage)
+        self.set_dc_voltage_value = QtWidgets.QLineEdit(parent=Visualization)
+        self.set_dc_voltage_value.setMinimumSize(QtCore.QSize(80, 20))
+        self.set_dc_voltage_value.setMaximumSize(QtCore.QSize(100, 16777215))
+        self.set_dc_voltage_value.setStyleSheet("QLineEdit{background: rgb(223,223,233)}")
+        self.set_dc_voltage_value.setObjectName("set_dc_voltage_value")
+        self.set_dc_voltage_value.setEnabled(False)
+        self.dc_hold_row.addWidget(self.set_dc_voltage_value)
+        self.dc_hold_row.addStretch(1)
+        self.gridLayout_4.addLayout(self.dc_hold_row, 2, 0, 1, 3)
         self.gridLayout_5.addLayout(self.gridLayout_4, 0, 0, 1, 1)
         self.gridLayout = QtWidgets.QGridLayout()
         self.gridLayout.setObjectName("gridLayout")
@@ -413,19 +452,30 @@ class Ui_Visualization(object):
         self.gridLayout_2.addWidget(self.histogram, 1, 0, 1, 1)
         self.horizontalLayout = QtWidgets.QHBoxLayout()
         self.horizontalLayout.setObjectName("horizontalLayout")
-        self.spectrum_switch = QtWidgets.QPushButton(parent=Visualization)
-        self.spectrum_switch.setMinimumSize(QtCore.QSize(0, 20))
-        self.spectrum_switch.setMaximumSize(QtCore.QSize(60, 16777215))
-        self.spectrum_switch.setObjectName("spectrum_switch")
-        self.horizontalLayout.addWidget(self.spectrum_switch)
-        # "Uncalibrate" toggle, sits right next to the mc/tof switch.
-        # Default state = NOT pressed = show calibrated spectrum.
-        # Pressed (green) = bypass corrections, show raw mc/tof.
-        self.uncalibrate_switch = QtWidgets.QPushButton(parent=Visualization)
-        self.uncalibrate_switch.setMinimumSize(QtCore.QSize(0, 20))
-        self.uncalibrate_switch.setMaximumSize(QtCore.QSize(100, 16777215))
-        self.uncalibrate_switch.setObjectName("uncalibrate_switch")
-        self.horizontalLayout.addWidget(self.uncalibrate_switch)
+        # Four explicit view buttons. Each selects one of the four live
+        # spectra (raw/calibrated x mc/tof) as a pure display swap; the
+        # active one is highlighted green. No reset, no refit on click.
+        # Display order: MC cal, MC, TOF cal, TOF.
+        self.btn_view_mc_cal = QtWidgets.QPushButton(parent=Visualization)
+        self.btn_view_mc_cal.setMinimumSize(QtCore.QSize(0, 20))
+        self.btn_view_mc_cal.setMaximumSize(QtCore.QSize(90, 16777215))
+        self.btn_view_mc_cal.setObjectName("btn_view_mc_cal")
+        self.horizontalLayout.addWidget(self.btn_view_mc_cal)
+        self.btn_view_mc = QtWidgets.QPushButton(parent=Visualization)
+        self.btn_view_mc.setMinimumSize(QtCore.QSize(0, 20))
+        self.btn_view_mc.setMaximumSize(QtCore.QSize(70, 16777215))
+        self.btn_view_mc.setObjectName("btn_view_mc")
+        self.horizontalLayout.addWidget(self.btn_view_mc)
+        self.btn_view_tof_cal = QtWidgets.QPushButton(parent=Visualization)
+        self.btn_view_tof_cal.setMinimumSize(QtCore.QSize(0, 20))
+        self.btn_view_tof_cal.setMaximumSize(QtCore.QSize(90, 16777215))
+        self.btn_view_tof_cal.setObjectName("btn_view_tof_cal")
+        self.horizontalLayout.addWidget(self.btn_view_tof_cal)
+        self.btn_view_tof = QtWidgets.QPushButton(parent=Visualization)
+        self.btn_view_tof.setMinimumSize(QtCore.QSize(0, 20))
+        self.btn_view_tof.setMaximumSize(QtCore.QSize(70, 16777215))
+        self.btn_view_tof.setObjectName("btn_view_tof")
+        self.horizontalLayout.addWidget(self.btn_view_tof)
         # Small status label that surfaces what the live-calibration
         # worker is doing ("calibrating…", "no clear peak", "R²=0.81…").
         self.calib_status_label = QtWidgets.QLabel(parent=Visualization)
@@ -526,14 +576,19 @@ class Ui_Visualization(object):
         Visualization.setTabOrder(self.voltage, self.detection_rate)
         Visualization.setTabOrder(self.detection_rate, self.hitmap_count)
         Visualization.setTabOrder(self.hitmap_count, self.dc_hold)
-        Visualization.setTabOrder(self.dc_hold, self.detection_rate_range_switch)
+        Visualization.setTabOrder(self.dc_hold, self.set_dc_voltage)
+        Visualization.setTabOrder(self.set_dc_voltage, self.set_dc_voltage_value)
+        Visualization.setTabOrder(self.set_dc_voltage_value, self.detection_rate_range_switch)
         Visualization.setTabOrder(self.detection_rate_range_switch, self.reset_heatmap_v)
         Visualization.setTabOrder(self.reset_heatmap_v, self.hitmap_plot_size)
         Visualization.setTabOrder(self.hitmap_plot_size, self.hit_displayed)
         Visualization.setTabOrder(self.hit_displayed, self.fdm_last_events_switch)
         Visualization.setTabOrder(self.fdm_last_events_switch, self.fdm_max_ions)
-        Visualization.setTabOrder(self.fdm_max_ions, self.spectrum_switch)
-        Visualization.setTabOrder(self.spectrum_switch, self.spectrum_last_events_switch)
+        Visualization.setTabOrder(self.fdm_max_ions, self.btn_view_mc_cal)
+        Visualization.setTabOrder(self.btn_view_mc_cal, self.btn_view_mc)
+        Visualization.setTabOrder(self.btn_view_mc, self.btn_view_tof_cal)
+        Visualization.setTabOrder(self.btn_view_tof_cal, self.btn_view_tof)
+        Visualization.setTabOrder(self.btn_view_tof, self.spectrum_last_events_switch)
         Visualization.setTabOrder(self.spectrum_last_events_switch, self.num_last_events)
         Visualization.setTabOrder(self.num_last_events, self.max_mc)
         Visualization.setTabOrder(self.max_mc, self.max_tof)
@@ -597,12 +652,16 @@ class Ui_Visualization(object):
         self.detector_fdm.setLabel("left", "X_det", units='mm', **self.styles)
         self.detector_fdm.setLabel("bottom", "Y_det", units='mm', **self.styles)
         self.detector_fdm.getViewBox().setAspectLocked(True)
-        # Per-FDM ion counter - resets when fdm_max_ions is exceeded
-        # (only relevant when the Last-Events toggle is OFF).
-        self._fdm_event_count = 0
-        # Last-Events mode state.  When the toggle is on, the FDM is
-        # rebuilt every tick from a sliding window of the most recent
-        # fdm_max_ions (x, y) hits stored in these two arrays.
+        # The FDM keeps TWO accumulators live in parallel every tick so
+        # the Last-Events toggle is a pure display swap that never loses
+        # data — you can flip between the entire map and the last-N map
+        # without either resetting:
+        #   * entire : _fdm_hist_all accumulates every ion forever, and
+        #              _fdm_count_all is the running total ion count.
+        #   * window : _fdm_window_x/y hold the most recent fdm_max_ions
+        #              hits, and the map is rebuilt from them each tick.
+        self._fdm_hist_all = np.zeros_like(self.hist_fdm)
+        self._fdm_count_all = 0
         self._fdm_use_last_events = False
         self._fdm_window_x = np.array([], dtype=np.float32)
         self._fdm_window_y = np.array([], dtype=np.float32)
@@ -626,8 +685,12 @@ class Ui_Visualization(object):
 
         self.original_button_style = self.detection_rate_range_switch.styleSheet()
         self.detection_rate_range_switch.clicked.connect(self.detection_rate_range)
-        self.spectrum_switch.clicked.connect(self.spectrum_switch_mc_tof)
-        self.uncalibrate_switch.clicked.connect(self.uncalibrate_clicked)
+        # Each button is a preset of (visualization axis, calibrated?).
+        self.btn_view_mc.clicked.connect(lambda: self._select_spectrum_view("mc", True))
+        self.btn_view_tof.clicked.connect(lambda: self._select_spectrum_view("tof", True))
+        self.btn_view_mc_cal.clicked.connect(lambda: self._select_spectrum_view("mc", False))
+        self.btn_view_tof_cal.clicked.connect(lambda: self._select_spectrum_view("tof", False))
+        self._highlight_active_view_button()
         self.spectrum_last_events_switch.clicked.connect(self.spectrum_last_events)
         # Start the background calibration worker. It snapshots the
         # 100 000-event ring buffer every refit_interval_s, fits new
@@ -651,6 +714,8 @@ class Ui_Visualization(object):
         self.index_hist_mc = np.where(self.bins_mc == self.max_mc_val)[0][0]
 
         self.dc_hold.clicked.connect(self.dc_hold_clicked)
+        self.set_dc_voltage.clicked.connect(self.set_dc_voltage_clicked)
+        self.set_dc_voltage_value.editingFinished.connect(self._clamp_set_dc_voltage_field)
 
         self.hitmap_count.setReadOnly(True)
         self.voltage.setReadOnly(True)
@@ -683,6 +748,8 @@ class Ui_Visualization(object):
         self.label_200.setText(_translate("Visualization", "Voltage"))
         self.voltage.setText(_translate("Visualization", "0"))
         self.dc_hold.setText(_translate("Visualization", "Hold DC Voltage"))
+        self.set_dc_voltage.setText(_translate("Visualization", "Set DC Voltage"))
+        self.set_dc_voltage_value.setText(_translate("Visualization", str(int(self.conf.get('default_vdc_min', 500)))))
         self.label_201.setText(_translate("Visualization", "Detection Rate"))
         self.detection_rate.setText(_translate("Visualization", "0"))
         self.detection_rate_range_switch.setText(_translate("Visualization", "Short Range"))
@@ -694,8 +761,10 @@ class Ui_Visualization(object):
         # any external code reads it.
         self.heatmap_fdm_switch.setText(_translate("Visualization", "Hitmap/FDM"))
         self.label_207.setText(_translate("Visualization", "Spectrum"))
-        self.spectrum_switch.setText(_translate("Visualization", "mc/tof"))
-        self.uncalibrate_switch.setText(_translate("Visualization", "Uncalibrate"))
+        self.btn_view_mc.setText(_translate("Visualization", "MC"))
+        self.btn_view_tof.setText(_translate("Visualization", "TOF"))
+        self.btn_view_mc_cal.setText(_translate("Visualization", "MC cal."))
+        self.btn_view_tof_cal.setText(_translate("Visualization", "TOF cal."))
         self.calib_status_label.setText(_translate("Visualization", "live cal: calibrating…"))
         self.spectrum_last_events_switch.setText(_translate("Visualization", "Last Events"))
         self.num_last_events.setText(_translate("Visualization", "10000"))
@@ -719,9 +788,64 @@ class Ui_Visualization(object):
             if not self.variables.vdc_hold:
                 self.variables.vdc_hold = True
                 self.dc_hold.setStyleSheet("QPushButton{\nbackground: rgb(0, 255, 26)\n}")
+                self._set_dc_voltage_controls_enabled(True)
             elif self.variables.vdc_hold:
                 self.variables.vdc_hold = False
                 self.dc_hold.setStyleSheet(self.original_button_style)
+                self._set_dc_voltage_controls_enabled(False)
+
+    def _dc_voltage_limits(self):
+        """(min, max) DC voltage the Set field allows, from config.toml."""
+        lo = int(self.conf.get('default_vdc_min', 500))
+        hi = int(self.conf.get('default_vdc_max', 4000))
+        return (lo, hi) if lo <= hi else (hi, lo)
+
+    def _set_dc_voltage_controls_enabled(self, enabled):
+        """Enable the Set-DC-voltage field + button only while DC is held."""
+        self.set_dc_voltage_value.setEnabled(enabled)
+        self.set_dc_voltage.setEnabled(enabled)
+        if enabled:
+            # Seed the field with the current supply voltage (clamped) so the
+            # operator nudges from where it is now.
+            lo, hi = self._dc_voltage_limits()
+            try:
+                cur = int(float(getattr(self.variables, 'specimen_voltage', 0)))
+            except (TypeError, ValueError):
+                cur = lo
+            self.set_dc_voltage_value.setText(str(min(max(cur, lo), hi)))
+
+    def _clamp_set_dc_voltage_field(self):
+        """Clamp the typed value into the config [min, max] DC range."""
+        lo, hi = self._dc_voltage_limits()
+        try:
+            val = int(float(self.set_dc_voltage_value.text().strip()))
+        except (TypeError, ValueError):
+            self.set_dc_voltage_value.setText(str(lo))
+            return
+        self.set_dc_voltage_value.setText(str(min(max(val, lo), hi)))
+
+    def set_dc_voltage_clicked(self):
+        """Apply the entered DC voltage to the supply (only while DC is held).
+
+        Reuses the existing mechanism unchanged: write the clamped target
+        into ``variables.vdc_min`` and raise ``flag_new_min_voltage``, which
+        the experiment control loop consumes to ramp the supply to it (the
+        same path the old main-GUI 'Set' button used, just with a
+        user-entered value instead of the Min. Voltage field).
+        """
+        if not self.variables.vdc_hold:
+            self.error_message("Hold the DC voltage first")
+            return
+        lo, hi = self._dc_voltage_limits()
+        try:
+            val = int(float(self.set_dc_voltage_value.text().strip()))
+        except (TypeError, ValueError):
+            self.error_message("Enter a valid DC voltage (V)")
+            return
+        val = min(max(val, lo), hi)
+        self.set_dc_voltage_value.setText(str(val))
+        self.variables.vdc_min = val
+        self.variables.flag_new_min_voltage = True
 
     def heatmap_fdm_switch_change(self):
         """No-op kept for backward compatibility.
@@ -735,30 +859,21 @@ class Ui_Visualization(object):
         return
 
     def _fdm_last_events_toggle(self):
-        """Switch the FDM between accumulate-all and sliding-window modes.
+        """Swap the FDM display between the entire map and the last-N map.
 
-        Default (button up) - the FDM histogram accumulates every ion
-        for the lifetime of the experiment.  The fdm_max_ions field
-        below is ignored.
+        Both accumulators are maintained every tick (see the FDM block in
+        update_graphs_helper), so this is a pure display swap: neither the
+        entire histogram nor the sliding window is cleared, and toggling
+        back and forth never loses data.
 
-        Toggled on (button green) - the FDM is rebuilt every refresh
-        from a sliding window of the most recent fdm_max_ions hits.
-        Switching modes resets the window so the next render starts
-        from a clean slate.
+        Default (button up)  - show the entire FDM (every ion ever).
+        Toggled on (green)   - show only the most recent fdm_max_ions hits.
         """
         self._fdm_use_last_events = self.fdm_last_events_switch.isChecked()
         if self._fdm_use_last_events:
             self.fdm_last_events_switch.setStyleSheet("QPushButton{background: rgb(0, 255, 26)}")
         else:
             self.fdm_last_events_switch.setStyleSheet(self._original_fdm_button_style)
-        # Reset everything so the next render starts clean in the new mode.
-        self._fdm_window_x = np.array([], dtype=np.float32)
-        self._fdm_window_y = np.array([], dtype=np.float32)
-        self.hist_fdm[:] = 0.0
-        self._fdm_event_count = 0
-        self.fdm_count.setText("0")
-        self.detector_fdm.clear()
-        self.detector_fdm.addItem(self.detector_circle_fdm)
 
     def reset_heatmap(self):
         """
@@ -930,78 +1045,54 @@ class Ui_Visualization(object):
                 elif self.variables.pulse_mode == 'Laser' or self.variables.pulse_mode == 'VoltageLaser':
                     t_0 = self.conf["t_0_laser"]
 
-                # The toggle only chooses which histogram is *displayed*.
-                # Both calibrated and uncalibrated accumulators are
-                # updated below so flipping the button never loses prior
-                # events.
-                use_calibration_display = not self.uncalibrated_mode and self._calib_params is not None
+                # Apply any pending live-calibration updates (parameter
+                # swaps + accumulator resets) here on the GUI thread,
+                # before we touch the histograms — the worker slots only
+                # flag the work, they never mutate the arrays.
+                self._drain_calib_updates()
 
-                def _get_tof_mc(t_arr, v_arr, x_arr, y_arr, use_cal):
-                    """Return (tof, mc) arrays. ``use_cal`` applies live cal if available."""
-                    if use_cal and self._calib_params is not None:
-                        corrected = live_calibration.apply_corrections(
-                            t_arr,
-                            v_arr,
-                            x_arr,
-                            y_arr,
-                            self._calib_params,
-                        )
-                        if corrected is not None:
-                            return corrected  # (t_corr, mc_corr)
-                    # Raw fallback: simple geometry-only mc, t unchanged.
-                    mc_raw = tof2mc_simple.tof_2_mc(
-                        t_arr,
-                        t_0,
-                        v_arr,
-                        x_arr,
-                        y_arr,
-                        flightPathLength=self.conf["flight_path_length"],
-                    )
-                    return t_arr, mc_raw
-
-                if self.mc_tof_last_events_flag and self.conf["visualization"] == "tof":
+                # "Last events" view: re-bin only the most recent N events
+                # for whichever single view is currently displayed.
+                if self.mc_tof_last_events_flag:
                     t_le = self.last_100_thousand_t[-self.num_event_mc_tof :]
                     v_le = self.last_100_thousand_v[-self.num_event_mc_tof :]
                     x_le = self.last_100_thousand_det_x[-self.num_event_mc_tof :]
                     y_le = self.last_100_thousand_det_y[-self.num_event_mc_tof :]
-                    tt_last_events, _ = _get_tof_mc(t_le, v_le, x_le, y_le, use_calibration_display)
-                    hist_tof_last_events, _ = np.histogram(tt_last_events, bins=self.bins_tof)
+                    if self.conf["visualization"] == "tof":
+                        params = None if self.uncalibrated_mode else self._calib_params_tof
+                        vals = self._apply_axis(params, "tof", t_le, v_le, x_le, y_le, t_0)
+                        hist_tof_last_events, _ = np.histogram(vals, bins=self.bins_tof)
+                    else:  # "mc"
+                        params = None if self.uncalibrated_mode else self._calib_params_mc
+                        vals = self._apply_axis(params, "mc", t_le, v_le, x_le, y_le, t_0)
+                        hist_mc_last_events, _ = np.histogram(vals, bins=self.bins_mc)
 
-                elif self.mc_tof_last_events_flag and self.conf["visualization"] == "mc":
-                    t_le = self.last_100_thousand_t[-self.num_event_mc_tof :]
-                    v_le = self.last_100_thousand_v[-self.num_event_mc_tof :]
-                    x_le = self.last_100_thousand_det_x[-self.num_event_mc_tof :]
-                    y_le = self.last_100_thousand_det_y[-self.num_event_mc_tof :]
-                    _, mc_last_events = _get_tof_mc(t_le, v_le, x_le, y_le, use_calibration_display)
-                    hist_mc_last_events, _ = np.histogram(mc_last_events, bins=self.bins_mc)
-
-                # Cumulative histograms always come from the new tick's
-                # events only -- no need to re-bin the whole ring
-                # buffer. We bin the same events *twice* (once with the
-                # live calibration applied, once raw) so each
-                # accumulator independently holds the complete history
-                # of every event in its own bin space. When no
-                # calibration params have arrived yet, the two outputs
-                # are identical and we reuse the result.
+                # Four cumulative spectra, every one updated each tick so
+                # switching the displayed view is a pure swap that never
+                # loses events:
+                #   raw tof / raw mc -> geometry-only, never depend on a fit
+                #   calibrated tof   -> uses the tof-mode fit (independent)
+                #   calibrated mc    -> uses the mc-mode fit  (independent)
+                # We bin only this tick's new events into each accumulator.
                 batch_t = tt[mask_t]
                 batch_v = main_v_dc_dld[mask_t]
                 batch_x = xx[mask_t]
                 batch_y = yy[mask_t]
-                tof_evt_calib, mc_evt_calib = _get_tof_mc(batch_t, batch_v, batch_x, batch_y, True)
-                if self._calib_params is None:
-                    tof_evt_uncalib, mc_evt_uncalib = tof_evt_calib, mc_evt_calib
-                else:
-                    tof_evt_uncalib, mc_evt_uncalib = _get_tof_mc(
-                        batch_t, batch_v, batch_x, batch_y, False
-                    )
-                hist_tof_calib_batch, _ = np.histogram(tof_evt_calib, bins=self.bins_tof)
-                self.hist_tof += hist_tof_calib_batch
-                hist_mc_calib_batch, _ = np.histogram(mc_evt_calib, bins=self.bins_mc)
-                self.hist_mc += hist_mc_calib_batch
-                hist_tof_uncalib_batch, _ = np.histogram(tof_evt_uncalib, bins=self.bins_tof)
-                self.hist_tof_uncalib += hist_tof_uncalib_batch
-                hist_mc_uncalib_batch, _ = np.histogram(mc_evt_uncalib, bins=self.bins_mc)
-                self.hist_mc_uncalib += hist_mc_uncalib_batch
+                tof_raw = batch_t
+                mc_raw = tof2mc_simple.tof_2_mc(
+                    batch_t, t_0, batch_v, batch_x, batch_y,
+                    flightPathLength=self.conf["flight_path_length"],
+                )
+                self.hist_tof_uncalib += np.histogram(tof_raw, bins=self.bins_tof)[0]
+                self.hist_mc_uncalib += np.histogram(mc_raw, bins=self.bins_mc)[0]
+                tof_cal = self._apply_axis(
+                    self._calib_params_tof, "tof", batch_t, batch_v, batch_x, batch_y, t_0
+                )
+                mc_cal = self._apply_axis(
+                    self._calib_params_mc, "mc", batch_t, batch_v, batch_x, batch_y, t_0
+                )
+                self.hist_tof += np.histogram(tof_cal, bins=self.bins_tof)[0]
+                self.hist_mc += np.histogram(mc_cal, bins=self.bins_mc)[0]
 
                 # Pick which cumulative series to display this tick.
                 cumul_hist_tof = self.hist_tof_uncalib if self.uncalibrated_mode else self.hist_tof
@@ -1096,23 +1187,28 @@ class Ui_Visualization(object):
             self.detector_heatmap.addItem(self.detector_circle)
 
             # --- FDM (right panel) ---------------------------------------
-            # Two modes, switched by the Last Events toggle button:
-            #   * OFF (default): accumulate every ion into hist_fdm
-            #                    forever; fdm_count = total ions seen.
-            #   * ON           : keep a sliding window of the most recent
-            #                    fdm_max ions and rebuild hist_fdm from
-            #                    that window every refresh.
+            # Both FDMs are updated every tick so the Last Events toggle is
+            # a pure display swap (see _fdm_last_events_toggle):
+            #   * entire : accumulate every ion into _fdm_hist_all forever.
+            #   * window : keep a sliding window of the most recent fdm_max
+            #              ions and rebuild the map from it each tick.
             try:
                 fdm_max = max(1, int(float(self.fdm_max_ions.text())))
             except (ValueError, AttributeError):
                 fdm_max = 1_000_000
             new_events = int(np.sum(hist))
 
+            # Entire FDM: accumulate forever.
+            self._fdm_hist_all += np.log10(hist + 1)
+            self._fdm_count_all += new_events
+
+            # Last-events FDM: keep the sliding window current every tick,
+            # trimmed to the most recent fdm_max hits.
+            self._fdm_window_x = np.concatenate((self._fdm_window_x, (xx * 10).astype(np.float32)))[-fdm_max:]
+            self._fdm_window_y = np.concatenate((self._fdm_window_y, (yy * 10).astype(np.float32)))[-fdm_max:]
+
+            # Display whichever map the toggle selects.
             if self._fdm_use_last_events:
-                # Append the new chunk's per-ion (x_mm, y_mm) into the
-                # sliding window, then trim to the last fdm_max entries.
-                self._fdm_window_x = np.concatenate((self._fdm_window_x, (xx * 10).astype(np.float32)))[-fdm_max:]
-                self._fdm_window_y = np.concatenate((self._fdm_window_y, (yy * 10).astype(np.float32)))[-fdm_max:]
                 win_hist, _, _ = np.histogram2d(
                     self._fdm_window_x,
                     self._fdm_window_y,
@@ -1120,13 +1216,13 @@ class Ui_Visualization(object):
                     range=self.range,
                 )
                 self.hist_fdm = np.log10(win_hist + 1)
-                self._fdm_event_count = int(self._fdm_window_x.size)
             else:
-                # Plain accumulate-forever path.
-                self.hist_fdm += np.log10(hist + 1)
-                self._fdm_event_count += new_events
+                self.hist_fdm = self._fdm_hist_all
 
-            self.fdm_count.setText(str(self._fdm_event_count))
+            # The ion counter is the cumulative total detected and keeps
+            # growing every tick regardless of mode, so toggling Last Events
+            # only swaps which map is drawn — it never changes the number.
+            self.fdm_count.setText(str(self._fdm_count_all))
 
             img_fdm = pg.ImageItem()
             img_fdm.setImage(np.copy(self.hist_fdm))
@@ -1181,8 +1277,8 @@ class Ui_Visualization(object):
             # Reset the FDM panel too.
             self.detector_fdm.clear()
             self.detector_fdm.addItem(self.detector_circle_fdm)
-            self.hist_fdm[:] = 0.0
-            self._fdm_event_count = 0
+            self._fdm_hist_all[:] = 0.0
+            self._fdm_count_all = 0
             self._fdm_window_x = np.array([], dtype=np.float32)
             self._fdm_window_y = np.array([], dtype=np.float32)
             self.fdm_count.setText("0")
@@ -1201,7 +1297,8 @@ class Ui_Visualization(object):
             self.last_100_thousand_v = np.array([])
             self.length_events = 0
             self.hist_fdm, xedges, yedges = np.histogram2d([], [], bins=self.bins_detector, range=self.range)
-            self._fdm_event_count = 0
+            self._fdm_hist_all = np.zeros_like(self.hist_fdm)
+            self._fdm_count_all = 0
             self._fdm_window_x = np.array([], dtype=np.float32)
             self._fdm_window_y = np.array([], dtype=np.float32)
             self.fdm_count.setText("0")
@@ -1266,7 +1363,9 @@ class Ui_Visualization(object):
             if self.change_detection_rate_range:
                 self.detection_rate_range_switch.click()
             if self.conf["visualization"] == "tof":
-                self.spectrum_switch.click()
+                # Force the MC view for a consistent exported screenshot,
+                # keeping the current calibrated/raw choice.
+                self._select_spectrum_view("mc", self.uncalibrated_mode)
 
             self.update_graphs_helper()
 
@@ -1298,70 +1397,57 @@ class Ui_Visualization(object):
 
             self.variables.last_screen_shot = False
 
-    def spectrum_switch_mc_tof(self):
-        """
-        Switch between mass spectrum and time of flight spectrum
-        Args:
-            None
+    def _select_spectrum_view(self, visualization, uncalibrated):
+        """Select which of the four live spectra is displayed.
 
-        Return:
-            None
+        ``visualization`` is "mc" or "tof"; ``uncalibrated`` True picks
+        the raw series, False the calibrated one. This is a pure display
+        swap — it never clears an accumulator or restarts a fitter, so
+        the four spectra keep filling in the background and switching is
+        instant. Only the "Last Events" button limits what is shown.
         """
-        if self.conf["visualization"] == "tof":
-            self.conf["visualization"] = "mc"
-            self.histogram.setLabel("bottom", "m/c", units='Da', **self.styles)
-        elif self.conf["visualization"] == "mc":
-            self.conf["visualization"] = "tof"
+        self.conf["visualization"] = visualization
+        self.uncalibrated_mode = uncalibrated
+        if visualization == "tof":
             self.histogram.setLabel("bottom", "Time", units='ns', **self.styles)
-        # The TOF and MC pipelines are different (TOF: prescale + vol +
-        # bowl; MC: bowl_init + vol + bowl_final). Restart the worker
-        # so it refits for the new mode and clear the cached params /
-        # cumulative histograms so the displayed spectrum doesn't mix
-        # bins from one mode's fit with another.
-        self._calib_params = None
-        self._reset_cumulative_histograms()
-        self._stop_live_calibration_worker()
-        self._set_calib_status_text("calibrating…")
-        self._start_live_calibration_worker()
+        else:
+            self.histogram.setLabel("bottom", "m/c", units='Da', **self.styles)
+        self._highlight_active_view_button()
+
+    def _highlight_active_view_button(self):
+        """Paint the active view button green, the other three default."""
+        buttons = {
+            ("mc", True): self.btn_view_mc,
+            ("tof", True): self.btn_view_tof,
+            ("mc", False): self.btn_view_mc_cal,
+            ("tof", False): self.btn_view_tof_cal,
+        }
+        active = buttons.get((self.conf.get("visualization", "mc"), self.uncalibrated_mode))
+        for button in buttons.values():
+            if button is active:
+                button.setStyleSheet("QPushButton{background: rgb(0, 255, 26)}")
+            else:
+                button.setStyleSheet(self.original_button_style)
 
     # ---------------------------------------------------------------- live cal
 
-    def uncalibrate_clicked(self):
-        """Toggle "Uncalibrate" state on the live spectrum.
+    def _apply_axis(self, params, want, t, v, x, y, t_0):
+        """Return the requested axis ("tof" or "mc") for these events.
 
-        Default = NOT pressed = show CALIBRATED data.
-        Pressed (green) = bypass corrections, show raw mc/tof.
+        Applies ``params`` when available (the matching mode's live fit),
+        otherwise falls back to the geometry-only raw value so the
+        calibrated accumulator still fills before the first fit lands.
         """
-        self.uncalibrated_mode = not self.uncalibrated_mode
-        if self.uncalibrated_mode:
-            self.uncalibrate_switch.setStyleSheet("QPushButton{background: rgb(0, 255, 26)}")
-        else:
-            self.uncalibrate_switch.setStyleSheet(self.original_button_style)
-        # NOTE: we deliberately do NOT clear the cumulative histograms
-        # here. Both calibrated and uncalibrated accumulators are kept
-        # in parallel by the update loop, so toggling the button just
-        # swaps the displayed series — every event hit so far stays
-        # visible. Only "Last Events" (and a session restart) prunes
-        # what's shown.
-
-    def _reset_cumulative_histograms(self, *, calib=True, uncalib=True):
-        """Clear cumulative histograms.
-
-        ``calib`` clears the calibrated series; ``uncalib`` the raw
-        series. By default both are cleared, which is what callers like
-        the TOF↔MC switch and the session re-init want. The
-        new-calibration-parameters callback passes ``uncalib=False``
-        because the raw bins are unaffected by parameter changes.
-        """
-        try:
-            if calib:
-                self.hist_tof.fill(0)
-                self.hist_mc.fill(0)
-            if uncalib:
-                self.hist_tof_uncalib.fill(0)
-                self.hist_mc_uncalib.fill(0)
-        except Exception:
-            pass
+        if params is not None:
+            corrected = live_calibration.apply_corrections(t, v, x, y, params)
+            if corrected is not None:
+                t_corr, mc_corr = corrected
+                return t_corr if want == "tof" else mc_corr
+        if want == "tof":
+            return t
+        return tof2mc_simple.tof_2_mc(
+            t, t_0, v, x, y, flightPathLength=self.conf["flight_path_length"],
+        )
 
     def _calibration_snapshot(self):
         """Snapshot callback handed to the LiveCalibrationWorker.
@@ -1394,74 +1480,137 @@ class Ui_Visualization(object):
             return None
 
     def _start_live_calibration_worker(self):
-        """Spin up the background fitter, unless disabled in config."""
+        """Spin up one background fitter per mode, unless disabled in config.
+
+        The mc and tof calibrations are independent fits, so we run two
+        workers in parallel and keep both parameter sets live. That is
+        what lets the four view buttons switch instantly without ever
+        refitting or clearing an accumulator.
+        """
         try:
             interval = float(self.conf.get("live_calibration_refit_interval_s", 15.0))
         except (TypeError, ValueError):
             interval = 15.0
         if interval <= 0:
             # Operator disabled live calibration entirely.
-            self._set_calib_status_text("disabled")
+            self._calib_status["tof"] = "disabled"
+            self._calib_status["mc"] = "disabled"
+            self._calib_status_dirty = True
             return
-        # Tell the worker which t_0 to use by hinting at the active pulse mode.
+        # Tell the workers which t_0 to use by hinting at the active pulse mode.
         try:
             pulse_mode = str(getattr(self.variables, "pulse_mode", "")).strip()
             self.conf["_active_pulse_mode_is_laser"] = pulse_mode in {"Laser", "VoltageLaser"}
         except Exception:
             self.conf["_active_pulse_mode_is_laser"] = False
-        # Pick the calibration mode that matches the active visualization
-        # view. The two pipelines are different (see live_calibration
-        # docstring): TOF starts with a sqrt(V/V̄) prescaling, MC starts
-        # with a bowl-only initial step.
-        self.conf["live_calibration_mode"] = "mc" if self.conf.get("visualization", "tof") == "mc" else "tof"
-        self._calib_worker = live_calibration.LiveCalibrationWorker(
-            self._calibration_snapshot,
-            self.conf,
+        # LiveCalibrationWorker captures its mode from conf at construction
+        # (the two pipelines differ — TOF starts with a sqrt(V/V̄)
+        # prescaling, MC with a bowl-only initial step), so set the mode
+        # immediately before building each worker.
+        # Re-fit cadence is driven by the GUI's running ion counter
+        # (length_events): each worker re-fits every
+        # live_calibration_refit_event_interval new events.
+        event_count = lambda: self.length_events
+        self.conf["live_calibration_mode"] = "tof"
+        self._calib_worker_tof = live_calibration.LiveCalibrationWorker(
+            self._calibration_snapshot, self.conf, event_count,
         )
-        self._calib_worker.parameters_updated.connect(self._on_calibration_params_updated)
-        self._calib_worker.status_changed.connect(self._on_calibration_status_changed)
-        self._calib_worker.start()
+        self._calib_worker_tof.parameters_updated.connect(self._on_calib_params_tof)
+        self._calib_worker_tof.status_changed.connect(self._on_calib_status_tof)
+        self.conf["live_calibration_mode"] = "mc"
+        self._calib_worker_mc = live_calibration.LiveCalibrationWorker(
+            self._calibration_snapshot, self.conf, event_count,
+        )
+        self._calib_worker_mc.parameters_updated.connect(self._on_calib_params_mc)
+        self._calib_worker_mc.status_changed.connect(self._on_calib_status_mc)
+        self._calib_worker_tof.start()
+        self._calib_worker_mc.start()
 
-    def _on_calibration_params_updated(self, params):
-        """GUI-thread slot that atomically swaps in new calibration params."""
-        self._calib_params = params
-        if params is not None:
-            self._set_calib_status_text(
-                f"calibrated (R²={params.fit_quality:.2f}, n={params.num_events_used})",
-                ok=True,
-            )
-            # Old calibrated bins were computed under the previous
-            # parameters; clear *only* the calibrated accumulator so
-            # the displayed spectrum reflects events binned with the
-            # new calibration. The uncalibrated accumulator's bin
-            # meanings don't depend on calibration params, so it keeps
-            # the full event history.
-            self._reset_cumulative_histograms(uncalib=False)
+    # --- live-calibration slots (may run on a worker thread) -------------
+    # PyQt delivers these in the *emitting* worker's thread (the receiver
+    # is a plain Ui_ helper, not a QObject), so they must stay tiny and
+    # only touch plain attributes — never Qt widgets, never the histogram
+    # arrays. The GUI thread picks the work up in _drain_calib_updates()
+    # on the next render tick.
+    def _on_calib_params_tof(self, params):
+        # Reset the calibrated accumulator ONLY when calibration turns on or
+        # off (None<->params), not on every refit. With the ~1000-event
+        # cadence, resetting each refit would keep the calibrated spectrum
+        # permanently near-empty. Between transitions the histogram keeps
+        # accumulating and sharpens as the fit converges (small frequent
+        # parameter nudges barely move already-binned events).
+        if (self._calib_params_tof is None) != (params is None):
+            self._calib_reset_tof = True
+        self._calib_params_tof = params  # atomic reference swap
+        self._calib_status["tof"] = self._params_status(params)
+        self._calib_status_dirty = True
 
-    def _on_calibration_status_changed(self, text):
-        """GUI-thread slot for the worker's human-readable status."""
-        self._set_calib_status_text(text)
+    def _on_calib_params_mc(self, params):
+        if (self._calib_params_mc is None) != (params is None):
+            self._calib_reset_mc = True
+        self._calib_params_mc = params
+        self._calib_status["mc"] = self._params_status(params)
+        self._calib_status_dirty = True
 
-    def _set_calib_status_text(self, text, *, ok=False):
-        self._calib_status_text = text
-        try:
-            color = "#0a7d20" if ok else "#666666"
-            self.calib_status_label.setText(f"live cal: {text}")
-            self.calib_status_label.setStyleSheet(f"QLabel{{color:{color};}}")
-        except Exception:
-            pass
+    def _on_calib_status_tof(self, text):
+        self._calib_status["tof"] = text
+        self._calib_status_dirty = True
+
+    def _on_calib_status_mc(self, text):
+        self._calib_status["mc"] = text
+        self._calib_status_dirty = True
+
+    @staticmethod
+    def _params_status(params):
+        if params is None:
+            return "raw (no fit)"
+        return f"R²={params.fit_quality:.2f} n={params.num_events_used}"
+
+    def _drain_calib_updates(self):
+        """Apply pending live-calibration updates on the GUI thread.
+
+        Zeroing a calibrated accumulator (its old bins were binned under
+        now-superseded params) and updating the status banner happen here
+        so the histogram arrays and Qt widgets are only ever touched from
+        the GUI thread. The raw accumulators never reset — their bin
+        meanings don't depend on any fit.
+        """
+        if self._calib_reset_tof:
+            self._calib_reset_tof = False
+            try:
+                self.hist_tof.fill(0)
+            except Exception:
+                pass
+        if self._calib_reset_mc:
+            self._calib_reset_mc = False
+            try:
+                self.hist_mc.fill(0)
+            except Exception:
+                pass
+        if self._calib_status_dirty:
+            self._calib_status_dirty = False
+            try:
+                ok = any(s.startswith("R²") for s in self._calib_status.values())
+                color = "#0a7d20" if ok else "#666666"
+                self.calib_status_label.setText(
+                    f"live cal — tof: {self._calib_status['tof']} | mc: {self._calib_status['mc']}"
+                )
+                self.calib_status_label.setStyleSheet(f"QLabel{{color:{color};}}")
+            except Exception:
+                pass
 
     def _stop_live_calibration_worker(self):
-        """Stop the background fitter cleanly; called from .stop()."""
-        worker = self._calib_worker
-        self._calib_worker = None
-        if worker is None:
-            return
-        try:
-            worker.stop()
-            worker.wait(2000)  # ms
-        except Exception:
-            pass
+        """Stop both background fitters cleanly; called from .stop()."""
+        for attr in ("_calib_worker_tof", "_calib_worker_mc"):
+            worker = getattr(self, attr, None)
+            setattr(self, attr, None)
+            if worker is None:
+                continue
+            try:
+                worker.stop()
+                worker.wait(2000)  # ms
+            except Exception:
+                pass
 
     def spectrum_last_events(self):
         """

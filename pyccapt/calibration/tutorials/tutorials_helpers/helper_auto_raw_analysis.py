@@ -1104,10 +1104,34 @@ def run_analysis(
         )
 
         if not analysis["hit_table"].empty:
-            plot_df = surface_concept_hits_to_processed_dataframe(
-                analysis["hit_table"],
-                pulse_mode=pulse_mode,
-            )
+            # Two modes:
+            # * raw load (no calibrated ``mc (Da)`` in ``dld_df``) — replace
+            #   plot_df with the hit-table-derived processed frame so the
+            #   downstream FDM / TOF / MC histograms have populated mc
+            #   columns to draw from.
+            # * calibrated-bundle load (``mc (Da)`` already populated by a
+            #   previous calibration run) — KEEP the calibrated frame as
+            #   plot_df. Throwing it away here would silently substitute
+            #   the centred-axis raw mc for the actual calibration result
+            #   in every downstream plot (full-spectrum, FDM, multi-hit).
+            #   The SC-specific recovery overlays below still use
+            #   ``analysis['hit_table']`` directly, so they're unaffected.
+            # ``_pick_mc_col`` returns the column with non-zero values,
+            # preferring ``mc (Da)``. A return of ``'mc (Da)'`` therefore
+            # means the dataframe was calibrated (column is non-zero);
+            # ``'mc_uc (Da)'`` or ``None`` means raw-only.
+            has_calibrated_mc = _pick_mc_col(dld_df) == "mc (Da)"
+            if not has_calibrated_mc:
+                plot_df = surface_concept_hits_to_processed_dataframe(
+                    analysis["hit_table"],
+                    pulse_mode=pulse_mode,
+                )
+            else:
+                _md(
+                    "_Keeping the calibrated `/df` frame as the plot input — "
+                    "the SC hit-table is shown via the dedicated recovery "
+                    "overlays only._"
+                )
 
         _md("## DLTS-per-pulse")
         _show_figure(
@@ -1438,6 +1462,110 @@ def run_analysis(
 
     _md("## Multi-hit / dead-zone")
     plot_multihit_and_deadzone(plot_df, save_dir=save_dir, save_stem="multihit_deadzone")
+
+    # ----------------------------------------------------------------------
+    # Partial-hit diagnostics: only meaningful when the merged DLD frame
+    # carries the ``dlts_quality`` annotation. The data-processing workflow
+    # writes that column when ``merge_partial_tdc=True`` was used (or any
+    # downstream caller of ``partial_recovery.merge_partial_tdc_into_dld``);
+    # pure-raw files without the merge will lack it and we skip silently.
+    # The same set of figures is produced regardless of detector kind so
+    # SC and RoentDek users see the same view.
+    # ----------------------------------------------------------------------
+    if "dlts_quality" in dld_df.columns:
+        from pyccapt.calibration.data_tools.partial_hit_diagnostics import (
+            partial_hit_counts,
+            plot_partial_hit_axis_bias,
+            plot_partial_hit_breakdown,
+            plot_partial_hit_detector_distribution,
+            plot_partial_hit_multihit_correlation,
+            plot_partial_hit_signal_overlay,
+            plot_partial_hit_voltage_correlation,
+        )
+
+        counts = partial_hit_counts(dld_df)
+        if counts["partial"] > 0 or counts["recovered_xy"] > 0:
+            _md("## Partial-hit diagnostics")
+            _md(
+                f"_Recovered partial-hit summary:_ **{counts['partial']:,} partial** "
+                f"({counts['recovered_x']:,} x-only, {counts['recovered_y']:,} y-only) "
+                f"+ **{counts['recovered_xy']:,} recovered_xy** out of "
+                f"**{counts['total']:,}** total — "
+                f"partial fraction `{counts['partial_fraction']:.2%}`, "
+                f"recovery share `{counts['recovered_fraction']:.2%}`."
+            )
+
+            # Resolve the detector radius for the spatial-distribution panel
+            # so RoentDek and Surface Concept users both get correctly-sized
+            # 2-D histograms. Default to 4 cm if no detector kind is known.
+            try:
+                from pyccapt.calibration.data_tools._raw_workflow_common import (
+                    load_detector_constants,
+                )
+
+                _kind = detector_kind if detector_kind in {"surface_concept", "roentdek"} else "surface_concept"
+                _dconst = load_detector_constants(_kind, getattr(variables, "conf", None))
+                _detector_radius_cm = float(_dconst["detector_limit_cm"])
+            except Exception:
+                _detector_radius_cm = 4.0
+
+            _md("### Category breakdown")
+            _show_figure(
+                plot_partial_hit_breakdown(dld_df),
+                save_dir=save_dir,
+                stem="partial_hit_breakdown",
+            )
+            _md("### Detector-space distribution (full vs partial)")
+            _show_figure(
+                plot_partial_hit_detector_distribution(
+                    dld_df,
+                    detector_radius_cm=_detector_radius_cm,
+                ),
+                save_dir=save_dir,
+                stem="partial_hit_detector_distribution",
+            )
+            _md("### Time-domain / HV correlation")
+            _show_figure(
+                plot_partial_hit_voltage_correlation(dld_df),
+                save_dir=save_dir,
+                stem="partial_hit_voltage_correlation",
+            )
+            _md("### Mass-spectrum split by hit category")
+            _show_figure(
+                plot_partial_hit_signal_overlay(dld_df, signal_kind="mc"),
+                save_dir=save_dir,
+                stem="partial_hit_mc_overlay",
+            )
+            _md("### Time-of-flight split by hit category")
+            _show_figure(
+                plot_partial_hit_signal_overlay(dld_df, signal_kind="tof"),
+                save_dir=save_dir,
+                stem="partial_hit_tof_overlay",
+            )
+            _md("### Multi-hit correlation (do partials concentrate in busy pulses?)")
+            _show_figure(
+                plot_partial_hit_multihit_correlation(dld_df, tdc_df),
+                save_dir=save_dir,
+                stem="partial_hit_multihit_correlation",
+            )
+            _md("### Per-axis bias (ideal ≈ 50 % each)")
+            _show_figure(
+                plot_partial_hit_axis_bias(dld_df),
+                save_dir=save_dir,
+                stem="partial_hit_axis_bias",
+            )
+        else:
+            _md(
+                "_Partial-hit diagnostics: the ``dlts_quality`` column is "
+                "present but no recovered partials were found in this "
+                "dataset — every row is a native 4-DLTS hit._"
+            )
+    else:
+        _md(
+            "_Partial-hit diagnostics skipped — the dataframe lacks the "
+            "``dlts_quality`` column (run ``load_data(..., load_tdc_raw=True, "
+            "merge_partial_tdc=True)`` during data-processing to enable)._"
+        )
 
 # ---------------------------------------------------------------------------
 # UI: single panel with peak-source dropdown

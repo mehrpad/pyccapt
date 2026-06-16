@@ -59,30 +59,13 @@ Contents
    appendix
 
 
-Bibliography
-============
-
-1. B. Gault et al., *Atom probe tomography*. Nat Rev Methods Primers 1, 52 (2021).
-2. D. W. Saxey, *Correlated ion analysis and the interpretation of atom probe mass spectra*.
-   Ultramicroscopy 111, 473-479 (2011).
-
 Citation
 ========
 
-If you use PyCCAPT in your work, please cite:
-
-.. code-block:: bibtex
-
-   @article{monajem2025pyccapt,
-     title={PyCCAPT: A Python Package for Open-Source Atom Probe Instrument Control and Data Calibration},
-     author={Monajem, Mehrpad and Ott, Benedict and Heimerl, Jonas and Meier, Stefan and Hommelhoff, Peter and Felfer, Peter},
-     journal={Microscopy Research and Technique},
-     volume={88},
-     number={12},
-     pages={3199--3210},
-     year={2025},
-     publisher={Wiley Online Library}
-   }
+If you use PyCCAPT in your work, please cite the paper :cite:`monajem2025pyccapt`.
+The complete list of references is on the :doc:`bibliography` page, and
+machine-readable citation metadata is provided in ``CITATION.cff`` at the
+repository root.
 
 Indices and Tables
 ==================

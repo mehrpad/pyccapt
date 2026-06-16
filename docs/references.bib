@@ -1,0 +1,115 @@
+% PyCCAPT bibliography.
+% Rendered on the Bibliography page via sphinxcontrib-bibtex (see conf.py:
+% bibtex_bibfiles = ['references.bib']). Lists the PyCCAPT paper + software
+% record, the atom-probe references the calibration/reconstruction methods
+% build on, APyT (from which the per-stage Nelder-Mead correction refinement
+% was adapted), and the core scientific-Python dependencies.
+
+% --- PyCCAPT -----------------------------------------------------------------
+
+@article{monajem2025pyccapt,
+  title     = {{PyCCAPT}: A Python Package for Open-Source Atom Probe Instrument Control and Data Calibration},
+  author    = {Monajem, Mehrpad and Ott, Benedict and Heimerl, Jonas and Meier, Stefan and Hommelhoff, Peter and Felfer, Peter},
+  journal   = {Microscopy Research and Technique},
+  volume    = {88},
+  number    = {12},
+  pages     = {3199--3210},
+  year      = {2025},
+  publisher = {Wiley Online Library}
+}
+
+@software{monajem_pyccapt_software,
+  title     = {{PyCCAPT}},
+  author    = {Monajem, Mehrpad and Pandey, Harsh},
+  year      = {2025},
+  publisher = {Zenodo},
+  doi       = {10.5281/zenodo.10210507},
+  url       = {https://doi.org/10.5281/zenodo.10210507},
+  note      = {Open-source software; all-versions (concept) DOI}
+}
+
+% --- Atom probe tomography references the methods build on -------------------
+
+@article{gault2021atom,
+  title   = {Atom probe tomography},
+  author  = {Gault, Baptiste and Chiaramonti, Ann and Cojocaru-Mir{\'e}din, Oana and Stender, Patrick and Dubosq, Renelle and Freysoldt, Christoph and Makineni, Surendra Kumar and Li, Tong and Moody, Michael and Cairney, Julie M.},
+  journal = {Nature Reviews Methods Primers},
+  volume  = {1},
+  number  = {1},
+  pages   = {51},
+  year    = {2021},
+  doi     = {10.1038/s43586-021-00047-w}
+}
+
+@article{saxey2011correlated,
+  title   = {Correlated ion analysis and the interpretation of atom probe mass spectra},
+  author  = {Saxey, David W.},
+  journal = {Ultramicroscopy},
+  volume  = {111},
+  number  = {6},
+  pages   = {473--479},
+  year    = {2011},
+  doi     = {10.1016/j.ultramic.2010.11.021}
+}
+
+% --- Software adapted from ----------------------------------------------------
+
+@misc{apyt,
+  title        = {{APyT}: atom probe tomography analysis in Python},
+  author       = {{sebi-85}},
+  howpublished = {\url{https://github.com/sebi-85/apyt}},
+  url          = {https://github.com/sebi-85/apyt},
+  note         = {Per-stage Nelder-Mead voltage/flight-path correction refinement adapted from \texttt{apyt/spectrum/align.py}}
+}
+
+% --- Core scientific-Python dependencies -------------------------------------
+
+@article{harris2020numpy,
+  title     = {Array programming with {NumPy}},
+  author    = {Harris, Charles R. and Millman, K. Jarrod and van der Walt, St{\'e}fan J. and Gommers, Ralf and Virtanen, Pauli and Cournapeau, David and Wieser, Eric and Taylor, Julian and Berg, Sebastian and Smith, Nathaniel J. and others},
+  journal   = {Nature},
+  volume    = {585},
+  number    = {7825},
+  pages     = {357--362},
+  year      = {2020},
+  doi       = {10.1038/s41586-020-2649-2}
+}
+
+@article{virtanen2020scipy,
+  title     = {{SciPy} 1.0: fundamental algorithms for scientific computing in {Python}},
+  author    = {Virtanen, Pauli and Gommers, Ralf and Oliphant, Travis E. and Haberland, Matt and Reddy, Tyler and Cournapeau, David and Burovski, Evgeni and others},
+  journal   = {Nature Methods},
+  volume    = {17},
+  number    = {3},
+  pages     = {261--272},
+  year      = {2020},
+  doi       = {10.1038/s41592-019-0686-2}
+}
+
+@article{hunter2007matplotlib,
+  title     = {Matplotlib: A 2D graphics environment},
+  author    = {Hunter, John D.},
+  journal   = {Computing in Science \& Engineering},
+  volume    = {9},
+  number    = {3},
+  pages     = {90--95},
+  year      = {2007},
+  doi       = {10.1109/MCSE.2007.55}
+}
+
+@inproceedings{mckinney2010pandas,
+  title     = {Data structures for statistical computing in {Python}},
+  author    = {McKinney, Wes},
+  booktitle = {Proceedings of the 9th Python in Science Conference},
+  pages     = {56--61},
+  year      = {2010},
+  doi       = {10.25080/Majora-92bf1922-00a}
+}
+
+@misc{h5py,
+  title        = {{h5py}: HDF5 for Python},
+  author       = {Collette, Andrew and {contributors}},
+  howpublished = {\url{https://www.h5py.org}},
+  url          = {https://www.h5py.org},
+  note         = {HDF5 read/write backend for PyCCAPT data files}
+}

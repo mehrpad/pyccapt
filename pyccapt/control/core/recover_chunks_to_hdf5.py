@@ -40,10 +40,16 @@ What is recovered
 -----------------
     dld/x, y, t, high_voltage, voltage_pulse, laser_pulse, start_counter
     tdc/channel, time_data, start_counter, high_voltage, voltage_pulse, laser_pulse
-    apt/id, num_events, num_raw_signals  -- reconstructed from dld/start_counter
-    apt/temperature, vacuum, timestamps  -- zeros (held in RAM, not in chunks)
+    apt/id, timestamps, num_events, num_raw_signals, temperature,
+        experiment_chamber_vacuum, laser_x/y/z, stage_x/y/z
+        -- loaded from the apt_* metadata chunks flushed during the run
+           (APT_Exp_Control._flush_apt_meta_chunks).
 
-The apt/* zeroed fields are not used by the calibration pipeline.
+Legacy fallback (experiments that predate apt_* chunk flushing): apt/id,
+num_events and num_raw_signals are synthesized from the start_counter arrays,
+and apt/temperature, apt/experiment_chamber_vacuum and apt/timestamps are
+zero/linear-filled. Those fallback-only fields are not used by the
+calibration pipeline.
 """
 
 from __future__ import annotations

@@ -14,8 +14,8 @@ Notation:
 Control-loop metadata recorded each iteration.
 
 - `id` `(n,)` (`N/A`, `uint64`): control-loop iteration index
-- `num_event` `(n,)` (`N/A`, `uint32`): number of detected ions in loop interval
-- `num_raw_signal` `(n,)` (`N/A`, `uint32`): number of raw detector signals
+- `num_events` `(n,)` (`N/A`, `uint32`): number of detected ions in loop interval
+- `num_raw_signals` `(n,)` (`N/A`, `uint32`): number of raw detector signals
 - `temperature` `(n,)` (`K`, `float64`): sample temperature
 - `experiment_chamber_vacuum` `(n,)` (`mbar`, `float64`): main-chamber vacuum
 - `timestamps` `(n,)` (`UNIX s`, `float64`): acquisition timestamp

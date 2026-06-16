@@ -1,4 +1,4 @@
-﻿# HDF5 Data Structure for `pyccapt.control`
+# HDF5 Data Structure for `pyccapt.control`
 
 This document describes the expected structure of control-side HDF5 outputs.
 
@@ -14,11 +14,26 @@ Notation:
 Control-loop metadata recorded each iteration.
 
 - `id` `(n,)` (`N/A`, `uint64`): control-loop iteration index
-- `num_event` `(n,)` (`N/A`, `uint32`): number of detected ions in loop interval
-- `num_raw_signal` `(n,)` (`N/A`, `uint32`): number of raw detector signals
+- `num_events` `(n,)` (`N/A`, `uint32`): number of detected ions in loop interval
+- `num_raw_signals` `(n,)` (`N/A`, `uint32`): number of raw detector signals
 - `temperature` `(n,)` (`K`, `float64`): sample temperature
 - `experiment_chamber_vacuum` `(n,)` (`mbar`, `float64`): main-chamber vacuum
 - `timestamps` `(n,)` (`UNIX s`, `float64`): acquisition timestamp
+- `stage_x`, `stage_y`, `stage_z` `(n,)` (`m`, `float64`): specimen-stage position
+  (SmarAct MCS2 `stage_smartact_main`), one sample per control-loop iteration
+- `laser_x`, `laser_y`, `laser_z` `(n,)` (`m`, `float64`): laser-focusing-stage
+  position (SmarAct MCS2 `stage_smartact_laser`), one sample per control-loop iteration
+
+> Stage/laser positions are in **meters**. They are published by the Stage Control
+> and Laser Control GUIs' poll timers and read by the experiment loop each
+> iteration. If a SmarAct stage is not connected (or not referenced) during the
+> run, its axes are written as the `0.0` default — see the GUI session log for the
+> connection outcome.
+>
+> The whole `apt/*` group is flushed to `apt_*` chunk files during the run (and at
+> finalization), so it is fully recovered by `recover_chunks_to_hdf5.py`. Only
+> experiments that predate chunk flushing fall back to zero/linear-filling
+> `temperature`, `experiment_chamber_vacuum`, and `timestamps`.
 
 ## Group `dld`
 

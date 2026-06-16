@@ -107,7 +107,7 @@ At the end of the run, `hdf_creator.hdf_creator()` reassembles all chunks into t
 └── <exp_name>.h5          (final output; written atomically via a .tmp rename)
 ```
 
-The `apt/*` group (temperature, vacuum, timestamps) is held in RAM during the run and is **not** written to chunk files — it is only flushed when the final HDF5 is written.
+The `apt/*` group (`id`, `timestamps`, `num_events`, `num_raw_signals`, `temperature`, `experiment_chamber_vacuum`, and the `stage_*`/`laser_*` positions) is flushed to `apt_*` chunk files during the run and again at finalization, then reassembled into the final HDF5 alongside `dld/*` and `tdc/*`.
 
 ## Recovering a Missing HDF5 File
 
@@ -144,8 +144,8 @@ The script:
 1. Discovers all chunk files under `temp_data/chunks/` and flat fallback files under `temp_data/`.
 2. Loads each stem, skipping zero-byte or corrupted chunks with a warning.
 3. **Reconciles unequal array lengths** within each group (`dld/*`, `tdc/*`) by truncating all arrays to the shortest present member and printing a report of any rows dropped.
-4. Reconstructs `apt/id`, `apt/num_events`, and `apt/num_raw_signals` from the `start_counter` arrays.
-5. Zero-fills `apt/temperature`, `apt/experiment_chamber_vacuum`, and `apt/timestamps` (not available in chunks; these fields are not used by the calibration pipeline).
+4. Loads the full `apt/*` metadata group (`id`, `timestamps`, `num_events`, `num_raw_signals`, `temperature`, `experiment_chamber_vacuum`, `stage_x/y/z`, `laser_x/y/z`) from its `apt_*` chunk files.
+5. **Legacy fallback only** (experiments with no `apt_*` chunks): reconstructs `apt/id`, `num_events`, and `num_raw_signals` from the `start_counter` arrays and zero/linear-fills `temperature`, `experiment_chamber_vacuum`, and `timestamps` (these fallback-only fields are not used by the calibration pipeline).
 6. Prints the last 50 lines of `apt.log` so the failure reason is visible without opening a separate terminal.
 7. Writes the output via an atomic `.tmp` → rename so the experiment folder is never left in a half-written state.
 
@@ -155,14 +155,13 @@ The script:
 |---|---|---|
 | `dld/x`, `y`, `t` | Yes | Primary calibration data |
 | `dld/high_voltage`, `voltage_pulse`, `laser_pulse` | Yes | |
-| `dld/start_counter` | Yes | Used to reconstruct `apt/id` |
+| `dld/start_counter` | Yes | Aligns hits to control-loop steps |
 | `tdc/*` | Yes | All six TDC datasets |
-| `apt/id`, `num_events`, `num_raw_signals` | Yes (reconstructed) | Derived from `start_counter` |
-| `apt/temperature` | **No — zeroed** | Held in RAM, not in chunks |
-| `apt/experiment_chamber_vacuum` | **No — zeroed** | Held in RAM, not in chunks |
-| `apt/timestamps` | **No — linear sequence** | Held in RAM, not in chunks |
+| `apt/id`, `num_events`, `num_raw_signals` | Yes | From `apt_*` chunks (or reconstructed from `start_counter` for legacy files) |
+| `apt/temperature`, `experiment_chamber_vacuum`, `timestamps` | Yes | From `apt_*` chunks; zero/linear-filled only for legacy files without them |
+| `apt/stage_x/y/z`, `laser_x/y/z` | Yes | Stage & laser-focus positions per loop step, from `apt_*` chunks |
 
-The zeroed `apt/*` fields are not read by the calibration or reconstruction pipeline, so the recovered file is fully usable for all downstream analysis.
+For legacy experiments that predate `apt_*` chunk flushing, the recovery falls back to zero/linear-filling `apt/temperature`, `apt/experiment_chamber_vacuum`, and `apt/timestamps`; those fallback-only fields are not read by the calibration or reconstruction pipeline, so the recovered file is fully usable for all downstream analysis.
 
 ### Edge cases handled by the script
 

@@ -22,5 +22,5 @@ identifiers:
 repository-code: 'https://github.com/mmonajem/pyccapt'
 url: 'https://pyccapt.readthedocs.io/'
 license: AGPL-3.0
-version: 0.1.11
-date-released: '2025-01-22'
+version: 0.2.3
+date-released: '2026-06-16'

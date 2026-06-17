@@ -906,6 +906,8 @@ class Ui_Pumps_Vacuum(object):
                 "OXCART", "<html><head/><body><p><span style=\" color:#ff0000;\">" + message + "</span></p></body></html>"
             )
         )
+        # Auto-hide the warning after 8 seconds so every message clears itself
+        self.timer.start(8000)
 
     def stop(self):
         """

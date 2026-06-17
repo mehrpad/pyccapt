@@ -211,7 +211,7 @@ stage_smartact_laser = "network:sn:MCS2-00017939"
 # already knows its reference).
 stage_home_x_mm = 1.615
 stage_home_y_mm = 2.235
-stage_home_z_mm = -7.124
+stage_home_z_mm = -7.933
 laser_stage_home_x_mm = 0.0
 laser_stage_home_y_mm = 0.0
 laser_stage_home_z_mm = 0.0

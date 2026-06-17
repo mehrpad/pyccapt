@@ -1,5 +1,4 @@
 import sys
-import time
 
 import nidaqmx
 from PyQt6 import QtCore, QtGui, QtWidgets
@@ -430,6 +429,8 @@ class Ui_Gates(object):
                 "OXCART", "<html><head/><body><p><span style=\" color:#ff0000;\">" + message + "</span></p></body></html>"
             )
         )
+        # Auto-hide the warning after 8 seconds so every message clears itself
+        self.timer.start(8000)
 
     def hideMessage(self):
         """

@@ -306,6 +306,9 @@ def plot_proxigram(
 
     ax.set_title(f'Proxigram relative to {interface_element} isosurface')
 
+    from pyccapt.calibration.core import plot_style
+    plot_style.finalize_axes(ax)  # round-number axes with end ticks (paper styling)
+
     if save:
         os.makedirs(variables.result_path, exist_ok=True)
         fig.savefig(os.path.join(variables.result_path, f'proxigram_{figname}.png'), dpi=300, format='png')

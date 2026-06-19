@@ -24,6 +24,7 @@ import ipywidgets as widgets
 from IPython.display import display
 from ipywidgets import Output
 
+from pyccapt.calibration.core import plot_style
 from pyccapt.calibration.reconstructions import sdm_calibration as sc
 
 _label = widgets.Layout(width='190px')
@@ -162,6 +163,7 @@ def call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected,
                 ax.set_xlabel('Δz (nm)'); ax.set_ylabel('pair counts')
                 ax.set_title(f'z-SDM  ROI={n_roi} ions  kf={kf_w.value:.3f} icf={icf_w.value:.3f}  '
                              f'spacing={pk["spacing"]:.3f} nm  peakiness={strength:.1f}')
+                plot_style.finalize_axes(ax)  # round-number axes with end ticks
                 plt.show()
         return {'spacing': pk['spacing'], 'strength': strength, 'n_roi': n_roi,
                 'n_peaks': pk['n_peaks']}

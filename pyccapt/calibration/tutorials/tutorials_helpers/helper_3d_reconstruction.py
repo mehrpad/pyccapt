@@ -4,7 +4,6 @@ import ipywidgets as widgets
 from IPython.display import display
 from ipywidgets import Output
 
-from pyccapt.calibration import clustering
 from pyccapt.calibration.reconstructions import reconstruction
 
 # Define a layout for labels to make them a fixed width
@@ -43,8 +42,6 @@ def call_x_y_z_calculation(variables, flight_path_length, element_selected, cola
     mode_widget = widgets.Dropdown(options=[('Geiser', 'Geiser'), ('Bas', 'Bas')])
     opacity_widget = widgets.FloatText(value=0.5, min=0, max=1, step=0.1)
     save_widget = widgets.Dropdown(options=[('True', True), ('False', False)], value=False)
-    cluster_enabled_widget = widgets.Dropdown(options=[('False', False), ('True', True)], value=False)
-    cluster_labels_widget = widgets.Text(value='', placeholder='Ni3Al, Al')
 
     # Create a button widget to trigger the function
     button_calculate_plot = widgets.Button(description="Reconstruct & plot", button_style='primary')
@@ -78,15 +75,6 @@ def call_x_y_z_calculation(variables, flight_path_length, element_selected, cola
                         max_value = element_percentage_dic[element]
                 element_percentage_list.append(max_value)
 
-            cluster_result = None
-            if cluster_enabled_widget.value:
-                cluster_selection = clustering.parse_label_selection(cluster_labels_widget.value)
-                if not cluster_selection:
-                    print('Clustering is enabled, but no ion or element labels were provided. Skipping segmentation.')
-                else:
-                    cluster_result = clustering.segment_ions_by_min_max(variables, cluster_selection, n_clusters=2)
-                    print('Min-Max clustering counts:', cluster_result.counts)
-
             reconstruction.x_y_z_calculation_and_plot(
                 kf=kf_value,
                 det_eff=det_eff_value,
@@ -102,7 +90,7 @@ def call_x_y_z_calculation(variables, flight_path_length, element_selected, cola
                 opacity=opacity_value,
                 save=save_value,
                 colab=colab,
-                cluster_result=cluster_result,
+	            cluster_result=None,
             )
 
         # Enable the button when the code is finished
@@ -124,8 +112,6 @@ def call_x_y_z_calculation(variables, flight_path_length, element_selected, cola
             widgets.HBox([widgets.Label(value='Element_percentage:', layout=label_layout), element_percentage_widget]),
             widgets.HBox([widgets.Label(value='Fig name:', layout=label_layout), figname_widget]),
             widgets.HBox([widgets.Label(value='Save fig:', layout=label_layout), save_widget]),
-            widgets.HBox([widgets.Label(value='Cluster precipitate:', layout=label_layout), cluster_enabled_widget]),
-            widgets.HBox([widgets.Label(value='Cluster ions/elements:', layout=label_layout), cluster_labels_widget]),
             widgets.HBox([widgets.Label(value='Mode:', layout=label_layout), mode_widget]),
             widgets.HBox([widgets.Label(value='Opacity:', layout=label_layout), opacity_widget]),
             widgets.HBox([button_calculate_plot]),

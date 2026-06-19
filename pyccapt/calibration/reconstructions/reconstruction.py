@@ -1,5 +1,5 @@
-from copy import copy
 import re
+from copy import copy
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -16,16 +16,15 @@ from pyccapt.calibration.reconstructions.io_utils import (
     resolve_result_file,
     save_gif,
     save_matplotlib_figure,
-    save_plotly_animation,
     write_plotly_html,
     write_plotly_image,
 )
+from pyccapt.calibration.reconstructions.plot_bounds import range_cube_from_mask, sample_mask
 from pyccapt.calibration.reconstructions.rotation_tools import (
     plotly_fig2array,
     rotary_fig,
-    rotate_z,
 )
-from pyccapt.calibration.reconstructions.plot_bounds import range_cube_from_mask, sample_mask
+
 
 def _normalize_plotly_color(value):
     """Return a Plotly-safe color string from stored range colors."""
@@ -545,8 +544,15 @@ def reconstruction_plot(
         )
     )
 
-    # Show the plot in the Jupyter cell output
-    variables.plotly_3d_reconstruction = go.FigureWidget(fig)
+    # Show the plot in the Jupyter cell output.
+    # FigureWidget requires the optional `anywidget` package (Plotly >= 6). Fall
+    # back to a plain Figure if it is missing so the reconstruction still renders.
+    try:
+	    variables.plotly_3d_reconstruction = go.FigureWidget(fig)
+    except ImportError:
+	    print("anywidget not installed; falling back to go.Figure "
+	          "(install it with `pip install anywidget` for the interactive widget).")
+	    variables.plotly_3d_reconstruction = fig
 
     if not colab:
         pio.renderers.default = 'browser'

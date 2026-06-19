@@ -150,7 +150,19 @@ def load_and_copy_chunks_to_hdf(path, hdf5_file_path, chunk_id):
                     chunk_data = np.load(chunk_file)
                     total_size += chunk_data.shape[0]
             if total_size > 0:
-                hdf_file.create_dataset(f'{group_name}/{dataset_name}', (total_size,), dtype=dtype)
+	            # lzf: fast, low-CPU compression applied once here at the
+	            # chunk->HDF5 merge (never in the live acquisition loop), so it
+	            # shrinks the permanent file with negligible overhead. chunks=True
+	            # is required for compression; transparent to all readers
+	            # (h5py/pandas decompress on read). 1-D data -> let h5py auto-size
+	            # the chunk shape.
+	            hdf_file.create_dataset(
+		            f'{group_name}/{dataset_name}',
+		            (total_size,),
+		            dtype=dtype,
+		            chunks=True,
+		            compression='lzf',
+	            )
             print(f"Created empty dataset '{group_name}/{dataset_name}' with shape {total_size}.")
 
         create_empty_dataset('dld', 't', 't', np.float64)

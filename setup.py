@@ -64,6 +64,9 @@ control_deps = [
 
 calibration_deps = [
     "adjustText",
+    # anywidget backs Plotly's go.FigureWidget (required since Plotly 6); without
+    # it reconstruction_plot() raises ImportError when building the 3D widget.
+    "anywidget",
     "ase",
     "faker",
     "fast-histogram",

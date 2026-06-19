@@ -361,7 +361,7 @@ def call_ion_selection(variables, colab=False, show_gaussian_controls=False):
     def show_color_ions(b, variables, output3):
         with output3:
             clear_output(True)
-            display(variables.range_data.style.applymap(ion_selection.display_color, subset=['color']))
+            display(variables.range_data.style.map(ion_selection.display_color, subset=['color']))
 
     change_color.on_click(lambda b: change_color_m(b, variables, output3))
 
@@ -370,7 +370,7 @@ def call_ion_selection(variables, colab=False, show_gaussian_controls=False):
             selected_color = mcolors.to_hex(color_picker.value)
             variables.range_data.at[row_index.value, 'color'] = selected_color
             clear_output(True)
-            display(variables.range_data.style.applymap(ion_selection.display_color, subset=['color']))
+            display(variables.range_data.style.map(ion_selection.display_color, subset=['color']))
 
     # Create "Next" and "Previous" buttons
 

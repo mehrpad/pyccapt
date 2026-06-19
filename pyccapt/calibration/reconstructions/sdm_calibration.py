@@ -52,6 +52,8 @@ __all__ = [
     "find_sdm_peaks",
     "sdm_peakiness",
     "corrected_kf",
+	"observed_pole_angle",
+	"icf_from_pole_angles",
     "grid_sweep_kf_icf",
 ]
 
@@ -416,6 +418,64 @@ def corrected_kf(kf, d_theo, d_obs):
     if d_obs is None or d_obs <= 0 or d_theo is None or d_theo <= 0:
         return float("nan")
     return float(kf * np.sqrt(d_theo / d_obs))
+
+
+def observed_pole_angle(xy1, xy2, flight_path_length):
+	"""Observed angle (degrees) between two detector poles, seen from the tip.
+
+	Mirrors the Day & Breen spreadsheet: ``S = |p1 - p2|`` is the in-plane
+	detector separation and the angle is ``atan(S / flight_path_length)``.
+	``xy1``/``xy2`` and ``flight_path_length`` must share the same length unit
+	(the spreadsheet uses mm for both).
+	"""
+	(x1, y1), (x2, y2) = xy1, xy2
+	s = float(np.hypot(x1 - x2, y1 - y2))
+	return float(np.degrees(np.arctan2(s, float(flight_path_length))))
+
+
+def icf_from_pole_angles(poles, a, b, c, alpha, beta, gamma, flight_path_length):
+	"""Image-compression factor from inter-pole angles (spreadsheet ICF method).
+
+	For every pair of indexed poles the theoretical interplanar angle (from the
+	lattice + Miller indices) is divided by the angle the same two poles subtend
+	on the detector; ``icf`` is the mean of those per-pair ratios. This is the
+	angle-based ICF calibration of Gault et al. 2009 implemented in the Day &
+	Breen reconstruction-calibration spreadsheet.
+
+	``poles`` is a sequence of ``{'xy': (X, Y), 'hkl': (h, k, l)}`` mappings with
+	the detector position in the same length unit as ``flight_path_length``
+	(mm). Poles with a missing position, a missing index or an all-zero index
+	are ignored.
+
+	Returns ``dict(icf, pairs)`` where ``pairs`` is a list of
+	``(i, j, theo_deg, obs_deg, ratio)`` for each contributing pole pair.
+	"""
+	items = []
+	for p in poles:
+		xy = p.get('xy')
+		hkl = p.get('hkl')
+		if xy is None or hkl is None:
+			continue
+		hkl = tuple(int(round(v)) for v in hkl)
+		if all(v == 0 for v in hkl):
+			continue
+		items.append((tuple(float(v) for v in xy), hkl))
+
+	pairs = []
+	ratios = []
+	for i in range(len(items)):
+		for j in range(i + 1, len(items)):
+			(xy1, hkl1), (xy2, hkl2) = items[i], items[j]
+			theo = interplanar_angle(hkl1, hkl2, a, b, c, alpha, beta, gamma)
+			obs = observed_pole_angle(xy1, xy2, flight_path_length)
+			if not np.isfinite(theo) or obs <= 0:
+				continue
+			ratio = theo / obs
+			pairs.append((i, j, float(theo), float(obs), float(ratio)))
+			ratios.append(ratio)
+
+	icf = float(np.mean(ratios)) if ratios else float('nan')
+	return {'icf': icf, 'pairs': pairs}
 
 
 def grid_sweep_kf_icf(variables, roi_center, roi_radius, det_eff, field_evap,

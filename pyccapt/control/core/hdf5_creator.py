@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import shutil
 from pathlib import Path
 
 import h5py
@@ -451,3 +452,15 @@ def hdf_creator(variables, conf, time_counter, time_ex):
         except OSError:
             pass
         raise
+
+    # Only reached when the .h5 was written and atomically put in place above
+    # (the except branch re-raises on any failure). The chunk files under
+    # temp_data/chunks/ are now fully merged into the final file, so delete them
+    # to reclaim disk space. Best-effort and isolated from the save itself: the
+    # data is already safe on disk, so a cleanup failure must never propagate.
+    try:
+	    if chunk_dir.is_dir():
+		    shutil.rmtree(chunk_dir)
+		    logger.info("Removed merged chunk directory %s", chunk_dir)
+    except Exception as exc:
+	    logger.warning("Could not remove chunk directory %s: %s", chunk_dir, exc)

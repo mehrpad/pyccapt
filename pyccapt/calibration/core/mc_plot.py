@@ -23,6 +23,33 @@ import numpy as np
 from adjustText import adjust_text
 from matplotlib.ticker import FuncFormatter
 
+
+def _safe_tight_layout(fig=None):
+	"""``tight_layout`` that never crashes on a corrupted mathtext parser.
+
+	Computing the layout renders the tick labels, and log-scale labels are
+	mathtext (e.g. ``$\\mathdefault{10^{1}}$``). matplotlib's mathtext parser
+	only resets pyparsing's global packrat cache *after a successful* parse, so
+	a single earlier failed parse anywhere in the session can leave that cache
+	poisoned and make every later label raise ``ValueError`` ("Expected end of
+	text, found '$'"). Reset the cache and retry once; if it still fails, skip
+	the (purely cosmetic) layout rather than break the caller.
+	"""
+	target = fig if fig is not None else plt
+	try:
+		target.tight_layout()
+		return
+	except ValueError:
+		try:
+			from pyparsing import ParserElement
+			ParserElement.reset_cache()
+		except Exception:
+			pass
+		try:
+			target.tight_layout()
+		except Exception:
+			pass  # layout is cosmetic — never let it propagate
+
 from pyccapt.calibration.path_utils import save_figure
 from pyccapt.calibration.core.mc_plot_background_helpers import (
     calculate_noise as _calculate_noise,
@@ -241,7 +268,7 @@ class AptHistPlotter:
             plt.grid(True, which='both', axis='both', linestyle='--', linewidth=0.4, alpha=0.3)
         if self.original_x_limits is None:
             self.original_x_limits = self.ax.get_xlim()  # Store the original x-axis limits
-        plt.tight_layout()
+        _safe_tight_layout(self.fig)
         if plot_show:
             plt.show()
         else:

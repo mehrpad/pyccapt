@@ -15,9 +15,9 @@ from pyccapt.calibration.core.mc_plot_peak_helpers import (
     gaussian_mrp_report,
 )
 from pyccapt.calibration.data_tools import data_loadcrop
-from pyccapt.calibration.reconstructions import reconstruction, sdm, rdf, density_map
-from pyccapt.calibration.reconstructions import iso_surface, proxigram
-from pyccapt.calibration.tutorials.tutorials_helpers.helper_peak_spectral_analysis import build_peak_spectral_analysis_panel
+from pyccapt.calibration.reconstructions import reconstruction, sdm, rdf, density_map, iso_surface, proxigram
+from pyccapt.calibration.tutorials.tutorials_helpers.helper_peak_spectral_analysis import \
+    build_peak_spectral_analysis_panel
 
 # Define a layout for labels to make them a fixed width
 label_layout = widgets.Layout(width='200px')
@@ -1563,7 +1563,7 @@ def call_visualization(variables, colab=False):
     def show_color_ions(b, variables, output):
         with output:
             clear_output(True)
-            display(variables.range_data.style.applymap(ion_selection.display_color, subset=['color']))
+            display(variables.range_data.style.map(ion_selection.display_color, subset=['color']))
 
     #############
     def change_color_m(b, variables, output):
@@ -1571,7 +1571,7 @@ def call_visualization(variables, colab=False):
             selected_color = mcolors.to_hex(color_picker.value)
             variables.range_data.at[row_index.value, 'color'] = selected_color
             clear_output(True)
-            display(variables.range_data.style.applymap(ion_selection.display_color, subset=['color']))
+            display(variables.range_data.style.map(ion_selection.display_color, subset=['color']))
 
     clear_button.on_click(lambda b: clear(b, out))
 

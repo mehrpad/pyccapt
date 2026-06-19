@@ -608,7 +608,7 @@ class Ui_Pumps_Vacuum(object):
         self.set_temperature_ll.setText(_translate("Pumps_Vacuum", "Set T LL (°C)"))
         self.label_218.setText(_translate("Pumps_Vacuum", f"Temp. {_s1} (K)"))
         self.label_221.setText(_translate("Pumps_Vacuum", f"Temp. {_s2} (K)"))
-        self.label_220.setText(_translate("Pumps_Vacuum", "LL Baking Time (min)"))
+        self.label_220.setText(_translate("Pumps_Vacuum", "LL Baking Duration (min.)"))
         self.ll_baking_time.setText(_translate("Pumps_Vacuum", "60"))
         self.Error.setText(_translate("Pumps_Vacuum", "<html><head/><body><p><br/></p></body></html>"))
 

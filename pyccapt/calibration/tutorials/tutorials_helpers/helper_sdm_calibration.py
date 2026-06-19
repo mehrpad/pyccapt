@@ -1,4 +1,4 @@
-""Interactive notebook GUI for SDM-based ICF/kf reconstruction calibration.
+"""Interactive notebook GUI for SDM-based ICF/kf reconstruction calibration.
 
 Public entry point: :func:`call_sdm_icf_kf_calibration`. Builds a two-tab
 ipywidgets panel on top of the widget-free algorithms in
@@ -22,16 +22,7 @@ For the z-SDM to show clean peaks the structure is first rotated so the chosen
 pole faces +z (planes become perpendicular to z).
 """
 
-from __future__ import annotations
-
-import numpy as np
-import ipywidgets as widgets
-from IPython.display import display
-from ipywidgets import Output
-
-from pyccapt.calibration.reconstructions import reconstruction
-from pyccapt.calibration.reconstructions import sdm_calibration as sc
-from __future__ import annotations
+from __future__ import annotations, annotations
 
 import ipywidgets as widgets
 import numpy as np

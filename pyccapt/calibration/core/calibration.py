@@ -259,8 +259,13 @@ def voltage_correction(
             return None
         if sample_range_max == 'histogram':
             try:
-                bins, _ = _build_histogram_bins(t_selected, bin_size)
-                y, x = np.histogram(t_selected, bins=bins)
+                x, n_bins = _build_histogram_bins(t_selected, bin_size)
+                # fast_histogram.histogram1d is ~10x faster than np.histogram
+                # for uniform bins and matches the rest of this module
+                # (_resolve_peak_location, _cell_peak_value). ``x`` are the edges.
+                y = fast_histogram.histogram1d(
+                    t_selected, bins=n_bins, range=(float(x[0]), float(x[-1]))
+                )
                 peaks, properties = find_peaks(y, height=0)
                 # find_peaks returns an empty array when no local maxima
                 # exist; np.argmax on the empty 'peak_heights' raises
@@ -500,9 +505,7 @@ def voltage_corr_main(
                 f"Nelder-Mead voltage refine requested but model='{model}' has no polynomial coefficients; skipping."
             )
 
-    mask_fv = np.ones_like(dld_highVoltage, dtype=bool)
-
-    f_v = _predict_voltage_model(model, fitresult, np.asarray(dld_highVoltage)[mask_fv])
+    f_v = _predict_voltage_model(model, fitresult, np.asarray(dld_highVoltage))
     # Guard against a poor/extrapolated quadratic predicting f_v <= 0, which
     # would make np.sqrt(f_v) NaN (tof) and poison the calibrated array on
     # division. Matches the np.clip(..., eps, None) in multi_peak_voltage_corr_main.
@@ -514,7 +517,9 @@ def voltage_corr_main(
         correction_factor = f_v
     print("Maximum value of correction factor:", np.max(correction_factor))
     print("Minimum value of correction factor:", np.min(correction_factor))
-    calibration_mc_tof[mask_fv] = calibration_mc_tof[mask_fv] / correction_factor
+    # In-place divide over the full array: the previous all-True boolean-mask
+    # gather/scatter copied the whole calibrated vector twice for no selectivity.
+    calibration_mc_tof /= correction_factor
 
     if plot or save:
         # Plot how correction factor for selected peak_x

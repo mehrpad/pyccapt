@@ -99,3 +99,44 @@ def test_plot_peaks_range_handles_top_edge_selection():
     ]
     # Must not raise.
     plotter.plot_peaks(range_data=None, mode="range")
+
+
+# ---------------------------------------------------------------------------
+# Reconstruction kernels must tolerate partial-recovered rows (NaN detector
+# x/y): det_area used np.max so one NaN row poisoned det_area -> dz -> every
+# event (Geiser assert crash / Bas all-NaN). nanmax fixes it; valid rows
+# reconstruct, partials keep NaN x/y/z.
+# ---------------------------------------------------------------------------
+def test_reconstruction_kernels_tolerate_partial_nan_rows():
+    from pyccapt.calibration.reconstructions import reconstruction as recon
+
+    rng = np.random.default_rng(0)
+    n = 200
+    detx = rng.uniform(-1.5, 1.5, n)
+    dety = rng.uniform(-1.5, 1.5, n)
+    hv = rng.uniform(4000.0, 6000.0, n)
+    partial = np.zeros(n, dtype=bool)
+    partial[::20] = True
+    detx_p = detx.copy()
+    dety_p = dety.copy()
+    detx_p[partial] = np.nan
+    dety_p[partial] = np.nan
+
+    kwargs = dict(flight_path_length=110.0, kf=3.3, det_eff=0.5, icf=1.4, field_evap=30.0, avg_dens=60.0)
+    for fn in (recon.atom_probe_recons_Bas_et_al, recon.atom_probe_recons_from_detector_Geiser_et_al):
+        x, y, z = fn(detx_p, dety_p, hv, **kwargs)
+        x, y, z = np.asarray(x), np.asarray(y), np.asarray(z)
+        # Partial rows -> NaN positions; valid rows -> finite (no poisoning).
+        assert np.isnan(x[partial]).all()
+        assert np.isnan(y[partial]).all()
+        assert np.isnan(z[partial]).all()
+        assert np.isfinite(x[~partial]).all()
+        assert np.isfinite(y[~partial]).all()
+        assert np.isfinite(z[~partial]).all()
+
+    # Valid-row lateral positions are independent of det_area, so they match a
+    # NaN-free baseline exactly (nanmax ignores the partials).
+    xb, yb, _ = recon.atom_probe_recons_Bas_et_al(detx[~partial], dety[~partial], hv[~partial], **kwargs)
+    xp, yp, _ = recon.atom_probe_recons_Bas_et_al(detx_p, dety_p, hv, **kwargs)
+    np.testing.assert_allclose(np.asarray(xp)[~partial], xb, rtol=0, atol=1e-9)
+    np.testing.assert_allclose(np.asarray(yp)[~partial], yb, rtol=0, atol=1e-9)

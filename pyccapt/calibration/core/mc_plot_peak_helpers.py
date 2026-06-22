@@ -1092,12 +1092,18 @@ def _fast_mrp_core(data, x1, x2, bin_size):
 
     n_bins = max(2, int((x2 - x1) / bin_size))
     data_arr = np.asarray(data, dtype=float)
-    data_lo = float(data_arr.min()) if data_arr.size else float(x1)
-    data_hi = float(data_arr.max()) if data_arr.size else float(x2)
-    if data_hi <= data_lo:
-        data_hi = data_lo + max(bin_size, 1e-9)
-    y = _fast_uniform_histogram(data_arr, n_bins, data_lo, data_hi)
-    edges = np.linspace(data_lo, data_hi, n_bins + 1)
+    # Bin over the REQUESTED window [x1, x2] (not the in-window data
+    # extent). n_bins is sized from (x2-x1)/bin_size, so spanning the edges
+    # over [data.min, data.max] made the realized bin width
+    # (data_max-data_min)/n_bins instead of the requested bin_size, biasing
+    # the reported MRP for non-dominant peaks. This matches
+    # _gaussian_mrp_report_core, which bins over the requested window.
+    lo = float(x1)
+    hi = float(x2)
+    if hi <= lo:
+        hi = lo + max(bin_size, 1e-9)
+    y = _fast_uniform_histogram(data_arr, n_bins, lo, hi)
+    edges = np.linspace(lo, hi, n_bins + 1)
     x = (edges[:-1] + edges[1:]) * 0.5
 
     try:

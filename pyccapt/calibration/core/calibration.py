@@ -177,7 +177,6 @@ def voltage_correction(
     - mode (string): Mode ('ion_seq'/'voltage').
     - calibration_mode (string): Type of calibration mode (tof/mc).
     - sample_range_max (string): Type of peak_x mode (histogram/mean/median).
-    - outlier_remove (bool): Indicates whether to remove outliers. Default is True.
     - plot (bool): Indicates whether to plot the graph. Default is True.
     - save (bool): Indicates whether to save the plot. Default is False.
     - fig_size (tuple): Figure size in inches. Default is (7, 5).
@@ -185,7 +184,9 @@ def voltage_correction(
     - bin_size (float): Size of the bin.
 
     Returns:
-    - fitresult (array): Corrected voltage array.
+    - fitresult: Fit result -- the polynomial coefficient array for
+      ``model='curve_fit'`` or the fitted sklearn pipeline for
+      ``model='robust_fit'`` (NOT a corrected-value array).
 
     """
     model = normalize_voltage_model(model)
@@ -235,7 +236,14 @@ def voltage_correction(
         def _segment_by_voltage(i: int):
             lo = v_min + i * sample_size
             hi = v_min + (i + 1) * sample_size
-            mask = np.logical_and(dld_highVoltage_peak >= lo, dld_highVoltage_peak < hi)
+            if i == num_segments - 1:
+                # The final segment must be right-inclusive: a strict ``< hi``
+                # drops every ion sitting exactly at v_max when the voltage
+                # range divides evenly into sample_size, biasing the fit away
+                # from the high-V end (where the correction matters most).
+                mask = dld_highVoltage_peak >= lo
+            else:
+                mask = np.logical_and(dld_highVoltage_peak >= lo, dld_highVoltage_peak < hi)
             return dld_highVoltage_peak[mask], dld_t_peak[mask]
 
         segments = [_segment_by_voltage(i) for i in range(num_segments)]
@@ -297,6 +305,17 @@ def voltage_correction(
     pairs = parallel_map(_evaluate_segment, segments, gil_releasing=True)
     dld_t_peak_list = [pair[0] for pair in pairs if pair is not None]
     high_voltage_mean_list = [pair[1] for pair in pairs if pair is not None]
+
+    # The quadratic voltage model has 3 parameters; curve_fit raises a cryptic
+    # "number of func parameters=3 must not exceed the number of data points"
+    # when too few segments survive (tiny peak / oversized sample_size). Fail
+    # with an actionable message instead, mirroring the multi-peak variants.
+    if len(high_voltage_mean_list) < 3:
+        raise CalibrationInputError(
+            "Not enough valid (V, t) segments for the voltage fit "
+            f"({len(high_voltage_mean_list)} found, need >= 3); "
+            "reduce sample_size or widen the calibration peak window."
+        )
 
     if model == 'curve_fit':
         fitresult, _ = curve_fit(voltage_corr, np.array(high_voltage_mean_list), np.array(dld_t_peak_list))
@@ -484,6 +503,10 @@ def voltage_corr_main(
     mask_fv = np.ones_like(dld_highVoltage, dtype=bool)
 
     f_v = _predict_voltage_model(model, fitresult, np.asarray(dld_highVoltage)[mask_fv])
+    # Guard against a poor/extrapolated quadratic predicting f_v <= 0, which
+    # would make np.sqrt(f_v) NaN (tof) and poison the calibrated array on
+    # division. Matches the np.clip(..., eps, None) in multi_peak_voltage_corr_main.
+    f_v = np.clip(f_v, np.finfo(float).eps, None)
 
     if calibration_mode == 'tof':
         correction_factor = np.sqrt(f_v)
@@ -496,10 +519,14 @@ def voltage_corr_main(
     if plot or save:
         # Plot how correction factor for selected peak_x
         fig1, ax1 = plt.subplots(figsize=fig_size, constrained_layout=True)
-        if len(dld_highVoltage_peak_v) > 1000:
-            mask = np.random.randint(0, len(dld_highVoltage_peak_v), 1000)
+        # Seeded, without-replacement subsample so saved diagnostic figures
+        # are reproducible run-to-run (the module docstring calls this out)
+        # and don't show duplicate points from sampling with replacement.
+        _n_pts = len(dld_highVoltage_peak_v)
+        if _n_pts > 1000:
+            mask = np.random.default_rng(0).choice(_n_pts, size=1000, replace=False)
         else:
-            mask = np.arange(len(dld_highVoltage_peak_v))
+            mask = np.arange(_n_pts)
         x = plt.scatter(dld_highVoltage_peak_v[mask] / 1000, dld_peak_b[mask], color="blue", label=r"$t$", s=1)
 
         if calibration_mode == 'tof':
@@ -763,7 +790,7 @@ def bowl_correction(
         sample_range_max (str, optional): Sample range maximum ('mean' or 'histogram').
         sample_size (int): Size of each rectangle in mm.
         calibration_mode (str): Calibration mode ('tof' or 'mc').
-        fit_mode (str): Fit mode ('curve_fit' or 'hemisphere_fit').
+        fit_mode (str): Fit mode ('curve_fit', 'ml_fit', or 'robust_fit').
         index_fig (int): Index for figure naming.
         plot (bool): Flag indicating whether to plot the surface.
         save (bool): Flag indicating whether to save the plot.
@@ -957,7 +984,8 @@ def bowl_correction_main(
         bin_size (float, optional): Size of the bin.
 
     Returns:
-        None
+        numpy.ndarray: ``f_bowl``, the per-event bowl correction factor that
+        was applied (the calibrated array is divided by it).
 
     """
     ensure_choice(calibration_mode, field_name="calibration_mode", allowed=["tof", "mc"])
@@ -1081,7 +1109,8 @@ def bowl_correction_main(
     if plot or save:
         # Plot how bowl correct tof/mc vs high voltage
         fig1, ax1 = plt.subplots(figsize=fig_size, constrained_layout=True)
-        mask = np.random.randint(0, len(dld_highVoltage_peak), 10000)
+        _n_pts = len(dld_highVoltage_peak)
+        mask = np.random.default_rng(0).choice(_n_pts, size=min(10000, _n_pts), replace=False)
 
         x = plt.scatter(dld_highVoltage_peak[mask] / 1000, dld_peak[mask], color="blue", label=r"$t$", s=1)
 
@@ -1172,7 +1201,8 @@ def bowl_correction_main(
         # Adjust the subplot parameters to make the plot smaller
         box = ax.get_position()
         ax.set_position([box.x0 + 0.1, box.y0 + 0.1, box.width * 0.75, box.height * 0.75])
-        mask = np.random.randint(0, len(dld_highVoltage_peak), 500)
+        _n_pts = len(dld_highVoltage_peak)
+        mask = np.random.default_rng(0).choice(_n_pts, size=min(500, _n_pts), replace=False)
         f_bowl_plot = _predict_bowl_model(fit_mode, parameters, dld_x_peak[mask], dld_y_peak[mask])
         dld_t_plot = dld_peak[mask] / f_bowl_plot
 

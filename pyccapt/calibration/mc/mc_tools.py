@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import numpy as np
 
 
@@ -10,8 +12,8 @@ def tof2mcSimple(t: int, t0: int, V: float, xDet: int, yDet: int, flightPathLeng
         t: Time (unit: ns)
         t0: Initial time (unit: ns)
         V: Voltage (unit: volts)
-        xDet: Distance along the x-axis (unit: mm)
-        yDet: Distance along the y-axis (unit: mm)
+        xDet: Distance along the x-axis (unit: cm)
+        yDet: Distance along the y-axis (unit: cm)
         flightPathLength: Length of the flight path (unit: mm)
 
     Returns:
@@ -41,7 +43,7 @@ def tof2mcSimple(t: int, t0: int, V: float, xDet: int, yDet: int, flightPathLeng
 
 def tof2mc(
     t: int, t0: int, V: float, xDet: int, yDet: int, flightPathLength: int, V_pulse: float, mode: str = 'voltage'
-) -> None:
+) -> np.ndarray | None:
     """
     Calculate m/c based on idealized geometry and electrostatics using the formula:
     m/c = 2eα(V + βV_pulse)(t/L)^2
@@ -51,13 +53,15 @@ def tof2mc(
         t0: Initial time (unit: ns)
         V: Voltage (unit: volts)
         V_pulse: Voltage pulse (unit: volts)
-        xDet: Distance along the x-axis (unit: mm)
-        yDet: Distance along the y-axis (unit: mm)
+        xDet: Distance along the x-axis (unit: cm)
+        yDet: Distance along the y-axis (unit: cm)
         flightPathLength: Length of the flight path (unit: mm)
-        mode: Type of mode ('voltage' or 'laser').
+        mode: Type of mode ('voltage' or 'laser'). NOTE: the 'laser' branch
+            drops the alpha/beta pulse-voltage terms used by 'voltage'.
 
     Returns:
-        mc: Mass-to-charge ratio (unit: Dalton)
+        mc: Mass-to-charge ratio (unit: Dalton), or None on a TypeError /
+            unknown ``mode`` (the latter leaves mc unbound and is caught).
     """
     # check to see that the input are arrays
     assert isinstance(t, np.ndarray), "t must be a NumPy array"

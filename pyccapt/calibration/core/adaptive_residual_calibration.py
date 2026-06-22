@@ -771,9 +771,13 @@ def adaptive_residual_calibration(
             if verbose:
                 print(f"[Adaptive residual] round {round_index + 1}: accepted {best_temporal['label']}")
         elif verbose:
+            # Use temporal_specs (always defined) not temporal_candidates,
+            # which is only bound in the non-coarse-to-fine else branch above
+            # -- referencing it here raised UnboundLocalError on the
+            # recommended coarse_to_fine_top_k path when no candidate improved.
             print(
                 f"[Adaptive residual] round {round_index + 1}: no temporal candidate improved over baseline "
-                f"({len(temporal_candidates)} evaluated)"
+                f"({len(temporal_specs)} evaluated)"
             )
 
         spatial_quality = None
@@ -860,9 +864,11 @@ def adaptive_residual_calibration(
                 if verbose:
                     print(f"[Adaptive residual] round {round_index + 1}: accepted {best_spatial['label']}")
             elif verbose:
+                # spatial_specs is always defined; spatial_candidates is only
+                # bound in the non-coarse-to-fine else branch above.
                 print(
                     f"[Adaptive residual] round {round_index + 1}: no spatial candidate improved over baseline "
-                    f"({len(spatial_candidates)} evaluated)"
+                    f"({len(spatial_specs)} evaluated)"
                 )
 
         iteration_history.append(

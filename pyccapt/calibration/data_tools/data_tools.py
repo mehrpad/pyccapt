@@ -205,10 +205,20 @@ def read_mat_files(filename: str | Path):
 
 
 def convert_mat_to_df(hdf5_file_response: dict) -> pd.DataFrame:
-    """Convert loaded `.mat` content to a dataframe and persist it as HDF5."""
-    if hdf5_file_response is None or "None" not in hdf5_file_response:
-        raise ValueError("Expected key 'None' in .mat content")
-    pd_dataframe = pd.DataFrame(hdf5_file_response["None"])
+    """Convert loaded `.mat` content to a dataframe and persist it as HDF5.
+
+    ``scipy.io.loadmat`` returns the stored MATLAB variables keyed by their
+    names, alongside the ``__header__`` / ``__version__`` / ``__globals__``
+    metadata entries. The first non-dunder key is the table to convert. The
+    previous implementation required a key literally named ``"None"``, which a
+    real ``.mat`` file never contains, so it raised on every valid input.
+    """
+    if hdf5_file_response is None:
+        raise ValueError("No .mat content to convert")
+    data_keys = [key for key in hdf5_file_response if not key.startswith("__")]
+    if not data_keys:
+        raise ValueError("No MATLAB variable found in .mat content")
+    pd_dataframe = pd.DataFrame(hdf5_file_response[data_keys[0]])
     store_df_to_hdf(pd_dataframe, "dataframe/isotope", "isotopeTable.h5")
     return pd_dataframe
 

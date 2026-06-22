@@ -310,6 +310,11 @@ def ml_calibration(
     holdout_peaks = peaks[-1:] if len(peaks) > 2 else []
 
     baseline_score = _evaluate_peaks(cal_array, peaks)
+    # Score the held-out peak separately so overfitting (the GBR sharpening
+    # the train peaks while degrading the holdout) is detectable. Previously
+    # holdout_peaks was computed but never scored, so the accept gate ran
+    # purely on the train-contaminated full-set score.
+    holdout_baseline = _evaluate_peaks(cal_array, holdout_peaks) if len(holdout_peaks) else float("nan")
     if verbose:
         print(f"[ML-GBCS] Baseline MRP score: {baseline_score:.2f}")
         print(f"[ML-GBCS] Using {len(train_peaks)} training peaks, {len(holdout_peaks)} holdout peaks")
@@ -358,11 +363,16 @@ def ml_calibration(
 
     # 6. Evaluate improvement
     final_score = _evaluate_peaks(calibrated, peaks)
+    holdout_final = _evaluate_peaks(calibrated, holdout_peaks) if len(holdout_peaks) else float("nan")
 
     if verbose:
         print(f"[ML-GBCS] Final MRP score:    {final_score:.2f}")
         improvement = final_score - baseline_score
         print(f"[ML-GBCS] Improvement:        {improvement:+.2f}")
+        if len(holdout_peaks):
+            print(
+                f"[ML-GBCS] Holdout MRP:        {holdout_baseline:.2f} -> {holdout_final:.2f}"
+            )
 
         # Feature importances
         _, feature_names = _build_feature_matrix(
@@ -378,18 +388,32 @@ def ml_calibration(
             print(f"  {name:>10s}: {imp:.4f}")
 
     # 7. Accept or reject
-    if np.isfinite(final_score) and np.isfinite(baseline_score) and final_score > baseline_score:
+    overall_improved = (
+        np.isfinite(final_score) and np.isfinite(baseline_score) and final_score > baseline_score
+    )
+    # When a holdout peak exists, require it not to regress (1% tolerance for
+    # histogram noise). This is the actual overfitting guard: a model that
+    # only sharpens the training peaks will fail it. With <=2 peaks there is
+    # no holdout, so fall back to the overall-improvement gate alone.
+    if len(holdout_peaks) and np.isfinite(holdout_baseline) and np.isfinite(holdout_final):
+        holdout_ok = holdout_final >= holdout_baseline * 0.99
+    else:
+        holdout_ok = True
+    if overall_improved and holdout_ok:
         if calibration_key == "tof":
             variables.dld_t_calib = calibrated
         else:
             variables.mc_calib = calibrated
         accepted = True
         if verbose:
-            print("[ML-GBCS] Correction accepted (MRP improved).")
+            print("[ML-GBCS] Correction accepted (MRP improved, holdout not regressed).")
     else:
         accepted = False
         if verbose:
-            print("[ML-GBCS] Correction rejected (no MRP improvement). Keeping previous calibration.")
+            if overall_improved and not holdout_ok:
+                print("[ML-GBCS] Correction rejected (holdout peak regressed -- likely overfit).")
+            else:
+                print("[ML-GBCS] Correction rejected (no MRP improvement). Keeping previous calibration.")
 
     _, feature_names = _build_feature_matrix(
         np.zeros(1),
@@ -401,6 +425,8 @@ def ml_calibration(
     return {
         "baseline_score": baseline_score,
         "final_score": final_score,
+        "holdout_baseline_score": holdout_baseline,
+        "holdout_final_score": holdout_final,
         "accepted": accepted,
         "feature_importances": dict(zip(feature_names, model.feature_importances_.tolist())),
         "diagnostics": diagnostics,

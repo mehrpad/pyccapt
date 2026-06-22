@@ -81,6 +81,45 @@ def test_global_install_styles_show_and_savefig(tmp_path):
         assert Figure.savefig is orig_savefig
 
 
+def test_finalize_hugs_data_when_view_is_wider_than_data():
+    # Reproduces the bad-shape case: data ends at 1500 but the view was set to
+    # 2000 (a fixed max_tof / forced round number), leaving a large empty band.
+    # finalize must snap the round last tick down to hug the data (1500), not
+    # leave the axis floating out at 2000.
+    fig, ax = plt.subplots()
+    ax.plot(np.linspace(0.0, 1500.0, 200), np.ones(200))
+    ax.set_xlim(0.0, 2000.0)
+    plot_style.finalize_axes(ax)
+    x0, x1 = ax.get_xlim()
+    assert x0 == pytest.approx(0.0)
+    assert x1 == pytest.approx(1500.0)            # hugged to data, not stuck at 2000
+    assert ax.get_xticks()[-1] == pytest.approx(x1)  # still a round number at the end
+    plt.close(fig)
+
+
+def test_finalize_respects_zoom_tighter_than_data():
+    # When the caller has zoomed IN (view tighter than the data), the snap must
+    # respect the zoom window rather than expanding back out to the full data.
+    fig, ax = plt.subplots()
+    ax.plot(np.linspace(0.0, 1000.0, 200), np.ones(200))
+    ax.set_xlim(400.0, 600.0)
+    plot_style.finalize_axes(ax)
+    x0, x1 = ax.get_xlim()
+    assert x0 <= 400.0 and x1 >= 600.0
+    assert (x1 - x0) < 1000.0                     # did not snap back to the full range
+    plt.close(fig)
+
+
+def test_finalize_preserves_inverted_axis():
+    fig, ax = plt.subplots()
+    ax.plot(np.arange(1, 10), np.arange(1, 10))
+    ax.set_ylim(9, 1)  # inverted
+    plot_style.finalize_axes(ax)
+    y0, y1 = ax.get_ylim()
+    assert y0 > y1  # still inverted after snapping
+    plt.close(fig)
+
+
 def test_finalize_does_not_change_data():
     fig, ax = plt.subplots()
     counts, edges, _ = ax.hist(np.arange(1, 10), bins=9)

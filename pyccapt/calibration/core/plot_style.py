@@ -72,10 +72,69 @@ def _axis_is_map_like(ax):
     return False
 
 
+def _data_interval(ax, which):
+    """(min, max) of the actually-plotted data along ``which`` axis, or None.
+
+    Uses ``ax.dataLim`` (the bounding box matplotlib maintains over every
+    artist added to the axes), so it reflects where the real data is -- not the
+    view limits, which the caller may have set wider (a fixed max_tof, autoscale
+    padding, ...). Returns ``None`` when there is no finite data extent.
+    """
+    try:
+        iv = ax.dataLim.intervalx if which == 'x' else ax.dataLim.intervaly
+        lo, hi = float(iv[0]), float(iv[1])
+    except Exception:
+        return None
+    if not (np.isfinite(lo) and np.isfinite(hi)) or hi <= lo:
+        return None
+    return lo, hi
+
+
+def _effective_interval(view, data):
+    """Tighter of the view and data intervals.
+
+    When the view is WIDER than the data (the "round number sitting in empty
+    space" case), hug the data; when the caller has zoomed in TIGHTER than the
+    data, respect the zoom. Falls back to the view when there is no data extent
+    or the two do not overlap.
+    """
+    v_lo, v_hi = (view[0], view[1]) if view[0] <= view[1] else (view[1], view[0])
+    if data is None:
+        return v_lo, v_hi
+    d_lo, d_hi = data
+    lo = max(v_lo, d_lo)
+    hi = min(v_hi, d_hi)
+    if hi <= lo:
+        return v_lo, v_hi
+    return lo, hi
+
+
+def _snap_axis(ax, which, max_ticks):
+    """Snap one linear axis to round bounds that hug the data, preserving any
+    inverted orientation."""
+    view = ax.get_xlim() if which == 'x' else ax.get_ylim()
+    inverted = view[0] > view[1]
+    lo0, hi0 = _effective_interval(view, _data_interval(ax, which))
+    bounds = nice_bounds(lo0, hi0, max_ticks=max_ticks)
+    if bounds is None:
+        return
+    lo, hi, ticks = bounds
+    limits = (hi, lo) if inverted else (lo, hi)
+    if which == 'x':
+        ax.set_xlim(*limits)
+        ax.set_xticks(ticks)
+    else:
+        ax.set_ylim(*limits)
+        ax.set_yticks(ticks)
+
+
 def finalize_axes(ax=None, x=True, y=True, max_ticks=6):
     """Snap an axes' linear x/y limits to round numbers with end ticks.
 
-    No-op for map-like axes; per-axis no-op for log scales. Returns ``ax``.
+    The round bounds hug the actual data extent (``ax.dataLim``), so a forced
+    round last tick never floats in a large empty region when the view is wider
+    than the data. No-op for map-like axes; per-axis no-op for log scales.
+    Returns ``ax``.
     """
     import matplotlib.pyplot as plt
 
@@ -84,17 +143,9 @@ def finalize_axes(ax=None, x=True, y=True, max_ticks=6):
     if _axis_is_map_like(ax):
         return ax
     if x and ax.get_xscale() == 'linear':
-        bounds = nice_bounds(*ax.get_xlim(), max_ticks=max_ticks)
-        if bounds is not None:
-            lo, hi, ticks = bounds
-            ax.set_xlim(lo, hi)
-            ax.set_xticks(ticks)
+        _snap_axis(ax, 'x', max_ticks)
     if y and ax.get_yscale() == 'linear':
-        bounds = nice_bounds(*ax.get_ylim(), max_ticks=max_ticks)
-        if bounds is not None:
-            lo, hi, ticks = bounds
-            ax.set_ylim(lo, hi)
-            ax.set_yticks(ticks)
+        _snap_axis(ax, 'y', max_ticks)
     return ax
 
 

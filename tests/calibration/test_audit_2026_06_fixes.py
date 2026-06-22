@@ -177,3 +177,63 @@ def test_sdm_kdtree_matches_bruteforce():
         assert all(_same(a, b) for a, b in zip(bf, disp)), (
             f"SDM dispatcher != brute force for axes={axes} rot=({th},{ph}) z_cut={zc}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Output-changing recon fixes (commit 5da9796), validated against ground truth.
+# ---------------------------------------------------------------------------
+def test_bas_reconstruction_recovers_input_density():
+    """Bas cm->m must be 1e-2 (matching lateral x/y) so the reconstruction
+    recovers the input atomic density. The old 1e-3 made z ~100x too deep and
+    the density ~100x too low."""
+    from pyccapt.calibration.reconstructions import reconstruction as recon
+
+    rng = np.random.default_rng(0)
+    n = 120_000
+    det_eff, avg_dens = 0.5, 60.0
+    kf, icf, field_evap, fp = 3.3, 1.4, 30.0, 110.0
+    r = 4.0 * np.sqrt(rng.random(n))
+    a = rng.random(n) * 2 * np.pi
+    detx, dety = r * np.cos(a), r * np.sin(a)
+    hv = np.full(n, 5000.0)
+
+    x, y, z = recon.atom_probe_recons_Bas_et_al(detx, dety, hv, fp, kf, det_eff, icf, field_evap, avg_dens)
+    x, y, z = np.asarray(x), np.asarray(y), np.asarray(z)
+    # Central column: the spherical cap is locally flat there, so the z-span is
+    # the volume-conserving cumulative depth.
+    col = (x * x + y * y) < 9.0  # radius 3 nm
+    span = z[col].max() - z[col].min()
+    density = col.sum() / (np.pi * 9.0 * span)
+    target = avg_dens * det_eff
+    assert abs(density - target) / target < 0.05, (
+        f"Bas reconstruction density {density:.2f} != expected {target:.1f} (avg_dens*det_eff)"
+    )
+
+
+def test_wt_to_atomic_fractions_ni_balance_matches_textbook():
+    from pyccapt.calibration.reconstructions import tapsim_builder as tb
+
+    out = tb.wt_to_atomic_fractions({"Cr": 20.0, "Ni": 80.0})
+    # Textbook Ni-20wt%Cr -> at%: Cr 0.2201, Ni 0.7799.
+    assert abs(out["Cr"] - 0.2201) < 1e-3
+    assert abs(out["Ni"] - 0.7799) < 1e-3
+    # Ni as balance gives the same (Ni value in input is replaced by the balance).
+    out2 = tb.wt_to_atomic_fractions({"Cr": 20.0})
+    assert abs(out2["Ni"] - out["Ni"]) < 1e-9
+
+
+def test_isosurface_uses_fortran_point_order():
+    pv = pytest.importorskip("pyvista")
+    from pyccapt.calibration.clustering import isosurface as iso  # noqa: F401
+
+    gv = [np.arange(0.5, 0.5 + 5), np.arange(0.5, 0.5 + 7), np.arange(0.5, 0.5 + 9)]
+    nx, ny, nz = len(gv[0]), len(gv[1]), len(gv[2])
+    data = np.fromfunction(lambda i, j, k: i * 100 + j * 10 + k, (nx, ny, nz), dtype=float)
+    X, Y, Z = np.meshgrid(gv[0], gv[1], gv[2], indexing="ij")
+    grid = pv.StructuredGrid(X, Y, Z)
+    grid.point_data["values"] = data.flatten(order="F")
+    pts = grid.points
+    # Every grid point's scalar must equal its (i,j,k)-encoded value.
+    idx = np.rint(pts - 0.5).astype(int)
+    expected = idx[:, 0] * 100 + idx[:, 1] * 10 + idx[:, 2]
+    assert np.array_equal(grid.point_data["values"], expected)

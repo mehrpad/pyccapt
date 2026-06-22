@@ -104,18 +104,21 @@ def pos_to_voxel(data, grid_vec, species=None):
         element_col = data.columns.get_loc("element") if "element" in data.columns else None
     else:
         pos_array = np.array(data)
+        element_col = None
 
     # Check for species filtering
     if species is not None:
-        if isinstance(species, list) and (element_col):
-            if element_col:
-                species_mask = data['element'].isin(species)
-            else:
-                raise ValueError("Invalid species filter or table format.")
+        # ``element_col`` is the integer column POSITION of 'element'; testing it
+        # truthily rejected a valid list filter when 'element' is the FIRST
+        # column (position 0 is falsy). Test against None instead.
+        if isinstance(species, list) and element_col is not None:
+            species_mask = data['element'].isin(species)
         elif isinstance(species, np.ndarray) and species.dtype == bool:
             species_mask = species
         else:
-            raise ValueError("Species must be a list, boolean array, or None.")
+            raise ValueError(
+                "Species must be a list (requires an 'element' column), a boolean array, or None."
+            )
 
         pos_array = pos_array[species_mask]
 
@@ -154,7 +157,12 @@ def isosurface(gridVec, data, isovalue):
     # Create a pyvista structured grid
     x, y, z = np.meshgrid(gridVec[0], gridVec[1], gridVec[2], indexing='ij')
     grid = pv.StructuredGrid(x, y, z)
-    grid.point_data["values"] = data.flatten()
+    # pyvista/VTK StructuredGrid orders points with the FIRST axis varying
+    # fastest (Fortran order). data has shape (nx, ny, nz), so it must be
+    # flattened with order='F' to line up with grid.points; the default C-order
+    # flatten misaligned the scalar field and produced a geometrically wrong
+    # isosurface. VALIDATE against a known field before relying on this.
+    grid.point_data["values"] = data.flatten(order='F')
 
     # Extract the isosurface
     isosurf = grid.contour([isovalue])  # Pass isovalue as a list for compatibility

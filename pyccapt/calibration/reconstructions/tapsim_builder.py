@@ -168,10 +168,16 @@ def choose_bulk_wt(spec: dict[str, list[object]], strategy: str = "mid", max_fra
 
 
 def wt_to_atomic_fractions(wt_dict: dict[str, float]) -> dict[str, float]:
-    """Convert a weight-percent composition to atomic fractions, using Ni as the balance."""
+    """Convert a weight-percent composition to atomic fractions, using Ni as the balance.
+
+    Ni is the balance to 100 wt%: ``Ni = 100 - sum(other elements)``. Any Ni
+    value supplied in ``wt_dict`` is therefore replaced by the balance.
+    Previously an input Ni value was summed AND then subtracted from itself,
+    double-counting Ni and driving its balance toward 0.
+    """
     symbols = set(wt_dict.keys()) | {"Ni"}
     atomic_weights = {symbol: float(PMGElement(symbol).atomic_mass) for symbol in symbols}
-    wt_full = {str(key): float(value) for key, value in wt_dict.items()}
+    wt_full = {str(key): float(value) for key, value in wt_dict.items() if str(key) != "Ni"}
     wt_full["Ni"] = max(0.0, 100.0 - sum(wt_full.values()))
     molar = {symbol: wt_full[symbol] / atomic_weights[symbol] for symbol in wt_full}
     total = float(sum(molar.values()))

@@ -389,9 +389,10 @@ def plot_crop_experiment_history(
     """
 
     if max_tof > 0:
-        mask_1 = data['t (ns)'].to_numpy() > max_tof
-        data.drop(np.where(mask_1)[0], inplace=True)
-        data.reset_index(inplace=True, drop=True)
+        # Filter into a NEW frame instead of dropping rows in place: this is a
+        # plotting/preview helper and must not permanently delete rows from the
+        # caller's loaded dataset just because a max_tof was supplied.
+        data = data[data['t (ns)'].to_numpy() <= max_tof].reset_index(drop=True)
     if frac < 1:
         # set axis limits based on fraction of data
         dldGroupStorage = data.sample(frac=frac, random_state=42)
@@ -403,7 +404,10 @@ def plot_crop_experiment_history(
 
     # extract tof and high voltage from the data frame
     tof = dldGroupStorage['t (ns)'].to_numpy()
-    high_voltage = data['high_voltage (V)'].to_numpy()
+    # Read HV from the SAME (possibly sub-sampled) frame as tof/pulse so the
+    # DC-voltage curve aligns with the hit-sequence x-axis; previously it came
+    # from the full frame and was stretched relative to the heatmap when frac<1.
+    high_voltage = dldGroupStorage['high_voltage (V)'].to_numpy()
     high_voltage = high_voltage / 1000  # change to kV
     if pulse_mode == 'laser':
         pulse = dldGroupStorage['pulse_l (pJ)'].to_numpy()
@@ -972,42 +976,41 @@ def calculate_ppi_and_ipp(data, max_start_counter):
     delta_p = np.zeros(len(counter))
     multi = np.zeros(len(counter))
 
-    multi_hit_count = 1
-
     total_iterations = len(counter)
     if total_iterations == 0:
         return delta_p, multi
     progress_step = max(1, total_iterations // 5)
 
+    previous_counter = counter[0]
+    run_start = 0
     for i, current_counter in enumerate(counter):
         if i == 0:
             delta_p[i] = 0
-            previous_counter = current_counter
         else:
             sc = current_counter - previous_counter
             if sc < 0:
-                sc_a = max_start_counter - previous_counter
-                sc_b = current_counter
-                sc = sc_a + sc_b
+                sc = (max_start_counter - previous_counter) + current_counter
 
             delta_p[i] = sc
 
-            if current_counter == previous_counter:
-                multi_hit_count += 1
-            else:
-                for j in range(multi_hit_count):
-                    if i + j <= len(counter):
-                        multi[i - j - 1] = multi_hit_count
-
-                multi_hit_count = 1
+            if current_counter != previous_counter:
+                # Close the just-finished run [run_start, i-1]: every member
+                # gets the run length as its multiplicity. The previous loop
+                # only set the LAST element of the final run (the rest stayed
+                # 0) and used an ``i + j <= len(counter)`` guard that did not
+                # protect the negative ``i - j - 1`` write index.
+                multi[run_start:i] = i - run_start
+                run_start = i
                 previous_counter = current_counter
-        # for the last event
-        if i == len(counter) - 1:
-            multi[i] = multi_hit_count
 
         # Print progress at each ~20% interval
         if i % progress_step == 0:
             progress_percent = int((i / total_iterations) * 100)
             print(f"Progress: {progress_percent}% complete")
+
+    # Close the trailing run [run_start, len(counter)-1] -- the loop only
+    # closes a run when the counter CHANGES, so the final run needs an
+    # explicit fill.
+    multi[run_start:] = len(counter) - run_start
 
     return delta_p, multi

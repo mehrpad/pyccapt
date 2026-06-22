@@ -134,13 +134,13 @@ def hist_plot(
         y, x = np.histogram(mc_tof, bins=bins)
         # y = np.log(y)
     elif mode == 'normalised':
-        # calculate as counts/(Da * totalCts) so that mass spectra with different
-        # count numbers are comparable
-        mc_tof = (mc_tof / bin) / len(mc_tof)
-        # y, x = np.histogram(mc_tof, bins=bins)
+        # counts/(Da * totalCts) so spectra with different total counts are
+        # comparable. Normalise the COUNTS (y), not the data (x). The previous
+        # code divided mc_tof itself by (bin*N) and then histogrammed it against
+        # the raw-data-scale ``bins``, collapsing every value below bins[0] and
+        # yielding an empty/meaningless spectrum.
         y, x = np.histogram(mc_tof, bins=bins)
-        # y = np.log(y)
-        # med = median(y);
+        y = y.astype(float) / (bin * len(mc_tof))
     else:
         raise CalibrationInputError("Unsupported histogram mode: %r" % mode)
 

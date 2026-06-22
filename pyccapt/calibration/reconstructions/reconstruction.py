@@ -92,8 +92,13 @@ def atom_probe_recons_from_detector_Geiser_et_al(detx, dety, hv, flight_path_len
     # Convert detector coordinates to polar form
     rad, ang = cart2pol(detx * 1e1, dety * 1e1)
 
-    # Calculate effective detector area
-    det_area = (np.max(rad) ** 2) * np.pi
+    # Calculate effective detector area. Use nanmax so a partial-recovered hit
+    # (NaN detector x/y) does not poison det_area -- and hence dz -- for EVERY
+    # event. dz depends on the global det_area + hv, not on per-ion x/y, so
+    # valid rows reconstruct correctly while partials keep NaN x/y/z.
+    if not np.any(np.isfinite(rad)):
+        raise ValueError("No finite detector coordinates available for reconstruction")
+    det_area = (np.nanmax(rad) ** 2) * np.pi
 
     # Calculate radius evolution
     radius_evolution = hv / (kf * field_evap)
@@ -165,8 +170,17 @@ def atom_probe_recons_Bas_et_al(detx, dety, hv, flight_path_length, kf, det_eff,
     x = (detx * 1e-2) / m
     y = (dety * 1e-2) / m
 
-    rad, ang = cart2pol(detx * 1e-3, dety * 1e-3)
-    det_area = (np.max(rad) ** 2) * np.pi
+    # cm -> m is 1e-2 (matching x/y above). The previous 1e-3 made rad 10x too
+    # small and det_area 100x too small, inflating every dz (and the z extent)
+    # by ~100x relative to the lateral dimensions. VALIDATE z against a
+    # reference reconstruction before relying on this.
+    rad, ang = cart2pol(detx * 1e-2, dety * 1e-2)
+    # nanmax: a partial-recovered hit (NaN detector x/y) must not poison
+    # det_area for every event (dz depends on the global det_area + hv, not on
+    # per-ion x/y), so valid rows reconstruct while partials keep NaN x/y/z.
+    if not np.any(np.isfinite(rad)):
+        raise ValueError("No finite detector coordinates available for reconstruction")
+    det_area = (np.nanmax(rad) ** 2) * np.pi
 
     omega = 1e-9**3 / avg_dens
     dz = (omega * ((flight_path_length * 1e-3) ** 2) * (kf**2) * ((field_evap / 1e-9) ** 2)) / (

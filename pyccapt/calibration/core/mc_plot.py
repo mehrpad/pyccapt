@@ -491,10 +491,18 @@ class AptHistPlotter:
             elif mode == 'range':
                 y_offset = 0.0  # Adjust this value as needed
                 for i in range(len(self.variables.peaks_x_selected)):
-                    # Find the bin that contains the mc[i]
-                    bin_index = np.searchsorted(self.x, self.variables.peaks_x_selected[i])
+                    # Find the bin that CONTAINS the selected mass. self.x are
+                    # bin EDGES (len = len(self.y)+1), so use the same
+                    # ``searchsorted - 1`` + clamp convention as plot_range /
+                    # plot_peaks(mode='peaks') above. Without the -1 and the
+                    # clamp, a selection at/beyond the last edge raised
+                    # IndexError on self.y, and in-range selections read the
+                    # count of the bin to the RIGHT of the one containing it.
+                    sel = self.variables.peaks_x_selected[i]
+                    bin_index = int(np.searchsorted(self.x, sel)) - 1
+                    bin_index = min(max(bin_index, 0), len(self.y) - 1)
                     peak_height = self.y[bin_index] * (
-                        (self.variables.peaks_x_selected[i] - self.x[bin_index - 1]) / self.bin_width
+                        (sel - self.x[bin_index]) / self.bin_width
                     )
                     if self.plot_show:
                         self.peak_annotates.append(

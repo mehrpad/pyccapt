@@ -141,8 +141,15 @@ def _extract_training_data(
 # ---------------------------------------------------------------------------
 
 
-def _train_gbcs(X, y, n_estimators=200, max_depth=5, learning_rate=0.05, subsample=0.8, cv_folds=3, verbose=False):
-    """Train a GradientBoostingRegressor and return model + diagnostics."""
+def _train_gbcs(X, y, n_estimators=200, max_depth=5, learning_rate=0.05, subsample=0.8, cv_folds=3,
+                verbose=False, compute_cv=True):
+    """Train a GradientBoostingRegressor and return model + diagnostics.
+
+    ``compute_cv`` runs a K-fold cross_val_score for the diagnostic CV R^2,
+    which trains ``cv`` ADDITIONAL full models (the dominant cost, ~cv+1x
+    total training). It does NOT feed the accept/reject decision -- only the
+    printed diagnostics -- so the calibration path skips it unless requested.
+    """
     model = GradientBoostingRegressor(
         n_estimators=n_estimators,
         max_depth=max_depth,
@@ -153,26 +160,32 @@ def _train_gbcs(X, y, n_estimators=200, max_depth=5, learning_rate=0.05, subsamp
     )
     model.fit(X, y)
 
-    # Cross-validation R^2
-    cv_scores = cross_val_score(
-        GradientBoostingRegressor(
-            n_estimators=n_estimators,
-            max_depth=max_depth,
-            learning_rate=learning_rate,
-            subsample=subsample,
-            loss="squared_error",
-            random_state=42,
-        ),
-        X,
-        y,
-        cv=min(cv_folds, max(2, X.shape[0] // 100)),
-        scoring="r2",
-    )
+    # Cross-validation R^2 (diagnostic only; retrains cv extra models).
+    if compute_cv:
+        cv_scores = cross_val_score(
+            GradientBoostingRegressor(
+                n_estimators=n_estimators,
+                max_depth=max_depth,
+                learning_rate=learning_rate,
+                subsample=subsample,
+                loss="squared_error",
+                random_state=42,
+            ),
+            X,
+            y,
+            cv=min(cv_folds, max(2, X.shape[0] // 100)),
+            scoring="r2",
+        )
+        cv_r2_mean = float(np.mean(cv_scores))
+        cv_r2_std = float(np.std(cv_scores))
+    else:
+        cv_r2_mean = float("nan")
+        cv_r2_std = float("nan")
 
     diagnostics = {
         "train_r2": float(model.score(X, y)),
-        "cv_r2_mean": float(np.mean(cv_scores)),
-        "cv_r2_std": float(np.std(cv_scores)),
+        "cv_r2_mean": cv_r2_mean,
+        "cv_r2_std": cv_r2_std,
         "n_samples": int(X.shape[0]),
     }
 
@@ -310,6 +323,11 @@ def ml_calibration(
     holdout_peaks = peaks[-1:] if len(peaks) > 2 else []
 
     baseline_score = _evaluate_peaks(cal_array, peaks)
+    # Score the held-out peak separately so overfitting (the GBR sharpening
+    # the train peaks while degrading the holdout) is detectable. Previously
+    # holdout_peaks was computed but never scored, so the accept gate ran
+    # purely on the train-contaminated full-set score.
+    holdout_baseline = _evaluate_peaks(cal_array, holdout_peaks) if len(holdout_peaks) else float("nan")
     if verbose:
         print(f"[ML-GBCS] Baseline MRP score: {baseline_score:.2f}")
         print(f"[ML-GBCS] Using {len(train_peaks)} training peaks, {len(holdout_peaks)} holdout peaks")
@@ -327,7 +345,9 @@ def ml_calibration(
     if verbose:
         print(f"[ML-GBCS] Training samples: {X.shape[0]}")
 
-    # 3. Train model
+    # 3. Train model. The CV R^2 is a verbose-only diagnostic that retrains
+    # the GBR cv extra times (~cv+1x cost) and does not affect acceptance, so
+    # only compute it when verbose.
     model, diagnostics = _train_gbcs(
         X,
         y,
@@ -336,6 +356,7 @@ def ml_calibration(
         learning_rate=learning_rate,
         subsample=subsample,
         verbose=verbose,
+        compute_cv=verbose,
     )
 
     # 4. Predict correction for all ions
@@ -358,11 +379,16 @@ def ml_calibration(
 
     # 6. Evaluate improvement
     final_score = _evaluate_peaks(calibrated, peaks)
+    holdout_final = _evaluate_peaks(calibrated, holdout_peaks) if len(holdout_peaks) else float("nan")
 
     if verbose:
         print(f"[ML-GBCS] Final MRP score:    {final_score:.2f}")
         improvement = final_score - baseline_score
         print(f"[ML-GBCS] Improvement:        {improvement:+.2f}")
+        if len(holdout_peaks):
+            print(
+                f"[ML-GBCS] Holdout MRP:        {holdout_baseline:.2f} -> {holdout_final:.2f}"
+            )
 
         # Feature importances
         _, feature_names = _build_feature_matrix(
@@ -378,18 +404,32 @@ def ml_calibration(
             print(f"  {name:>10s}: {imp:.4f}")
 
     # 7. Accept or reject
-    if np.isfinite(final_score) and np.isfinite(baseline_score) and final_score > baseline_score:
+    overall_improved = (
+        np.isfinite(final_score) and np.isfinite(baseline_score) and final_score > baseline_score
+    )
+    # When a holdout peak exists, require it not to regress (1% tolerance for
+    # histogram noise). This is the actual overfitting guard: a model that
+    # only sharpens the training peaks will fail it. With <=2 peaks there is
+    # no holdout, so fall back to the overall-improvement gate alone.
+    if len(holdout_peaks) and np.isfinite(holdout_baseline) and np.isfinite(holdout_final):
+        holdout_ok = holdout_final >= holdout_baseline * 0.99
+    else:
+        holdout_ok = True
+    if overall_improved and holdout_ok:
         if calibration_key == "tof":
             variables.dld_t_calib = calibrated
         else:
             variables.mc_calib = calibrated
         accepted = True
         if verbose:
-            print("[ML-GBCS] Correction accepted (MRP improved).")
+            print("[ML-GBCS] Correction accepted (MRP improved, holdout not regressed).")
     else:
         accepted = False
         if verbose:
-            print("[ML-GBCS] Correction rejected (no MRP improvement). Keeping previous calibration.")
+            if overall_improved and not holdout_ok:
+                print("[ML-GBCS] Correction rejected (holdout peak regressed -- likely overfit).")
+            else:
+                print("[ML-GBCS] Correction rejected (no MRP improvement). Keeping previous calibration.")
 
     _, feature_names = _build_feature_matrix(
         np.zeros(1),
@@ -401,6 +441,8 @@ def ml_calibration(
     return {
         "baseline_score": baseline_score,
         "final_score": final_score,
+        "holdout_baseline_score": holdout_baseline,
+        "holdout_final_score": holdout_final,
         "accepted": accepted,
         "feature_importances": dict(zip(feature_names, model.feature_importances_.tolist())),
         "diagnostics": diagnostics,

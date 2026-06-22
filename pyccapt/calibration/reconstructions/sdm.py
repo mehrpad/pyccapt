@@ -218,6 +218,14 @@ def sdm(
         edges : list of np.array
                 Bin edges for each histogram.
     """
+    if axes is None:
+        # Downstream `'x' in axes` checks raise a cryptic TypeError on None.
+        # The axis choice is a deliberate analysis decision, so fail with an
+        # actionable message rather than guessing a default.
+        raise ValueError(
+            "axes must be provided, e.g. ['z'] for a 1D SDM or ['x', 'y'] "
+            "for a 2D SDM (got None)."
+        )
     if range_sequence or range_mc or range_detx or range_dety or range_x or range_y or range_z or range_vol:
         if range_sequence:
             if range_sequence:

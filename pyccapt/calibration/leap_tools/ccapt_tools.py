@@ -253,16 +253,31 @@ def epos_to_ccapt_h5_streaming(epos_path, h5_output_path, *, chunk_size: int = 1
     h5_output_path.parent.mkdir(parents=True, exist_ok=True)
 
     rows_written = 0
+    empty_schema = None
     with leap_tools.read_epos_lazy(epos_path) as epos_table:
         total_rows = epos_table.n_rows
         with pd.HDFStore(str(h5_output_path), mode="w") as store:
             for chunk in epos_lazy_to_ccapt_chunks(epos_table, chunk_size=chunk_size):
                 if len(chunk) == 0:
+                    if empty_schema is None:
+                        empty_schema = chunk
                     continue
                 store.append("df", chunk, format="table", index=False)
                 rows_written += len(chunk)
                 if progress_callback is not None:
                     progress_callback(rows_written, total_rows)
+            if rows_written == 0:
+                # No non-empty chunk was written (empty / truncated .epos).
+                # append(format='table') does NOT create the key for a 0-row
+                # frame, so the file would have no 'df' dataset and the
+                # documented pd.read_hdf(path, key='df') consumer would raise
+                # KeyError. Persist the 0-row schema frame explicitly via put().
+                if empty_schema is None:
+                    empty_schema = pd.DataFrame()
+                try:
+                    store.put("df", empty_schema, format="table")
+                except (ValueError, TypeError):
+                    store.put("df", empty_schema, format="fixed")
 
     return {"h5": str(h5_output_path), "rows": rows_written}
 

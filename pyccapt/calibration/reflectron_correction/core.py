@@ -428,6 +428,7 @@ def correct_epos_streaming(
     h5_output_path.parent.mkdir(parents=True, exist_ok=True)
 
     rows_written = 0
+    empty_schema = None
     with leap_tools.read_epos_lazy(epos_path) as epos_table:
         total_rows = epos_table.n_rows
         # Warm the trifinder once so we don't pay the matplotlib build cost
@@ -436,6 +437,8 @@ def correct_epos_streaming(
         with pd.HDFStore(str(h5_output_path), mode="w") as store:
             for chunk in ccapt_tools.epos_lazy_to_ccapt_chunks(epos_table, chunk_size=chunk_size):
                 if len(chunk) == 0:
+                    if empty_schema is None:
+                        empty_schema = apply_reflectron_correction_to_ccapt(chunk, mesh)
                     continue
                 corrected_chunk = apply_reflectron_correction_to_ccapt(chunk, mesh)
                 # ``format='table'`` lets pandas append along the row axis and
@@ -450,6 +453,16 @@ def correct_epos_streaming(
                 rows_written += len(chunk)
                 if progress_callback is not None:
                     progress_callback(rows_written, total_rows)
+            if rows_written == 0:
+                # Empty / truncated .epos: append(format='table') never creates
+                # the key for a 0-row frame, so persist the schema frame
+                # explicitly or pd.read_hdf(path, key='df') raises KeyError.
+                if empty_schema is None:
+                    empty_schema = pd.DataFrame()
+                try:
+                    store.put("df", empty_schema, format="table")
+                except (ValueError, TypeError):
+                    store.put("df", empty_schema, format="fixed")
 
     return {"h5": str(h5_output_path), "rows": rows_written}
 

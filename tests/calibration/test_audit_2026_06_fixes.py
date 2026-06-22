@@ -140,3 +140,40 @@ def test_reconstruction_kernels_tolerate_partial_nan_rows():
     xp, yp, _ = recon.atom_probe_recons_Bas_et_al(detx_p, dety_p, hv, **kwargs)
     np.testing.assert_allclose(np.asarray(xp)[~partial], xb, rtol=0, atol=1e-9)
     np.testing.assert_allclose(np.asarray(yp)[~partial], yb, rtol=0, atol=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# SDM cKDTree fast path must be bit-identical to the brute-force reference
+# across axis subsets / rotation / z_cut / mask combinations.
+# ---------------------------------------------------------------------------
+def test_sdm_kdtree_matches_bruteforce():
+    import itertools
+
+    from pyccapt.calibration.reconstructions import sdm
+
+    rng = np.random.default_rng(0)
+    clouds = [rng.normal(c, 0.6, (400, 3)) for c in ([0, 0, 0], [1.5, 0, 0.5], [0, 1.2, 1.0])]
+    pts = np.concatenate(clouds)
+    n = len(pts)
+    mask_all = np.ones(n, dtype=bool)
+    mask_a = rng.random(n) < 0.6
+    mask_b = rng.random(n) < 0.6
+
+    def _same(a, b):
+        if a is None and b is None:
+            return True
+        if a is None or b is None or a.shape != b.shape:
+            return False
+        return np.array_equal(np.sort(a), np.sort(b))
+
+    axes_opts = [["x"], ["y"], ["z"], ["x", "y"], ["y", "z"], ["x", "z"], ["x", "y", "z"]]
+    rot_opts = [(0.0, 0.0), (0.3, 0.0), (0.35, 0.5)]
+    mask_pairs = [(mask_all, mask_all), (mask_a, mask_b), (mask_a, mask_a)]
+
+    for axes, (th, ph), (mi, mj), zc in itertools.product(axes_opts, rot_opts, mask_pairs, [True, False]):
+        kw = dict(particles=pts, mask_i=mi, mask_j=mj, axes=axes, z_cut=zc, theta=th, phi=ph)
+        bf = sdm._compute_sdm_displacements_bruteforce(**kw)
+        disp = sdm._compute_sdm_displacements(**kw)
+        assert all(_same(a, b) for a, b in zip(bf, disp)), (
+            f"SDM dispatcher != brute force for axes={axes} rot=({th},{ph}) z_cut={zc}"
+        )

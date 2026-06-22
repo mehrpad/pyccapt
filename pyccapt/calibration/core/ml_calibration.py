@@ -141,8 +141,15 @@ def _extract_training_data(
 # ---------------------------------------------------------------------------
 
 
-def _train_gbcs(X, y, n_estimators=200, max_depth=5, learning_rate=0.05, subsample=0.8, cv_folds=3, verbose=False):
-    """Train a GradientBoostingRegressor and return model + diagnostics."""
+def _train_gbcs(X, y, n_estimators=200, max_depth=5, learning_rate=0.05, subsample=0.8, cv_folds=3,
+                verbose=False, compute_cv=True):
+    """Train a GradientBoostingRegressor and return model + diagnostics.
+
+    ``compute_cv`` runs a K-fold cross_val_score for the diagnostic CV R^2,
+    which trains ``cv`` ADDITIONAL full models (the dominant cost, ~cv+1x
+    total training). It does NOT feed the accept/reject decision -- only the
+    printed diagnostics -- so the calibration path skips it unless requested.
+    """
     model = GradientBoostingRegressor(
         n_estimators=n_estimators,
         max_depth=max_depth,
@@ -153,26 +160,32 @@ def _train_gbcs(X, y, n_estimators=200, max_depth=5, learning_rate=0.05, subsamp
     )
     model.fit(X, y)
 
-    # Cross-validation R^2
-    cv_scores = cross_val_score(
-        GradientBoostingRegressor(
-            n_estimators=n_estimators,
-            max_depth=max_depth,
-            learning_rate=learning_rate,
-            subsample=subsample,
-            loss="squared_error",
-            random_state=42,
-        ),
-        X,
-        y,
-        cv=min(cv_folds, max(2, X.shape[0] // 100)),
-        scoring="r2",
-    )
+    # Cross-validation R^2 (diagnostic only; retrains cv extra models).
+    if compute_cv:
+        cv_scores = cross_val_score(
+            GradientBoostingRegressor(
+                n_estimators=n_estimators,
+                max_depth=max_depth,
+                learning_rate=learning_rate,
+                subsample=subsample,
+                loss="squared_error",
+                random_state=42,
+            ),
+            X,
+            y,
+            cv=min(cv_folds, max(2, X.shape[0] // 100)),
+            scoring="r2",
+        )
+        cv_r2_mean = float(np.mean(cv_scores))
+        cv_r2_std = float(np.std(cv_scores))
+    else:
+        cv_r2_mean = float("nan")
+        cv_r2_std = float("nan")
 
     diagnostics = {
         "train_r2": float(model.score(X, y)),
-        "cv_r2_mean": float(np.mean(cv_scores)),
-        "cv_r2_std": float(np.std(cv_scores)),
+        "cv_r2_mean": cv_r2_mean,
+        "cv_r2_std": cv_r2_std,
         "n_samples": int(X.shape[0]),
     }
 
@@ -332,7 +345,9 @@ def ml_calibration(
     if verbose:
         print(f"[ML-GBCS] Training samples: {X.shape[0]}")
 
-    # 3. Train model
+    # 3. Train model. The CV R^2 is a verbose-only diagnostic that retrains
+    # the GBR cv extra times (~cv+1x cost) and does not affect acceptance, so
+    # only compute it when verbose.
     model, diagnostics = _train_gbcs(
         X,
         y,
@@ -341,6 +356,7 @@ def ml_calibration(
         learning_rate=learning_rate,
         subsample=subsample,
         verbose=verbose,
+        compute_cv=verbose,
     )
 
     # 4. Predict correction for all ions

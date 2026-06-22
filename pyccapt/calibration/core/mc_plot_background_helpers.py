@@ -255,10 +255,8 @@ def plot_background(plotter, mode, non_peaks=None, lam=1e6, tol=1e-1, max_iter=1
             keys = list(params_2.keys())
             if 'mask' in keys:
                 mask_2 = params_2['mask']
-                noise = 0
-                for i in range(len(mask_2)):
-                    if mask_2[i]:
-                        noise += plotter.y[i]
+                # Vectorised masked sum (was a Python per-bin loop).
+                noise = float(np.asarray(plotter.y)[np.asarray(mask_2, dtype=bool)].sum())
                 handles, labels = plt.gca().get_legend_handles_labels()
                 handles.append(plt.Line2D([], [], linestyle='none'))
                 plotter.background_ppm = round(noise / len(plotter.mc_tof) * 1e6 / np.max(plotter.mc_tof), 2)
@@ -268,14 +266,8 @@ def plot_background(plotter, mode, non_peaks=None, lam=1e6, tol=1e-1, max_iter=1
                 if patch:
                     plotter.ax.plot(plotter.bins[:-1][mask_2], plotter.y[mask_2], 'o', color='orange')[0]
         elif mode == 'aspls':
-            effective_heights = []
-            for i in range(len(plotter.bins) - 1):
-                background_height = fit_2[i]
-                bin_height = plotter.y[i]
-                effective_height = min(bin_height, background_height)
-                effective_heights.append(effective_height)
-
-            effective_heights = np.array(effective_heights)
+            # Vectorised elementwise min (was a Python per-bin loop).
+            effective_heights = np.minimum(np.asarray(plotter.y), np.asarray(fit_2))
             handles, labels = plt.gca().get_legend_handles_labels()
             handles.append(plt.Line2D([], [], linestyle='none'))
             plotter.background_ppm = round(np.sum(effective_heights) / len(plotter.mc_tof) * 1e6 / np.max(plotter.mc_tof), 2)
@@ -342,15 +334,13 @@ def calculate_noise(plotter, fig_size=(9, 5), plot_without_noise=False):
     a, b, c, d = plotter.popt
     bin_edges = plotter.bins[:]
 
-    effective_heights = []
-    for i in range(len(bin_edges) - 1):
-        y_left = exponential_decay_with_linear_and_dc(bin_edges[i], a, b, c, d)
-        y_right = exponential_decay_with_linear_and_dc(bin_edges[i + 1], a, b, c, d)
-        bin_height = plotter.y[i]
-        height_under_curve = min(max(y_left, y_right), bin_height)
-        effective_heights.append(height_under_curve)
-
-    effective_heights = np.array(effective_heights)
+    # Vectorised: evaluate the fitted background at all bin edges at once
+    # (was a Python per-bin loop with two exp() calls each). Identical result:
+    # min(max(y_left, y_right), bin_height) per bin.
+    edges = np.asarray(bin_edges, dtype=float)
+    y_left = exponential_decay_with_linear_and_dc(edges[:-1], a, b, c, d)
+    y_right = exponential_decay_with_linear_and_dc(edges[1:], a, b, c, d)
+    effective_heights = np.minimum(np.maximum(y_left, y_right), np.asarray(plotter.y))
     y_noise_removed = plotter.y - effective_heights
 
     handles, labels = plt.gca().get_legend_handles_labels()

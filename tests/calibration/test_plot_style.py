@@ -120,6 +120,50 @@ def test_finalize_preserves_inverted_axis():
     plt.close(fig)
 
 
+def test_set_paper_style_toggle():
+    try:
+        # normal mode: finalize is a no-op
+        plot_style.set_paper_style("normal")
+        assert plot_style.paper_style_enabled() is False
+        fig, ax = plt.subplots()
+        ax.plot(np.arange(1, 10), np.arange(1, 10))
+        before = ax.get_xlim()
+        plot_style.finalize_axes(ax)
+        assert ax.get_xlim() == before  # untouched in normal mode
+        plt.close(fig)
+
+        # paper mode: snapped to round numbers
+        plot_style.set_paper_style("paper")
+        assert plot_style.paper_style_enabled() is True
+        fig, ax = plt.subplots()
+        ax.plot(np.arange(1, 10), np.arange(1, 10))
+        plot_style.finalize_axes(ax)
+        assert ax.get_xlim() == (0.0, 10.0)
+        plt.close(fig)
+    finally:
+        plot_style.set_paper_style(True)
+        plot_style.uninstall_global_paper_style()
+
+
+def test_finalize_skips_colorbar_and_heatmap_axes():
+    """The garbled-numbers-under-colorbar and heatmap empty-band artifacts:
+    finalize must leave colorbar axes and 2-D mesh (hist2d/pcolormesh) axes
+    untouched."""
+    plot_style.set_paper_style(True)
+    try:
+        fig, ax = plt.subplots()
+        mesh = ax.pcolormesh(np.random.rand(10, 12))
+        cb = fig.colorbar(mesh, ax=ax)
+        cb_before = (cb.ax.get_xlim(), cb.ax.get_ylim(), list(cb.ax.get_yticks()))
+        heat_before = (ax.get_xlim(), ax.get_ylim())
+        plot_style.finalize_figure(fig)
+        assert (cb.ax.get_xlim(), cb.ax.get_ylim(), list(cb.ax.get_yticks())) == cb_before
+        assert (ax.get_xlim(), ax.get_ylim()) == heat_before
+        plt.close(fig)
+    finally:
+        plot_style.uninstall_global_paper_style()
+
+
 def test_finalize_does_not_change_data():
     fig, ax = plt.subplots()
     counts, edges, _ = ax.hist(np.arange(1, 10), bins=9)

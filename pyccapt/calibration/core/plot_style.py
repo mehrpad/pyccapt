@@ -30,10 +30,48 @@ __all__ = [
     "apply_paper_style",
     "install_global_paper_style",
     "uninstall_global_paper_style",
+    "set_paper_style",
+    "paper_style_enabled",
 ]
 
 _INSTALLED = False
 _ORIG = {}
+_ORIG_RCPARAMS = {}
+
+# Master switch. When False, ``finalize_axes``/``finalize_figure`` are no-ops
+# (so even ``save_figure`` leaves matplotlib's normal axes alone) and
+# ``set_paper_style(False)`` also removes the global show/savefig hooks.
+_PAPER_ENABLED = True
+
+
+def set_paper_style(mode=True):
+    """Switch plotting between paper style (round-number axes) and normal.
+
+    Call once near the top of a notebook/script::
+
+        from pyccapt.calibration.core import plot_style
+        plot_style.set_paper_style('paper')    # or True  -> round-number axes
+        plot_style.set_paper_style('normal')   # or False -> matplotlib defaults
+
+    Affects both inline (``plt.show``) and saved figures. Returns the resolved
+    boolean.
+    """
+    global _PAPER_ENABLED
+    if isinstance(mode, str):
+        enabled = mode.strip().lower() in ("paper", "on", "true", "1", "yes")
+    else:
+        enabled = bool(mode)
+    _PAPER_ENABLED = enabled
+    if enabled:
+        install_global_paper_style()
+    else:
+        uninstall_global_paper_style()
+    return enabled
+
+
+def paper_style_enabled():
+    """Return whether paper style is currently enabled."""
+    return _PAPER_ENABLED
 
 
 def nice_bounds(vmin, vmax, max_ticks=6):
@@ -61,15 +99,52 @@ def nice_bounds(vmin, vmax, max_ticks=6):
 
 
 def _axis_is_map_like(ax):
-    """True for image / equal-aspect axes that must not have their limits snapped."""
+    """True for axes whose limits must NOT be snapped to round numbers.
+
+    Covers: colorbar axes (snapping garbles the colorbar tick labels -- the
+    "weird numbers below the colorbar"); image (``imshow``) axes; 2-D mesh axes
+    (``pcolormesh`` / ``hist2d`` heatmaps, whose ``dataLim`` is the full bin
+    grid incl. empty cells, so snapping leaves empty bands); and equal/fixed
+    -aspect axes (maps -- snapping would distort).
+    """
+    # Colorbar axes (matplotlib labels them '<colorbar>' and/or sets _colorbar).
+    if getattr(ax, "_colorbar", None) is not None:
+        return True
+    try:
+        if ax.get_label() == "<colorbar>":
+            return True
+    except Exception:
+        pass
     if ax.images:
         return True
+    try:
+        from matplotlib.collections import QuadMesh
+
+        if any(isinstance(c, QuadMesh) for c in ax.collections):
+            return True
+    except Exception:
+        pass
     try:
         if ax.get_aspect() != 'auto':
             return True
     except Exception:
         pass
     return False
+
+
+def _shares_with_map(ax, which):
+    """True if ``ax`` shares its ``which`` axis with a map-like sibling.
+
+    A twin axis (``twinx``/``twiny``, e.g. the HV/DC-voltage overlay) shares one
+    axis with the heatmap underneath it. Snapping the twin's shared axis would
+    move the heatmap's limits too, reintroducing the empty bands -- so skip it.
+    """
+    try:
+        grp = ax.get_shared_x_axes() if which == 'x' else ax.get_shared_y_axes()
+        siblings = list(grp.get_siblings(ax))
+    except Exception:
+        return False
+    return any(s is not ax and _axis_is_map_like(s) for s in siblings)
 
 
 def _data_interval(ax, which):
@@ -140,11 +215,13 @@ def finalize_axes(ax=None, x=True, y=True, max_ticks=6):
 
     if ax is None:
         ax = plt.gca()
+    if not _PAPER_ENABLED:
+        return ax
     if _axis_is_map_like(ax):
         return ax
-    if x and ax.get_xscale() == 'linear':
+    if x and ax.get_xscale() == 'linear' and not _shares_with_map(ax, 'x'):
         _snap_axis(ax, 'x', max_ticks)
-    if y and ax.get_yscale() == 'linear':
+    if y and ax.get_yscale() == 'linear' and not _shares_with_map(ax, 'y'):
         _snap_axis(ax, 'y', max_ticks)
     return ax
 
@@ -165,18 +242,37 @@ def finalize_figure(fig=None, **kwargs):
 
 
 def apply_paper_style():
-    """Set baseline rcParams so on-screen auto-scaled axes prefer round limits.
+    """Set baseline rcParams for tight, paper-style axes.
 
-    This nudges *auto-scaled* axes toward round-number limits with end ticks
-    (snapping to the data extremes). For the full "0..10 bracket" behaviour on a
-    specific figure use :func:`finalize_figure`; saved figures get it for free
-    via ``save_figure``.
+    Only zeroes the auto-scale margins so axes hug the data (no padding band).
+    It deliberately does NOT set ``axes.autolimit_mode='round_numbers'``: that
+    rounds the autoscale UP to a coarse round number (1500 -> 2000, 24e6 ->
+    25e6), which is exactly the large empty band the user sees -- and it affects
+    even axes that :func:`finalize_axes` skips (heatmaps, colorbars). Round-number
+    *ticks* are added by :func:`finalize_axes`, which hugs the real data extent.
     """
     import matplotlib as mpl
 
-    mpl.rcParams['axes.autolimit_mode'] = 'round_numbers'
+    for key in ('axes.xmargin', 'axes.ymargin'):
+        _ORIG_RCPARAMS.setdefault(key, mpl.rcParams[key])
     mpl.rcParams['axes.xmargin'] = 0.0
     mpl.rcParams['axes.ymargin'] = 0.0
+
+
+def _restore_rcparams():
+    """Restore the rcParams that :func:`apply_paper_style` changed."""
+    import matplotlib as mpl
+
+    for key, value in _ORIG_RCPARAMS.items():
+        mpl.rcParams[key] = value
+
+
+def _is_paper_wrapper(fn):
+    """True if ``fn`` is one of our show/savefig wrappers (this or a prior
+    version -- matched by tag or by nested qualname)."""
+    if getattr(fn, "_pyccapt_wrapper", False):
+        return True
+    return "install_global_paper_style.<locals>" in getattr(fn, "__qualname__", "")
 
 
 def install_global_paper_style():
@@ -190,14 +286,38 @@ def install_global_paper_style():
     global _INSTALLED
     import os
 
-    if _INSTALLED or os.environ.get("PYCCAPT_NO_PAPER_STYLE"):
+    if os.environ.get("PYCCAPT_NO_PAPER_STYLE"):
         return
     import matplotlib.pyplot as plt
     from matplotlib.figure import Figure
 
+    # Stash the genuine originals on STABLE matplotlib attributes (the pyplot
+    # module / Figure class). These survive reloads of THIS module -- which
+    # reset _ORIG and _INSTALLED -- so the originals are never lost. The older
+    # design kept them only in _ORIG; a reload wiped it while the wrappers
+    # stayed bound, then every render raised ``KeyError: 'show'/'savefig'``.
+    if not _is_paper_wrapper(plt.show) and not hasattr(plt, "_pyccapt_orig_show"):
+        plt._pyccapt_orig_show = plt.show
+    if not _is_paper_wrapper(Figure.savefig) and not hasattr(Figure, "_pyccapt_orig_savefig"):
+        Figure._pyccapt_orig_savefig = Figure.savefig
+
+    orig_show = getattr(plt, "_pyccapt_orig_show", None)
+    orig_savefig = getattr(Figure, "_pyccapt_orig_savefig", None)
+    if orig_show is None or orig_savefig is None:
+        import warnings
+        warnings.warn(
+            "pyccapt paper-style: matplotlib show/savefig were left wrapped by a "
+            "previous (pre-fix) session and the originals can't be recovered. "
+            "Restart the kernel to enable paper style.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return
+
     apply_paper_style()
-    _ORIG['show'] = plt.show
-    _ORIG['savefig'] = Figure.savefig
+
+    if _INSTALLED and _is_paper_wrapper(plt.show) and _is_paper_wrapper(Figure.savefig):
+        return  # already installed and intact
 
     def _show(*args, **kwargs):
         try:
@@ -205,15 +325,20 @@ def install_global_paper_style():
                 finalize_figure(plt.figure(num))
         except Exception:
             pass
-        return _ORIG['show'](*args, **kwargs)
+        return orig_show(*args, **kwargs)
 
     def _savefig(self, *args, **kwargs):
         try:
             finalize_figure(self)
         except Exception:
             pass
-        return _ORIG['savefig'](self, *args, **kwargs)
+        return orig_savefig(self, *args, **kwargs)
 
+    for fn, orig in ((_show, orig_show), (_savefig, orig_savefig)):
+        fn._pyccapt_wrapper = True
+        fn._pyccapt_orig = orig
+    _ORIG['show'] = orig_show
+    _ORIG['savefig'] = orig_savefig
     plt.show = _show
     Figure.savefig = _savefig
     _INSTALLED = True
@@ -222,11 +347,16 @@ def install_global_paper_style():
 def uninstall_global_paper_style():
     """Undo :func:`install_global_paper_style` (restore matplotlib's show/savefig)."""
     global _INSTALLED
-    if not _INSTALLED:
-        return
     import matplotlib.pyplot as plt
     from matplotlib.figure import Figure
 
-    plt.show = _ORIG['show']
-    Figure.savefig = _ORIG['savefig']
+    show = getattr(plt, "_pyccapt_orig_show", None) or getattr(plt.show, "_pyccapt_orig", _ORIG.get("show"))
+    savefig = getattr(Figure, "_pyccapt_orig_savefig", None) or getattr(
+        Figure.savefig, "_pyccapt_orig", _ORIG.get("savefig")
+    )
+    if show is not None:
+        plt.show = show
+    if savefig is not None:
+        Figure.savefig = savefig
+    _restore_rcparams()
     _INSTALLED = False

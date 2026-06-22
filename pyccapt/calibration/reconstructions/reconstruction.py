@@ -166,7 +166,11 @@ def atom_probe_recons_Bas_et_al(detx, dety, hv, flight_path_length, kf, det_eff,
     x = (detx * 1e-2) / m
     y = (dety * 1e-2) / m
 
-    rad, ang = cart2pol(detx * 1e-3, dety * 1e-3)
+    # cm -> m is 1e-2 (matching x/y above). The previous 1e-3 made rad 10x too
+    # small and det_area 100x too small, inflating every dz (and the z extent)
+    # by ~100x relative to the lateral dimensions. VALIDATE z against a
+    # reference reconstruction before relying on this.
+    rad, ang = cart2pol(detx * 1e-2, dety * 1e-2)
     det_area = (np.max(rad) ** 2) * np.pi
 
     omega = 1e-9**3 / avg_dens

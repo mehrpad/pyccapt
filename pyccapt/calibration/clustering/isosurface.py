@@ -157,7 +157,12 @@ def isosurface(gridVec, data, isovalue):
     # Create a pyvista structured grid
     x, y, z = np.meshgrid(gridVec[0], gridVec[1], gridVec[2], indexing='ij')
     grid = pv.StructuredGrid(x, y, z)
-    grid.point_data["values"] = data.flatten()
+    # pyvista/VTK StructuredGrid orders points with the FIRST axis varying
+    # fastest (Fortran order). data has shape (nx, ny, nz), so it must be
+    # flattened with order='F' to line up with grid.points; the default C-order
+    # flatten misaligned the scalar field and produced a geometrically wrong
+    # isosurface. VALIDATE against a known field before relying on this.
+    grid.point_data["values"] = data.flatten(order='F')
 
     # Extract the isosurface
     isosurf = grid.contour([isovalue])  # Pass isovalue as a list for compatibility

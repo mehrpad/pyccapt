@@ -1,7 +1,11 @@
+import os
 import sys
 import threading
 import time
+from datetime import datetime
 
+import numpy as np
+import pandas as pd
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import QTimer, pyqtSignal, QObject
 from PyQt6.QtGui import QFont, QPixmap
@@ -32,6 +36,15 @@ class Ui_Pumps_Vacuum(object):
         self.conf = conf
         self.parent = parent
         self.emitter = SignalEmitter
+
+        # --- LL baking log state ---
+        # Latest LL temperature (deg C) seen on the temp_ll signal; cached so
+        # the periodic log row always has a value even between signal updates.
+        self._latest_temp_ll = None
+        # DataFrame holding the current baking run (None when not baking).
+        self.ll_baking_log_data = None
+        self.ll_baking_log_file = None
+        self.ll_baking_log_start = None
 
     def setupUi(self, Pumps_Vacuum):
         """
@@ -562,6 +575,11 @@ class Ui_Pumps_Vacuum(object):
         self.baking_timer = QTimer(self.parent)
         self.baking_timer.timeout.connect(self.update_target_temperature_ll)
 
+        # Timer that samples LL temperature & vacuum into the baking CSV while
+        # a baking run is active.
+        self.ll_baking_log_timer = QTimer(self.parent)
+        self.ll_baking_log_timer.timeout.connect(self._log_ll_baking_row)
+
         self.original_button_style = self.set_temperature_cryo.styleSheet()
 
         # default Qlcd color
@@ -670,6 +688,8 @@ class Ui_Pumps_Vacuum(object):
             self.temp_ll.display('Error')
         else:
             self.temp_ll.display(round(value, 2))
+            # Cache for the baking log (vacuum is read from variables directly).
+            self._latest_temp_ll = round(value, 2)
 
     def update_target_temperature_cryo(
         self,
@@ -722,12 +742,73 @@ class Ui_Pumps_Vacuum(object):
                 self.variables.set_temperature_ll = self.target_tempreature_ll.value()
                 # Start the timer for baking which is min * 60000
                 self.baking_timer.start(int(self.ll_baking_time.text()) * 60000)
+                # Begin logging LL temperature & vacuum for this baking run.
+                self._start_ll_baking_log()
             elif self.variables.set_temperature_flag_ll:
                 self.baking_timer.stop()
                 self.ll_baking_time.setEnabled(True)
                 self.target_tempreature_ll.setEnabled(True)
                 self.variables.set_temperature_flag_ll = False
                 self.set_temperature_ll.setStyleSheet(self.original_button_style)
+                # Baking finished -- either the duration elapsed (this slot is
+                # also fired by baking_timer) or the user deselected the button.
+                self._stop_ll_baking_log()
+
+    def _start_ll_baking_log(self):
+        """Create a CSV and start sampling LL temperature & vacuum.
+
+        Called when the "Set T LL" button starts a baking run. Logging stops
+        in :meth:`_stop_ll_baking_log` once the baking duration elapses or the
+        user deselects the button.
+        """
+        try:
+            now = datetime.now()
+            now_time = now.strftime("%d-%m-%Y_%H-%M-%S")
+            save_path = runtime.project_path("files", "logs", "ll_baking", now_time)
+            os.makedirs(save_path, mode=0o777, exist_ok=True)
+            self.ll_baking_log_file = str(save_path / f'll_baking_{now_time}.csv')
+            self.ll_baking_log_data = pd.DataFrame(
+                columns=['Date', 'Time', 'Elapsed_s', 'Target_T_LL_C', 'Temp_LL_C', 'Vacuum_LL_mBar']
+            )
+            self.ll_baking_log_start = time.perf_counter()
+            # Sample once per second.
+            self.ll_baking_log_timer.start(1000)
+            # Write an initial row immediately so the file is never empty.
+            self._log_ll_baking_row()
+        except Exception as e:
+            print(f'Cannot start LL baking log: {e}')
+
+    def _log_ll_baking_row(self):
+        """Append one sample (temperature + vacuum) and flush to disk."""
+        if self.ll_baking_log_data is None:
+            return
+        now = datetime.now()
+        elapsed = round(time.perf_counter() - self.ll_baking_log_start, 1)
+        temp = self._latest_temp_ll if self._latest_temp_ll is not None else np.nan
+        vacuum = self.variables.vacuum_load_lock
+        self.ll_baking_log_data.loc[len(self.ll_baking_log_data)] = [
+            now.strftime("%d-%m-%Y"),
+            now.strftime('%H:%M:%S'),
+            elapsed,
+            self.variables.set_temperature_ll,
+            temp,
+            vacuum,
+        ]
+        try:
+            self.ll_baking_log_data.to_csv(self.ll_baking_log_file, sep=';', index=False)
+        except Exception as e:
+            print(f'LL baking csv cannot be saved (close the file): {e}')
+
+    def _stop_ll_baking_log(self):
+        """Stop sampling, write a final row, and release the log buffer."""
+        if self.ll_baking_log_timer.isActive():
+            self.ll_baking_log_timer.stop()
+        if self.ll_baking_log_data is not None:
+            # Capture a final sample so the CSV records the end state.
+            self._log_ll_baking_row()
+        self.ll_baking_log_data = None
+        self.ll_baking_log_file = None
+        self.ll_baking_log_start = None
 
     def _update_gauge(self, display_widget, label_widget, value, threshold_key):
         """Show *value* on a gauge LCD and colour its label by threshold."""
@@ -920,6 +1001,8 @@ class Ui_Pumps_Vacuum(object):
         """
         # Stop any background processes, timers, or threads here
         self.timer.stop()  # If you want to stop this timer when closing
+        # Flush and stop the LL baking log if a run is in progress.
+        self._stop_ll_baking_log()
 
 
 class SignalEmitter(QObject):

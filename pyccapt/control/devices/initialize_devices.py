@@ -382,8 +382,12 @@ def state_update(conf, variables, emitter, stop_event=None):
         vacuum_load_lock_backing = -1.0
         vacuum_cryo_load_lock = -1.0
         vacuum_cryo_load_lock_backing = -1.0
-        set_temperature_tmp_cryo = 0
-        set_temperature_tmp_ll = 0
+        # Last setpoint actually written to the controller. ``None`` means
+        # "nothing sent yet", so the first request -- and the first request
+        # after a stop -- is always pushed even if it equals a previous
+        # target (e.g. baking twice in a row at the same temperature).
+        set_temperature_tmp_cryo = None
+        set_temperature_tmp_ll = None
         # Loop until either an external stop_event is set OR the
         # legacy emitter flag goes False. The flag remains supported
         # for backward compatibility but is unreliable (it's a pyqtSignal,
@@ -459,6 +463,9 @@ def state_update(conf, variables, emitter, stop_event=None):
                 elif variables.set_temperature_flag_cryo == False:
                     variables.set_temperature_cryo = 0
                     res = command_cryovac(f'Out1Cryo.PID.Setpoint {variables.set_temperature_cryo}', com_port_cryovac)
+                    # Forget the last-written value so the next request is
+                    # re-sent even at the same setpoint as before.
+                    set_temperature_tmp_cryo = None
                     variables.set_temperature_flag_cryo = None
 
                 if variables.set_temperature_flag_ll:
@@ -474,7 +481,16 @@ def state_update(conf, variables, emitter, stop_event=None):
                             print("cannot set the load lock temperature")
                 elif variables.set_temperature_flag_ll == False:
                     variables.set_temperature_ll = 0
-                    res = command_cryovac(f'Out2LL.PID.Setpoint {variables.set_temperature_ll}', com_port_cryovac)
+                    # Drive the heater off by commanding the controller's
+                    # MINIMUM valid setpoint (Kelvin). A raw 0 means 0 K, which
+                    # is below the TIC 500's allowed LL range -> the controller
+                    # rejects it and keeps the previous baking setpoint, so the
+                    # heater stays pinned at full output (the "still 2 W after
+                    # deselect" bug). min_temperature_ll is already in Kelvin.
+                    res = command_cryovac(f"Out2LL.PID.Setpoint {conf['min_temperature_ll']}", com_port_cryovac)
+                    # Forget the last-written value so the next bake re-sends
+                    # the setpoint even at the same temperature as before.
+                    set_temperature_tmp_ll = None
                     variables.set_temperature_flag_ll = None
             if conf['COM_PORT_gauge_mc'] != "off" and tpg is not None:
                 value, _ = tpg.pressure_gauge(2)

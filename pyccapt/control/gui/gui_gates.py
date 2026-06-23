@@ -254,6 +254,70 @@ class Ui_Gates(object):
             self.error_message("!!! Override Access deactivated !!!")
             self.timer.start(8000)
 
+    def _vacuum_ok_to_open(self, gate_label, sides):
+        """Confirm the vacuum is safe before opening a gate.
+
+        A gate connects two chambers; opening it equalises their pressure.
+        If either chamber is not pumped down to its safe threshold, opening
+        can spoil a good vacuum (or worse). This pops a confirmation dialog
+        naming the offending chamber(s) and lets the operator decide.
+
+        Args:
+            gate_label: Human-readable gate name for the dialog.
+            sides: list of ``(chamber_label, pressure, threshold)`` for the
+                two chambers the gate connects. ``pressure`` and
+                ``threshold`` are in mBar (lower = better vacuum).
+
+        Returns:
+            True if it is safe to proceed (every side is within its
+            threshold) or the operator confirmed the override; False if the
+            operator cancelled.
+        """
+        # No gauges -> no pressure data to validate against; don't block.
+        if self.conf.get('gauges', 'off') == 'off':
+            return True
+
+        unsafe = []
+        for label, pressure, threshold in sides:
+            try:
+                pressure = float(pressure)
+            except (TypeError, ValueError):
+                pressure = -1.0
+            if pressure <= 0:
+                # -1 = gauge read error, 0 = no reading yet -> cannot
+                # confirm the chamber is safe, so warn to be cautious.
+                unsafe.append(
+                    f"- {label}: pressure unknown (no valid gauge reading); "
+                    f"should be ≤ {threshold:.1e} mBar"
+                )
+            elif pressure > threshold:
+                unsafe.append(
+                    f"- {label}: {pressure:.2e} mBar "
+                    f"(should be ≤ {threshold:.1e} mBar)"
+                )
+
+        if not unsafe:
+            return True
+
+        parent = self.parent if isinstance(self.parent, QtWidgets.QWidget) else self.superuser
+        warning = QtWidgets.QMessageBox(parent=parent)
+        warning.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+        warning.setWindowTitle("Unsafe vacuum - confirm gate opening")
+        warning.setText(
+            f"The vacuum is NOT at a safe level to open the {gate_label}.\n"
+            "Opening it now may spoil the vacuum in the adjoining chamber."
+        )
+        warning.setInformativeText(
+            "The following chamber(s) are outside the safe range:\n"
+            + "\n".join(unsafe)
+            + "\n\nDo you still want to open the gate?"
+        )
+        warning.setStandardButtons(
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
+        )
+        warning.setDefaultButton(QtWidgets.QMessageBox.StandardButton.No)
+        return warning.exec() == QtWidgets.QMessageBox.StandardButton.Yes
+
     def gates(self, gate_num):
         """
         The function for applying the command of closing or opening gate
@@ -336,6 +400,15 @@ class Ui_Gates(object):
                 )
             ) or self.flag_super_user:
                 if not self.variables.flag_main_gate:  # Open the main gate
+                    # Override Access explicitly bypasses the vacuum interlock.
+                    if not self.flag_super_user and not self._vacuum_ok_to_open(
+                        "main-chamber gate",
+                        [
+                            ("Main chamber", self.variables.vacuum_main, float(self.conf['vacuum_threshold_main'])),
+                            ("Buffer chamber", self.variables.vacuum_buffer, float(self.conf['vacuum_threshold_buffer'])),
+                        ],
+                    ):
+                        return  # operator cancelled - leave the gate closed
                     if self.conf["gates"] == "on":
                         switch_gate(0)
                     self.led_main_chamber.setPixmap(self.led_green)
@@ -357,7 +430,15 @@ class Ui_Gates(object):
                     and self.variables.flag_pump_load_lock
                 )
             ) or self.flag_super_user:
-                if not self.variables.flag_load_gate:  # Open the main gate
+                if not self.variables.flag_load_gate:  # Open the load-lock gate
+                    if not self.flag_super_user and not self._vacuum_ok_to_open(
+                        "load-lock gate",
+                        [
+                            ("Load lock", self.variables.vacuum_load_lock, float(self.conf['vacuum_threshold_load_lock'])),
+                            ("Buffer chamber", self.variables.vacuum_buffer, float(self.conf['vacuum_threshold_buffer'])),
+                        ],
+                    ):
+                        return  # operator cancelled - leave the gate closed
                     if self.conf["gates"] == "on":
                         switch_gate(2)
                     self.led_load_lock.setPixmap(self.led_green)
@@ -379,7 +460,19 @@ class Ui_Gates(object):
                     and self.variables.flag_pump_load_lock
                 )
             ) or self.flag_super_user:
-                if not self.variables.flag_cryo_gate:  # Open the main gate
+                if not self.variables.flag_cryo_gate:  # Open the cryo gate
+                    if not self.flag_super_user and not self._vacuum_ok_to_open(
+                        "cryo gate",
+                        [
+                            (
+                                "Cryo load lock",
+                                self.variables.vacuum_cryo_load_lock,
+                                float(self.conf['vacuum_threshold_cryo_load_lock']),
+                            ),
+                            ("Buffer chamber", self.variables.vacuum_buffer, float(self.conf['vacuum_threshold_buffer'])),
+                        ],
+                    ):
+                        return  # operator cancelled - leave the gate closed
                     if self.conf["gates"] == "on":
                         switch_gate(4)
                     self.led_cryo.setPixmap(self.led_green)

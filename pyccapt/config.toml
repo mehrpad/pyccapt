@@ -19,7 +19,7 @@ save_meta_interval_visualization = 300
 save_meta_interval_camera = 300
 
 # Limits and control defaults
-max_vdc = 14000
+max_vdc = 10000
 min_vp = 328
 max_vp = 3281
 pulse_amp_per_supply_voltage = 21.875

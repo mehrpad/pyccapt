@@ -143,19 +143,44 @@ def _experiment_folder(variables) -> Path | None:
     return folder if folder.is_dir() else None
 
 
+def _experiment_id(variables) -> str:
+    """Best-effort experiment identifier for the attachment filename.
+
+    Prefers ``exp_name`` (``<counter>_<date>_<electrode>_<name>``, set in
+    experiment_state.prepare_experiment_output_paths), then the experiment
+    folder name, then ``hdf5_data_name``.
+    """
+    for attr in ("exp_name", "hdf5_data_name"):
+        value = str(getattr(variables, attr, "") or "").strip()
+        if value:
+            return value
+    folder = _experiment_folder(variables)
+    if folder is not None:
+        return folder.name
+    return "experiment"
+
+
 def _attach_experiment_files(msg: MIMEMultipart, variables) -> list[str]:
-    """Attach apt.log and parameters.txt if they exist. Returns names attached."""
+    """Attach apt.log and the experiment-details file if they exist.
+
+    parameters.txt is attached under the friendlier name
+    ``experiment_details_<exp id>.txt`` so the recipient can tell which
+    experiment it belongs to. Returns the names attached.
+    """
     attached: list[str] = []
     folder = _experiment_folder(variables)
     if folder is None:
         return attached
 
+    # On-disk name -> attachment (download) name. parameters.txt keeps its
+    # stable on-disk name but is delivered as experiment_details_<id>.txt.
+    details_name = f"experiment_details_{_experiment_id(variables)}.txt"
     candidates = [
-        folder / "parameters.txt",
-        folder / "meta_data" / "apt.log",
+        (folder / "parameters.txt", details_name),
+        (folder / "meta_data" / "apt.log", None),
     ]
 
-    for path in candidates:
+    for path, attach_name in candidates:
         try:
             if not path.is_file():
                 continue
@@ -171,13 +196,14 @@ def _attach_experiment_files(msg: MIMEMultipart, variables) -> list[str]:
             maintype, subtype = (ctype or "application/octet-stream").split("/", 1)
             with open(path, "rb") as fh:
                 part = MIMEApplication(fh.read(), _subtype=subtype)
+            filename = attach_name or path.name
             part.add_header(
                 "Content-Disposition",
                 "attachment",
-                filename=path.name,
+                filename=filename,
             )
             msg.attach(part)
-            attached.append(path.name)
+            attached.append(filename)
         except Exception as exc:  # never let an attachment failure kill the email
             _log.warning("Could not attach %s: %s", path, exc)
     return attached

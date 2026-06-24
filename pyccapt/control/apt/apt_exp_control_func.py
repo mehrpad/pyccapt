@@ -150,17 +150,26 @@ def initialization_v_p(com_port_v_p, log_apt, variables):
     return initialization_error
 
 
-def send_info_email(log_apt, variables):
+def send_info_email(log_apt, variables, conf):
     """
     Send the information email.
+
+    The body carries the same run-statistics-on-top / setup-parameters
+    report that is written to the experiment folder, so the recipient sees
+    everything inline without having to open the attachment.
 
     Args:
             log_apt: The logger object.
             variables: The class object of the Variables class.
+            conf: The configuration dictionary (needed to build the report).
 
     Returns:
             None
     """
+    # Imported lazily so this device-side helper does not pull in the core
+    # package at import time.
+    from pyccapt.control.core import experiment_statistics
+
     subject = 'Experiment {} Report on {}'.format(variables.hdf5_data_name, variables.start_time)
     elapsed_time_temp = float("{:.3f}".format(variables.elapsed_time))
     message = (
@@ -172,60 +181,10 @@ def send_info_email(log_apt, variables):
         )
     )
 
-    additional_info = 'Username: {}\n'.format(variables.user_name)
-    additional_info += 'Experiment Name: {}\n'.format(variables.ex_name)
-    additional_info += 'Electrode Name: {}\n'.format(variables.electrode)
-    additional_info += 'Experiment number: {}\n'.format(variables.counter)
-    additional_info += 'Detection Rate (%): {}\n'.format(variables.detection_rate)
-    additional_info += 'Maximum Number of Ions: {}\n'.format(variables.max_ions)
-    additional_info += 'Counter source: {}\n'.format(variables.counter_source)
-    additional_info += 'Pulse Fraction (%): {}\n'.format(variables.pulse_fraction)
-    additional_info += 'Pulse Frequency (kHz): {}\n'.format(variables.pulse_frequency)
-    # variables.laser_freq is the BASE rep-rate in Hz; the OUTPUT rate at
-    # the sample is base / division. Show both in kHz so the recipient does
-    # not need to do the conversion.
-    try:
-        _base_khz = float(variables.laser_freq or 0) / 1000.0
-        _div = max(int(getattr(variables, 'laser_division_factor', 1) or 1), 1)
-        _output_khz = _base_khz / _div
-        additional_info += 'Laser base pulse frequency (kHz): {:.3f}\n'.format(_base_khz)
-        additional_info += 'Laser division factor: {}\n'.format(_div)
-        additional_info += 'Laser output pulse frequency (kHz): {:.3f}\n'.format(_output_khz)
-        _pulse_nJ = float(getattr(variables, 'laser_pulse_energy', 0) or 0)
-        additional_info += 'Laser pulse energy (nJ): {:.3f}\n'.format(_pulse_nJ)
-    except (TypeError, ValueError):
-        pass
-    additional_info += 'Control Algorithm: {}\n'.format(variables.control_algorithm)
-    additional_info += 'pulse_mode: {}\n'.format(variables.pulse_mode)
-    additional_info += 'Experiment Control Refresh freq. (Hz): {}\n'.format(variables.ex_freq)
-    additional_info += 'K_p Upwards: {}\n'.format(variables.vdc_step_up)
-    additional_info += 'K_p Downwards: {}\n'.format(variables.vdc_step_down)
-    additional_info += 'Specimen start Voltage (V): {}\n'.format(variables.vdc_min)
-    additional_info += 'Specimen Stop Voltage (V): {}\n'.format(variables.vdc_max)
-    additional_info += 'Temperature (k): {}\n'.format(variables.temperature)
-    additional_info += 'Vacuum (mbar): {}\n'.format(variables.vacuum_main)
+    # Full report: run statistics on top, separated by a line from the
+    # setup parameters. Same content as the attached experiment-details file.
+    message += experiment_statistics.build_statistics_text(variables, conf)
 
-    if variables.pulse_mode == 'Voltage':
-        additional_info += 'Pulse start Voltage (V): {}\n'.format(variables.v_p_min)
-        additional_info += 'Pulse Stop Voltage (V): {}\n'.format(variables.v_p_max)
-        additional_info += 'Specimen Max Achieved Pulse Voltage (V): {:.3f}\n\n'.format(variables.pulse_voltage)
-    elif variables.pulse_mode == 'Laser':
-        additional_info += 'Specimen Laser Pulsed Energy (pJ): {:.3f}\n\n'.format(variables.laser_intensity)
-        additional_info += 'Specimen Max Laser Power (W): {:.3f}\n\n'.format(variables.max_laser_power)
-    additional_info += 'StopCriteria:\n'
-    additional_info += 'Criteria Time:: {}\n'.format(variables.criteria_time)
-    additional_info += 'Criteria DC Voltage:: {}\n'.format(variables.criteria_vdc)
-    additional_info += 'Criteria Ions:: {}\n'.format(variables.criteria_ions)
-
-    additional_info += 'Specimen Max Achieved dc Voltage (V): {:.3f}\n'.format(variables.specimen_voltage)
-    additional_info += 'Experiment Elapsed Time (Sec): {:.3f}\n'.format(variables.elapsed_time)
-    additional_info += 'Experiment Total Ions: {}\n\n'.format(variables.total_ions)
-
-    additional_info += 'Email: {}\n'.format(variables.email)
-
-    additional_info += 'The experiment was conducted using PyCCAPT Python package.'
-
-    message += additional_info
     # Pass variables through so the email module can attach apt.log and
     # parameters.txt from this experiment's folder. Any failure (missing
     # credentials, SMTP error, attachment IO error) raises and is caught

@@ -875,7 +875,7 @@ class APT_Exp_Control:
             # send an email
             if len(self.variables.email) > 3:
                 try:
-                    apt_exp_control_func.send_info_email(self.log_apt, self.variables)
+                    apt_exp_control_func.send_info_email(self.log_apt, self.variables, self.conf)
                 except Exception:
                     # Email failure must not block counter increment, HDF5
                     # closure, or any other finalization step.

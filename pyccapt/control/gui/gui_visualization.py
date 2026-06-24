@@ -874,6 +874,8 @@ class Ui_Visualization(object):
             self.fdm_last_events_switch.setStyleSheet("QPushButton{background: rgb(0, 255, 26)}")
         else:
             self.fdm_last_events_switch.setStyleSheet(self._original_fdm_button_style)
+        # Keep the toggle responsive after the experiment has stopped.
+        self._redraw_if_stopped()
 
     def reset_heatmap(self):
         """
@@ -887,6 +889,8 @@ class Ui_Visualization(object):
         # with self.variables.lock_setup_parameters:
         if not self.variables.reset_heatmap:
             self.variables.reset_heatmap = True
+        # Apply the reset immediately if the experiment is already stopped.
+        self._redraw_if_stopped()
 
     def detection_rate_range(self):
         """
@@ -1040,10 +1044,7 @@ class Ui_Visualization(object):
                     self.last_100_thousand_t = self.last_100_thousand_t[-100000:]
 
             try:
-                if self.variables.pulse_mode == 'Voltage':
-                    t_0 = self.conf["t_0_voltage"]
-                elif self.variables.pulse_mode == 'Laser' or self.variables.pulse_mode == 'VoltageLaser':
-                    t_0 = self.conf["t_0_laser"]
+                t_0 = self._t_0()
 
                 # Apply any pending live-calibration updates (parameter
                 # swaps + accumulator resets) here on the GUI thread,
@@ -1053,19 +1054,7 @@ class Ui_Visualization(object):
 
                 # "Last events" view: re-bin only the most recent N events
                 # for whichever single view is currently displayed.
-                if self.mc_tof_last_events_flag:
-                    t_le = self.last_100_thousand_t[-self.num_event_mc_tof :]
-                    v_le = self.last_100_thousand_v[-self.num_event_mc_tof :]
-                    x_le = self.last_100_thousand_det_x[-self.num_event_mc_tof :]
-                    y_le = self.last_100_thousand_det_y[-self.num_event_mc_tof :]
-                    if self.conf["visualization"] == "tof":
-                        params = None if self.uncalibrated_mode else self._calib_params_tof
-                        vals = self._apply_axis(params, "tof", t_le, v_le, x_le, y_le, t_0)
-                        hist_tof_last_events, _ = np.histogram(vals, bins=self.bins_tof)
-                    else:  # "mc"
-                        params = None if self.uncalibrated_mode else self._calib_params_mc
-                        vals = self._apply_axis(params, "mc", t_le, v_le, x_le, y_le, t_0)
-                        hist_mc_last_events, _ = np.histogram(vals, bins=self.bins_mc)
+                le_hist = self._last_events_spectrum_hist(t_0) if self.mc_tof_last_events_flag else None
 
                 # Four cumulative spectra, every one updated each tick so
                 # switching the displayed view is a pure swap that never
@@ -1094,66 +1083,8 @@ class Ui_Visualization(object):
                 self.hist_tof += np.histogram(tof_cal, bins=self.bins_tof)[0]
                 self.hist_mc += np.histogram(mc_cal, bins=self.bins_mc)[0]
 
-                # Pick which cumulative series to display this tick.
-                cumul_hist_tof = self.hist_tof_uncalib if self.uncalibrated_mode else self.hist_tof
-                cumul_hist_mc = self.hist_mc_uncalib if self.uncalibrated_mode else self.hist_mc
-
-                self.histogram.clear()
-                if self.conf["visualization"] == "tof" and not self.mc_tof_last_events_flag:
-                    hist = np.copy(cumul_hist_tof[: self.index_hist_tof])
-                    hist[hist == 0] = 1  # Avoid log(0) error
-                    bins = self.bins_tof[: self.index_hist_tof + 1]
-                    self.histogram.plot(
-                        bins,
-                        hist,
-                        stepMode="center",
-                        fillLevel=0,
-                        fillOutline=True,
-                        brush='black',
-                        name="num events: %s" % self.length_events,
-                    )
-                elif self.conf["visualization"] == "mc" and not self.mc_tof_last_events_flag:
-                    hist = np.copy(cumul_hist_mc[: self.index_hist_mc])
-                    hist[hist == 0] = 1  # Avoid log(0) error
-                    bins = self.bins_mc[: self.index_hist_mc + 1]
-                    self.histogram.plot(
-                        bins,
-                        hist,
-                        stepMode="center",
-                        fillLevel=0,
-                        fillOutline=True,
-                        brush='black',
-                        name="num events: %s" % self.length_events,
-                    )
-                elif self.conf["visualization"] == "tof" and self.mc_tof_last_events_flag:
-                    # remobe the bins bigger than the max_tof
-                    hist = np.copy(hist_tof_last_events[: self.index_hist_tof])
-                    hist[hist == 0] = 1  # Avoid log(0) error
-                    bins = self.bins_tof[: self.index_hist_tof + 1]
-                    self.histogram.plot(
-                        bins,
-                        hist,
-                        stepMode="center",
-                        fillLevel=0,
-                        fillOutline=True,
-                        brush='black',
-                        name="num events: %s" % self.length_events,
-                    )
-                elif self.conf["visualization"] == "mc" and self.mc_tof_last_events_flag:
-                    # remobe the bins bigger than the max_mc
-                    hist = np.copy(hist_mc_last_events[: self.index_hist_mc])
-                    hist[hist == 0] = 1  # Avoid log(0) error
-                    bins = self.bins_mc[: self.index_hist_mc + 1]
-                    self.histogram.plot(
-                        bins,
-                        hist,
-                        stepMode="center",
-                        fillLevel=0,
-                        fillOutline=True,
-                        brush='black',
-                        name="num events: %s" % self.length_events,
-                    )
-
+                # Draw the active spectrum from the freshly updated buffers.
+                self._draw_spectrum(le_hist)
             except Exception as e:
                 print(
                     f"{initialize_devices.bcolors.FAIL}Error: Cannot plot Histogram correctly{initialize_devices.bcolors.ENDC}"
@@ -1170,21 +1101,7 @@ class Ui_Visualization(object):
             )
 
             # --- Hitmap (left panel) -------------------------------------
-            if self.variables.reset_heatmap:
-                self.variables.reset_heatmap = False
-                self.last_100_thousand_det_x_heatmap = np.array([])
-                self.last_100_thousand_det_y_heatmap = np.array([])
-            x_last_events = self.last_100_thousand_det_x_heatmap[:]
-            y_last_events = self.last_100_thousand_det_y_heatmap[:]
-            self.scatter.setSize(self.hitmap_plot_size.value())
-            x = (x_last_events * 10)[-self.num_hit_display :]
-            y = (y_last_events * 10)[-self.num_hit_display :]
-            self.hitmap_count.setText(str(len(x)))
-            self.scatter.clear()
-            self.scatter.setData(x=x, y=y)
-            self.detector_heatmap.clear()
-            self.detector_heatmap.addItem(self.scatter)
-            self.detector_heatmap.addItem(self.detector_circle)
+            self._draw_hitmap()
 
             # --- FDM (right panel) ---------------------------------------
             # Both FDMs are updated every tick so the Last Events toggle is
@@ -1207,39 +1124,166 @@ class Ui_Visualization(object):
             self._fdm_window_x = np.concatenate((self._fdm_window_x, (xx * 10).astype(np.float32)))[-fdm_max:]
             self._fdm_window_y = np.concatenate((self._fdm_window_y, (yy * 10).astype(np.float32)))[-fdm_max:]
 
-            # Display whichever map the toggle selects.
-            if self._fdm_use_last_events:
-                win_hist, _, _ = np.histogram2d(
-                    self._fdm_window_x,
-                    self._fdm_window_y,
-                    bins=self.bins_detector,
-                    range=self.range,
-                )
-                self.hist_fdm = np.log10(win_hist + 1)
+            # Display whichever map the toggle selects (no new accumulation).
+            self._draw_fdm_display()
+
+    # ------------------------------------------------------------------ render
+    # The rendering of the spectrum, hitmap and FDM is factored into the
+    # helpers below so it can be reused both from the live update tick and
+    # from _render_static_views (which redraws from the retained buffers
+    # after the experiment has stopped, keeping the view buttons working).
+
+    def _t_0(self):
+        """Return the t_0 constant for the active pulse mode (s)."""
+        if self.variables.pulse_mode in ('Laser', 'VoltageLaser'):
+            return self.conf["t_0_laser"]
+        return self.conf["t_0_voltage"]
+
+    def _last_events_spectrum_hist(self, t_0):
+        """Histogram of the most recent ``num_event_mc_tof`` events for the
+        currently displayed axis (mc or tof), calibrated or raw per the
+        active view. Reads only the retained ring buffer, so it works the
+        same whether the experiment is running or stopped."""
+        t_le = self.last_100_thousand_t[-self.num_event_mc_tof:]
+        v_le = self.last_100_thousand_v[-self.num_event_mc_tof:]
+        x_le = self.last_100_thousand_det_x[-self.num_event_mc_tof:]
+        y_le = self.last_100_thousand_det_y[-self.num_event_mc_tof:]
+        if self.conf["visualization"] == "tof":
+            params = None if self.uncalibrated_mode else self._calib_params_tof
+            vals = self._apply_axis(params, "tof", t_le, v_le, x_le, y_le, t_0)
+            return np.histogram(vals, bins=self.bins_tof)[0]
+        params = None if self.uncalibrated_mode else self._calib_params_mc
+        vals = self._apply_axis(params, "mc", t_le, v_le, x_le, y_le, t_0)
+        return np.histogram(vals, bins=self.bins_mc)[0]
+
+    def _plot_spectrum_hist(self, hist, bins):
+        """Plot a single spectrum histogram with the standard styling."""
+        hist = np.copy(hist)
+        hist[hist == 0] = 1  # Avoid log(0) error
+        self.histogram.plot(
+            bins,
+            hist,
+            stepMode="center",
+            fillLevel=0,
+            fillOutline=True,
+            brush='black',
+            name="num events: %s" % self.length_events,
+        )
+
+    def _draw_spectrum(self, le_hist=None):
+        """Render the active spectrum.
+
+        ``le_hist`` is the precomputed last-events histogram for the active
+        view (from _last_events_spectrum_hist) when "Last Events" is on, or
+        None to draw the cumulative accumulator instead.
+        """
+        self.histogram.clear()
+        if self.conf["visualization"] == "tof":
+            if self.mc_tof_last_events_flag and le_hist is not None:
+                src = le_hist
             else:
-                self.hist_fdm = self._fdm_hist_all
+                src = self.hist_tof_uncalib if self.uncalibrated_mode else self.hist_tof
+            self._plot_spectrum_hist(src[: self.index_hist_tof], self.bins_tof[: self.index_hist_tof + 1])
+        else:  # "mc"
+            if self.mc_tof_last_events_flag and le_hist is not None:
+                src = le_hist
+            else:
+                src = self.hist_mc_uncalib if self.uncalibrated_mode else self.hist_mc
+            self._plot_spectrum_hist(src[: self.index_hist_mc], self.bins_mc[: self.index_hist_mc + 1])
 
-            # The ion counter is the cumulative total detected and keeps
-            # growing every tick regardless of mode, so toggling Last Events
-            # only swaps which map is drawn — it never changes the number.
-            self.fdm_count.setText(str(self._fdm_count_all))
+    def _draw_hitmap(self):
+        """Redraw the detector hitmap scatter from the retained heatmap
+        buffer. Honours a pending Reset request."""
+        if self.variables.reset_heatmap:
+            self.variables.reset_heatmap = False
+            self.last_100_thousand_det_x_heatmap = np.array([])
+            self.last_100_thousand_det_y_heatmap = np.array([])
+        x_last_events = self.last_100_thousand_det_x_heatmap[:]
+        y_last_events = self.last_100_thousand_det_y_heatmap[:]
+        self.scatter.setSize(self.hitmap_plot_size.value())
+        x = (x_last_events * 10)[-self.num_hit_display:]
+        y = (y_last_events * 10)[-self.num_hit_display:]
+        self.hitmap_count.setText(str(len(x)))
+        self.scatter.clear()
+        self.scatter.setData(x=x, y=y)
+        self.detector_heatmap.clear()
+        self.detector_heatmap.addItem(self.scatter)
+        self.detector_heatmap.addItem(self.detector_circle)
 
-            img_fdm = pg.ImageItem()
-            img_fdm.setImage(np.copy(self.hist_fdm))
-            img_fdm.setRect(
-                QtCore.QRectF(
-                    xedges[0],
-                    yedges[0],
-                    xedges[-1] - xedges[0],
-                    yedges[-1] - yedges[0],
-                )
+    def _draw_fdm_display(self):
+        """Render the FDM panel from the existing accumulators (entire map
+        or last-events window). Performs no accumulation, so it is safe to
+        call both live and after the experiment has stopped."""
+        try:
+            fdm_max = max(1, int(float(self.fdm_max_ions.text())))
+        except (ValueError, AttributeError):
+            fdm_max = 1_000_000
+        if self._fdm_use_last_events:
+            win_hist, _, _ = np.histogram2d(
+                self._fdm_window_x[-fdm_max:],
+                self._fdm_window_y[-fdm_max:],
+                bins=self.bins_detector,
+                range=self.range,
             )
-            lut = pg.colormap.get('viridis').getLookupTable(start=0.0, stop=1.0, nPts=256)
-            img_fdm.setLookupTable(lut)
-            self.detector_fdm.clear()
-            self.detector_fdm.addItem(img_fdm)
-            self.detector_fdm.addItem(self.detector_circle_fdm)
-            self.detector_fdm.getViewBox().setAspectLocked(True)
+            self.hist_fdm = np.log10(win_hist + 1)
+        else:
+            self.hist_fdm = self._fdm_hist_all
+        # The ion counter is the cumulative total detected, so toggling
+        # Last Events only swaps which map is drawn — never the number.
+        self.fdm_count.setText(str(self._fdm_count_all))
+        # Detector-plane edges are fixed by the configured range, so they
+        # can be derived without re-histogramming this tick's events.
+        xedges = np.linspace(self.range[0][0], self.range[0][1], self.bins_detector[0] + 1)
+        yedges = np.linspace(self.range[1][0], self.range[1][1], self.bins_detector[1] + 1)
+        img_fdm = pg.ImageItem()
+        img_fdm.setImage(np.copy(self.hist_fdm))
+        img_fdm.setRect(
+            QtCore.QRectF(
+                xedges[0],
+                yedges[0],
+                xedges[-1] - xedges[0],
+                yedges[-1] - yedges[0],
+            )
+        )
+        lut = pg.colormap.get('viridis').getLookupTable(start=0.0, stop=1.0, nPts=256)
+        img_fdm.setLookupTable(lut)
+        self.detector_fdm.clear()
+        self.detector_fdm.addItem(img_fdm)
+        self.detector_fdm.addItem(self.detector_circle_fdm)
+        self.detector_fdm.getViewBox().setAspectLocked(True)
+
+    def _render_static_views(self):
+        """Re-render the spectrum, hitmap and FDM from the retained buffers.
+
+        Called when a view button is used after the experiment has stopped
+        so the controls stay interactive (e.g. show the last 10000 events on
+        the FDM / mass spectrum). Reads no new ring-buffer data and never
+        touches the V_dc / detection-rate time series — those stay frozen at
+        their final values. The next experiment start clears everything via
+        ``plot_clear_flag`` in update_graphs.
+        """
+        try:
+            t_0 = self._t_0()
+            self._drain_calib_updates()
+            le_hist = self._last_events_spectrum_hist(t_0) if self.mc_tof_last_events_flag else None
+            self._draw_spectrum(le_hist)
+            self._draw_hitmap()
+            self._draw_fdm_display()
+        except Exception as e:
+            print(
+                f"{initialize_devices.bcolors.FAIL}Error: Cannot redraw stopped views{initialize_devices.bcolors.ENDC}"
+            )
+            print(e)
+
+    def _redraw_if_stopped(self):
+        """Redraw the static views when the experiment is not running.
+
+        While an experiment runs the live timer redraws every tick, so this
+        is a no-op then. After a stop the timer no longer renders, so the
+        view buttons call this to reflect their change immediately.
+        """
+        if not self.variables.start_flag and self.length_events > 0:
+            self._render_static_views()
 
     def update_graphs(
         self,
@@ -1413,6 +1457,8 @@ class Ui_Visualization(object):
         else:
             self.histogram.setLabel("bottom", "m/c", units='Da', **self.styles)
         self._highlight_active_view_button()
+        # Keep the view switch responsive after the experiment has stopped.
+        self._redraw_if_stopped()
 
     def _highlight_active_view_button(self):
         """Paint the active view button green, the other three default."""
@@ -1626,6 +1672,8 @@ class Ui_Visualization(object):
             self.spectrum_last_events_switch.setStyleSheet("QPushButton{\nbackground: rgb(0, 255, 26)\n}")
         else:
             self.spectrum_last_events_switch.setStyleSheet(self.original_button_style)
+        # Keep the toggle responsive after the experiment has stopped.
+        self._redraw_if_stopped()
 
     def parameters_changes(self):
         """
@@ -1670,6 +1718,10 @@ class Ui_Visualization(object):
                 self.hit_displayed.setText(_translate("PyCCAPT", "100000"))
             else:
                 self.num_hit_display = int(float(self.hit_displayed.text()))
+
+        # Keep the fields responsive after the experiment has stopped so the
+        # operator can still re-window the spectrum / hitmap (e.g. last 10000).
+        self._redraw_if_stopped()
 
     def error_message(self, message):
         """

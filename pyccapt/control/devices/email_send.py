@@ -135,6 +135,30 @@ def _resolve_logo() -> Path | None:
     return None
 
 
+def _resolve_viz_image(variables) -> Path | None:
+    """Newest Visualization full-window snapshot for this experiment.
+
+    The Visualization process writes ``visualization_screenshot_<suffix>.png``
+    into the experiment's ``meta_data`` folder — periodically (numeric
+    suffix), at the end of the run (``_final``) and on demand for interim
+    e-mails (``_email``). We attach the most recently written one so the
+    e-mail carries a current picture of the detector / spectra. Returns
+    None if no snapshot exists yet.
+    """
+    folder = _experiment_folder(variables)
+    if folder is None:
+        return None
+    meta = folder / "meta_data"
+    if not meta.is_dir():
+        return None
+    shots = list(meta.glob("visualization_screenshot_*.png"))
+    if not shots:
+        return None
+    # Newest by modification time — the interim '_email' / final '_final'
+    # shot is whatever was written last.
+    return max(shots, key=lambda p: p.stat().st_mtime)
+
+
 def _experiment_folder(variables) -> Path | None:
     path_value = getattr(variables, "path", None)
     if not path_value:
@@ -179,6 +203,11 @@ def _attach_experiment_files(msg: MIMEMultipart, variables) -> list[str]:
         (folder / "parameters.txt", details_name),
         (folder / "meta_data" / "apt.log", None),
     ]
+    # Attach the (full-resolution) Visualization snapshot as well; it is
+    # also inlined in the body by _build_message.
+    viz_path = _resolve_viz_image(variables)
+    if viz_path is not None:
+        candidates.append((viz_path, f"visualization_{_experiment_id(variables)}.png"))
 
     for path, attach_name in candidates:
         try:
@@ -251,6 +280,27 @@ def _build_message(
         except Exception as exc:
             _log.warning("Could not embed logo %s: %s", logo_path, exc)
 
+    # Inline the latest Visualization snapshot (detector + spectra) so the
+    # recipient sees the current state of the experiment in the body, and
+    # keep the file as an attachment for full resolution.
+    viz_html = ""
+    viz_path = _resolve_viz_image(variables) if variables is not None else None
+    if viz_path is not None:
+        try:
+            with open(viz_path, "rb") as fh:
+                viz_data = fh.read()
+            viz_part = MIMEImage(viz_data, _subtype="png", name=viz_path.name)
+            viz_part.add_header("Content-ID", "<pyccapt_viz>")
+            viz_part.add_header("Content-Disposition", "inline", filename=viz_path.name)
+            msg.attach(viz_part)
+            viz_html = (
+                '<p style="margin:8px 0 4px 0;font-weight:bold">Visualization snapshot</p>'
+                '<img src="cid:pyccapt_viz" alt="Visualization snapshot" '
+                'style="max-width:640px;border:1px solid #ccc"/><br/>'
+            )
+        except Exception as exc:
+            _log.warning("Could not embed visualization image %s: %s", viz_path, exc)
+
     # Multipart/alternative inside the related container so clients pick the
     # best representation. Plain text is the source of truth; HTML is just a
     # nicer rendering.
@@ -262,6 +312,7 @@ def _build_message(
         "<pre style='font-family:Consolas,Menlo,monospace;font-size:12px'>"
         f"{body_text}"
         "</pre>"
+        f"{viz_html}"
         "</body></html>"
     )
     alternative.attach(MIMEText(html_body, "html", _charset="utf-8"))

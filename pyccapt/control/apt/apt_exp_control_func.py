@@ -150,18 +150,22 @@ def initialization_v_p(com_port_v_p, log_apt, variables):
     return initialization_error
 
 
-def send_info_email(log_apt, variables, conf):
+def send_info_email(log_apt, variables, conf, interim=False):
     """
     Send the information email.
 
     The body carries the same run-statistics-on-top / setup-parameters
     report that is written to the experiment folder, so the recipient sees
-    everything inline without having to open the attachment.
+    everything inline without having to open the attachment. The latest
+    Visualization snapshot is attached / inlined by ``email_send``.
 
     Args:
             log_apt: The logger object.
             variables: The class object of the Variables class.
             conf: The configuration dictionary (needed to build the report).
+            interim: When True this is a periodic progress e-mail sent mid-run
+                    (every ``email_interval_events`` ions) rather than the final
+                    end-of-experiment report; only the subject line differs.
 
     Returns:
             None
@@ -170,7 +174,12 @@ def send_info_email(log_apt, variables, conf):
     # package at import time.
     from pyccapt.control.core import experiment_statistics
 
-    subject = 'Experiment {} Report on {}'.format(variables.hdf5_data_name, variables.start_time)
+    if interim:
+        subject = 'Experiment {} Progress ({} ions) on {}'.format(
+            variables.hdf5_data_name, variables.total_ions, variables.start_time
+        )
+    else:
+        subject = 'Experiment {} Report on {}'.format(variables.hdf5_data_name, variables.start_time)
     elapsed_time_temp = float("{:.3f}".format(variables.elapsed_time))
     message = (
         'The experiment was started at: {}\n'

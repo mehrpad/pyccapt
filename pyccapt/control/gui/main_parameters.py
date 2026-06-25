@@ -66,6 +66,10 @@ class FormValues:
     criteria_time: bool
     criteria_ions: bool
     criteria_vdc: bool
+    # Optional so older callers / TextLine blocks that don't supply it
+    # still construct a valid FormValues.
+    criteria_email: bool = False
+    email_interval_events: str = "1000000"
 
 
 def _electrode_names_from_mapping(data: Mapping[str, Any]) -> list[str]:
@@ -232,6 +236,8 @@ def apply_textline_item(
     variables.criteria_time = bool(item["criteria_time"])
     variables.criteria_ions = bool(item["criteria_ions"])
     variables.criteria_vdc = bool(item["criteria_vdc"])
+    variables.criteria_email = bool(item.get("criteria_email", False))
+    variables.email_interval_events = int(item.get("email_interval_events", 1000000))
 
 
 def _bounded_pulse_frequency(value: int, pulse_mode: str, conf: Mapping[str, Any]) -> tuple[int, str | None]:
@@ -314,5 +320,11 @@ def apply_form_values(
     variables.criteria_time = values.criteria_time
     variables.criteria_ions = values.criteria_ions
     variables.criteria_vdc = values.criteria_vdc
+    variables.criteria_email = values.criteria_email
+
+    try:
+        variables.email_interval_events = int(float(values.email_interval_events))
+    except (TypeError, ValueError):
+        emit_error("Email interval must be a whole number of ions")
 
     return corrections

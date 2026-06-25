@@ -1285,6 +1285,29 @@ class Ui_Visualization(object):
         if not self.variables.start_flag and self.length_events > 0:
             self._render_static_views()
 
+    def _export_all_plots(self, path_meta, suffix):
+        """Export every Visualization plot (+ a full-window grab) to PNGs.
+
+        ``suffix`` is appended to each filename, e.g. ``'email'`` for the
+        interim-notification snapshot. Mirrors the periodic / final export
+        blocks below so the e-mail attachment looks like the saved metadata.
+        """
+        targets = (
+            (self.vdc_time.plotItem, 'visualization_v_dc_p'),
+            (self.detection_rate_viz.plotItem, 'visualization_detection_rate'),
+            (self.detector_heatmap.plotItem, 'visualization_detector_hitmap'),
+            (self.detector_fdm.plotItem, 'visualization_detector_fdm'),
+            (self.histogram.plotItem, 'visualization_mc_tof'),
+        )
+        for plot_item, name in targets:
+            exporter = pg.exporters.ImageExporter(plot_item)
+            exporter.params['width'] = 1000
+            exporter.params['height'] = 800
+            exporter.export('%s/%s_%s.png' % (path_meta, name, suffix))
+
+        screenshot = QtWidgets.QApplication.primaryScreen().grabWindow(self.visualization_window.winId())
+        screenshot.save('%s/visualization_screenshot_%s.png' % (path_meta, suffix), 'png')
+
     def update_graphs(
         self,
     ):
@@ -1359,6 +1382,24 @@ class Ui_Visualization(object):
             self.detector_heatmap.enableAutoRange(axis='x')
             self.detector_heatmap.enableAutoRange(axis='y')
             self.index_auto_scale_graph = 0
+
+        # Fresh snapshot requested by the experiment process for an interim
+        # notification e-mail. Export the live plots + a full-window grab to
+        # fixed '*_email.png' names so email_send can attach the newest one,
+        # then clear the flag to signal the experiment loop we are done.
+        if self.variables.flag_save_email_screenshot:
+            try:
+                path_meta = self.variables.path_meta
+                if path_meta:
+                    self._export_all_plots(path_meta, 'email')
+            except Exception as e:
+                print(
+                    f"{initialize_devices.bcolors.WARNING}Warning: Could not save e-mail "
+                    f"screenshot{initialize_devices.bcolors.ENDC}"
+                )
+                print(e)
+            finally:
+                self.variables.flag_save_email_screenshot = False
 
         # with self.variables.lock_statistics and self.variables.lock_setup_parameters:
         if self.variables.start_flag and self.variables.flag_visualization_start:

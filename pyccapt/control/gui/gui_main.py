@@ -454,6 +454,43 @@ class Ui_PyCCAPT(object):
         )
         self.vdc_min.setObjectName("vdc_min")
         self.gridLayout_3.addWidget(self.vdc_min, 3, 3, 1, 1)
+        # Interim-email row (mirrors the "Stop at" criteria rows): when the
+        # checkbox is ticked the experiment loop sends a progress e-mail
+        # (with a fresh Visualization snapshot) every N detected ions. N is
+        # the editable field, seeded from email_interval_events in
+        # config.toml. Unchecked by default.
+        self.label_email_notif = QtWidgets.QLabel(parent=self.centralwidget)
+        self.label_email_notif.setObjectName("label_email_notif")
+        self.gridLayout_3.addWidget(self.label_email_notif, 4, 0, 1, 1)
+        self.label_email_every = QtWidgets.QLabel(parent=self.centralwidget)
+        self.label_email_every.setObjectName("label_email_every")
+        self.gridLayout_3.addWidget(self.label_email_every, 4, 1, 1, 1)
+        self.criteria_email = QtWidgets.QCheckBox(parent=self.centralwidget)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Minimum)
+        sizePolicy.setHorizontalStretch(0)
+        sizePolicy.setVerticalStretch(0)
+        sizePolicy.setHeightForWidth(self.criteria_email.sizePolicy().hasHeightForWidth())
+        self.criteria_email.setSizePolicy(sizePolicy)
+        self.criteria_email.setMouseTracking(True)
+        self.criteria_email.setText("")
+        self.criteria_email.setChecked(False)
+        self.criteria_email.setObjectName("criteria_email")
+        self.gridLayout_3.addWidget(self.criteria_email, 4, 2, 1, 1)
+        self.email_interval = QtWidgets.QLineEdit(parent=self.centralwidget)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Minimum)
+        sizePolicy.setHorizontalStretch(0)
+        sizePolicy.setVerticalStretch(0)
+        sizePolicy.setHeightForWidth(self.email_interval.sizePolicy().hasHeightForWidth())
+        self.email_interval.setSizePolicy(sizePolicy)
+        self.email_interval.setMinimumSize(QtCore.QSize(0, 20))
+        self.email_interval.setStyleSheet(
+            "QLineEdit{\n"
+            "                                                background: rgb(223,223,233)\n"
+            "                                                }\n"
+            "                                            "
+        )
+        self.email_interval.setObjectName("email_interval")
+        self.gridLayout_3.addWidget(self.email_interval, 4, 3, 1, 1)
         self.verticalLayout.addLayout(self.gridLayout_3)
         self.line_2 = QtWidgets.QFrame(parent=self.centralwidget)
         self.line_2.setFrameShape(QtWidgets.QFrame.Shape.HLine)
@@ -1068,7 +1105,9 @@ class Ui_PyCCAPT(object):
         PyCCAPT.setTabOrder(self.max_ions, self.criteria_vdc)
         PyCCAPT.setTabOrder(self.criteria_vdc, self.vdc_max)
         PyCCAPT.setTabOrder(self.vdc_max, self.vdc_min)
-        PyCCAPT.setTabOrder(self.vdc_min, self.pulse_mode)
+        PyCCAPT.setTabOrder(self.vdc_min, self.criteria_email)
+        PyCCAPT.setTabOrder(self.criteria_email, self.email_interval)
+        PyCCAPT.setTabOrder(self.email_interval, self.pulse_mode)
         PyCCAPT.setTabOrder(self.pulse_mode, self.pulse_fraction)
         PyCCAPT.setTabOrder(self.pulse_fraction, self.pulse_frequency)
         PyCCAPT.setTabOrder(self.pulse_frequency, self.detection_rate_init)
@@ -1169,6 +1208,8 @@ class Ui_PyCCAPT(object):
         self.criteria_vdc.stateChanged.connect(self.setup_parameters_changes)
         self.criteria_time.stateChanged.connect(self.setup_parameters_changes)
         self.criteria_ions.stateChanged.connect(self.setup_parameters_changes)
+        self.criteria_email.stateChanged.connect(self.setup_parameters_changes)
+        self.email_interval.editingFinished.connect(self.setup_parameters_changes)
         ###
         self.start_button.clicked.connect(self.start_experiment_clicked)
         self.stop_button.clicked.connect(self.stop_experiment_clicked)
@@ -1243,7 +1284,10 @@ class Ui_PyCCAPT(object):
         self.label_3.setText(_translate("PyCCAPT", "Stop at"))
         self.label_176.setText(_translate("PyCCAPT", "Max. Experiment Time (s)"))
         self.ex_time.setText(_translate("PyCCAPT", "3600"))
-        self.label_179.setText(_translate("PyCCAPT", "DC Min. Voltage (V)"))
+        self.label_email_notif.setText(_translate("PyCCAPT", "Email Notification"))
+        self.label_email_every.setText(_translate("PyCCAPT", "Every (ions)"))
+        self.email_interval.setText(_translate("PyCCAPT", "1000000"))
+        self.label_179.setText(_translate("PyCCAPT", "DC Start Voltage (V)"))
         self.vdc_max.setText(_translate("PyCCAPT", "4000"))
         self.label_180.setText(_translate("PyCCAPT", "DC Max. Voltage (V)"))
         self.label_177.setText(_translate("PyCCAPT", "Max. Number of Ions"))
@@ -1400,6 +1444,14 @@ class Ui_PyCCAPT(object):
         _set_combo(self.pulse_mode, 'default_pulse_mode')
         _set_combo(self.counter_source, 'default_counter_source')
         _set_combo(self.control_algorithm, 'default_control_algorithm')
+
+        # Seed the interim-email interval field from config; the operator can
+        # edit it afterwards. The checkbox stays unchecked by default.
+        try:
+            interval = int(conf.get('email_interval_events', 1000000))
+        except (TypeError, ValueError):
+            interval = 1000000
+        self.email_interval.setText(str(interval))
 
     def super_user_access(self):
         """
@@ -1558,6 +1610,8 @@ class Ui_PyCCAPT(object):
                 criteria_time=self.criteria_time.isChecked(),
                 criteria_ions=self.criteria_ions.isChecked(),
                 criteria_vdc=self.criteria_vdc.isChecked(),
+                criteria_email=self.criteria_email.isChecked(),
+                email_interval_events=self.email_interval.text(),
             )
             corrections = main_parameters.apply_form_values(
                 self.variables,

@@ -18,6 +18,12 @@ log_time_time_interval = 15
 save_meta_interval_visualization = 300
 save_meta_interval_camera = 300
 
+# Interim e-mail notifications. When the "Email every ..." checkbox next to
+# the e-mail field in the main GUI is ticked, the experiment sends a progress
+# e-mail (with a fresh Visualization snapshot attached) every this many
+# detected ions. Set to 0 to disable the periodic e-mail entirely.
+email_interval_events = 1000000
+
 # Limits and control defaults
 max_vdc = 10000
 min_vp = 328

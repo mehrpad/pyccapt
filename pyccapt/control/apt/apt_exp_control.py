@@ -1,6 +1,7 @@
 import copy
 import datetime
 import multiprocessing
+import threading
 import time
 from pathlib import Path
 
@@ -334,6 +335,32 @@ class APT_Exp_Control:
         while time.perf_counter() - start_time < seconds:
             pass
 
+    def _send_interim_email_async(self):
+        """Send a progress e-mail (off the control loop) every N ions.
+
+        Asks the Visualization process for a fresh snapshot, gives it a
+        short window to write the PNGs, then sends the e-mail on a daemon
+        thread so SMTP latency never stalls the experiment loop.
+        """
+        # Request a fresh Visualization snapshot for the e-mail attachment.
+        self.variables.flag_save_email_screenshot = True
+
+        def _worker():
+            # Give the viz process up to ~3 s to write the snapshot. If it
+            # is closed / not running, the e-mail just falls back to the
+            # most recent existing snapshot (or none).
+            for _ in range(30):
+                if not self.variables.flag_save_email_screenshot:
+                    break
+                time.sleep(0.1)
+            try:
+                apt_exp_control_func.send_info_email(self.log_apt, self.variables, self.conf, interim=True)
+                self.log_apt.info('Interim e-mail sent at %s ions', self.variables.total_ions)
+            except Exception:
+                self.log_apt.exception('Interim e-mail notification failed')
+
+        threading.Thread(target=_worker, name='interim-email', daemon=True).start()
+
     def _build_pid(self):
         """(Re)create the PID controller from the current config gains."""
         self.pid = PID(self._pid_kp, self._pid_ki, self._pid_kd, setpoint=self.detection_rate)
@@ -556,6 +583,10 @@ class APT_Exp_Control:
         last_pulse_mode = self.pulse_mode
         flag_change_pulse_mode = False
         pulse_frequency_tmp = self.pulse_frequency
+        # Interim-email bookkeeping: send a progress e-mail every
+        # email_interval_events ions while the GUI checkbox is ticked. The
+        # interval itself is read live from the GUI field inside the loop.
+        self._last_email_ions = 0
         if self.initialization_error:
             pass
         else:
@@ -596,6 +627,20 @@ class APT_Exp_Control:
                 else:
                     index_tdc_failure = 0
                     total_ions_tmp = copy.deepcopy(self.total_ions)
+
+                # Interim progress e-mail every email_interval_events ions
+                # (only while the GUI checkbox is ticked and a recipient is
+                # set). The interval is read live from the GUI field. Sent on
+                # a background thread so SMTP latency never stalls the loop.
+                email_interval_events = self.variables.email_interval_events
+                if (
+                    self.variables.criteria_email
+                    and email_interval_events > 0
+                    and len(self.variables.email) > 3
+                    and self.total_ions - self._last_email_ions >= email_interval_events
+                ):
+                    self._last_email_ions = self.total_ions
+                    self._send_interim_email_async()
 
                 if self.variables.vdc_hold:
                     self.pulse_mode = self.variables.pulse_mode

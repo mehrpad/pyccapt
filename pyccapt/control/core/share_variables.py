@@ -70,6 +70,15 @@ class Variables:
         "criteria_ions": ("main", ("exp",)),
         "criteria_vdc": ("main", ("exp",)),
         "criteria_laser": ("main", ("exp",)),
+        # GUI checkbox: when True the experiment loop sends an interim
+        # notification e-mail every ``email_interval_events`` ions.
+        "criteria_email": ("main", ("exp",)),
+        # GUI field: how many ions between interim notification e-mails.
+        "email_interval_events": ("main", ("exp",)),
+        # Raised by the experiment loop to ask the visualization process
+        # to dump a fresh snapshot to meta_data for the interim e-mail;
+        # the viz process clears it once the PNGs are written.
+        "flag_save_email_screenshot": ("exp", ("viz",)),
         "detection_rate": ("main", ("exp",)),
         "hit_display": ("main", ("viz",)),
         "fixed_laser": ("main", ("exp",)),
@@ -402,6 +411,9 @@ class Variables:
         "criteria_ions": True,
         "criteria_vdc": True,
         "criteria_laser": True,
+        "criteria_email": False,
+        "email_interval_events": 1000000,
+        "flag_save_email_screenshot": False,
         "exp_name": "",
         "log_path": "",
         "fixed_laser": 0,

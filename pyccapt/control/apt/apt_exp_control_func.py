@@ -198,7 +198,7 @@ def send_info_email(log_apt, variables, conf, interim=False):
     # parameters.txt from this experiment's folder. Any failure (missing
     # credentials, SMTP error, attachment IO error) raises and is caught
     # by the caller's try/except in apt_exp_control.run_experiment.
-    attached = email_send.send_email(variables.email, subject, message, variables=variables)
+    attached = email_send.send_email(variables.email, subject, message, variables=variables, interim=interim)
     if attached:
         log_apt.info('Email is sent (attachments: %s)', ', '.join(attached))
     else:

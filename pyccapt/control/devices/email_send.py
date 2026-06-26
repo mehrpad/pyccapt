@@ -184,14 +184,15 @@ def _experiment_id(variables) -> str:
     return "experiment"
 
 
-def _attach_experiment_files(msg: MIMEMultipart, variables) -> list[str]:
-    """Attach the Visualization snapshot to the message, if one exists.
+def _attach_experiment_files(msg: MIMEMultipart, variables, interim: bool = False) -> list[str]:
+    """Attach the Visualization snapshot (+ the details txt for final mails).
 
-    Only the full-resolution snapshot is attached (it is also inlined in
-    the body by _build_message). The run report / parameters and apt.log
-    are intentionally NOT attached — the full report is already in the
-    e-mail body, so the picture is all that needs to ride along.
-    Returns the names attached.
+    The apt.log is never attached — the full run report is already in the
+    e-mail body. For the final end-of-experiment e-mail (``interim=False``)
+    the experiment-details text file (parameters.txt, delivered as
+    ``experiment_details_<id>.txt``) is attached alongside the snapshot.
+    Interim progress e-mails carry only the snapshot. Returns the names
+    attached.
     """
     attached: list[str] = []
     folder = _experiment_folder(variables)
@@ -200,6 +201,10 @@ def _attach_experiment_files(msg: MIMEMultipart, variables) -> list[str]:
 
     # On-disk name -> attachment (download) name.
     candidates = []
+    if not interim:
+        # Final report: include the experiment-details txt (not the log).
+        details_name = f"experiment_details_{_experiment_id(variables)}.txt"
+        candidates.append((folder / "parameters.txt", details_name))
     viz_path = _resolve_viz_image(variables)
     if viz_path is not None:
         candidates.append((viz_path, f"visualization_{_experiment_id(variables)}.png"))
@@ -239,6 +244,7 @@ def _build_message(
     body_text: str,
     config: dict,
     variables=None,
+    interim: bool = False,
 ) -> tuple[MIMEMultipart, list[str], list[str]]:
     """Compose the MIME message. Returns (msg, all_recipients, attached_names)."""
     from_address = config["sender_email"]
@@ -315,21 +321,23 @@ def _build_message(
 
     attached_names: list[str] = []
     if config.get("attach_experiment_files", True) and variables is not None:
-        attached_names = _attach_experiment_files(msg, variables)
+        attached_names = _attach_experiment_files(msg, variables, interim=interim)
 
     all_recipients = [recipient] + cc_list
     return msg, all_recipients, attached_names
 
 
-def send_email(email: str, subject: str, message: str, variables=None) -> list[str]:
-    """Send the experiment-finished email.
+def send_email(email: str, subject: str, message: str, variables=None, interim: bool = False) -> list[str]:
+    """Send the experiment notification email.
 
     Args:
             email: Recipient address (the operator's address from the GUI).
             subject: Email subject.
             message: Plain-text body.
             variables: Optional shared experiment variables; if provided, the
-                    experiment's ``apt.log`` and ``parameters.txt`` are attached.
+                    latest Visualization snapshot is inlined/attached.
+            interim: True for a mid-run progress e-mail (snapshot only); False
+                    for the final report (snapshot + experiment-details txt).
 
     Returns:
             List of attached filenames (may be empty).
@@ -344,7 +352,9 @@ def send_email(email: str, subject: str, message: str, variables=None) -> list[s
         raise ValueError(f"No valid recipient address: {email!r}")
 
     config = _load_credentials()
-    msg, all_recipients, attached = _build_message(recipient, subject, message, config, variables=variables)
+    msg, all_recipients, attached = _build_message(
+        recipient, subject, message, config, variables=variables, interim=interim
+    )
 
     port = int(config["smtp_port"])
     server_name = config["smtp_server"]

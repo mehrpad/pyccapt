@@ -45,6 +45,13 @@ class Ui_Visualization(object):
         self.last_100_thousand_v = np.array([])
         self.last_100_thousand_det_x = np.array([])
         self.last_100_thousand_det_y = np.array([])
+        # Per-ion-aligned leftover from the ring-buffer drain, carried to
+        # the next tick so no events are dropped when a read lands while the
+        # producer is mid-write (see update_graphs_helper).
+        self._carry_x = np.array([])
+        self._carry_y = np.array([])
+        self._carry_t = np.array([])
+        self._carry_v = np.array([])
         self.length_events = 0
         self.styles = None
         self.num_event_mc_tof = None
@@ -990,16 +997,27 @@ class Ui_Visualization(object):
         # mass spectrum
 
         if self.counter_source == 'TDC' and self.variables.total_ions > 0 and self.index_wait_on_plot_start > 16:
-            # Drain all four ring buffers in one shot (zero-copy NumPy
-            # slices, no IPC).  Each call returns every sample produced
-            # since the last call and trims the four arrays to the
-            # minimum length so they remain aligned per-ion if one buffer
-            # happens to lag the others by a tick.
-            xx = self.x_plot.read_all()
-            yy = self.y_plot.read_all()
-            tt = self.t_plot.read_all()
-            main_v_dc_dld = self.main_v_dc_plot.read_all()
+            # Drain all four ring buffers (zero-copy NumPy slices, no IPC).
+            # The producer writes x -> y -> t -> v in sequence, so a read
+            # that lands mid-write sees a longer x/y/t than v. We keep only
+            # the per-ion-aligned prefix (min length) this tick AND carry
+            # the unmatched tail over to the next tick instead of dropping
+            # it. Dropping it (the old behaviour) permanently lost those
+            # events, so the viz total drifted below total_ions — visibly
+            # so for the final events after the experiment stopped.
+            xx = np.concatenate((self._carry_x, self.x_plot.read_all()))
+            yy = np.concatenate((self._carry_y, self.y_plot.read_all()))
+            tt = np.concatenate((self._carry_t, self.t_plot.read_all()))
+            main_v_dc_dld = np.concatenate((self._carry_v, self.main_v_dc_plot.read_all()))
             n = min(len(xx), len(yy), len(tt), len(main_v_dc_dld))
+            # Stash the leftover tail of each buffer (everything past the
+            # aligned prefix) for next tick. When the producer has finished
+            # all four indices are equal, so the tails are empty and the
+            # final drain matches every remaining event.
+            self._carry_x = xx[n:]
+            self._carry_y = yy[n:]
+            self._carry_t = tt[n:]
+            self._carry_v = main_v_dc_dld[n:]
             if n == 0:
                 xx = np.array([])
                 yy = np.array([])
@@ -1362,6 +1380,10 @@ class Ui_Visualization(object):
             self.last_100_thousand_det_y = np.array([])
             self.last_100_thousand_t = np.array([])
             self.last_100_thousand_v = np.array([])
+            self._carry_x = np.array([])
+            self._carry_y = np.array([])
+            self._carry_t = np.array([])
+            self._carry_v = np.array([])
             self.length_events = 0
             self.hist_fdm, xedges, yedges = np.histogram2d([], [], bins=self.bins_detector, range=self.range)
             self._fdm_hist_all = np.zeros_like(self.hist_fdm)

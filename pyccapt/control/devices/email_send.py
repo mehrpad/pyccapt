@@ -185,26 +185,21 @@ def _experiment_id(variables) -> str:
 
 
 def _attach_experiment_files(msg: MIMEMultipart, variables) -> list[str]:
-    """Attach apt.log and the experiment-details file if they exist.
+    """Attach the Visualization snapshot to the message, if one exists.
 
-    parameters.txt is attached under the friendlier name
-    ``experiment_details_<exp id>.txt`` so the recipient can tell which
-    experiment it belongs to. Returns the names attached.
+    Only the full-resolution snapshot is attached (it is also inlined in
+    the body by _build_message). The run report / parameters and apt.log
+    are intentionally NOT attached — the full report is already in the
+    e-mail body, so the picture is all that needs to ride along.
+    Returns the names attached.
     """
     attached: list[str] = []
     folder = _experiment_folder(variables)
     if folder is None:
         return attached
 
-    # On-disk name -> attachment (download) name. parameters.txt keeps its
-    # stable on-disk name but is delivered as experiment_details_<id>.txt.
-    details_name = f"experiment_details_{_experiment_id(variables)}.txt"
-    candidates = [
-        (folder / "parameters.txt", details_name),
-        (folder / "meta_data" / "apt.log", None),
-    ]
-    # Attach the (full-resolution) Visualization snapshot as well; it is
-    # also inlined in the body by _build_message.
+    # On-disk name -> attachment (download) name.
+    candidates = []
     viz_path = _resolve_viz_image(variables)
     if viz_path is not None:
         candidates.append((viz_path, f"visualization_{_experiment_id(variables)}.png"))

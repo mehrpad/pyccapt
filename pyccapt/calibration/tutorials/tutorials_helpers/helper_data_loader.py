@@ -18,6 +18,110 @@ def _loader_progress(*, total: int, enabled: bool, desc: str):
     )
 
 
+def _build_path_browser(variables, *, file_kind, attr, placeholder, on_selected=None, width="650px"):
+    """Build and display a "Browse + path field" widget for a notebook cell.
+
+    Replaces the ~25-line button cell that used to be copied into every
+    notebook. Shows a path field (in front of the button) that starts on the
+    last used path and updates to the file you pick. On selection the chosen
+    path is stored on ``variables.<attr>`` (the notebook's downstream cells read
+    it from there) and on ``variables.last_directory`` so the next browse opens
+    in the same place. ``on_selected(path, output)`` may post-process the chosen
+    path (e.g. convert a MATLAB ``.fig``) and return the path to actually use,
+    or ``None`` to abort. Returns the displayed widget.
+    """
+    import ipywidgets as widgets
+    from IPython.display import display
+
+    from pyccapt.calibration.data_tools import file_dialog
+
+    last_dir = getattr(variables, "last_directory", "") or ""
+    button = widgets.Button(description="Browse", button_style="primary")
+    path_field = widgets.Text(
+        value=last_dir,
+        placeholder=placeholder,
+        description="Path:",
+        layout=widgets.Layout(width=width),
+    )
+    out = widgets.Output()
+
+    def _on_click(_):
+        with out:
+            out.clear_output()
+            # Always show the last used path when the button is hit.
+            path_field.value = getattr(variables, "last_directory", "") or ""
+            try:
+                selected = file_dialog.choose_file_path(
+                    getattr(variables, "last_directory", None), file_kind=file_kind
+                )
+            except Exception as exc:
+                print(f"File chooser failed: {type(exc).__name__}: {exc}")
+                return
+            if not selected:
+                print("No file chosen.")
+                return
+            if on_selected is not None:
+                selected = on_selected(selected, out)
+                if not selected:
+                    return
+            setattr(variables, attr, selected)
+            variables.last_directory = selected
+            # Show the path of the file we just browsed to.
+            path_field.value = selected
+            print(f"Selected: {selected}")
+
+    button.on_click(_on_click)
+    widget = widgets.VBox([widgets.HBox([path_field, button]), out])
+    display(widget)
+    return widget
+
+
+def dataset_browser(variables, width="650px"):
+    """Browse for a dataset file; store the choice on ``variables.dataset_path``.
+
+    Drop-in replacement for the old multi-line dataset Browse cell. Use the
+    chosen path downstream as ``variables.dataset_path``.
+    """
+    return _build_path_browser(
+        variables,
+        file_kind="dataset",
+        attr="dataset_path",
+        placeholder="No file chosen yet",
+        width=width,
+    )
+
+
+def range_browser(variables, width="650px"):
+    """Browse for a range file; store the choice on ``variables.range_path``.
+
+    Drop-in replacement for the old multi-line range Browse cell. Picking a
+    MATLAB Atom-Probe-Toolbox ``.fig`` converts it to a PyCCAPT range ``.h5`` on
+    the fly and uses that. Use the chosen path downstream as
+    ``variables.range_path``.
+    """
+
+    def _convert_fig_if_needed(selected, _out):
+        if selected.lower().endswith(".fig"):
+            from pyccapt.calibration.leap_tools import matlab_fig_range
+
+            fig_path = Path(selected)
+            out_h5 = fig_path.with_name(f"{fig_path.stem}_range.h5")
+            frame = matlab_fig_range.fig_to_range_dataframe(fig_path)
+            matlab_fig_range.write_pyccapt_range(frame, out_h5, also_csv=True)
+            print(f"Converted MATLAB .fig to PyCCAPT range: {out_h5} ({len(frame)} ranges)")
+            return str(out_h5)
+        return selected
+
+    return _build_path_browser(
+        variables,
+        file_kind="range",
+        attr="range_path",
+        placeholder="No range file chosen yet",
+        on_selected=_convert_fig_if_needed,
+        width=width,
+    )
+
+
 def load_data(
     dataset_path,
     max_mc,

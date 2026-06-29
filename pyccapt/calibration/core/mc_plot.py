@@ -167,6 +167,8 @@ class AptHistPlotter:
         fig_size=(9, 5),
         plot_show=True,
         fast=False,
+        x_lim=None,
+        y_headroom=0.4,
     ):
         """
         Plot the histogram of the mc or tof data.
@@ -184,6 +186,18 @@ class AptHistPlotter:
             fig_size (tuple): The size of the figure.
             plot_show (bool): Whether to show the plot.
             fast (bool): Use np.histogram + fill_between instead of ax.hist for speed.
+            x_lim: Paper-style x-axis bound. ``None`` (default) hugs the data
+                with a tiny pad so the spectrum doesn't trail off into a wide
+                empty band (matplotlib's autoscale otherwise pads out to the
+                next round tick, e.g. data ending at 100 Da but the axis drawn
+                to 120). Pass a single number to force a sharp upper bound
+                (e.g. ``100``) or a ``(min, max)`` pair to set both ends;
+                ``None`` inside the pair keeps the hugged value for that end.
+            y_headroom (float): Extra space above the tallest bin so the top
+                peak and its rotated label aren't cramped against the frame.
+                In log scale it's added in decades (0.4 ~= a factor of 2.5);
+                in linear scale it's a multiplier (0.4 -> top = max * 1.4).
+                Set to 0 to keep matplotlib's tight autoscale.
 
         Returns:
             tuple: A tuple of the y and x values of the histogram.
@@ -266,6 +280,42 @@ class AptHistPlotter:
             self.ax.set_ylabel('Event Counts')
         if grid:
             plt.grid(True, which='both', axis='both', linestyle='--', linewidth=0.4, alpha=0.3)
+
+        # --- Paper-style axis limits -----------------------------------------
+        # matplotlib's autoscale leaves two cosmetic problems for these spectra:
+        #   1) the x-axis pads out to the next round tick, leaving a wide empty
+        #      band on the right (data ending ~100 Da but the axis drawn to 120);
+        #   2) the y-axis top sits right at the tallest bin, so the peak and its
+        #      rotated label are cramped against the frame.
+        # Hug the x-axis to the data (or to a caller-supplied bound) and raise the
+        # y-axis top by ``y_headroom``. Do this before caching ``original_x_limits``
+        # so selector/background resets restore these tighter limits, not the
+        # autoscaled ones.
+        x_lo = float(self.x[0])
+        x_hi = float(self.x[-1])
+        if x_lim is not None:
+            if np.isscalar(x_lim):
+                x_hi = float(x_lim)
+            else:
+                lo_req, hi_req = x_lim
+                if lo_req is not None:
+                    x_lo = float(lo_req)
+                if hi_req is not None:
+                    x_hi = float(hi_req)
+            self.ax.set_xlim(x_lo, x_hi)
+        else:
+            x_pad = (x_hi - x_lo) * 0.01
+            self.ax.set_xlim(x_lo - x_pad, x_hi + x_pad)
+
+        y_max = float(np.max(self.y)) if self.y.size else 0.0
+        if y_max > 0 and y_headroom and y_headroom > 0:
+            cur_bottom, _ = self.ax.get_ylim()
+            if log:
+                # Add headroom in decades; keep matplotlib's autoscaled bottom.
+                self.ax.set_ylim(cur_bottom, 10 ** (np.log10(y_max) + y_headroom))
+            else:
+                self.ax.set_ylim(cur_bottom, y_max * (1.0 + y_headroom))
+
         if self.original_x_limits is None:
             self.original_x_limits = self.ax.get_xlim()  # Store the original x-axis limits
         _safe_tight_layout(self.fig)

@@ -395,6 +395,10 @@ class Variables(SharedVariablesBase):
         self.AptHistPlotter = None
         self.ions_list_data = None
         self.last_directory = get_project_path()
+        # Paths chosen via the notebook Browse widgets (helper_data_loader
+        # dataset_browser/range_browser). None until the user picks a file.
+        self.dataset_path = None
+        self.range_path = None
 
         self.plotly_3d_reconstruction = None
         self.data = None

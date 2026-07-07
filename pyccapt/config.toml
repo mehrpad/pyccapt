@@ -178,6 +178,47 @@ COM_PORT_laser = "COM9"
 COM_PORT_gates = "Dev2/port0/"
 COM_PORT_cryo = "COM7"
 
+# ===================== CLL fast-vent valves ("Vent CLL" button) =====================
+# The "Vent CLL" button (Pumps & Vacuum panel) does a fast sample/cryo exchange
+# in the cryo load lock (CLL) by sequencing three valves:
+#
+#   State                     backing valve             Turbo valve         vent valve
+#   -----------------------   -----------------------   -----------------   ----------------
+#   "Vent CLL" pressed        OFF                       OFF                 ON  (after 2 s)
+#   "Vent CLL" deselected     ON, then OFF after 29 s   ON  (after 30 s)    OFF
+#
+# --- CLL backing & Turbo valves ---
+# On the SAME NI as the gates (COM_PORT_gates -> Dev2, an 8-channel USB-6525
+# solid-state-relay module). Each valve is ONE SSR channel, level-controlled
+# and energise-to-open: line HIGH = SSR closed = valve powered/OPEN,
+# line LOW = valve closed. The USB-6525 latches its output state after the
+# task closes (until reprogrammed or powered off), so a single write holds the
+# valve and no line is left reserved.
+# Physical screw-terminal wiring on the USB-6525 (each SSR channel P0.x has two
+# terminals P0.xA / P0.xB that the valve is wired across):
+#   backing valve -> pins 13/14 = P0.6A / P0.6B -> Dev2/port0/line6
+#   Turbo valve   -> pins 15/16 = P0.7A / P0.7B -> Dev2/port0/line7
+# WARNING: the gates use line0..line5 on this SAME device. Only line6 and line7
+# are free - never point these at line0..5 or you will drive a gate.
+cll_backing_valve_line = 6
+cll_turbo_valve_line = 7
+#
+# --- CLL vent valve ---
+# On a SEPARATE NI USB-6501. The relay SIG line was identified empirically
+# (devices_test/cll_vent_valve_blink.py + voltmeter) as DAQmx channel
+# Dev3/port1/line7 (= P1.7). Wire the relay: SIG -> that terminal, VCC -> +5V,
+# GND -> GND. This valve is level-controlled: line HIGH = valve ON (venting),
+# line LOW = valve OFF. Confirm the device name ("Dev3") in NI MAX.
+# NOTE: the 6501 outputs are open-collector with a pull-up, so an UNDRIVEN line
+# floats HIGH (relay ON). The GUI holds a task on this line and drives it LOW at
+# startup and on deselect to keep the vent closed.
+COM_PORT_cll_vent_valve = "Dev3/port1/line7"
+#
+# --- Sequencing delays (seconds) ---
+cll_vent_on_delay = 2       # on press: wait this long, then open the vent valve
+cll_backing_off_delay = 29  # on deselect: backing opens now, then closes after this
+cll_turbo_on_delay = 30     # on deselect: wait this long, then open the Turbo valve
+
 # Cryo sensor mapping: label and which output word index (0-based) comes from the device
 # Change cryo_sensor_X_index to remap which physical output position feeds that display slot.
 cryo_sensor_1 = "cryo_head_outside"
@@ -209,15 +250,15 @@ COM_PORT_thorlab_motor = "27261754"
 # Set either one to "" (empty string) to disable that GUI's stage section
 # without showing any error - useful when only one MCS2 is plugged in.
 stage_smartact_main = "network:sn:MCS2-00017944"
-stage_smartact_laser = "network:sn:MCS2-00017939"
+stage_smartact_laser = "network:sn:MCS2-00017951"
 
 # Default "home" position for the Home button on the stage / laser GUIs.
 # Values are in millimetres.  The Home button moves all three axes to these
 # coordinates after referencing has run (or immediately if the controller
 # already knows its reference).
-stage_home_x_mm = 1.615
+stage_home_x_mm = 1.054
 stage_home_y_mm = 2.235
-stage_home_z_mm = -7.933
+stage_home_z_mm = -8.030
 laser_stage_home_x_mm = 0.0
 laser_stage_home_y_mm = 0.0
 laser_stage_home_z_mm = 0.0

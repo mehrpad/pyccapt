@@ -322,7 +322,12 @@ PUMPS_TOOLTIPS = {
     "vacuum_cryo_load_lock_back": "Cryo load-lock backing-line pressure (mBar).",
     # --- Pump switches ---------------------------------------------------
     "pump_load_lock_switch": "Vent / pump the load lock.  Click to toggle.  Interlocked behind Override Access.",
-    "pump_cryo_load_lock_switch": "Vent / pump the cryo load lock.",
+    "pump_cryo_load_lock_switch": "Fully vent / pump the cryo load lock.  Interlocked behind Override Access.  "
+                                  "Cryo head vacuum depends on the CLL backing pump - check everything before venting.",
+    "vent_cryo_load_lock_partial_switch": "Partially vent the cryo load lock for fast sample/cryo exchange "
+                                          "(drives a 3-valve sequence).  Blocked during an experiment or with a "
+                                          "gate open unless Override Access is active.",
+    "led_vent_cll_partial": "CLL partial-vent state.  Green = un-vented (normal/idle), red = venting (Vent CLL active).",
     "led_pump_load_lock": "Load-lock pump state.  Green = pumping, red = vented.",
     "led_pump_cryo_load_lock": "Cryo load-lock pump state.",
     # --- Temperatures ---------------------------------------------------

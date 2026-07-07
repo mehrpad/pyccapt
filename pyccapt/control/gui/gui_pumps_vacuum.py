@@ -37,6 +37,13 @@ class Ui_Pumps_Vacuum(object):
         self.parent = parent
         self.emitter = SignalEmitter
 
+        # --- "Vent CLL" partial-vent state ---
+        # Whether the fast CLL vent (sample/cryo exchange) is currently active,
+        # and the persistent NI task that holds the vent-valve relay line high
+        # while venting (see vent_cryo_load_lock_partial / _set_vent_valve).
+        self.flag_vent_cll_partial = False
+        self._vent_valve_task = None
+
         # --- LL baking log state ---
         # Latest LL temperature (deg C) seen on the temp_ll signal; cached so
         # the periodic log row always has a value even between signal updates.
@@ -264,6 +271,31 @@ class Ui_Pumps_Vacuum(object):
         )
         self.superuser.setObjectName("superuser")
         self.gridLayout_3.addWidget(self.superuser, 0, 0, 1, 2)
+        # "Vent CLL" - partial vent of the cryo load lock for fast sample/cryo
+        # exchange (drives a 3-valve sequence). Sits between "Fully Vent CLL"
+        # and "Vent LL".
+        self.vent_cryo_load_lock_partial_switch = QtWidgets.QPushButton(parent=Pumps_Vacuum)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Fixed)
+        sizePolicy.setHorizontalStretch(0)
+        sizePolicy.setVerticalStretch(0)
+        sizePolicy.setHeightForWidth(self.vent_cryo_load_lock_partial_switch.sizePolicy().hasHeightForWidth())
+        self.vent_cryo_load_lock_partial_switch.setSizePolicy(sizePolicy)
+        self.vent_cryo_load_lock_partial_switch.setMinimumSize(QtCore.QSize(0, 25))
+        self.vent_cryo_load_lock_partial_switch.setStyleSheet(
+            "QPushButton{\n"
+            "                                            background: rgb(193, 193, 193)\n"
+            "                                            }\n"
+            "                                        "
+        )
+        self.vent_cryo_load_lock_partial_switch.setObjectName("vent_cryo_load_lock_partial_switch")
+        self.gridLayout_3.addWidget(self.vent_cryo_load_lock_partial_switch, 2, 0, 1, 1)
+        # LED for the "Vent CLL" partial vent (green = venting, red = idle).
+        self.led_vent_cll_partial = QtWidgets.QLabel(parent=Pumps_Vacuum)
+        self.led_vent_cll_partial.setMinimumSize(QtCore.QSize(50, 50))
+        self.led_vent_cll_partial.setMaximumSize(QtCore.QSize(50, 50))
+        self.led_vent_cll_partial.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.led_vent_cll_partial.setObjectName("led_vent_cll_partial")
+        self.gridLayout_3.addWidget(self.led_vent_cll_partial, 2, 1, 1, 1)
         self.pump_cryo_load_lock_switch = QtWidgets.QPushButton(parent=Pumps_Vacuum)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Fixed)
         sizePolicy.setHorizontalStretch(0)
@@ -299,13 +331,13 @@ class Ui_Pumps_Vacuum(object):
             "                                        "
         )
         self.pump_load_lock_switch.setObjectName("pump_load_lock_switch")
-        self.gridLayout_3.addWidget(self.pump_load_lock_switch, 2, 0, 1, 1)
+        self.gridLayout_3.addWidget(self.pump_load_lock_switch, 3, 0, 1, 1)
         self.led_pump_load_lock = QtWidgets.QLabel(parent=Pumps_Vacuum)
         self.led_pump_load_lock.setMinimumSize(QtCore.QSize(50, 50))
         self.led_pump_load_lock.setMaximumSize(QtCore.QSize(50, 50))
         self.led_pump_load_lock.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.led_pump_load_lock.setObjectName("led_pump_load_lock")
-        self.gridLayout_3.addWidget(self.led_pump_load_lock, 2, 1, 1, 1)
+        self.gridLayout_3.addWidget(self.led_pump_load_lock, 3, 1, 1, 1)
         self.gridLayout_4.addLayout(self.gridLayout_3, 1, 3, 1, 1)
         self.verticalLayout.addLayout(self.gridLayout_4)
         self.gridLayout_8 = QtWidgets.QGridLayout()
@@ -413,7 +445,8 @@ class Ui_Pumps_Vacuum(object):
         )
         self.target_tempreature_ll.setObjectName("target_tempreature_ll")
         self.gridLayout_5.addWidget(self.target_tempreature_ll, 1, 2, 1, 1)
-        self.gridLayout_8.addLayout(self.gridLayout_5, 0, 1, 1, 1)
+        # Load Lock temp block moved to column 2 (swapped with the Cryo Head block).
+        self.gridLayout_8.addLayout(self.gridLayout_5, 0, 2, 1, 1)
         self.gridLayout_7 = QtWidgets.QGridLayout()
         self.gridLayout_7.setObjectName("gridLayout_7")
         self.label_218 = QtWidgets.QLabel(parent=Pumps_Vacuum)
@@ -478,7 +511,8 @@ class Ui_Pumps_Vacuum(object):
         )
         self.ll_baking_time.setObjectName("ll_baking_time")
         self.gridLayout_7.addWidget(self.ll_baking_time, 2, 1, 1, 1)
-        self.gridLayout_8.addLayout(self.gridLayout_7, 0, 2, 1, 1)
+        # Cryo Head (outside/inside) block moved to column 1 (swapped with Load Lock).
+        self.gridLayout_8.addLayout(self.gridLayout_7, 0, 1, 1, 1)
         self.Error = QtWidgets.QLabel(parent=Pumps_Vacuum)
         self.Error.setMinimumSize(QtCore.QSize(600, 30))
         font = QtGui.QFont()
@@ -502,7 +536,8 @@ class Ui_Pumps_Vacuum(object):
         Pumps_Vacuum.setTabOrder(self.set_temperature_ll, self.target_tempreature_ll)
         Pumps_Vacuum.setTabOrder(self.target_tempreature_ll, self.ll_baking_time)
         Pumps_Vacuum.setTabOrder(self.ll_baking_time, self.pump_load_lock_switch)
-        Pumps_Vacuum.setTabOrder(self.pump_load_lock_switch, self.pump_cryo_load_lock_switch)
+        Pumps_Vacuum.setTabOrder(self.pump_load_lock_switch, self.vent_cryo_load_lock_partial_switch)
+        Pumps_Vacuum.setTabOrder(self.vent_cryo_load_lock_partial_switch, self.pump_cryo_load_lock_switch)
         Pumps_Vacuum.setTabOrder(self.pump_cryo_load_lock_switch, self.superuser)
 
         ###
@@ -510,8 +545,22 @@ class Ui_Pumps_Vacuum(object):
         self.led_green = QPixmap('./files/green-led-on.png')
         self.led_pump_load_lock.setPixmap(self.led_green)
         self.led_pump_cryo_load_lock.setPixmap(self.led_green)
+        # Green = CLL un-vented (normal/idle), red = venting. CLL starts un-vented.
+        self.led_vent_cll_partial.setPixmap(self.led_green)
         self.pump_load_lock_switch.clicked.connect(self.pump_switch_ll)
         self.pump_cryo_load_lock_switch.clicked.connect(self.pump_switch_cryo_ll)
+        self.vent_cryo_load_lock_partial_switch.clicked.connect(self.vent_cryo_load_lock_partial)
+        # Remember the "Vent CLL" default style so it can be restored when the
+        # partial vent is deselected (the button turns green while active).
+        self.vent_partial_default_style = self.vent_cryo_load_lock_partial_switch.styleSheet()
+        # "Fully vented CLL" fully vents the cryo load lock; it is interlocked
+        # behind Override Access, so keep it disabled until override is granted.
+        self.pump_cryo_load_lock_switch.setEnabled(False)
+        # Initialise the CLL vent valve CLOSED and HOLD the line low. The
+        # USB-6501 output floats HIGH via its pull-up when undriven, which would
+        # leave the active-high vent relay energised (CLL venting) at startup.
+        # Driving it low here opens a held task so the CLL starts un-vented.
+        self._set_vent_valve(True)  # True = closed, False = open
         # Set 8 digits for each LCD to show
         self.vacuum_main.setDigitCount(8)
         self.vacuum_buffer.setDigitCount(8)
@@ -611,7 +660,9 @@ class Ui_Pumps_Vacuum(object):
         self.label_217.setText(_translate("Pumps_Vacuum", "CryoLoad Lock Pre(mBar)"))
         self.label_213.setText(_translate("Pumps_Vacuum", "Load Lock Pre(mBar)"))
         self.superuser.setText(_translate("Pumps_Vacuum", "Override Access"))
-        self.pump_cryo_load_lock_switch.setText(_translate("Pumps_Vacuum", "Vent CLL"))
+        self.pump_cryo_load_lock_switch.setText(_translate("Pumps_Vacuum", "Fully Vent CLL"))
+        self.vent_cryo_load_lock_partial_switch.setText(_translate("Pumps_Vacuum", "Vent CLL"))
+        self.led_vent_cll_partial.setText(_translate("Pumps_Vacuum", "vent"))
         self.led_pump_cryo_load_lock.setText(_translate("Pumps_Vacuum", "pump"))
         self.pump_load_lock_switch.setText(_translate("Pumps_Vacuum", "Vent LL"))
         self.led_pump_load_lock.setText(_translate("Pumps_Vacuum", "pump"))
@@ -867,10 +918,14 @@ class Ui_Pumps_Vacuum(object):
                 return
             self.flag_super_user = True
             self.superuser.setStyleSheet("QPushButton{\nbackground: rgb(0, 255, 26)\n}")
+            # "Fully vented CLL" is only usable while override is active.
+            self.pump_cryo_load_lock_switch.setEnabled(True)
             self.error_message("!!! Override Access Granted !!!")
         elif self.flag_super_user:
             self.flag_super_user = False
             self.superuser.setStyleSheet(self.original_button_style)
+            # Re-lock "Fully vented CLL" when override is deactivated.
+            self.pump_cryo_load_lock_switch.setEnabled(False)
             self.error_message("!!! Override Access deactivated !!!")
             self.timer.start(8000)
 
@@ -949,17 +1004,22 @@ class Ui_Pumps_Vacuum(object):
                 and not self.variables.flag_load_gate
             ):
                 if self.variables.flag_pump_cryo_load_lock:
+                    # About to fully vent the CLL (stop the backing pump).
+                    # Make the operator confirm first - see warning text.
+                    if not self._confirm_full_vent_cll():
+                        return
                     self.variables.flag_pump_cryo_load_lock_click = True
                     self.led_pump_cryo_load_lock.setPixmap(self.led_red)
                     self.pump_cryo_load_lock_switch.setEnabled(False)
                     time.sleep(1)
-                    self.pump_cryo_load_lock_switch.setEnabled(True)
+                    # Stay locked behind Override Access after the toggle.
+                    self.pump_cryo_load_lock_switch.setEnabled(bool(self.flag_super_user))
                 elif not self.variables.flag_pump_cryo_load_lock:
                     self.variables.flag_pump_cryo_load_lock_click = True
                     self.led_pump_cryo_load_lock.setPixmap(self.led_green)
                     self.pump_cryo_load_lock_switch.setEnabled(False)
                     time.sleep(1)
-                    self.pump_cryo_load_lock_switch.setEnabled(True)
+                    self.pump_cryo_load_lock_switch.setEnabled(bool(self.flag_super_user))
             else:  # SHow error message in the GUI
                 if self.variables.start_flag:
                     self.error_message("!!! An experiment is running !!!")
@@ -971,6 +1031,251 @@ class Ui_Pumps_Vacuum(object):
             print('Error in pump_switch function')
             print(e)
             pass
+
+    def _confirm_full_vent_cll(self):
+        """Confirm the operator really wants to fully vent the cryo load lock.
+
+        The cryo head vacuum depends on the CLL backing pump; fully venting
+        the CLL stops that backing and will spoil the cryo head vacuum. Warn
+        the operator so they can check everything before venting.
+
+        Args:
+                None
+
+        Return:
+                True if the operator confirmed the vent, False if cancelled.
+        """
+        warning = QtWidgets.QMessageBox(parent=self.pump_cryo_load_lock_switch)
+        warning.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+        warning.setWindowTitle("Confirm full CLL vent")
+        warning.setText("You are about to fully vent the cryo load lock (CLL).")
+        warning.setInformativeText(
+            "The cryo head vacuum depends on the CLL backing pump. Fully "
+            "venting the CLL stops that backing and will spoil the cryo head "
+            "vacuum.\n\nCheck everything before venting the CLL.\n\n"
+            "Do you want to continue?"
+        )
+        warning.setStandardButtons(
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
+        )
+        warning.setDefaultButton(QtWidgets.QMessageBox.StandardButton.No)
+        return warning.exec() == QtWidgets.QMessageBox.StandardButton.Yes
+
+    def vent_cryo_load_lock_partial(self):
+        """Toggle a fast partial vent of the cryo load lock (CLL).
+
+        Sequences the three CLL exchange valves for a fast sample/cryo swap.
+        See config.toml (the ``cll_*`` keys) for the valve wiring and the full
+        state table.
+
+        Starting a vent is interlocked: it is refused while an experiment is
+        running or any gate is open, unless Override Access is active (which
+        bypasses the interlock). Stopping a vent is always allowed.
+
+        Press (start venting):
+                - CLL backing valve OFF and CLL Turbo valve OFF (immediately)
+                - CLL vent valve ON after ``cll_vent_on_delay`` s (default 2 s)
+        Deselect (stop venting / restore pumping):
+                - CLL vent valve OFF and CLL backing valve ON (immediately)
+                - CLL backing valve OFF again after ``cll_backing_off_delay`` s (29 s)
+                - CLL Turbo valve ON after ``cll_turbo_on_delay`` s (default 30 s)
+
+        The delayed steps are guarded by ``flag_vent_cll_partial`` so a quick
+        press/deselect within the delay window cancels the pending action.
+
+        All three valves are level-controlled and energise-to-open. The
+        backing/Turbo valves are single SSR channels on the gates NI
+        (Dev2/USB-6525), which latches its output; the vent valve is held on a
+        separate NI USB-6501. Long waits use QTimer.singleShot so the GUI stays
+        responsive.
+
+        Args:
+                None
+
+        Return:
+                None
+        """
+        try:
+            if not self.flag_vent_cll_partial:
+                # ---- start venting (sample/cryo exchange) ----
+                # Interlock: opening the CLL to atmosphere is only allowed when
+                # no experiment is running and every gate is closed. Override
+                # Access bypasses this interlock.
+                if not (
+                    self.flag_super_user
+                    or (
+                        not self.variables.start_flag
+                        and not self.variables.flag_main_gate
+                        and not self.variables.flag_cryo_gate
+                        and not self.variables.flag_load_gate
+                    )
+                ):
+                    if self.variables.start_flag:
+                        self.error_message("!!! An experiment is running !!!")
+                    else:
+                        self.error_message("!!! First Close all the Gates !!!")
+                    self.timer.start(8000)
+                    return
+                self.flag_vent_cll_partial = True
+                self.vent_cryo_load_lock_partial_switch.setStyleSheet("QPushButton{\nbackground: rgb(0, 255, 26)\n}")
+                # Red = CLL is venting.
+                self.led_vent_cll_partial.setPixmap(self.led_red)
+                # Backing and Turbo valves off immediately.
+                self._set_cll_valve_6525(self.conf['cll_backing_valve_line'], False)
+                self._set_cll_valve_6525(self.conf['cll_turbo_valve_line'], False)
+                # Vent valve on after a short delay (then held on).
+                delay_ms = int(float(self.conf.get('cll_vent_on_delay', 2)) * 1000)
+                QTimer.singleShot(delay_ms, self._vent_cll_press_delayed)
+                self.error_message("!!! Venting CLL for sample/cryo exchange !!!")
+            else:
+                # ---- stop venting / restore pumping ----
+                # Always allowed - restoring the pumps is the safe direction.
+                self.flag_vent_cll_partial = False
+                self.vent_cryo_load_lock_partial_switch.setStyleSheet(self.vent_partial_default_style)
+                # Green = CLL un-vented again (normal/idle).
+                self.led_vent_cll_partial.setPixmap(self.led_green)
+                # Close the vent valve and re-open the backing valve immediately.
+                self._set_vent_valve(True)  # True = closed, False = open
+                self._set_cll_valve_6525(self.conf['cll_backing_valve_line'], True)
+                # Backing valve closes again after a delay; Turbo valve opens
+                # after a longer delay (protects the turbo). Both are guarded
+                # against a re-press within the delay window.
+                backing_off_ms = int(float(self.conf.get('cll_backing_off_delay', 29)) * 1000)
+                QTimer.singleShot(backing_off_ms, self._vent_cll_deselect_backing_off)
+                turbo_on_ms = int(float(self.conf.get('cll_turbo_on_delay', 30)) * 1000)
+                QTimer.singleShot(turbo_on_ms, self._vent_cll_deselect_turbo_on)
+                self.error_message("!!! CLL vent closed - restoring pumps !!!")
+        except Exception as e:
+            print('Error in vent_cryo_load_lock_partial function')
+            print(e)
+
+    def _vent_cll_press_delayed(self):
+        """Delayed part of the "Vent CLL" press sequence: open the vent valve.
+
+        Guarded by ``flag_vent_cll_partial`` so a quick deselect within the
+        delay window cancels it (leaves the vent valve closed).
+
+        Args:
+                None
+
+        Return:
+                None
+        """
+        if self.flag_vent_cll_partial:
+            self._set_vent_valve(False) # True = closed, False = open
+
+    def _vent_cll_deselect_backing_off(self):
+        """Delayed part of the "Vent CLL" deselect sequence: close the backing valve.
+
+        On deselect the backing valve opens immediately and then closes again
+        after ``cll_backing_off_delay`` s. Guarded by ``flag_vent_cll_partial``
+        so a quick re-press within the delay window cancels it.
+
+        Args:
+                None
+
+        Return:
+                None
+        """
+        if not self.flag_vent_cll_partial:
+            self._set_cll_valve_6525(self.conf['cll_backing_valve_line'], False)
+
+    def _vent_cll_deselect_turbo_on(self):
+        """Delayed part of the "Vent CLL" deselect sequence: open the Turbo valve.
+
+        Guarded by ``flag_vent_cll_partial`` so a quick re-press within the
+        delay window cancels it (leaves the Turbo valve closed while venting).
+
+        Args:
+                None
+
+        Return:
+                None
+        """
+        if not self.flag_vent_cll_partial:
+            self._set_cll_valve_6525(self.conf['cll_turbo_valve_line'], True)
+
+    def _set_cll_valve_6525(self, line_num, state):
+        """Set one CLL SSR valve (Dev2 / USB-6525) open or closed and hold it.
+
+        The CLL backing/Turbo valves are single solid-state-relay channels on
+        the gates NI (``COM_PORT_gates`` -> Dev2, a USB-6525). They are
+        level-controlled and energise-to-open: line HIGH = SSR closed = valve
+        powered/OPEN, line LOW = valve closed. The USB-6525 latches its output
+        state after the task closes (until reprogrammed or powered off), so a
+        single momentary write holds the valve - no persistent task is kept,
+        which also avoids colliding with the gates' tasks on the same port.
+
+        Only the requested line is placed in the task, so writing it never
+        disturbs the gate lines (line0..5). Errors are logged, not raised.
+
+        Args:
+                line_num: SSR channel / DO line on ``COM_PORT_gates`` (Dev2).
+                          Must be a CLL valve line (6 or 7), never a gate line.
+                state: True to open (energise) the valve, False to close it.
+
+        Return:
+                None
+        """
+        import nidaqmx
+        try:
+            task = nidaqmx.Task()
+        except Exception as e:
+            print('Error creating NI task for CLL valve')
+            print(e)
+            return
+        try:
+            task.do_channels.add_do_chan(self.conf['COM_PORT_gates'] + 'line%s' % line_num)
+            task.start()
+            task.write([bool(state)])
+        except Exception as e:
+            print('Error setting CLL valve line %s' % line_num)
+            print(e)
+        finally:
+            # Close the task immediately; the USB-6525 latches the value.
+            try:
+                task.close()
+            except Exception:
+                pass
+
+    def _set_vent_valve(self, state):
+        """Drive the CLL vent-valve relay on/off and HOLD the line.
+
+        The vent valve is a level-controlled relay on the NI USB-6501
+        (``COM_PORT_cll_vent_valve``). The 6501 DIO lines are open-collector
+        with a weak on-board 4.7 kOhm pull-up, so a line that is NOT actively
+        driven floats HIGH (~5 V) and leaves an active-high relay stuck ON.
+        The DAQmx task is therefore kept OPEN for the life of the panel and
+        just writes the level:
+                True  -> relay ON  (vent open)   - line released/high
+                False -> relay OFF (vent closed)  - line actively driven LOW
+        The task is NOT closed on the off-path: closing it would release the
+        line back to the pull-up and re-energise the relay (this was the bug
+        where the vent could never be switched off).
+
+        Args:
+                state: True to open (vent), False to close the vent valve.
+
+        Return:
+                None
+        """
+        import nidaqmx
+        try:
+            if self._vent_valve_task is None:
+                self._vent_valve_task = nidaqmx.Task()
+                self._vent_valve_task.do_channels.add_do_chan(self.conf['COM_PORT_cll_vent_valve'])
+                self._vent_valve_task.start()
+            self._vent_valve_task.write([bool(state)])
+        except Exception as e:
+            print('Error setting CLL vent valve')
+            print(e)
+            # Best-effort cleanup so a half-open task does not wedge the line.
+            try:
+                if self._vent_valve_task is not None:
+                    self._vent_valve_task.close()
+            except Exception:
+                pass
+            self._vent_valve_task = None
 
     def error_message(self, message):
         """
@@ -1003,6 +1308,13 @@ class Ui_Pumps_Vacuum(object):
         self.timer.stop()  # If you want to stop this timer when closing
         # Flush and stop the LL baking log if a run is in progress.
         self._stop_ll_baking_log()
+        # The backing/Turbo valves are on the USB-6525, which latches its
+        # output, so their state is preserved across a software restart with no
+        # action here. The vent valve is on the USB-6501, whose line floats
+        # HIGH via its pull-up once the process releases it on exit - i.e. the
+        # vent relay energises (CLL vents) on shutdown. This is a hardware trait
+        # of the 6501 that software cannot prevent; use the relay NC contact or
+        # an active-drive + pull-down if a fail-safe-closed vent is required.
 
 
 class SignalEmitter(QObject):

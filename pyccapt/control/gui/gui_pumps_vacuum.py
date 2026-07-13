@@ -1077,8 +1077,8 @@ class Ui_Pumps_Vacuum(object):
                 - CLL vent valve ON after ``cll_vent_on_delay`` s (default 2 s)
         Deselect (stop venting / restore pumping):
                 - CLL vent valve OFF and CLL backing valve ON (immediately)
-                - CLL backing valve OFF again after ``cll_backing_off_delay`` s (29 s)
-                - CLL Turbo valve ON after ``cll_turbo_on_delay`` s (default 30 s)
+                - CLL backing valve OFF again after ``cll_backing_off_delay`` s (default 90 s)
+                - CLL Turbo valve ON after ``cll_turbo_on_delay`` s (default 90 s)
 
         The delayed steps are guarded by ``flag_vent_cll_partial`` so a quick
         press/deselect within the delay window cancels the pending action.
@@ -1140,9 +1140,9 @@ class Ui_Pumps_Vacuum(object):
                 # Backing valve closes again after a delay; Turbo valve opens
                 # after a longer delay (protects the turbo). Both are guarded
                 # against a re-press within the delay window.
-                backing_off_ms = int(float(self.conf.get('cll_backing_off_delay', 29)) * 1000)
+                backing_off_ms = int(float(self.conf.get('cll_backing_off_delay', 90)) * 1000)
                 QTimer.singleShot(backing_off_ms, self._vent_cll_deselect_backing_off)
-                turbo_on_ms = int(float(self.conf.get('cll_turbo_on_delay', 30)) * 1000)
+                turbo_on_ms = int(float(self.conf.get('cll_turbo_on_delay', 90)) * 1000)
                 QTimer.singleShot(turbo_on_ms, self._vent_cll_deselect_turbo_on)
                 self.error_message("!!! CLL vent closed - restoring pumps !!!")
         except Exception as e:

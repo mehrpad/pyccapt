@@ -1675,27 +1675,53 @@ class Ui_Visualization(object):
             return "raw (no fit)"
         return f"R²={params.fit_quality:.2f} n={params.num_events_used}"
 
+    def _rebuild_calibrated_hist(self, axis):
+        """Rebuild the "tof" or "mc" calibrated accumulator from retained events.
+
+        Called right after a calibration on/off transition instead of
+        zeroing the accumulator, so ions seen before the transition are
+        re-binned under the new params (or the raw fallback) instead of
+        vanishing. Limited to the last-100k retained raw events - anything
+        older than that window is still lost.
+        """
+        try:
+            with self._buffer_lock:
+                t = self.last_100_thousand_t
+                v = self.last_100_thousand_v
+                x = self.last_100_thousand_det_x
+                y = self.last_100_thousand_det_y
+            t_0 = self._t_0()
+            params = self._calib_params_tof if axis == "tof" else self._calib_params_mc
+            values = self._apply_axis(params, axis, t, v, x, y, t_0)
+            bins = self.bins_tof if axis == "tof" else self.bins_mc
+            hist = np.histogram(values, bins=bins)[0].astype(float)
+            if axis == "tof":
+                self.hist_tof = hist
+            else:
+                self.hist_mc = hist
+        except Exception:
+            pass
+
     def _drain_calib_updates(self):
         """Apply pending live-calibration updates on the GUI thread.
 
-        Zeroing a calibrated accumulator (its old bins were binned under
-        now-superseded params) and updating the status banner happen here
-        so the histogram arrays and Qt widgets are only ever touched from
-        the GUI thread. The raw accumulators never reset — their bin
-        meanings don't depend on any fit.
+        A calibrated accumulator's old bins were binned under
+        now-superseded params, so they no longer mean the right thing on
+        the new axis. Rather than zeroing them outright (which threw away
+        every ion seen before calibration turned on/off), rebuild the
+        accumulator from the retained last-100k raw event buffer under the
+        new params - so events before the transition still show up,
+        limited only by that 100k retention window. Updating the status
+        banner happens here too so the histogram arrays and Qt widgets are
+        only ever touched from the GUI thread. The raw accumulators never
+        reset — their bin meanings don't depend on any fit.
         """
         if self._calib_reset_tof:
             self._calib_reset_tof = False
-            try:
-                self.hist_tof.fill(0)
-            except Exception:
-                pass
+            self._rebuild_calibrated_hist("tof")
         if self._calib_reset_mc:
             self._calib_reset_mc = False
-            try:
-                self.hist_mc.fill(0)
-            except Exception:
-                pass
+            self._rebuild_calibrated_hist("mc")
         if self._calib_status_dirty:
             self._calib_status_dirty = False
             try:

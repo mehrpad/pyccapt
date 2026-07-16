@@ -663,8 +663,13 @@ class Ui_Visualization(object):
         # the Last-Events toggle is a pure display swap that never loses
         # data — you can flip between the entire map and the last-N map
         # without either resetting:
-        #   * entire : _fdm_hist_all accumulates every ion forever, and
-        #              _fdm_count_all is the running total ion count.
+        #   * entire : _fdm_hist_all accumulates every ion forever as raw
+        #              counts (log10 is applied once at display time - see
+        #              _draw_fdm_display - not per tick, otherwise summing
+        #              log10(tick_count+1) every tick makes hot pixels grow
+        #              unboundedly and washes out the rest of the map under
+        #              autoscale), and _fdm_count_all is the running total
+        #              ion count.
         #   * window : _fdm_window_x/y hold the most recent fdm_max_ions
         #              hits, and the map is rebuilt from them each tick.
         self._fdm_hist_all = np.zeros_like(self.hist_fdm)
@@ -1133,8 +1138,9 @@ class Ui_Visualization(object):
                 fdm_max = 1_000_000
             new_events = int(np.sum(hist))
 
-            # Entire FDM: accumulate forever.
-            self._fdm_hist_all += np.log10(hist + 1)
+            # Entire FDM: accumulate raw counts forever (log10 is applied
+            # once at display time in _draw_fdm_display).
+            self._fdm_hist_all += hist
             self._fdm_count_all += new_events
 
             # Last-events FDM: keep the sliding window current every tick,
@@ -1245,7 +1251,7 @@ class Ui_Visualization(object):
             )
             self.hist_fdm = np.log10(win_hist + 1)
         else:
-            self.hist_fdm = self._fdm_hist_all
+            self.hist_fdm = np.log10(self._fdm_hist_all + 1)
         # The ion counter is the cumulative total detected, so toggling
         # Last Events only swaps which map is drawn — never the number.
         self.fdm_count.setText(str(self._fdm_count_all))

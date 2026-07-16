@@ -93,6 +93,10 @@ class APT_Exp_Control:
         self.detector_runtime = DetectorRuntime()
         self.access_override_enabled = False
         self.override_disabled_devices = set()
+        # Gate voltage ramp-up until the TDC has produced at least one
+        # event, so we don't blindly raise the specimen voltage while the
+        # detector isn't confirmed to be receiving anything yet.
+        self._tdc_first_event_seen = False
 
         # apt/* metadata chunk state: how many items have already been flushed
         # to disk and which chunk file ID to use next.
@@ -215,6 +219,13 @@ class APT_Exp_Control:
         count_temp = self.total_ions - self.count_last
         self.count_last = self.total_ions
 
+        if (
+            not self._tdc_first_event_seen
+            and self.variables.counter_source == 'TDC'
+            and (self.total_ions > 0 or count_temp > 0)
+        ):
+            self._tdc_first_event_seen = True
+
         count_raw_signals_temp = self.total_raw_signals - self.count_raw_signals_last
         self.count_raw_signals_last = self.total_raw_signals
 
@@ -302,6 +313,16 @@ class APT_Exp_Control:
             voltage_step = max(-cap, min(cap, voltage_step))
 
         else:
+            voltage_step = 0
+
+        # Don't ramp the voltage up before the TDC has confirmed it is
+        # actually receiving events - only holds back increases, a
+        # decrease (voltage_step < 0) is still allowed to go through.
+        if (
+            voltage_step > 0
+            and self.variables.counter_source == 'TDC'
+            and not self._tdc_first_event_seen
+        ):
             voltage_step = 0
 
         # update v_dc

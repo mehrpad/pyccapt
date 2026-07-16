@@ -1641,9 +1641,77 @@ class Ui_PyCCAPT(object):
                 None
         """
         if not self.variables.flag_main_gate or self.flag_super_user:
+            if not self._confirm_start_parameter_warnings():
+                return
             self.start_experiment_worker()
         else:
             self.error_message("Please close the main gate or activate the Access Override")
+
+    def _confirm_start_parameter_warnings(self):
+        """Warn about risky start parameters and let the operator confirm.
+
+        Two checks, each with its own Yes/No confirmation dialog so a
+        borderline setup can still be started deliberately:
+          * Pulse Fraction below 10% - unusually low, likely a typo.
+          * DC Start Voltage above 1 kV - unusually high for a start value.
+
+        Args:
+                None
+
+        Return:
+                True if it is OK to proceed with the start, False if the
+                operator cancelled on either warning.
+        """
+        try:
+            pulse_fraction = float(self.pulse_fraction.text())
+        except (TypeError, ValueError):
+            pulse_fraction = None
+        if pulse_fraction is not None and pulse_fraction < 10:
+            if not self._confirm_warning_dialog(
+                "Low pulse fraction",
+                "Pulse fraction is below 10%.",
+                "Pulse fraction is currently %.2g%%, which is unusually low.\n\n"
+                "Do you want to continue?" % pulse_fraction,
+            ):
+                return False
+
+        try:
+            vdc_min = float(self.vdc_min.text())
+        except (TypeError, ValueError):
+            vdc_min = None
+        if vdc_min is not None and vdc_min > 1000:
+            if not self._confirm_warning_dialog(
+                "High start voltage",
+                "DC start voltage is too high.",
+                "DC Start Voltage is currently %.0f V (above 1 kV).\n\n"
+                "Do you want to continue?" % vdc_min,
+            ):
+                return False
+
+        return True
+
+    def _confirm_warning_dialog(self, title, text, informative_text):
+        """Show a Yes/No warning dialog and return whether the user confirmed.
+
+        Args:
+                title:             Window title.
+                text:              Short warning headline.
+                informative_text:  Longer explanation shown below the headline.
+
+        Return:
+                True if the operator picked Yes, False otherwise (including
+                the dialog being dismissed).
+        """
+        warning = QtWidgets.QMessageBox(parent=self.start_button)
+        warning.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+        warning.setWindowTitle(title)
+        warning.setText(text)
+        warning.setInformativeText(informative_text)
+        warning.setStandardButtons(
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
+        )
+        warning.setDefaultButton(QtWidgets.QMessageBox.StandardButton.No)
+        return warning.exec() == QtWidgets.QMessageBox.StandardButton.Yes
 
     def statistics_update(self):
         """

@@ -9,9 +9,8 @@ from PyQt6.QtGui import QPixmap
 
 # Local module and scripts
 from pyccapt.control.core import runtime
-from pyccapt.control.devices import camera
+from pyccapt.control.devices import arduino_illumination, camera
 from pyccapt.control.gui import tooltips
-from pyccapt.control.usb_switch import usb_switch
 
 
 class Ui_Cameras_Alignment(object):
@@ -33,6 +32,11 @@ class Ui_Cameras_Alignment(object):
         #   selected  -> the three µs fields are user-editable;
         #   unselected -> the worker drives them from light-dependent presets.
         self.manual_exposure_flag = False
+        # This window keeps a local Override Access state for illumination and
+        # camera-exposure changes.  Startup illumination is intentionally not
+        # gated: it always turns on at the configured default brightness.
+        self.flag_super_user = False
+        self.illumination_controller = None
         self.conf = conf
         self.emitter = SignalEmitter
         self.variables = variables
@@ -271,9 +275,17 @@ class Ui_Cameras_Alignment(object):
         self.verticalLayout_2.setObjectName("verticalLayout_2")
         self.horizontalLayout = QtWidgets.QHBoxLayout()
         self.horizontalLayout.setObjectName("horizontalLayout")
-        # LED indicator that sits directly to the left of the
-        # auto-exposure button. Green = auto on, red = manual. Mirrors
-        # the light button / led_light pair just to the right.
+        self.superuser = QtWidgets.QPushButton(parent=Cameras_Alignment)
+        self.superuser.setMinimumSize(QtCore.QSize(0, 25))
+        self.superuser.setStyleSheet(
+            "QPushButton{\n"
+            "    background: rgb(193, 193, 193)\n"
+            "}\n"
+        )
+        self.superuser.setObjectName("superuser")
+        self.horizontalLayout.addWidget(self.superuser)
+        # The Auto Exposure button is placed below the exposure-time fields;
+        # it is constructed here with the other controls and added later.
         self.auto_exposure_time = QtWidgets.QPushButton(parent=Cameras_Alignment)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Fixed)
         sizePolicy.setHorizontalStretch(0)
@@ -288,7 +300,6 @@ class Ui_Cameras_Alignment(object):
             "                                        "
         )
         self.auto_exposure_time.setObjectName("auto_exposure_time")
-        self.horizontalLayout.addWidget(self.auto_exposure_time)
         spacerItem = QtWidgets.QSpacerItem(
             40, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum
         )
@@ -319,11 +330,27 @@ class Ui_Cameras_Alignment(object):
         self.verticalLayout_2.addLayout(self.horizontalLayout)
         self.gridLayout_2 = QtWidgets.QGridLayout()
         self.gridLayout_2.setObjectName("gridLayout_2")
+        self.illumination_percent_label = QtWidgets.QLabel(parent=Cameras_Alignment)
+        self.illumination_percent_label.setMinimumSize(QtCore.QSize(130, 0))
+        self.illumination_percent_label.setMaximumSize(QtCore.QSize(500, 50))
+        self.illumination_percent_label.setObjectName("illumination_percent_label")
+        self.gridLayout_2.addWidget(self.illumination_percent_label, 1, 0, 1, 1)
+        self.illumination_percent = QtWidgets.QSpinBox(parent=Cameras_Alignment)
+        self.illumination_percent.setRange(0, 100)
+        self.illumination_percent.setSuffix(" %")
+        self.illumination_percent.setValue(int(self.conf.get("camera_illumination_percent", 50)))
+        self.illumination_percent.setObjectName("illumination_percent")
+        self.gridLayout_2.addWidget(self.illumination_percent, 1, 1, 1, 1)
+        self.dimming_separator = QtWidgets.QFrame(parent=Cameras_Alignment)
+        self.dimming_separator.setFrameShape(QtWidgets.QFrame.Shape.HLine)
+        self.dimming_separator.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
+        self.dimming_separator.setObjectName("dimming_separator")
+        self.gridLayout_2.addWidget(self.dimming_separator, 2, 0, 1, 2)
         self.led_light_2 = QtWidgets.QLabel(parent=Cameras_Alignment)
         self.led_light_2.setMinimumSize(QtCore.QSize(130, 0))
         self.led_light_2.setMaximumSize(QtCore.QSize(500, 50))
         self.led_light_2.setObjectName("led_light_2")
-        self.gridLayout_2.addWidget(self.led_light_2, 1, 0, 1, 1)
+        self.gridLayout_2.addWidget(self.led_light_2, 3, 0, 1, 1)
         self.exposure_time_cam_1 = QtWidgets.QLineEdit(parent=Cameras_Alignment)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Minimum)
         sizePolicy.setHorizontalStretch(0)
@@ -338,11 +365,11 @@ class Ui_Cameras_Alignment(object):
             "                                            "
         )
         self.exposure_time_cam_1.setObjectName("exposure_time_cam_1")
-        self.gridLayout_2.addWidget(self.exposure_time_cam_1, 1, 1, 1, 1)
+        self.gridLayout_2.addWidget(self.exposure_time_cam_1, 3, 1, 1, 1)
         spacerItem2 = QtWidgets.QSpacerItem(
             20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding
         )
-        self.gridLayout_2.addItem(spacerItem2, 4, 1, 1, 1)
+        self.gridLayout_2.addItem(spacerItem2, 7, 1, 1, 1)
         self.exposure_time_cam_2 = QtWidgets.QLineEdit(parent=Cameras_Alignment)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Minimum)
         sizePolicy.setHorizontalStretch(0)
@@ -357,7 +384,7 @@ class Ui_Cameras_Alignment(object):
             "                                            "
         )
         self.exposure_time_cam_2.setObjectName("exposure_time_cam_2")
-        self.gridLayout_2.addWidget(self.exposure_time_cam_2, 2, 1, 1, 1)
+        self.gridLayout_2.addWidget(self.exposure_time_cam_2, 4, 1, 1, 1)
         self.exposure_time_cam_3 = QtWidgets.QLineEdit(parent=Cameras_Alignment)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Minimum)
         sizePolicy.setHorizontalStretch(0)
@@ -372,12 +399,12 @@ class Ui_Cameras_Alignment(object):
             "                                            "
         )
         self.exposure_time_cam_3.setObjectName("exposure_time_cam_3")
-        self.gridLayout_2.addWidget(self.exposure_time_cam_3, 3, 1, 1, 1)
+        self.gridLayout_2.addWidget(self.exposure_time_cam_3, 5, 1, 1, 1)
         self.led_light_3 = QtWidgets.QLabel(parent=Cameras_Alignment)
         self.led_light_3.setMinimumSize(QtCore.QSize(130, 0))
         self.led_light_3.setMaximumSize(QtCore.QSize(500, 50))
         self.led_light_3.setObjectName("led_light_3")
-        self.gridLayout_2.addWidget(self.led_light_3, 2, 0, 1, 1)
+        self.gridLayout_2.addWidget(self.led_light_3, 4, 0, 1, 1)
         self.default_exposure_time = QtWidgets.QPushButton(parent=Cameras_Alignment)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Fixed)
         sizePolicy.setHorizontalStretch(0)
@@ -392,12 +419,16 @@ class Ui_Cameras_Alignment(object):
             "                                        "
         )
         self.default_exposure_time.setObjectName("default_exposure_time")
-        self.gridLayout_2.addWidget(self.default_exposure_time, 0, 0, 1, 1, QtCore.Qt.AlignmentFlag.AlignHCenter)
         self.led_light_4 = QtWidgets.QLabel(parent=Cameras_Alignment)
         self.led_light_4.setMinimumSize(QtCore.QSize(130, 0))
         self.led_light_4.setMaximumSize(QtCore.QSize(500, 50))
         self.led_light_4.setObjectName("led_light_4")
-        self.gridLayout_2.addWidget(self.led_light_4, 3, 0, 1, 1)
+        self.gridLayout_2.addWidget(self.led_light_4, 5, 0, 1, 1)
+        self.exposure_mode_layout = QtWidgets.QHBoxLayout()
+        self.exposure_mode_layout.setObjectName("exposure_mode_layout")
+        self.exposure_mode_layout.addWidget(self.auto_exposure_time)
+        self.exposure_mode_layout.addWidget(self.default_exposure_time)
+        self.gridLayout_2.addLayout(self.exposure_mode_layout, 6, 0, 1, 2)
         self.verticalLayout_2.addLayout(self.gridLayout_2)
         # ----- Camera list + connect/disconnect panel ---------------------
         # Compact box that lives right under the exposure-time controls
@@ -434,8 +465,10 @@ class Ui_Cameras_Alignment(object):
         self.retranslateUi(Cameras_Alignment)
         QtCore.QMetaObject.connectSlotsByName(Cameras_Alignment)
         tooltips.apply_tooltips(self, tooltips.CAMERAS_TOOLTIPS)
-        Cameras_Alignment.setTabOrder(self.auto_exposure_time, self.light)
-        Cameras_Alignment.setTabOrder(self.light, self.default_exposure_time)
+        Cameras_Alignment.setTabOrder(self.superuser, self.light)
+        Cameras_Alignment.setTabOrder(self.light, self.illumination_percent)
+        Cameras_Alignment.setTabOrder(self.illumination_percent, self.auto_exposure_time)
+        Cameras_Alignment.setTabOrder(self.auto_exposure_time, self.default_exposure_time)
         Cameras_Alignment.setTabOrder(self.default_exposure_time, self.exposure_time_cam_1)
         Cameras_Alignment.setTabOrder(self.exposure_time_cam_1, self.exposure_time_cam_2)
         Cameras_Alignment.setTabOrder(self.exposure_time_cam_2, self.exposure_time_cam_3)
@@ -489,29 +522,31 @@ class Ui_Cameras_Alignment(object):
         # arrow1 = pg.ArrowItem(pos=(620, 265), angle=90, brush='r')
         # self.cam_b_d.addItem(arrow1)
         ###
+        self.superuser.clicked.connect(self.super_user_access)
         self.light.clicked.connect(self.light_switch)
+        self.illumination_percent.valueChanged.connect(self.update_illumination_percent)
         self.auto_exposure_time.clicked.connect(self.auto_exposure_time_switch)
         self.default_exposure_time.clicked.connect(self.manual_exposure_time_switch)
 
         self.emitter.img0_orig.connect(self.update_cam_s_o)
         self.emitter.img1_orig.connect(self.update_cam_b_o)
         self.emitter.img2_orig.connect(self.update_cam_angle_o)
+        # Connect the Arduino before starting camera capture, so the worker
+        # begins with the correct illumination state.
+        self._initialise_illumination()
         self.initialize_camera_thread()
-
-        if self.conf['usb_lamp_switch'] == 'on':
-            self.usb_lamp_switch = usb_switch.USBSwitch("./control/usb_switch/USBaccessX64.dll")  # 32 bit w/o X64
 
         self.exposure_time_cam_1.editingFinished.connect(self.update_exposure_time)
         self.exposure_time_cam_2.editingFinished.connect(self.update_exposure_time)
         self.exposure_time_cam_3.editingFinished.connect(self.update_exposure_time)
 
         self.original_button_style = self.auto_exposure_time.styleSheet()
+        self._original_superuser_style = self.superuser.styleSheet()
         # Captured so the "Manual Exposure Time" toggle can restore its own
         # look when deselected (it goes green while selected).
         self._original_manual_exposure_style = self.default_exposure_time.styleSheet()
-        # Exposure controls depend on two flags (auto on/off, manual on/off);
-        # cameras start in auto, so this disables the manual button and the
-        # three per-camera µs fields. See _refresh_exposure_widgets.
+        # Camera illumination and exposure controls start locked until the
+        # operator deliberately grants Override Access.
         self._refresh_exposure_widgets()
 
         self.emitter.cams_exposure_time_default.connect(self.set_default_exposure_time)
@@ -520,8 +555,6 @@ class Ui_Cameras_Alignment(object):
         # auto mode where the firmware picks the value; in manual mode
         # it just mirrors what the user typed.
         self.emitter.cams_exposure_time_current.connect(self._update_current_exposure_fields)
-        # switch off the light if it is one before opening the window
-        self.usb_lamp_switch.switch_off(16)
 
     def retranslateUi(self, Cameras_Alignment):
         """
@@ -548,9 +581,11 @@ class Ui_Cameras_Alignment(object):
         self.label_211.setText(_translate("Cameras_Alignment", "Overview"))
         self.label_210.setText(_translate("Cameras_Alignment", "Detail"))
         self.label_206.setText(_translate("Cameras_Alignment", "Camera Angle"))
+        self.superuser.setText(_translate("Cameras_Alignment", "Override Access"))
         self.auto_exposure_time.setText(_translate("Cameras_Alignment", "Auto Exposure Time"))
-        self.led_light.setText(_translate("Cameras_Alignment", "Light"))
-        self.light.setText(_translate("Cameras_Alignment", "Light"))
+        self.led_light.setText("")
+        self.light.setText(_translate("Cameras_Alignment", "Light On / Off"))
+        self.illumination_percent_label.setText(_translate("Cameras_Alignment", "Dimming"))
         self.led_light_2.setText(_translate("Cameras_Alignment", "Exposure Time Side (us)"))
         self.exposure_time_cam_1.setText(_translate("Cameras_Alignment", "2000000"))
         self.exposure_time_cam_2.setText(_translate("Cameras_Alignment", "1000000"))
@@ -690,29 +725,96 @@ class Ui_Cameras_Alignment(object):
             region = img[roi_coords[0][0], roi_coords[0][1]]
             self.cam_angle_d.setImage(region, autoRange=False, autoLevels=True)
 
-    def light_switch(self):
-        """
-        light switch function
+    def _initialise_illumination(self):
+        """Connect to the Arduino and turn the camera illumination on.
 
-        Args:
-        None
-
-        Return:
-        None
+        This deliberately runs before local Override Access is granted.  The
+        operator must still grant Override Access to subsequently change
+        brightness, switch the light, or alter exposure modes.
         """
-        if not self.variables.light:
-            self.led_light.setPixmap(self.led_green)
-            if self.conf['usb_lamp_switch'] == 'on':
-                self.usb_lamp_switch.switch_on(16)
+        if self.conf.get("camera_illumination", "off") != "on":
+            self.variables.light = False
+            self.led_light.setPixmap(self.led_red)
+            return
+
+        try:
+            controller = arduino_illumination.ArduinoIllumination(
+                self.conf.get("COM_PORT_camera_illumination", "auto")
+            )
+            port = controller.connect()
+            controller.set_on(self.illumination_percent.value())
+            self.illumination_controller = controller
             self.variables.light = True
             self.variables.light_switch = True
-
-        elif self.variables.light:
-            self.led_light.setPixmap(self.led_red)
-            if self.conf['usb_lamp_switch'] == 'on':
-                self.usb_lamp_switch.switch_off(16)
+            self.led_light.setPixmap(self.led_green)
+            print(
+                f"Camera illumination connected on {port}; "
+                f"on at {self.illumination_percent.value()}%."
+            )
+        except Exception as exc:
+            self.illumination_controller = None
             self.variables.light = False
+            self.led_light.setPixmap(self.led_red)
+            message = f"Camera illumination unavailable: {exc}"
+            print(message)
+            self.camera_status_label.setText(message)
+
+    def _report_illumination_error(self, exc):
+        message = f"Camera illumination command failed: {exc}"
+        print(message)
+        self.camera_status_label.setText(message)
+
+    def super_user_access(self):
+        """Toggle Override Access for camera illumination and exposure changes."""
+        if not self.flag_super_user:
+            warning = QtWidgets.QMessageBox(parent=self.superuser)
+            warning.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+            warning.setWindowTitle("Confirm Access Override")
+            warning.setText("Camera Override Access unlocks illumination and exposure controls.")
+            warning.setInformativeText(
+                "It enables the illumination on/off button, brightness setting, "
+                "Auto Exposure Time, and Manual Exposure Time. Continue only "
+                "when it is safe to change the camera alignment conditions."
+            )
+            warning.setStandardButtons(
+                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
+            )
+            warning.setDefaultButton(QtWidgets.QMessageBox.StandardButton.No)
+            if warning.exec() != QtWidgets.QMessageBox.StandardButton.Yes:
+                return
+            self.flag_super_user = True
+            self.superuser.setStyleSheet("QPushButton{background: rgb(0, 255, 26)}")
+        else:
+            self.flag_super_user = False
+            self.superuser.setStyleSheet(self._original_superuser_style)
+        self._refresh_exposure_widgets()
+
+    def update_illumination_percent(self, percent):
+        """Apply an operator-selected brightness percentage to the Arduino."""
+        if not self.flag_super_user or self.illumination_controller is None:
+            return
+        try:
+            self.illumination_controller.set_brightness(percent)
+        except Exception as exc:
+            self._report_illumination_error(exc)
+
+    def light_switch(self):
+        """Toggle Arduino-driven NeoPixel illumination on/off."""
+        if not self.flag_super_user or self.illumination_controller is None:
+            return
+        try:
+            if self.variables.light:
+                self.illumination_controller.set_off()
+                self.variables.light = False
+                self.led_light.setPixmap(self.led_red)
+            else:
+                self.illumination_controller.set_on(self.illumination_percent.value())
+                self.variables.light = True
+                self.led_light.setPixmap(self.led_green)
+            # Keep the camera worker's exposure presets in sync with light.
             self.variables.light_switch = True
+        except Exception as exc:
+            self._report_illumination_error(exc)
 
     def auto_exposure_time_switch(self):
         """
@@ -724,6 +826,8 @@ class Ui_Cameras_Alignment(object):
         Return:
         None
         """
+        if not self.flag_super_user:
+            return
         self.auto_exposure_time_flag = not self.auto_exposure_time_flag
         # Button goes green while selected (auto on), like the other toggles.
         if self.auto_exposure_time_flag:
@@ -737,7 +841,7 @@ class Ui_Cameras_Alignment(object):
         else:
             self.auto_exposure_time.setStyleSheet(self.original_button_style)
         self._refresh_exposure_widgets()
-        self.emitter.auto_exposure_time.emit(True)
+        self.emitter.auto_exposure_time.emit(self.auto_exposure_time_flag)
 
     def _refresh_exposure_widgets(self):
         """Enable/disable the exposure controls for the current mode.
@@ -749,11 +853,16 @@ class Ui_Cameras_Alignment(object):
           * auto off, manual off     -> fields disabled; the worker drives
                                        them from the light-dependent presets.
         """
+        access_granted = self.flag_super_user
         auto = self.auto_exposure_time_flag
         manual = self.manual_exposure_flag
-        # The Manual toggle is only selectable while auto exposure is off.
-        self.default_exposure_time.setEnabled(not auto)
-        fields_editable = (not auto) and manual
+        self.light.setEnabled(access_granted)
+        self.illumination_percent.setEnabled(access_granted)
+        self.auto_exposure_time.setEnabled(access_granted)
+        # The Manual toggle is only selectable while auto exposure is off,
+        # and all of these changes require Override Access.
+        self.default_exposure_time.setEnabled(access_granted and not auto)
+        fields_editable = access_granted and (not auto) and manual
         for widget in (self.exposure_time_cam_1, self.exposure_time_cam_2, self.exposure_time_cam_3):
             widget.setEnabled(fields_editable)
 
@@ -764,7 +873,7 @@ class Ui_Cameras_Alignment(object):
         Unselected        -> the worker reverts to the light-dependent
                              presets and the fields are locked.
         """
-        if self.auto_exposure_time_flag:
+        if not self.flag_super_user or self.auto_exposure_time_flag:
             return
         self.manual_exposure_flag = not self.manual_exposure_flag
         if self.manual_exposure_flag:
@@ -826,6 +935,8 @@ class Ui_Cameras_Alignment(object):
         self.variables.flag_camera_grab = False
         if hasattr(self, 'camera_thread'):
             self.camera_thread.wait()
+        if self.illumination_controller is not None:
+            self.illumination_controller.close()
 
     def cameras_screenshot(self):
         if self.variables.flag_cameras_take_screenshot:

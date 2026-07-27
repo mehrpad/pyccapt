@@ -15,6 +15,7 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for older Python
 _DEVICE_TOGGLE_KEYS = {
     "tdc",
     "camera",
+    "camera_illumination",
     "pump_ll",
     "pump_cll",
     "gates",

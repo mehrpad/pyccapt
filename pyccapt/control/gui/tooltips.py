@@ -360,19 +360,21 @@ CAMERAS_TOOLTIPS = {
     "cam_b_d": "Camera Top - detail view (zoomed in).",
     "cam_angle_o": "Camera Angle - overview view.",
     "cam_angle_d": "Camera Angle - detail view.",
+    # --- Override / illumination ----------------------------------------
+    "superuser": "Override Access unlocks illumination and camera exposure controls after confirmation.",
+    "light": "Turn the Arduino-controlled NeoPixel light on or off. Disabled until Override Access is granted.",
+    "led_light": "Illumination state: green = on, red = off.",
+    "illumination_percent": "NeoPixel dimming level, 0 to 100 percent. Disabled until Override Access is granted.",
     # --- Exposure controls ----------------------------------------------
     "exposure_time_cam_1": "Exposure time for the side camera, microseconds.  Increase if the image is too dark.",
     "exposure_time_cam_2": "Exposure time for the top camera (µs).",
     "exposure_time_cam_3": "Exposure time for the angle camera (µs).",
     "auto_exposure_time": (
-        "Toggle automatic exposure for all cameras. Cameras start in auto "
-        "(green LED to the left); click to switch to manual (red LED)."
+        "Toggle automatic exposure for all cameras. Disabled until Override Access is granted."
     ),
     "led_auto_exposure": "Auto-exposure indicator: green = on (Continuous), red = off (manual).",
-    "default_exposure_time": "Reset exposure time to the default values for all cameras.",
-    # --- Light + status -------------------------------------------------
-    "light": "Toggle the alignment light (USB switch).",
-    "led_light": "Light state indicator.  Green = on.",
+    "default_exposure_time": "Enable/disable manual camera exposure entry. Disabled until Override Access is granted.",
+    # --- Status ----------------------------------------------------------
     "Error": "Status / error messages from the camera controller.",
 }
 

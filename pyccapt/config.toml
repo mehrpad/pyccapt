@@ -184,7 +184,20 @@ COM_PORT_cryo = "COM7"
 # Set this to "auto" only if this COM assignment changes; auto searches
 # Arduino/CH340/CP210 serial devices for the PyCCAPT sketch.
 COM_PORT_camera_illumination = "COM12"
-camera_illumination_percent = 50
+# A dim, diffuse green field is the initial alignment baseline. Green uses
+# the most densely sampled Bayer channel on colour cameras, allowing lower
+# LED output than blue/white; final colour and geometry must still be tuned
+# on the instrument to avoid a specular reflection from the electrode.
+camera_illumination_color = "green" # RGB (0, 255, 0); supported: green, red, blue, white
+camera_illumination_percent = 25
+# Light-on manual/preset exposure (microseconds), ordered side / top / angle.
+# The light-off preset remains unchanged in camera.py: 2 s / 1 s / 2 s.
+camera_exposure_light_side_us = 20000
+camera_exposure_light_top_us = 10000
+camera_exposure_light_angle_us = 20000
+# Requested maximum stream rate. Actual rate can be lower due to exposure,
+# ROI, camera model, or USB bandwidth.
+camera_alignment_frame_rate_hz = 30.0
 
 # ===================== CLL fast-vent valves ("Vent CLL" button) =====================
 # The "Vent CLL" button (Pumps & Vacuum panel) does a fast sample/cryo exchange

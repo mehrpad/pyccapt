@@ -13,6 +13,14 @@ from pyccapt.control.devices import arduino_illumination, camera
 from pyccapt.control.gui import tooltips
 
 
+ILLUMINATION_RGB = {
+    "green": (0, 255, 0),
+    "red": (255, 0, 0),
+    "blue": (0, 0, 255),
+    "white": (255, 255, 255),
+}
+
+
 class Ui_Cameras_Alignment(object):
     def __init__(self, variables, conf, SignalEmitter):
         """
@@ -338,7 +346,7 @@ class Ui_Cameras_Alignment(object):
         self.illumination_percent = QtWidgets.QSpinBox(parent=Cameras_Alignment)
         self.illumination_percent.setRange(0, 100)
         self.illumination_percent.setSuffix(" %")
-        self.illumination_percent.setValue(int(self.conf.get("camera_illumination_percent", 50)))
+        self.illumination_percent.setValue(int(self.conf.get("camera_illumination_percent", 25)))
         self.illumination_percent.setObjectName("illumination_percent")
         self.gridLayout_2.addWidget(self.illumination_percent, 1, 1, 1, 1)
         self.dimming_separator = QtWidgets.QFrame(parent=Cameras_Alignment)
@@ -742,6 +750,23 @@ class Ui_Cameras_Alignment(object):
                 self.conf.get("COM_PORT_camera_illumination", "auto")
             )
             port = controller.connect()
+            color_name = str(self.conf.get("camera_illumination_color", "green")).strip().lower()
+            color = ILLUMINATION_RGB.get(color_name, ILLUMINATION_RGB["green"])
+            if color_name not in ILLUMINATION_RGB:
+                print(
+                    f"Unknown camera illumination color {color_name!r}; "
+                    "using green."
+                )
+                color_name = "green"
+            try:
+                controller.set_color(*color)
+            except RuntimeError as exc:
+                # Keep an already-installed older sketch usable until the
+                # Nano can be reflashed. Its previous colour is retained.
+                print(
+                    f"Camera illumination firmware does not accept colour "
+                    f"control yet ({exc}); retaining its existing colour."
+                )
             controller.set_on(self.illumination_percent.value())
             self.illumination_controller = controller
             self.variables.light = True
@@ -749,7 +774,7 @@ class Ui_Cameras_Alignment(object):
             self.led_light.setPixmap(self.led_green)
             print(
                 f"Camera illumination connected on {port}; "
-                f"on at {self.illumination_percent.value()}%."
+                f"on at {self.illumination_percent.value()}% ({color_name})."
             )
         except Exception as exc:
             self.illumination_controller = None

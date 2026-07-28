@@ -21,8 +21,9 @@ except ImportError:  # pragma: no cover - reported clearly at runtime on minimal
 class ArduinoIllumination:
     """Control the Nano running the PyCCAPT NeoPixel illumination sketch.
 
-    The Arduino accepts ``PING``, ``ON <percent>``, ``OFF`` and
-    ``BRIGHTNESS <percent>`` commands.  Each command responds with an ``OK``
+    The Arduino accepts ``PING``, ``ON <percent>``, ``OFF``,
+    ``BRIGHTNESS <percent>``, and ``COLOR <red> <green> <blue>`` commands.
+    Each command responds with an ``OK``
     line, allowing auto-detection without claiming an unrelated serial device.
     """
 
@@ -87,6 +88,15 @@ class ArduinoIllumination:
         """Store brightness and apply it immediately when illumination is on."""
         self._command(f"BRIGHTNESS {self._validate_percent(percent)}")
 
+    def set_color(self, red: int, green: int, blue: int) -> None:
+        """Store the NeoPixel RGB colour and apply it immediately when on."""
+        self._command(
+            "COLOR "
+            f"{self._validate_channel(red)} "
+            f"{self._validate_channel(green)} "
+            f"{self._validate_channel(blue)}"
+        )
+
     def close(self) -> None:
         if self.serial_port is None:
             return
@@ -123,3 +133,7 @@ class ArduinoIllumination:
     @staticmethod
     def _validate_percent(percent: int) -> int:
         return max(0, min(100, int(percent)))
+
+    @staticmethod
+    def _validate_channel(value: int) -> int:
+        return max(0, min(255, int(value)))

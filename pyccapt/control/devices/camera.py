@@ -105,6 +105,19 @@ class CameraWorker(QObject):
         # which reproduces the legacy first-come behaviour. Order must match
         # VIEW_ORDER / the slot layout (side=0, top=1, angle=2).
         conf = conf or {}
+        # The illuminated alignment preset and its frame-rate ceiling are
+        # configuration values because they depend on the installed optics.
+        # Keep the dark preset in code so the long-standing light-off
+        # behaviour is unchanged.
+        self.preset_exposure_light = tuple(
+            self._positive_config_int(
+                conf.get(f"camera_exposure_light_{view}_us"), default
+            )
+            for view, default in zip(self.VIEW_ORDER, self.PRESET_EXPOSURE_LIGHT)
+        )
+        self.camera_alignment_frame_rate_hz = self._positive_config_float(
+            conf.get("camera_alignment_frame_rate_hz"), 30.0
+        )
         self._configured_serials = [
             _normalize_serial(conf.get(f"camera_serial_{view}"))
             for view in self.VIEW_ORDER
@@ -195,7 +208,6 @@ class CameraWorker(QObject):
         self.running = False
 
     @pyqtSlot(bool)
-    @pyqtSlot(bool)
     def set_manual_exposure_mode(self, manual):
         """Choose the manual-exposure source (only used when auto is off).
 
@@ -209,13 +221,13 @@ class CameraWorker(QObject):
             self._applied_exposure[slot] = None
 
     @pyqtSlot(bool)
-    def set_auto_exposure_time(self):
-        if not self.exposure_auto:
-            self.exposure_mode = 'Continuous'
-            self.exposure_auto = True
-        else:
-            self.exposure_mode = 'Off'
-            self.exposure_auto = False
+    def set_auto_exposure_time(self, enabled):
+        """Set, rather than toggle, the camera firmware auto-exposure mode."""
+        self.exposure_auto = bool(enabled)
+        self.exposure_mode = 'Continuous' if self.exposure_auto else 'Off'
+        for slot in range(self.SLOT_COUNT):
+            self._applied_exposure_mode[slot] = None
+            self._applied_exposure[slot] = None
 
     @pyqtSlot(int)
     def set_exposure_time_1(self, exposure_time):
@@ -235,8 +247,25 @@ class CameraWorker(QObject):
             return (self.exposure_time_cam_1, self.exposure_time_cam_2, self.exposure_time_cam_3)[slot]
         # Preset mode: light-dependent defaults (side, top, angle).
         light_on = bool(getattr(self.variables, 'light', False))
-        presets = self.PRESET_EXPOSURE_LIGHT if light_on else self.PRESET_EXPOSURE_DARK
+        presets = self.preset_exposure_light if light_on else self.PRESET_EXPOSURE_DARK
         return presets[slot]
+
+    @staticmethod
+    def _positive_config_int(value, default):
+        """Return a positive integer config value, falling back safely."""
+        try:
+            return max(1, int(value))
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _positive_config_float(value, default):
+        """Return a positive floating config value, falling back safely."""
+        try:
+            number = float(value)
+            return number if number > 0 else default
+        except (TypeError, ValueError):
+            return default
 
     def _close_slot(self, slot):
         cam = self._slots[slot]
@@ -503,6 +532,20 @@ class CameraWorker(QObject):
             bl = getattr(cam, "BlackLevel", None)
             if bl is not None:
                 bl.SetValue(0)
+        except Exception:
+            pass
+
+        # Limit the alignment stream to a responsive, modest rate.  Basler
+        # exposes AcquisitionFrameRate on current cameras and
+        # AcquisitionFrameRateAbs on some older models.  Exposure, ROI, and
+        # transport bandwidth can still make the resulting rate lower.
+        try:
+            self._try_set(getattr(cam, "AcquisitionFrameRateEnable", None), True)
+            for name in ("AcquisitionFrameRate", "AcquisitionFrameRateAbs"):
+                if self._try_set(
+                    getattr(cam, name, None), self.camera_alignment_frame_rate_hz
+                ):
+                    break
         except Exception:
             pass
 

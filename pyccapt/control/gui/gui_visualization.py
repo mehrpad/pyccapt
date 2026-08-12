@@ -670,13 +670,17 @@ class Ui_Visualization(object):
         #              unboundedly and washes out the rest of the map under
         #              autoscale), and _fdm_count_all is the running total
         #              ion count.
-        #   * window : _fdm_window_x/y hold the most recent fdm_max_ions
-        #              hits, and the map is rebuilt from them each tick.
+        #   * window : a circular buffer stores the bin of each recent ion;
+        #              its histogram is updated by adding new bins and
+        #              subtracting only the bins that leave the window.
         self._fdm_hist_all = np.zeros_like(self.hist_fdm)
         self._fdm_count_all = 0
         self._fdm_use_last_events = False
-        self._fdm_window_x = np.array([], dtype=np.float32)
-        self._fdm_window_y = np.array([], dtype=np.float32)
+        self._fdm_window_capacity = 0
+        self._fdm_window_bins = np.empty(0, dtype=np.int32)
+        self._fdm_window_start = 0
+        self._fdm_window_count = 0
+        self._fdm_window_hist = np.zeros_like(self.hist_fdm)
         self._original_fdm_button_style = self.fdm_last_events_switch.styleSheet()
         self.fdm_last_events_switch.clicked.connect(self._fdm_last_events_toggle)
 
@@ -883,6 +887,7 @@ class Ui_Visualization(object):
         """
         self._fdm_use_last_events = self.fdm_last_events_switch.isChecked()
         if self._fdm_use_last_events:
+            self._seed_fdm_window_from_retained_events()
             self.fdm_last_events_switch.setStyleSheet("QPushButton{background: rgb(0, 255, 26)}")
         else:
             self.fdm_last_events_switch.setStyleSheet(self._original_fdm_button_style)
@@ -1143,10 +1148,9 @@ class Ui_Visualization(object):
             self._fdm_hist_all += hist
             self._fdm_count_all += new_events
 
-            # Last-events FDM: keep the sliding window current every tick,
-            # trimmed to the most recent fdm_max hits.
-            self._fdm_window_x = np.concatenate((self._fdm_window_x, (xx * 10).astype(np.float32)))[-fdm_max:]
-            self._fdm_window_y = np.concatenate((self._fdm_window_y, (yy * 10).astype(np.float32)))[-fdm_max:]
+            # Maintain the last-events histogram incrementally. This adds
+            # only this tick's ions and subtracts only expired ions.
+            self._update_fdm_window(xx * 10, yy * 10, fdm_max)
 
             # Display whichever map the toggle selects (no new accumulation).
             self._draw_fdm_display()
@@ -1234,6 +1238,82 @@ class Ui_Visualization(object):
         self.detector_heatmap.addItem(self.scatter)
         self.detector_heatmap.addItem(self.detector_circle)
 
+    def _fdm_flat_bins(self, x, y):
+        """Map detector coordinates to flat histogram bins; discard outliers."""
+        x = np.asarray(x)
+        y = np.asarray(y)
+        nx, ny = self.bins_detector
+        xmin, xmax = self.range[0]
+        ymin, ymax = self.range[1]
+        valid = (x >= xmin) & (x <= xmax) & (y >= ymin) & (y <= ymax)
+        if not np.any(valid):
+            return np.empty(0, dtype=np.int32)
+        xi = np.minimum(((x[valid] - xmin) * nx / (xmax - xmin)).astype(np.int64), nx - 1)
+        yi = np.minimum(((y[valid] - ymin) * ny / (ymax - ymin)).astype(np.int64), ny - 1)
+        return (xi * ny + yi).astype(np.int32, copy=False)
+
+    def _seed_fdm_window_from_retained_events(self):
+        """Immediately build last-N state from ions already retained by the GUI."""
+        try:
+            capacity = max(1, int(float(self.fdm_max_ions.text())))
+        except (ValueError, AttributeError):
+            capacity = 1_000_000
+        x = self.last_100_thousand_det_x_heatmap[-capacity:] * 10
+        y = self.last_100_thousand_det_y_heatmap[-capacity:] * 10
+        bins = self._fdm_flat_bins(x, y)
+        self._fdm_window_capacity = capacity
+        self._fdm_window_bins = np.empty(capacity, dtype=np.int32)
+        self._fdm_window_start = 0
+        self._fdm_window_count = min(len(bins), capacity)
+        if self._fdm_window_count:
+            bins = bins[-self._fdm_window_count:]
+            self._fdm_window_bins[:self._fdm_window_count] = bins
+        counts = np.bincount(
+            bins if self._fdm_window_count else np.empty(0, dtype=np.int32),
+            minlength=self.hist_fdm.size,
+        )
+        self._fdm_window_hist = counts.reshape(self.hist_fdm.shape).astype(float, copy=False)
+
+    def _update_fdm_window(self, x, y, capacity):
+        """Slide the last-N FDM using O(new + expired) work, without rebinning N."""
+        if capacity != self._fdm_window_capacity:
+            # The retained arrays already include this tick, so seeding is
+            # sufficient and adding x/y again would duplicate those ions.
+            self._seed_fdm_window_from_retained_events()
+            return
+        incoming = self._fdm_flat_bins(x, y)
+        if not len(incoming):
+            return
+        if len(incoming) >= capacity:
+            incoming = incoming[-capacity:]
+            self._fdm_window_bins[:] = incoming
+            self._fdm_window_start = 0
+            self._fdm_window_count = capacity
+            self._fdm_window_hist = np.bincount(
+                incoming, minlength=self.hist_fdm.size
+            ).reshape(self.hist_fdm.shape).astype(float, copy=False)
+            return
+
+        expired = max(0, self._fdm_window_count + len(incoming) - capacity)
+        if expired:
+            positions = (self._fdm_window_start + np.arange(expired)) % capacity
+            outgoing = self._fdm_window_bins[positions]
+            self._fdm_window_hist -= np.bincount(
+                outgoing, minlength=self.hist_fdm.size
+            ).reshape(self.hist_fdm.shape)
+            self._fdm_window_start = (self._fdm_window_start + expired) % capacity
+            self._fdm_window_count -= expired
+
+        end = (self._fdm_window_start + self._fdm_window_count) % capacity
+        first = min(len(incoming), capacity - end)
+        self._fdm_window_bins[end:end + first] = incoming[:first]
+        if first < len(incoming):
+            self._fdm_window_bins[:len(incoming) - first] = incoming[first:]
+        self._fdm_window_count += len(incoming)
+        self._fdm_window_hist += np.bincount(
+            incoming, minlength=self.hist_fdm.size
+        ).reshape(self.hist_fdm.shape)
+
     def _draw_fdm_display(self):
         """Render the FDM panel from the existing accumulators (entire map
         or last-events window). Performs no accumulation, so it is safe to
@@ -1243,18 +1323,13 @@ class Ui_Visualization(object):
         except (ValueError, AttributeError):
             fdm_max = 1_000_000
         if self._fdm_use_last_events:
-            win_hist, _, _ = np.histogram2d(
-                self._fdm_window_x[-fdm_max:],
-                self._fdm_window_y[-fdm_max:],
-                bins=self.bins_detector,
-                range=self.range,
-            )
-            self.hist_fdm = np.log10(win_hist + 1)
+            if fdm_max != self._fdm_window_capacity:
+                self._seed_fdm_window_from_retained_events()
+            self.hist_fdm = np.log10(self._fdm_window_hist + 1)
         else:
             self.hist_fdm = np.log10(self._fdm_hist_all + 1)
-        # The ion counter is the cumulative total detected, so toggling
-        # Last Events only swaps which map is drawn — never the number.
-        self.fdm_count.setText(str(self._fdm_count_all))
+        displayed_count = self._fdm_window_count if self._fdm_use_last_events else self._fdm_count_all
+        self.fdm_count.setText(str(displayed_count))
         # Detector-plane edges are fixed by the configured range, so they
         # can be derived without re-histogramming this tick's events.
         xedges = np.linspace(self.range[0][0], self.range[0][1], self.bins_detector[0] + 1)
@@ -1370,8 +1445,11 @@ class Ui_Visualization(object):
             self.detector_fdm.addItem(self.detector_circle_fdm)
             self._fdm_hist_all[:] = 0.0
             self._fdm_count_all = 0
-            self._fdm_window_x = np.array([], dtype=np.float32)
-            self._fdm_window_y = np.array([], dtype=np.float32)
+            self._fdm_window_capacity = 0
+            self._fdm_window_bins = np.empty(0, dtype=np.int32)
+            self._fdm_window_start = 0
+            self._fdm_window_count = 0
+            self._fdm_window_hist = np.zeros_like(self.hist_fdm)
             self.fdm_count.setText("0")
             self.variables.plot_clear_flag = False
             self.index_plot = 0
@@ -1394,8 +1472,11 @@ class Ui_Visualization(object):
             self.hist_fdm, xedges, yedges = np.histogram2d([], [], bins=self.bins_detector, range=self.range)
             self._fdm_hist_all = np.zeros_like(self.hist_fdm)
             self._fdm_count_all = 0
-            self._fdm_window_x = np.array([], dtype=np.float32)
-            self._fdm_window_y = np.array([], dtype=np.float32)
+            self._fdm_window_capacity = 0
+            self._fdm_window_bins = np.empty(0, dtype=np.int32)
+            self._fdm_window_start = 0
+            self._fdm_window_count = 0
+            self._fdm_window_hist = np.zeros_like(self.hist_fdm)
             self.fdm_count.setText("0")
             self.hist_mc = np.zeros(len(self.bins_mc) - 1)
             self.hist_tof = np.zeros(len(self.bins_tof) - 1)

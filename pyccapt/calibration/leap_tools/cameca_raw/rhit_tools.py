@@ -161,13 +161,12 @@ def _decode_run_header(file_path: str | Path) -> dict[str, Any]:
         if np.isfinite(value) and abs(value) < 1e8:
             params[field_name] = float(value)
 
-    coefficients = []
-    for index in range(1952, min(2112, len(rest)), 8):
-        value = struct.unpack(">d", rest[index : index + 8])[0]
-        if np.isfinite(value) and abs(value) < 1e15:
-            coefficients.append(float(value))
-    if coefficients:
-        params["bowl_correction_coefficients"] = coefficients
+    # CRunHeader is a private Cameca ROOT class.  Earlier code treated a fixed
+    # byte range as big-endian doubles and exposed the result as bowl
+    # coefficients.  On complete LEAP files that produces obvious byte-garbage
+    # (for example 1e-315 and 1e14 values), so it must not be presented as a
+    # calibration.  A verified CCalibMass/CBowl class decoder is required.
+    params["bowl_correction_status"] = "not decoded: proprietary CRunHeader/CBowl layout requires a verified class decoder"
 
     params["lsb_to_mm"] = float(params.get("detector_halfsize_mm", 18.5)) / 750.0
     return params
@@ -299,6 +298,7 @@ def _collect_pelf(root_file) -> dict[str, np.ndarray]:
 
 
 def _compute_rhit_mc(hits: pd.DataFrame, instrument_params: dict[str, Any]) -> np.ndarray:
+    """Return a direct-flight m/q proxy, not an IVAS or reflectron calibration."""
     flight_path_m = float(instrument_params.get("flight_path_mm", DEFAULT_FLIGHT_PATH_M * 1000.0)) / 1000.0
     t0_ns = float(instrument_params.get("t0_ns", DEFAULT_T0_NS))
     if "Vref" in hits.columns and "VDC" in hits.columns:
@@ -336,7 +336,12 @@ def _convert_rhit_to_pos_format(raw_hits: pd.DataFrame, metadata: dict[str, Any]
 
     hits["VDC"] = hits["v"].to_numpy(dtype=float)
     hits = hits.drop(columns=["v"])
-    hits["mc"] = _compute_rhit_mc(hits, instrument_params)
+    # Keep the long-standing ``mc`` compatibility column, but make the
+    # approximation explicit as well.  Reflectron RHIT files need their stored
+    # CCalibMass/CBowl calibration (or a separately validated transfer model)
+    # before this quantity can be called calibrated m/q.
+    hits["mc_direct_flight_approx"] = _compute_rhit_mc(hits, instrument_params)
+    hits["mc"] = hits["mc_direct_flight_approx"]
 
     standard_columns = ["ionIdx", "detx", "dety", "mc", "tof", "VDC"]
     if "Vref" in hits.columns:
@@ -369,6 +374,11 @@ def rhit_load(file_path: str | Path) -> tuple[pd.DataFrame, dict[str, dict[str, 
         "numHits": int(tree.num_entries),
         "instrumentParams": instrument_params,
         "rootKeys": list(root_file.keys()),
+        "massToCharge": {
+            "column": "mc_direct_flight_approx",
+            "status": "direct-flight approximation from raw RHIT TOF/VDC; not IVAS-calibrated m/q",
+            "limitation": "Do not use for reflectron TOF, energy, bowl, or mass-tail inference without a verified CCalibMass/CBowl decoder or instrument transfer model.",
+        },
     }
     pelf = _collect_pelf(root_file)
     if pelf:

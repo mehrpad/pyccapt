@@ -203,9 +203,9 @@ def call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected,
 
     # ---- automatic grid sweep --------------------------------------------
     kf_lo_w = widgets.FloatText(value=2.8, step=0.1, layout=_narrow)
-    kf_hi_w = widgets.FloatText(value=3.8, step=0.1, layout=_narrow)
+    kf_hi_w = widgets.FloatText(value=6.0, step=0.1, layout=_narrow)
     kf_n_w = widgets.IntText(value=9, layout=_narrow)
-    icf_lo_w = widgets.FloatText(value=1.4, step=0.05, layout=_narrow)
+    icf_lo_w = widgets.FloatText(value=1.1, step=0.05, layout=_narrow)
     icf_hi_w = widgets.FloatText(value=1.9, step=0.05, layout=_narrow)
     icf_n_w = widgets.IntText(value=9, layout=_narrow)
     auto_best = {}
@@ -319,7 +319,7 @@ def call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected,
         out_auto,
     ])
 
-    tabs = widgets.Tab(children=[manual_tab, auto_tab])
-    tabs.set_title(0, 'Manual (ICF/kf iterate)')
-    tabs.set_title(1, 'Automatic sweep')
+    tabs = widgets.Tab(children=[auto_tab, manual_tab])
+    tabs.set_title(0, 'Automatic sweep')
+    tabs.set_title(1, 'Manual (ICF/kf iterate)')
     display(widgets.VBox([tabs, widgets.HTML('<b>Status</b>'), out_status]))

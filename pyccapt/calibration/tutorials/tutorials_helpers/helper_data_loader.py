@@ -28,7 +28,9 @@ def _build_path_browser(variables, *, file_kind, attr, placeholder, on_selected=
     it from there) and on ``variables.last_directory`` so the next browse opens
     in the same place. ``on_selected(path, output)`` may post-process the chosen
     path (e.g. convert a MATLAB ``.fig``) and return the path to actually use,
-    or ``None`` to abort. Returns the displayed widget.
+    or ``None`` to abort. Displays the widget itself (returns ``None``, since
+    notebook cells call this as their last expression -- returning the widget
+    as well would make Jupyter auto-display it a second time).
     """
     import ipywidgets as widgets
     from IPython.display import display
@@ -73,7 +75,6 @@ def _build_path_browser(variables, *, file_kind, attr, placeholder, on_selected=
     button.on_click(_on_click)
     widget = widgets.VBox([widgets.HBox([path_field, button]), out])
     display(widget)
-    return widget
 
 
 def dataset_browser(variables, width="650px"):
@@ -82,7 +83,7 @@ def dataset_browser(variables, width="650px"):
     Drop-in replacement for the old multi-line dataset Browse cell. Use the
     chosen path downstream as ``variables.dataset_path``.
     """
-    return _build_path_browser(
+    _build_path_browser(
         variables,
         file_kind="dataset",
         attr="dataset_path",
@@ -112,7 +113,7 @@ def range_browser(variables, width="650px"):
             return str(out_h5)
         return selected
 
-    return _build_path_browser(
+    _build_path_browser(
         variables,
         file_kind="range",
         attr="range_path",

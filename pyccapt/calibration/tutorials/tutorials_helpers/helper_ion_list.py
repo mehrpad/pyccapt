@@ -148,7 +148,7 @@ def call_ion_list(variables, selector, mode, path='../../../files/'):
                 ('NIST reference (auto-match)', 'nist'),
                 ('Parametric', 'parametric'),
             ],
-            value='nist',
+            value='parametric',
             layout=widgets.Layout(width='400px'),
         )
         fit_method_help = widgets.HTML(

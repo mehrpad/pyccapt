@@ -16,6 +16,9 @@ from pyccapt.calibration.core.mc_plot_peak_helpers import (
 )
 from pyccapt.calibration.data_tools import data_loadcrop
 from pyccapt.calibration.reconstructions import reconstruction, sdm, rdf, density_map, iso_surface, proxigram
+from pyccapt.calibration.tutorials.tutorials_helpers.helper_mc_tof_calculator import (
+    build_mc_tof_calculator_panel,
+)
 from pyccapt.calibration.tutorials.tutorials_helpers.helper_peak_spectral_analysis import \
     build_peak_spectral_analysis_panel
 
@@ -2254,6 +2257,8 @@ def call_visualization(variables, colab=False):
 
     tab13 = build_peak_spectral_analysis_panel(variables, label_layout=label_layout)
 
+    tab_mc_tof_calculator = build_mc_tof_calculator_panel(variables)
+
     tab14 = widgets.VBox(
         [
             widgets.HBox([widgets.Label(value='Index row:', layout=label_layout), row_index]),
@@ -2263,23 +2268,43 @@ def call_visualization(variables, colab=False):
     )
 
     if not colab:
-        tab = widgets.Tab([tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12, tab13, tab14])
+        tab = widgets.Tab(
+            [
+                tab0,
+                tab_mc_tof_calculator,
+                tab1,
+                tab2,
+                tab3,
+                tab4,
+                tab5,
+                tab6,
+                tab7,
+                tab8,
+                tab9,
+                tab10,
+                tab11,
+                tab12,
+                tab13,
+                tab14,
+            ]
+        )
         tab.set_title(0, 'mc')
-        tab.set_title(1, 'Experiment history')
-        tab.set_title(2, 'FDM')
-        tab.set_title(3, '3D')
-        tab.set_title(4, 'Hitmap')
-        tab.set_title(5, 'Animated hitmap')
-        tab.set_title(6, 'Projection')
+        tab.set_title(1, 'mc & tof calculator')
+        tab.set_title(2, 'Experiment history')
+        tab.set_title(3, 'FDM')
+        tab.set_title(4, '3D')
+        tab.set_title(5, 'Hitmap')
+        tab.set_title(6, 'Animated hitmap')
+        tab.set_title(7, 'Projection')
 
-        tab.set_title(7, 'Disparity map')
-        tab.set_title(8, 'SDM')
-        tab.set_title(9, 'RDF')
-        tab.set_title(10, 'Iso surface')
-        tab.set_title(11, 'Proxigram')
-        tab.set_title(12, 'Clustering')
-        tab.set_title(13, 'Peak analysis')
-        tab.set_title(14, 'Change Color')
+        tab.set_title(8, 'Disparity map')
+        tab.set_title(9, 'SDM')
+        tab.set_title(10, 'RDF')
+        tab.set_title(11, 'Iso surface')
+        tab.set_title(12, 'Proxigram')
+        tab.set_title(13, 'Clustering')
+        tab.set_title(14, 'Peak analysis')
+        tab.set_title(15, 'Change Color')
 
         out = Output()
 
@@ -2287,13 +2312,31 @@ def call_visualization(variables, colab=False):
 
     else:
         # Define the content for each tab
-        content = [tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12, tab13, tab14]
+        content = [
+            tab0,
+            tab_mc_tof_calculator,
+            tab1,
+            tab2,
+            tab3,
+            tab4,
+            tab5,
+            tab6,
+            tab7,
+            tab8,
+            tab9,
+            tab10,
+            tab11,
+            tab12,
+            tab13,
+            tab14,
+        ]
 
         # Create buttons for each tab
         buttons = [
             widgets.Button(description=title)
             for title in [
                 'mc',
+                'mc & tof calculator',
                 'Experiment history',
                 'FDM',
                 '3D',

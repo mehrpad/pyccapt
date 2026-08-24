@@ -58,8 +58,7 @@ def apply_tooltips(ui_object, tooltips: Mapping[str, str]) -> None:
 
 MAIN_TOOLTIPS = {
     # --- Sub-window launcher buttons --------------------------------------
-    "gates_control": "Open the Gates Control window (open/close cryo, main and load-lock gate valves).",
-    "pumps_vaccum": "Open the Pumps & Vacuum window (chamber pressures, load-lock pumping, cryo / load-lock temperatures).",
+    "pumps_vaccum": "Open the combined Gates & Pumps window (gate valves, chamber pressures, pumping and temperatures).",
     "camears": "Open the Cameras & Alignment window (live side / top / angle camera streams, light, exposure).",
     "laser_control": "Open the Laser Control window (NKT laser settings, AOM, and the laser focusing stage).",
     "stage_control": "Open the Stage Control window (sample / specimen stage, SmarAct MCS2).",

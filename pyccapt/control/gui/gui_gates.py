@@ -87,7 +87,10 @@ class Ui_Gates(object):
         )
         self.cryo_switch.setObjectName("cryo_switch")
         self.verticalLayout_3.addWidget(self.cryo_switch)
-        self.gridLayout.addLayout(self.verticalLayout_3, 0, 2, 1, 1)
+        # Gate controls follow the physical chamber order from left to right:
+        # Cryo, Main Chamber, Load Lock. Each vertical layout keeps its LED
+        # paired with the corresponding button.
+        self.gridLayout.addLayout(self.verticalLayout_3, 0, 0, 1, 1)
         self.verticalLayout = QtWidgets.QVBoxLayout()
         self.verticalLayout.setObjectName("verticalLayout")
         self.led_main_chamber = QtWidgets.QLabel(parent=Gates)
@@ -106,7 +109,7 @@ class Ui_Gates(object):
         )
         self.main_chamber_switch.setObjectName("main_chamber_switch")
         self.verticalLayout.addWidget(self.main_chamber_switch)
-        self.gridLayout.addLayout(self.verticalLayout, 0, 0, 1, 1)
+        self.gridLayout.addLayout(self.verticalLayout, 0, 1, 1, 1)
         self.verticalLayout_2 = QtWidgets.QVBoxLayout()
         self.verticalLayout_2.setObjectName("verticalLayout_2")
         self.led_load_lock = QtWidgets.QLabel(parent=Gates)
@@ -125,7 +128,7 @@ class Ui_Gates(object):
         )
         self.load_lock_switch.setObjectName("load_lock_switch")
         self.verticalLayout_2.addWidget(self.load_lock_switch)
-        self.gridLayout.addLayout(self.verticalLayout_2, 0, 1, 1, 1)
+        self.gridLayout.addLayout(self.verticalLayout_2, 0, 2, 1, 1)
         self.verticalLayout_4.addLayout(self.gridLayout)
         self.gridLayout_2 = QtWidgets.QGridLayout()
         self.gridLayout_2.setObjectName("gridLayout_2")

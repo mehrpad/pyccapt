@@ -70,16 +70,6 @@ class Ui_PyCCAPT(object):
         self.gridLayout_6.setObjectName("gridLayout_6")
         self.horizontalLayout = QtWidgets.QHBoxLayout()
         self.horizontalLayout.setObjectName("horizontalLayout")
-        self.gates_control = QtWidgets.QPushButton(parent=self.centralwidget)
-        self.gates_control.setMinimumSize(QtCore.QSize(0, 40))
-        self.gates_control.setStyleSheet(
-            "QPushButton{\n"
-            "                                                background: rgb(85, 170, 255)\n"
-            "                                                }\n"
-            "                                            "
-        )
-        self.gates_control.setObjectName("gates_control")
-        self.horizontalLayout.addWidget(self.gates_control)
         self.pumps_vaccum = QtWidgets.QPushButton(parent=self.centralwidget)
         self.pumps_vaccum.setMinimumSize(QtCore.QSize(0, 40))
         self.pumps_vaccum.setStyleSheet(
@@ -89,7 +79,7 @@ class Ui_PyCCAPT(object):
             "                                            "
         )
         self.pumps_vaccum.setObjectName("pumps_vaccum")
-        self.horizontalLayout.addWidget(self.pumps_vaccum)
+        self.horizontalLayout.addWidget(self.pumps_vaccum, 1)
         self.camears = QtWidgets.QPushButton(parent=self.centralwidget)
         self.camears.setMinimumSize(QtCore.QSize(0, 40))
         self.camears.setStyleSheet(
@@ -99,7 +89,7 @@ class Ui_PyCCAPT(object):
             "                                            "
         )
         self.camears.setObjectName("camears")
-        self.horizontalLayout.addWidget(self.camears)
+        self.horizontalLayout.addWidget(self.camears, 1)
         self.laser_control = QtWidgets.QPushButton(parent=self.centralwidget)
         self.laser_control.setMinimumSize(QtCore.QSize(0, 40))
         self.laser_control.setSizeIncrement(QtCore.QSize(0, 0))
@@ -110,7 +100,7 @@ class Ui_PyCCAPT(object):
             "                                            "
         )
         self.laser_control.setObjectName("laser_control")
-        self.horizontalLayout.addWidget(self.laser_control)
+        self.horizontalLayout.addWidget(self.laser_control, 1)
         self.stage_control = QtWidgets.QPushButton(parent=self.centralwidget)
         self.stage_control.setMinimumSize(QtCore.QSize(0, 40))
         self.stage_control.setSizeIncrement(QtCore.QSize(0, 0))
@@ -121,7 +111,7 @@ class Ui_PyCCAPT(object):
             "                                            "
         )
         self.stage_control.setObjectName("stage_control")
-        self.horizontalLayout.addWidget(self.stage_control)
+        self.horizontalLayout.addWidget(self.stage_control, 1)
         self.visualization = QtWidgets.QPushButton(parent=self.centralwidget)
         self.visualization.setMinimumSize(QtCore.QSize(0, 40))
         self.visualization.setSizeIncrement(QtCore.QSize(0, 0))
@@ -132,7 +122,7 @@ class Ui_PyCCAPT(object):
             "                                            "
         )
         self.visualization.setObjectName("visualization")
-        self.horizontalLayout.addWidget(self.visualization)
+        self.horizontalLayout.addWidget(self.visualization, 1)
         self.baking = QtWidgets.QPushButton(parent=self.centralwidget)
         self.baking.setMinimumSize(QtCore.QSize(0, 40))
         self.baking.setSizeIncrement(QtCore.QSize(0, 0))
@@ -143,7 +133,7 @@ class Ui_PyCCAPT(object):
             "                                            "
         )
         self.baking.setObjectName("baking")
-        self.horizontalLayout.addWidget(self.baking)
+        self.horizontalLayout.addWidget(self.baking, 1)
         self.gridLayout_6.addLayout(self.horizontalLayout, 0, 0, 1, 2)
         self.verticalLayout = QtWidgets.QVBoxLayout()
         self.verticalLayout.setObjectName("verticalLayout")
@@ -1030,21 +1020,18 @@ class Ui_PyCCAPT(object):
         # View menu (shortcuts to the sub-windows already in the toolbar)
         self.actionShowCameras = QtGui.QAction("Cameras Window", parent=PyCCAPT)
         self.actionShowCameras.setShortcut("Ctrl+1")
-        self.actionShowPumps = QtGui.QAction("Pumps && Vacuum Window", parent=PyCCAPT)
+        self.actionShowPumps = QtGui.QAction("Gates && Pumps Window", parent=PyCCAPT)
         self.actionShowPumps.setShortcut("Ctrl+2")
-        self.actionShowGates = QtGui.QAction("Gates Window", parent=PyCCAPT)
-        self.actionShowGates.setShortcut("Ctrl+3")
         self.actionShowLaser = QtGui.QAction("Laser Control Window", parent=PyCCAPT)
-        self.actionShowLaser.setShortcut("Ctrl+4")
+        self.actionShowLaser.setShortcut("Ctrl+3")
         self.actionShowStage = QtGui.QAction("Stage Control Window", parent=PyCCAPT)
-        self.actionShowStage.setShortcut("Ctrl+5")
+        self.actionShowStage.setShortcut("Ctrl+4")
         self.actionShowVisualization = QtGui.QAction("Visualization Window", parent=PyCCAPT)
-        self.actionShowVisualization.setShortcut("Ctrl+6")
+        self.actionShowVisualization.setShortcut("Ctrl+5")
         self.actionShowBaking = QtGui.QAction("Baking Window", parent=PyCCAPT)
-        self.actionShowBaking.setShortcut("Ctrl+7")
+        self.actionShowBaking.setShortcut("Ctrl+6")
         self.menuView.addAction(self.actionShowCameras)
         self.menuView.addAction(self.actionShowPumps)
-        self.menuView.addAction(self.actionShowGates)
         self.menuView.addAction(self.actionShowLaser)
         self.menuView.addAction(self.actionShowStage)
         self.menuView.addAction(self.actionShowVisualization)
@@ -1086,7 +1073,6 @@ class Ui_PyCCAPT(object):
         # opens the software". Operators can still freely edit the fields
         # afterwards; this only changes the *initial* values.
         self._apply_config_defaults_to_inputs()
-        PyCCAPT.setTabOrder(self.gates_control, self.pumps_vaccum)
         PyCCAPT.setTabOrder(self.pumps_vaccum, self.camears)
         PyCCAPT.setTabOrder(self.camears, self.laser_control)
         PyCCAPT.setTabOrder(self.laser_control, self.stage_control)
@@ -1141,7 +1127,6 @@ class Ui_PyCCAPT(object):
         self.actionShowSerialPorts.triggered.connect(self.show_serial_ports)
         self.actionShowCameras.triggered.connect(self.open_cameras_win)
         self.actionShowPumps.triggered.connect(self.open_pumps_vacuum_win)
-        self.actionShowGates.triggered.connect(self.open_gates_win)
         self.actionShowLaser.triggered.connect(self.open_laser_control_win)
         self.actionShowStage.triggered.connect(self.open_stage_control_win)
         self.actionShowVisualization.triggered.connect(self.open_visualization_win)
@@ -1155,7 +1140,6 @@ class Ui_PyCCAPT(object):
         )
         self.actionShortcuts.triggered.connect(self.show_keyboard_shortcuts)
         self.camears.clicked.connect(self.open_cameras_win)
-        self.gates_control.clicked.connect(self.open_gates_win)
         self.laser_control.clicked.connect(self.open_laser_control_win)
         self.stage_control.clicked.connect(self.open_stage_control_win)
         self.pumps_vaccum.clicked.connect(self.open_pumps_vacuum_win)
@@ -1260,8 +1244,7 @@ class Ui_PyCCAPT(object):
         PyCCAPT.setWindowTitle(_translate("PyCCAPT", "PyCCAPT APT Experiment Control"))
         PyCCAPT.setWindowIcon(QtGui.QIcon(str(runtime.project_path("files", "logo.png"))))
         ###
-        self.gates_control.setText(_translate("PyCCAPT", "Gates Control"))
-        self.pumps_vaccum.setText(_translate("PyCCAPT", "Pumps & Vacuum"))
+        self.pumps_vaccum.setText(_translate("PyCCAPT", "Gates & Pumps"))
         self.camears.setText(_translate("PyCCAPT", "Cameras & Alingment"))
         self.laser_control.setText(_translate("PyCCAPT", "Laser Control"))
         self.stage_control.setText(_translate("PyCCAPT", "Stage Control"))
@@ -2129,12 +2112,11 @@ class Ui_PyCCAPT(object):
             "  Ctrl+,       Edit config.toml\n\n"
             "View\n"
             "  Ctrl+1       Cameras\n"
-            "  Ctrl+2       Pumps & Vacuum\n"
-            "  Ctrl+3       Gates\n"
-            "  Ctrl+4       Laser control\n"
-            "  Ctrl+5       Stage control\n"
-            "  Ctrl+6       Visualization\n"
-            "  Ctrl+7       Baking\n\n"
+            "  Ctrl+2       Gates & Pumps\n"
+            "  Ctrl+3       Laser control\n"
+            "  Ctrl+4       Stage control\n"
+            "  Ctrl+5       Visualization\n"
+            "  Ctrl+6       Baking\n\n"
             "Help\n"
             "  F1           Online documentation",
         )
@@ -2256,13 +2238,9 @@ class Ui_PyCCAPT(object):
                 if not serial_issues:
                     self.error_message(self.camera_status_message)
 
-        # GUI gate
-        self.gui_gates = gui_gates.Ui_Gates(self.variables, self.conf)
-        self.Gates = gui_gates.GatesWindow(self.gui_gates, flags=QtCore.Qt.WindowType.Tool)
-        self.Gates.setWindowStyleFusion()
-        self.gui_gates.setupUi(self.Gates)
-        self.Gates.closed.connect(lambda: self.reset_button_color(self.gates_control))
-        # GUI Pumps and Vacuum
+        # Combined Pumps/Vacuum + Gates window. Pumps remain on the left and
+        # the complete Gates UI is embedded on the right so vacuum readings
+        # and gate controls are visible together.
         self.SignalEmitter_Pumps_Vacuum = gui_pumps_vacuum.SignalEmitter()
         self.gui_pumps_vacuum = gui_pumps_vacuum.Ui_Pumps_Vacuum(self.variables, self.conf, self.SignalEmitter_Pumps_Vacuum)
         self.Pumps_vacuum = gui_pumps_vacuum.PumpsVacuumWindow(
@@ -2270,7 +2248,14 @@ class Ui_PyCCAPT(object):
         )
         self.Pumps_vacuum.setWindowStyleFusion()
         self.gui_pumps_vacuum.setupUi(self.Pumps_vacuum)
-        self.Pumps_vacuum.closed.connect(lambda: self.reset_button_color(self.pumps_vaccum))
+
+        self.gui_gates = gui_gates.Ui_Gates(self.variables, self.conf, parent=self.Pumps_vacuum)
+        self.Gates = gui_gates.GatesWindow(self.gui_gates, parent=self.Pumps_vacuum)
+        self.gui_gates.setupUi(self.Gates)
+        self.gui_pumps_vacuum.gridLayout_9.addWidget(self.Gates, 0, 1, 1, 1)
+        self.Pumps_vacuum.resize(1200, max(426, self.Pumps_vacuum.height()))
+        self.Pumps_vacuum.setWindowTitle("PyCCAPT Pumps, Vacuum and Gates Control")
+        self.Pumps_vacuum.closed.connect(self._combined_vacuum_gates_closed)
         self.variables.flag_pumps_vacuum_start = True
 
         # GUI Laser Control
@@ -2375,21 +2360,6 @@ class Ui_PyCCAPT(object):
             self.reset_button_color(self.visualization)
             self.visualization_closed_event.clear()
 
-    def open_gates_win(self):
-        """
-        Open the Gates window
-
-        Args:
-                None
-
-        Return:
-                None
-        """
-        if hasattr(self, 'Gates') and self.Gates.isVisible():
-            self._show_sub_window(self.Gates, self.gates_control)
-        else:
-            self._show_sub_window(self.Gates, self.gates_control)
-
     def open_pumps_vacuum_win(
         self,
     ):
@@ -2402,10 +2372,15 @@ class Ui_PyCCAPT(object):
         Return:
                 None
         """
-        if hasattr(self, 'Pumps_vacuum') and self.Pumps_vacuum.isVisible():
-            self._show_sub_window(self.Pumps_vacuum, self.pumps_vaccum)
-        else:
-            self._show_sub_window(self.Pumps_vacuum, self.pumps_vaccum)
+        self._show_vacuum_gates_window()
+
+    def _show_vacuum_gates_window(self):
+        """Show the shared Pumps/Vacuum and Gates control window."""
+        self._show_sub_window(self.Pumps_vacuum, self.pumps_vaccum)
+
+    def _combined_vacuum_gates_closed(self):
+        """Reset the combined launcher button when its window closes."""
+        self.reset_button_color(self.pumps_vaccum)
 
     def open_laser_control_win(self):
         """

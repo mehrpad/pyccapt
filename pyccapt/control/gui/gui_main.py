@@ -79,7 +79,6 @@ class Ui_PyCCAPT(object):
             "                                            "
         )
         self.pumps_vaccum.setObjectName("pumps_vaccum")
-        self.horizontalLayout.addWidget(self.pumps_vaccum, 1)
         self.camears = QtWidgets.QPushButton(parent=self.centralwidget)
         self.camears.setMinimumSize(QtCore.QSize(0, 40))
         self.camears.setStyleSheet(
@@ -89,7 +88,6 @@ class Ui_PyCCAPT(object):
             "                                            "
         )
         self.camears.setObjectName("camears")
-        self.horizontalLayout.addWidget(self.camears, 1)
         self.laser_control = QtWidgets.QPushButton(parent=self.centralwidget)
         self.laser_control.setMinimumSize(QtCore.QSize(0, 40))
         self.laser_control.setSizeIncrement(QtCore.QSize(0, 0))
@@ -100,7 +98,6 @@ class Ui_PyCCAPT(object):
             "                                            "
         )
         self.laser_control.setObjectName("laser_control")
-        self.horizontalLayout.addWidget(self.laser_control, 1)
         self.stage_control = QtWidgets.QPushButton(parent=self.centralwidget)
         self.stage_control.setMinimumSize(QtCore.QSize(0, 40))
         self.stage_control.setSizeIncrement(QtCore.QSize(0, 0))
@@ -111,7 +108,6 @@ class Ui_PyCCAPT(object):
             "                                            "
         )
         self.stage_control.setObjectName("stage_control")
-        self.horizontalLayout.addWidget(self.stage_control, 1)
         self.visualization = QtWidgets.QPushButton(parent=self.centralwidget)
         self.visualization.setMinimumSize(QtCore.QSize(0, 40))
         self.visualization.setSizeIncrement(QtCore.QSize(0, 0))
@@ -122,7 +118,6 @@ class Ui_PyCCAPT(object):
             "                                            "
         )
         self.visualization.setObjectName("visualization")
-        self.horizontalLayout.addWidget(self.visualization, 1)
         self.baking = QtWidgets.QPushButton(parent=self.centralwidget)
         self.baking.setMinimumSize(QtCore.QSize(0, 40))
         self.baking.setSizeIncrement(QtCore.QSize(0, 0))
@@ -133,7 +128,17 @@ class Ui_PyCCAPT(object):
             "                                            "
         )
         self.baking.setObjectName("baking")
-        self.horizontalLayout.addWidget(self.baking, 1)
+        # Main launcher order follows the operator workflow. Equal stretch
+        # keeps every button the same width despite different label lengths.
+        for launcher in (
+            self.pumps_vaccum,
+            self.stage_control,
+            self.camears,
+            self.laser_control,
+            self.visualization,
+            self.baking,
+        ):
+            self.horizontalLayout.addWidget(launcher, 1)
         self.gridLayout_6.addLayout(self.horizontalLayout, 0, 0, 1, 2)
         self.verticalLayout = QtWidgets.QVBoxLayout()
         self.verticalLayout.setObjectName("verticalLayout")
@@ -1018,22 +1023,22 @@ class Ui_PyCCAPT(object):
         self.menuEdit.addAction(self.actionShowConfigPath)
 
         # View menu (shortcuts to the sub-windows already in the toolbar)
-        self.actionShowCameras = QtGui.QAction("Cameras Window", parent=PyCCAPT)
-        self.actionShowCameras.setShortcut("Ctrl+1")
         self.actionShowPumps = QtGui.QAction("Gates && Pumps Window", parent=PyCCAPT)
-        self.actionShowPumps.setShortcut("Ctrl+2")
-        self.actionShowLaser = QtGui.QAction("Laser Control Window", parent=PyCCAPT)
-        self.actionShowLaser.setShortcut("Ctrl+3")
-        self.actionShowStage = QtGui.QAction("Stage Control Window", parent=PyCCAPT)
-        self.actionShowStage.setShortcut("Ctrl+4")
+        self.actionShowPumps.setShortcut("Ctrl+1")
+        self.actionShowStage = QtGui.QAction("Stage Window", parent=PyCCAPT)
+        self.actionShowStage.setShortcut("Ctrl+2")
+        self.actionShowCameras = QtGui.QAction("Cameras Window", parent=PyCCAPT)
+        self.actionShowCameras.setShortcut("Ctrl+3")
+        self.actionShowLaser = QtGui.QAction("Laser Window", parent=PyCCAPT)
+        self.actionShowLaser.setShortcut("Ctrl+4")
         self.actionShowVisualization = QtGui.QAction("Visualization Window", parent=PyCCAPT)
         self.actionShowVisualization.setShortcut("Ctrl+5")
         self.actionShowBaking = QtGui.QAction("Baking Window", parent=PyCCAPT)
         self.actionShowBaking.setShortcut("Ctrl+6")
-        self.menuView.addAction(self.actionShowCameras)
         self.menuView.addAction(self.actionShowPumps)
-        self.menuView.addAction(self.actionShowLaser)
         self.menuView.addAction(self.actionShowStage)
+        self.menuView.addAction(self.actionShowCameras)
+        self.menuView.addAction(self.actionShowLaser)
         self.menuView.addAction(self.actionShowVisualization)
         self.menuView.addAction(self.actionShowBaking)
 
@@ -1073,10 +1078,10 @@ class Ui_PyCCAPT(object):
         # opens the software". Operators can still freely edit the fields
         # afterwards; this only changes the *initial* values.
         self._apply_config_defaults_to_inputs()
-        PyCCAPT.setTabOrder(self.pumps_vaccum, self.camears)
+        PyCCAPT.setTabOrder(self.pumps_vaccum, self.stage_control)
+        PyCCAPT.setTabOrder(self.stage_control, self.camears)
         PyCCAPT.setTabOrder(self.camears, self.laser_control)
-        PyCCAPT.setTabOrder(self.laser_control, self.stage_control)
-        PyCCAPT.setTabOrder(self.stage_control, self.visualization)
+        PyCCAPT.setTabOrder(self.laser_control, self.visualization)
         PyCCAPT.setTabOrder(self.visualization, self.baking)
         PyCCAPT.setTabOrder(self.baking, self.parameters_source)
         PyCCAPT.setTabOrder(self.parameters_source, self.ex_number)
@@ -1245,9 +1250,9 @@ class Ui_PyCCAPT(object):
         PyCCAPT.setWindowIcon(QtGui.QIcon(str(runtime.project_path("files", "logo.png"))))
         ###
         self.pumps_vaccum.setText(_translate("PyCCAPT", "Gates & Pumps"))
-        self.camears.setText(_translate("PyCCAPT", "Cameras & Alingment"))
-        self.laser_control.setText(_translate("PyCCAPT", "Laser Control"))
-        self.stage_control.setText(_translate("PyCCAPT", "Stage Control"))
+        self.camears.setText(_translate("PyCCAPT", "Cameras"))
+        self.laser_control.setText(_translate("PyCCAPT", "Laser"))
+        self.stage_control.setText(_translate("PyCCAPT", "Stage"))
         self.visualization.setText(_translate("PyCCAPT", "Visualization"))
         self.baking.setText(_translate("PyCCAPT", "Baking"))
         self.label_173.setText(_translate("PyCCAPT", "Setup Parameters"))
@@ -2111,10 +2116,10 @@ class Ui_PyCCAPT(object):
             "Edit\n"
             "  Ctrl+,       Edit config.toml\n\n"
             "View\n"
-            "  Ctrl+1       Cameras\n"
-            "  Ctrl+2       Gates & Pumps\n"
-            "  Ctrl+3       Laser control\n"
-            "  Ctrl+4       Stage control\n"
+            "  Ctrl+1       Gates & Pumps\n"
+            "  Ctrl+2       Stage\n"
+            "  Ctrl+3       Cameras\n"
+            "  Ctrl+4       Laser\n"
             "  Ctrl+5       Visualization\n"
             "  Ctrl+6       Baking\n\n"
             "Help\n"

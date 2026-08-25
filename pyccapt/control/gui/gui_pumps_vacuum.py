@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import QTimer, pyqtSignal, QObject
-from PyQt6.QtGui import QFont, QPixmap
+from PyQt6.QtGui import QFont
 
 # Local module and scripts
 from pyccapt.control.core import runtime
@@ -42,6 +42,7 @@ class Ui_Pumps_Vacuum(object):
         # and the persistent NI task that holds the vent-valve relay line high
         # while venting (see vent_cryo_load_lock_partial / _set_vent_valve).
         self.flag_vent_cll_partial = False
+        self.variables.flag_vent_cryo_load_lock_partial = False
         self._vent_valve_task = None
 
         # --- LL baking log state ---
@@ -84,7 +85,7 @@ class Ui_Pumps_Vacuum(object):
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.vacuum_main.sizePolicy().hasHeightForWidth())
         self.vacuum_main.setSizePolicy(sizePolicy)
-        self.vacuum_main.setMinimumSize(QtCore.QSize(200, 50))
+        self.vacuum_main.setFixedSize(QtCore.QSize(220, 55))
         font = QtGui.QFont()
         font.setPointSize(9)
         self.vacuum_main.setFont(font)
@@ -253,6 +254,17 @@ class Ui_Pumps_Vacuum(object):
         )
         self.vacuum_load_lock_back.setObjectName("vacuum_load_lock_back")
         self.gridLayout_2.addWidget(self.vacuum_load_lock_back, 2, 1, 1, 1)
+        # Keep the three chamber gauges and their three backing/pre-vacuum
+        # gauges visually identical even when the neighboring controls change.
+        for vacuum_lcd in (
+            self.vacuum_buffer,
+            self.vacuum_cryo_load_lock,
+            self.vacuum_load_lock,
+            self.vacuum_buffer_back,
+            self.vacuum_cryo_load_lock_back,
+            self.vacuum_load_lock_back,
+        ):
+            vacuum_lcd.setFixedSize(QtCore.QSize(150, 50))
         self.gridLayout_4.addLayout(self.gridLayout_2, 1, 1, 1, 2)
         self.gridLayout_3 = QtWidgets.QGridLayout()
         self.gridLayout_3.setObjectName("gridLayout_3")
@@ -288,14 +300,7 @@ class Ui_Pumps_Vacuum(object):
             "                                        "
         )
         self.vent_cryo_load_lock_partial_switch.setObjectName("vent_cryo_load_lock_partial_switch")
-        self.gridLayout_3.addWidget(self.vent_cryo_load_lock_partial_switch, 2, 0, 1, 1)
-        # LED for the "Vent CLL" partial vent (green = venting, red = idle).
-        self.led_vent_cll_partial = QtWidgets.QLabel(parent=Pumps_Vacuum)
-        self.led_vent_cll_partial.setMinimumSize(QtCore.QSize(50, 50))
-        self.led_vent_cll_partial.setMaximumSize(QtCore.QSize(50, 50))
-        self.led_vent_cll_partial.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.led_vent_cll_partial.setObjectName("led_vent_cll_partial")
-        self.gridLayout_3.addWidget(self.led_vent_cll_partial, 2, 1, 1, 1)
+        self.gridLayout_3.addWidget(self.vent_cryo_load_lock_partial_switch, 2, 0, 1, 2)
         self.pump_cryo_load_lock_switch = QtWidgets.QPushButton(parent=Pumps_Vacuum)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Fixed)
         sizePolicy.setHorizontalStretch(0)
@@ -310,13 +315,7 @@ class Ui_Pumps_Vacuum(object):
             "                                        "
         )
         self.pump_cryo_load_lock_switch.setObjectName("pump_cryo_load_lock_switch")
-        self.gridLayout_3.addWidget(self.pump_cryo_load_lock_switch, 1, 0, 1, 1)
-        self.led_pump_cryo_load_lock = QtWidgets.QLabel(parent=Pumps_Vacuum)
-        self.led_pump_cryo_load_lock.setMinimumSize(QtCore.QSize(50, 50))
-        self.led_pump_cryo_load_lock.setMaximumSize(QtCore.QSize(50, 50))
-        self.led_pump_cryo_load_lock.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.led_pump_cryo_load_lock.setObjectName("led_pump_cryo_load_lock")
-        self.gridLayout_3.addWidget(self.led_pump_cryo_load_lock, 1, 1, 1, 1)
+        self.gridLayout_3.addWidget(self.pump_cryo_load_lock_switch, 1, 0, 1, 2)
         self.pump_load_lock_switch = QtWidgets.QPushButton(parent=Pumps_Vacuum)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Fixed)
         sizePolicy.setHorizontalStretch(0)
@@ -331,13 +330,7 @@ class Ui_Pumps_Vacuum(object):
             "                                        "
         )
         self.pump_load_lock_switch.setObjectName("pump_load_lock_switch")
-        self.gridLayout_3.addWidget(self.pump_load_lock_switch, 3, 0, 1, 1)
-        self.led_pump_load_lock = QtWidgets.QLabel(parent=Pumps_Vacuum)
-        self.led_pump_load_lock.setMinimumSize(QtCore.QSize(50, 50))
-        self.led_pump_load_lock.setMaximumSize(QtCore.QSize(50, 50))
-        self.led_pump_load_lock.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.led_pump_load_lock.setObjectName("led_pump_load_lock")
-        self.gridLayout_3.addWidget(self.led_pump_load_lock, 3, 1, 1, 1)
+        self.gridLayout_3.addWidget(self.pump_load_lock_switch, 3, 0, 1, 2)
         self.gridLayout_4.addLayout(self.gridLayout_3, 1, 3, 1, 1)
         self.verticalLayout.addLayout(self.gridLayout_4)
         self.gridLayout_8 = QtWidgets.QGridLayout()
@@ -540,19 +533,15 @@ class Ui_Pumps_Vacuum(object):
         Pumps_Vacuum.setTabOrder(self.vent_cryo_load_lock_partial_switch, self.pump_cryo_load_lock_switch)
         Pumps_Vacuum.setTabOrder(self.pump_cryo_load_lock_switch, self.superuser)
 
-        ###
-        self.led_red = QPixmap('./files/led-red-on.png')
-        self.led_green = QPixmap('./files/green-led-on.png')
-        self.led_pump_load_lock.setPixmap(self.led_green)
-        self.led_pump_cryo_load_lock.setPixmap(self.led_green)
-        # Green = CLL un-vented (normal/idle), red = venting. CLL starts un-vented.
-        self.led_vent_cll_partial.setPixmap(self.led_green)
         self.pump_load_lock_switch.clicked.connect(self.pump_switch_ll)
         self.pump_cryo_load_lock_switch.clicked.connect(self.pump_switch_cryo_ll)
         self.vent_cryo_load_lock_partial_switch.clicked.connect(self.vent_cryo_load_lock_partial)
-        # Remember the "Vent CLL" default style so it can be restored when the
-        # partial vent is deselected (the button turns green while active).
+        # The buttons themselves replace the old LED icons as state indicators.
+        # Green means the corresponding vent action is active.
         self.vent_partial_default_style = self.vent_cryo_load_lock_partial_switch.styleSheet()
+        self.pump_load_lock_default_style = self.pump_load_lock_switch.styleSheet()
+        self.pump_cryo_load_lock_default_style = self.pump_cryo_load_lock_switch.styleSheet()
+        self._sync_pump_action_styles()
         # "Fully vented CLL" fully vents the cryo load lock; it is interlocked
         # behind Override Access, so keep it disabled until override is granted.
         self.pump_cryo_load_lock_switch.setEnabled(False)
@@ -662,10 +651,7 @@ class Ui_Pumps_Vacuum(object):
         self.superuser.setText(_translate("Pumps_Vacuum", "Override Access"))
         self.pump_cryo_load_lock_switch.setText(_translate("Pumps_Vacuum", "Fully Vent CLL"))
         self.vent_cryo_load_lock_partial_switch.setText(_translate("Pumps_Vacuum", "Vent CLL"))
-        self.led_vent_cll_partial.setText(_translate("Pumps_Vacuum", "vent"))
-        self.led_pump_cryo_load_lock.setText(_translate("Pumps_Vacuum", "pump"))
         self.pump_load_lock_switch.setText(_translate("Pumps_Vacuum", "Vent LL"))
-        self.led_pump_load_lock.setText(_translate("Pumps_Vacuum", "pump"))
         # Cryo sensor labels driven by config.toml cryo_sensor_X keys
         _s1 = self.conf.get('cryo_sensor_1', 'cryo_head_outside').replace('_', ' ').title()
         _s2 = self.conf.get('cryo_sensor_2', 'cryo_head_inside').replace('_', ' ').title()
@@ -887,9 +873,11 @@ class Ui_Pumps_Vacuum(object):
 
     def update_vacuum_load(self, value):
         self._update_gauge(self.vacuum_load_lock, self.label_210, value, 'vacuum_threshold_load_lock')
+        self._sync_pump_action_styles()
 
     def update_vacuum_cryo_load_lock(self, value):
         self._update_gauge(self.vacuum_cryo_load_lock, self.label_216, value, 'vacuum_threshold_cryo_load_lock')
+        self._sync_pump_action_styles()
 
     def update_vacuum_cryo_load_lock_back(self, value):
         self._update_gauge(self.vacuum_cryo_load_lock_back, self.label_217, value, 'vacuum_threshold_cryo_load_lock_back')
@@ -946,6 +934,27 @@ class Ui_Pumps_Vacuum(object):
 
         self.timer.stop()
 
+    @staticmethod
+    def _set_action_button_active(button, active, default_style):
+        """Show an active toggle action with the same green used by Set T."""
+        if active:
+            button.setStyleSheet("QPushButton{\nbackground: rgb(0, 255, 26)\n}")
+        else:
+            button.setStyleSheet(default_style)
+
+    def _sync_pump_action_styles(self):
+        """Synchronize vent button colors with the confirmed pump states."""
+        self._set_action_button_active(
+            self.pump_load_lock_switch,
+            not bool(self.variables.flag_pump_load_lock),
+            self.pump_load_lock_default_style,
+        )
+        self._set_action_button_active(
+            self.pump_cryo_load_lock_switch,
+            not bool(self.variables.flag_pump_cryo_load_lock),
+            self.pump_cryo_load_lock_default_style,
+        )
+
     def pump_switch_ll(self):
         """
         Switch the pump on or off
@@ -963,17 +972,22 @@ class Ui_Pumps_Vacuum(object):
                 and not self.variables.flag_load_gate
             ):
                 if self.variables.flag_pump_load_lock:
+                    self._set_action_button_active(
+                        self.pump_load_lock_switch, True, self.pump_load_lock_default_style
+                    )
                     self.variables.flag_pump_load_lock_click = True
-                    self.led_pump_load_lock.setPixmap(self.led_red)
                     self.pump_load_lock_switch.setEnabled(False)
                     time.sleep(1)
                     self.pump_load_lock_switch.setEnabled(True)
                 elif not self.variables.flag_pump_load_lock:
+                    self._set_action_button_active(
+                        self.pump_load_lock_switch, False, self.pump_load_lock_default_style
+                    )
                     self.variables.flag_pump_load_lock_click = True
-                    self.led_pump_load_lock.setPixmap(self.led_green)
                     self.pump_load_lock_switch.setEnabled(False)
                     time.sleep(1)
                     self.pump_load_lock_switch.setEnabled(True)
+                self._sync_pump_action_styles()
             else:  # SHow error message in the GUI
                 if self.variables.start_flag:
                     self.error_message("!!! An experiment is running !!!")
@@ -1008,18 +1022,23 @@ class Ui_Pumps_Vacuum(object):
                     # Make the operator confirm first - see warning text.
                     if not self._confirm_full_vent_cll():
                         return
+                    self._set_action_button_active(
+                        self.pump_cryo_load_lock_switch, True, self.pump_cryo_load_lock_default_style
+                    )
                     self.variables.flag_pump_cryo_load_lock_click = True
-                    self.led_pump_cryo_load_lock.setPixmap(self.led_red)
                     self.pump_cryo_load_lock_switch.setEnabled(False)
                     time.sleep(1)
                     # Stay locked behind Override Access after the toggle.
                     self.pump_cryo_load_lock_switch.setEnabled(bool(self.flag_super_user))
                 elif not self.variables.flag_pump_cryo_load_lock:
+                    self._set_action_button_active(
+                        self.pump_cryo_load_lock_switch, False, self.pump_cryo_load_lock_default_style
+                    )
                     self.variables.flag_pump_cryo_load_lock_click = True
-                    self.led_pump_cryo_load_lock.setPixmap(self.led_green)
                     self.pump_cryo_load_lock_switch.setEnabled(False)
                     time.sleep(1)
                     self.pump_cryo_load_lock_switch.setEnabled(bool(self.flag_super_user))
+                self._sync_pump_action_styles()
             else:  # SHow error message in the GUI
                 if self.variables.start_flag:
                     self.error_message("!!! An experiment is running !!!")
@@ -1117,9 +1136,9 @@ class Ui_Pumps_Vacuum(object):
                     self.timer.start(8000)
                     return
                 self.flag_vent_cll_partial = True
-                self.vent_cryo_load_lock_partial_switch.setStyleSheet("QPushButton{\nbackground: rgb(0, 255, 26)\n}")
-                # Red = CLL is venting.
-                self.led_vent_cll_partial.setPixmap(self.led_red)
+                self._set_action_button_active(
+                    self.vent_cryo_load_lock_partial_switch, True, self.vent_partial_default_style
+                )
                 # Backing and Turbo valves off immediately.
                 self._set_cll_valve_6525(self.conf['cll_backing_valve_line'], False)
                 self._set_cll_valve_6525(self.conf['cll_turbo_valve_line'], False)
@@ -1131,11 +1150,12 @@ class Ui_Pumps_Vacuum(object):
                 # ---- stop venting / restore pumping ----
                 # Always allowed - restoring the pumps is the safe direction.
                 self.flag_vent_cll_partial = False
-                self.vent_cryo_load_lock_partial_switch.setStyleSheet(self.vent_partial_default_style)
-                # Green = CLL un-vented again (normal/idle).
-                self.led_vent_cll_partial.setPixmap(self.led_green)
+                self._set_action_button_active(
+                    self.vent_cryo_load_lock_partial_switch, False, self.vent_partial_default_style
+                )
                 # Close the vent valve and re-open the backing valve immediately.
                 self._set_vent_valve(True)  # True = closed, False = open
+                self.variables.flag_vent_cryo_load_lock_partial = False
                 self._set_cll_valve_6525(self.conf['cll_backing_valve_line'], True)
                 # Backing valve closes again after a delay; Turbo valve opens
                 # after a longer delay (protects the turbo). Both are guarded
@@ -1163,6 +1183,7 @@ class Ui_Pumps_Vacuum(object):
         """
         if self.flag_vent_cll_partial:
             self._set_vent_valve(False) # True = closed, False = open
+            self.variables.flag_vent_cryo_load_lock_partial = True
 
     def _vent_cll_deselect_backing_off(self):
         """Delayed part of the "Vent CLL" deselect sequence: close the backing valve.

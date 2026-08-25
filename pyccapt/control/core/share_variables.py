@@ -175,6 +175,7 @@ class Variables:
         "flag_pump_cryo_load_lock": ("main", ("pump",)),
         "flag_pump_cryo_load_lock_click": ("main", ("pump",)),
         "flag_pump_cryo_load_lock_led": ("pump", ("main",)),
+        "flag_vent_cryo_load_lock_partial": ("main", ("main",)),
         # --- Path / metadata fields --------------------------------------
         "path": ("exp", ("exp", "viz", "main")),
         "path_meta": ("exp", ("exp", "viz", "main")),
@@ -400,6 +401,7 @@ class Variables:
         "flag_pump_cryo_load_lock": True,
         "flag_pump_cryo_load_lock_click": False,
         "flag_pump_cryo_load_lock_led": None,
+        "flag_vent_cryo_load_lock_partial": False,
         "flag_camera_grab": False,
         "flag_camera_win_show": False,
         "flag_visualization_win_show": False,

@@ -345,18 +345,18 @@ ro_detector_width_mm = 80
 # Detector usable half-width (cm).  Same convention as the SC entry.
 ro_detector_limit_cm = 4.0
 
-# Speed slider range for both GUIs.  Mirrors the "Simple Mode" levels shown on
+# Speed preset range for the stage GUI. Mirrors the "Simple Mode" levels shown on
 # the SmarAct MCS2 hand-control display (1 = slowest, 11 = fastest).  Each
 # level is mapped to an actual MOVE_VELOCITY by stage_smartact_speed_mm_s
 # below (level^2 * factor in mm/s, capped at the max).
 stage_speed_level_min = 1
 stage_speed_level_max = 11
-stage_speed_level_default = 5
-# Velocity (mm/s) corresponding to slider level 11.  Only used when
+stage_speed_level_default = 3
+# Velocity (mm/s) corresponding to preset level 11. Only used when
 # stage_speed_table_mm_s below is empty.  Lower levels are then scaled
-# quadratically so the slider feels exponential-ish.
+# quadratically across the preset list.
 stage_speed_max_mm_s = 1.0
-# Per-level velocity table (mm/s), one entry per slider level.  When set,
+# Per-level velocity table (mm/s), one entry per preset level. When set,
 # this takes precedence over stage_speed_max_mm_s and lets you make the
 # GUI levels match the MCS2 hand-control display exactly: step the
 # controller through Simple Mode levels 1..11, read off the velocity each
@@ -364,13 +364,13 @@ stage_speed_max_mm_s = 1.0
 # power-of-2 table from 1 µm/s to ~1 mm/s, safe for atom-probe positioning.
 stage_speed_table_mm_s = [0.001, 0.002, 0.004, 0.008, 0.016, 0.032, 0.064, 0.128, 0.256, 0.512, 1.024]
 # Effective "joystick deflection time" (seconds): the per-click jog distance
-# is computed as velocity * this value, so faster slider settings produce
+# is computed as velocity * this value, so faster presets produce
 # proportionally larger jogs - just like the MCS2 hand-control where only
 # speed is set and the distance follows from how long the knob is deflected.
 stage_click_duration_s = 0.2
 # Velocity (mm/s) used by the Home button.  Decoupled from the per-axis
-# sliders because Home should be fast and predictable regardless of what
-# slider the user happens to have moved last.  Default 1 mm/s = the
+# selectors because Home should be fast and predictable regardless of what
+# preset the user happens to have selected. Default 1 mm/s = the
 # table top-end; lower if your stage is fragile.
 stage_home_velocity_mm_s = 1.0
 

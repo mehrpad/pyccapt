@@ -12,6 +12,11 @@ from PyQt6.QtGui import QPixmap
 # Local module and scripts
 from pyccapt.control.core import runtime
 from pyccapt.control.gui import tooltips
+from pyccapt.control.gui.stage_control_widgets import (
+    JOG_GROUP_STYLE,
+    SpeedSelector,
+    make_jog_button,
+)
 from pyccapt.control.nkt_photonics import nktpbus_switch, origamiClassCLI
 from pyccapt.control.smaract_mcs2 import mcs2_stage
 
@@ -448,7 +453,7 @@ class Ui_Laser_Control(object):
         self.gridLayout_5.addLayout(self.gridLayout_4, 3, 0, 1, 1)
 
         # ------------------------------------------------------------------
-        # Speed slider (Simple-Mode-style 1..N) + jog step spin
+        # Exact speed presets (Simple-Mode-style 1..N) and jog distance
         # ------------------------------------------------------------------
         self.gridLayout_2 = QtWidgets.QGridLayout()
         self.gridLayout_2.setObjectName("gridLayout_2")
@@ -456,7 +461,7 @@ class Ui_Laser_Control(object):
         self._speed_max_mm_s = float(self.conf.get('stage_speed_max_mm_s', 1.0))
         self._speed_max_level = int(self.conf.get('stage_speed_level_max', 11))
         self._speed_min_level = int(self.conf.get('stage_speed_level_min', 1))
-        self._speed_default = int(self.conf.get('stage_speed_level_default', 5))
+        self._speed_default = int(self.conf.get('stage_speed_level_default', 3))
         self._click_duration_s = float(self.conf.get('stage_click_duration_s', 0.2))
         self._speed_table = self.conf.get('stage_speed_table_mm_s') or None
         self._home_target_m = (
@@ -475,10 +480,16 @@ class Ui_Laser_Control(object):
         self._home_velocity_m_s = float(self.conf.get('stage_home_velocity_mm_s', 1.0)) * 1e-3
 
         # Header
-        self.label_14 = QtWidgets.QLabel("Speed", parent=Laser_Control)
+        self.label_14 = QtWidgets.QLabel("Speed preset", parent=Laser_Control)
         self.label_14.setFont(bold_font)
         self.label_14.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.gridLayout_2.addWidget(self.label_14, 0, 1, 1, 1)
+        self.laser_jog_header = QtWidgets.QLabel(
+            f"Jog / {self._click_duration_s:g} s", parent=Laser_Control
+        )
+        self.laser_jog_header.setFont(bold_font)
+        self.laser_jog_header.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.gridLayout_2.addWidget(self.laser_jog_header, 0, 2, 1, 1)
 
         # Per-axis labels
         self.label_15 = QtWidgets.QLabel("X", parent=Laser_Control)
@@ -488,26 +499,26 @@ class Ui_Laser_Control(object):
         self.label_speed_z = QtWidgets.QLabel("Z", parent=Laser_Control)
         self.label_speed_z.setFont(bold_font)
 
-        def _make_speed_slider():
-            s = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal, parent=Laser_Control)
-            s.setMinimum(self._speed_min_level)
-            s.setMaximum(self._speed_max_level)
-            s.setValue(self._speed_default)
-            s.setTickPosition(QtWidgets.QSlider.TickPosition.TicksBelow)
-            s.setTickInterval(1)
-            s.setMinimumWidth(160)
-            return s
+        def _make_speed_selector():
+            return SpeedSelector(
+                Laser_Control,
+                self._speed_min_level,
+                self._speed_max_level,
+                self._speed_default,
+                self._speed_max_mm_s,
+                self._speed_table,
+            )
 
-        self.laser_speed_x = _make_speed_slider()
-        self.laser_speed_y = _make_speed_slider()
-        self.laser_speed_z = _make_speed_slider()
+        self.laser_speed_x = _make_speed_selector()
+        self.laser_speed_y = _make_speed_selector()
+        self.laser_speed_z = _make_speed_selector()
 
         self.laser_speed_x_label = QtWidgets.QLabel(parent=Laser_Control)
-        self.laser_speed_x_label.setMinimumWidth(230)
+        self.laser_speed_x_label.setMinimumWidth(85)
         self.laser_speed_y_label = QtWidgets.QLabel(parent=Laser_Control)
-        self.laser_speed_y_label.setMinimumWidth(230)
+        self.laser_speed_y_label.setMinimumWidth(85)
         self.laser_speed_z_label = QtWidgets.QLabel(parent=Laser_Control)
-        self.laser_speed_z_label.setMinimumWidth(230)
+        self.laser_speed_z_label.setMinimumWidth(85)
 
         for row, (lbl, sl, val) in enumerate(
             (
@@ -527,68 +538,54 @@ class Ui_Laser_Control(object):
         self.laser_speed_fb = self.laser_speed_z
 
         self.gridLayout_5.addLayout(self.gridLayout_2, 3, 1, 1, 1)
-        self.gridLayout = QtWidgets.QGridLayout()
+        # Standard three-axis layout matching the specimen-stage GUI.
+        self.laser_xy_jog_group = QtWidgets.QGroupBox("X / Y Jog", parent=Laser_Control)
+        self.laser_xy_jog_group.setStyleSheet(JOG_GROUP_STYLE)
+        self.gridLayout = QtWidgets.QGridLayout(self.laser_xy_jog_group)
         self.gridLayout.setObjectName("gridLayout")
-        spacerItem2 = QtWidgets.QSpacerItem(
-            40, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum
-        )
-        self.gridLayout.addItem(spacerItem2, 0, 0, 1, 1)
-        self.laser_up = QtWidgets.QPushButton(parent=Laser_Control)
-        self.laser_up.setMinimumSize(QtCore.QSize(50, 25))
-        self.laser_up.setMaximumSize(QtCore.QSize(16777215, 16777215))
-        self.laser_up.setStyleSheet("")
+        self.gridLayout.setContentsMargins(7, 11, 7, 7)
+        self.gridLayout.setHorizontalSpacing(4)
+        self.gridLayout.setVerticalSpacing(4)
+
+        self.laser_up = make_jog_button(self.laser_xy_jog_group, "Y+\n▲")
         self.laser_up.setObjectName("laser_up")
-        self.gridLayout.addWidget(self.laser_up, 0, 1, 1, 1)
-        spacerItem3 = QtWidgets.QSpacerItem(
-            40, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum
-        )
-        self.gridLayout.addItem(spacerItem3, 0, 2, 1, 1)
-        self.laser_left = QtWidgets.QPushButton(parent=Laser_Control)
-        self.laser_left.setMinimumSize(QtCore.QSize(50, 25))
-        self.laser_left.setMaximumSize(QtCore.QSize(16777215, 16777215))
-        self.laser_left.setStyleSheet("")
+        self.laser_left = make_jog_button(self.laser_xy_jog_group, "◀  X−")
         self.laser_left.setObjectName("laser_left")
-        self.gridLayout.addWidget(self.laser_left, 1, 0, 1, 1)
-        spacerItem4 = QtWidgets.QSpacerItem(
-            40, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum
-        )
-        self.gridLayout.addItem(spacerItem4, 1, 1, 1, 1)
-        self.leser_right = QtWidgets.QPushButton(parent=Laser_Control)
-        self.leser_right.setMinimumSize(QtCore.QSize(50, 25))
-        self.leser_right.setMaximumSize(QtCore.QSize(16777215, 16777215))
-        self.leser_right.setStyleSheet("")
+        self.leser_right = make_jog_button(self.laser_xy_jog_group, "X+  ▶")
         self.leser_right.setObjectName("leser_right")
-        self.gridLayout.addWidget(self.leser_right, 1, 2, 1, 1)
-        spacerItem5 = QtWidgets.QSpacerItem(
-            40, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum
-        )
-        self.gridLayout.addItem(spacerItem5, 2, 0, 1, 1)
-        self.laser_down = QtWidgets.QPushButton(parent=Laser_Control)
-        self.laser_down.setMinimumSize(QtCore.QSize(50, 25))
-        self.laser_down.setMaximumSize(QtCore.QSize(16777215, 16777215))
-        self.laser_down.setStyleSheet("")
+        # Correctly-spelled alias for new callers; legacy name remains valid.
+        self.laser_right = self.leser_right
+        self.laser_down = make_jog_button(self.laser_xy_jog_group, "▼\nY−")
         self.laser_down.setObjectName("laser_down")
-        self.gridLayout.addWidget(self.laser_down, 2, 1, 1, 1)
-        spacerItem6 = QtWidgets.QSpacerItem(
-            40, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum
+        laser_xy_center = QtWidgets.QLabel("X / Y", parent=self.laser_xy_jog_group)
+        laser_xy_center.setFixedSize(QtCore.QSize(58, 42))
+        laser_xy_center.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        laser_xy_center.setStyleSheet(
+            "QLabel{background:#f5f7f9;color:#526b7c;border:1px solid #c4ced6;"
+            "border-radius:7px;font-weight:bold;}"
         )
-        self.gridLayout.addItem(spacerItem6, 2, 2, 1, 1)
-        self.gridLayout_5.addLayout(self.gridLayout, 3, 2, 1, 1)
-        self.verticalLayout = QtWidgets.QVBoxLayout()
+
+        self.gridLayout.addWidget(self.laser_up, 0, 1)
+        self.gridLayout.addWidget(self.laser_left, 1, 0)
+        self.gridLayout.addWidget(laser_xy_center, 1, 1)
+        self.gridLayout.addWidget(self.leser_right, 1, 2)
+        self.gridLayout.addWidget(self.laser_down, 2, 1)
+        self.gridLayout_5.addWidget(self.laser_xy_jog_group, 3, 2, 1, 1)
+
+        self.laser_z_jog_group = QtWidgets.QGroupBox("Z Jog", parent=Laser_Control)
+        self.laser_z_jog_group.setStyleSheet(JOG_GROUP_STYLE)
+        self.verticalLayout = QtWidgets.QVBoxLayout(self.laser_z_jog_group)
         self.verticalLayout.setObjectName("verticalLayout")
-        self.laser_forward = QtWidgets.QPushButton(parent=Laser_Control)
-        self.laser_forward.setStyleSheet("")
+        self.verticalLayout.setContentsMargins(7, 11, 7, 7)
+        self.verticalLayout.setSpacing(6)
+        self.laser_forward = make_jog_button(self.laser_z_jog_group, "Z+\nForward", width=76)
         self.laser_forward.setObjectName("laser_forward")
         self.verticalLayout.addWidget(self.laser_forward)
-        spacerItem7 = QtWidgets.QSpacerItem(
-            17, 24, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding
-        )
-        self.verticalLayout.addItem(spacerItem7)
-        self.laser_backward = QtWidgets.QPushButton(parent=Laser_Control)
-        self.laser_backward.setStyleSheet("")
+        self.verticalLayout.addStretch(1)
+        self.laser_backward = make_jog_button(self.laser_z_jog_group, "Z−\nBackward", width=76)
         self.laser_backward.setObjectName("laser_backward")
         self.verticalLayout.addWidget(self.laser_backward)
-        self.gridLayout_5.addLayout(self.verticalLayout, 3, 3, 1, 2)
+        self.gridLayout_5.addWidget(self.laser_z_jog_group, 3, 3, 1, 2)
         # Home / Reference / Stop / Override column for the SmarAct stage.
         self._stage_button_layout = QtWidgets.QVBoxLayout()
         self.laser_home = QtWidgets.QPushButton(parent=Laser_Control)
@@ -769,7 +766,7 @@ class Ui_Laser_Control(object):
         # Direction buttons: continuous jog while held — see the stage
         # control GUI for the rationale. Tick interval matches
         # click_duration_s so consecutive relative steps chain into
-        # smooth motion at the slider-selected velocity.
+        # smooth motion at the selected velocity.
         for button, axis, sign in (
             (self.laser_left, mcs2_stage.AXIS_X, -1),
             (self.leser_right, mcs2_stage.AXIS_X, +1),
@@ -786,8 +783,8 @@ class Ui_Laser_Control(object):
         self.laser_stage_reference.clicked.connect(self._stage_reference)
         self.laser_stage_stop.clicked.connect(self._stage_stop)
         self.laser_stage_superuser.clicked.connect(self._stage_super_user_access)
-        for sl in (self.laser_speed_x, self.laser_speed_y, self.laser_speed_z):
-            self._update_stage_speed_label(sl)
+        for selector in (self.laser_speed_x, self.laser_speed_y, self.laser_speed_z):
+            self._update_stage_speed_label(selector)
         self._connect_stage_device()
 
     # ------------------------------------------------------------------
@@ -914,16 +911,16 @@ class Ui_Laser_Control(object):
         self.switch_to_cli_button.setEnabled(self.flag_super_user_stage)
 
     def _axis_velocity_m_s(self, axis):
-        slider = (self.laser_speed_x, self.laser_speed_y, self.laser_speed_z)[axis]
+        selector = (self.laser_speed_x, self.laser_speed_y, self.laser_speed_z)[axis]
         return mcs2_stage.speed_level_to_m_s(
-            slider.value(),
+            selector.value(),
             self._speed_max_level,
             self._speed_max_mm_s,
             table=self._speed_table,
         )
 
-    def _update_stage_speed_label(self, slider):
-        level = slider.value()
+    def _update_stage_speed_label(self, selector):
+        level = selector.value()
         v_m_s = mcs2_stage.speed_level_to_m_s(
             level,
             self._speed_max_level,
@@ -933,13 +930,13 @@ class Ui_Laser_Control(object):
         step_m = mcs2_stage.click_step_m(v_m_s, self._click_duration_s)
         step_um = step_m * 1e6
         step_text = f"{step_um:.0f}" if step_um >= 10 else f"{step_um:.2f}"
-        text = f"L{level}  {v_m_s * 1000:.3f} mm/s, step {step_text} µm"
+        text = f"{step_text} µm"
         mapping = {
             self.laser_speed_x: self.laser_speed_x_label,
             self.laser_speed_y: self.laser_speed_y_label,
             self.laser_speed_z: self.laser_speed_z_label,
         }
-        mapping[slider].setText(text)
+        mapping[selector].setText(text)
 
     def _stage_jog_axis(self, axis, sign):
         if self.stage_device is None:
@@ -963,7 +960,7 @@ class Ui_Laser_Control(object):
         Mirrors the stage control window's behaviour — see
         gui_stage_control._start_continuous_jog for the full rationale.
         Tick period = click_duration_s so the per-step relative moves
-        chain into smooth motion at the slider velocity.
+        chain into smooth motion at the selected velocity.
         """
         if self.stage_device is None:
             self.error_message(self._stage_connect_error or "Laser stage not connected.")
@@ -1009,8 +1006,8 @@ class Ui_Laser_Control(object):
             return
         x_m, y_m, z_m = self._home_target_m
         # Home uses a dedicated velocity (stage_home_velocity_mm_s in
-        # config.toml) instead of the per-axis sliders - otherwise a
-        # Home click with the X slider at level 1 takes minutes.
+        # config.toml) instead of the per-axis speed presets - otherwise a
+        # Home click with X at the slowest preset takes minutes.
         try:
             self.stage_device.move_absolute(
                 x_m=x_m,
@@ -1173,18 +1170,18 @@ class Ui_Laser_Control(object):
         self.label_19.setText(_translate("Laser_Control", "x"))
         self.label_17.setText(_translate("Laser_Control", "y"))
         self.label_18.setText(_translate("Laser_Control", "z"))
-        self.label_14.setText(_translate("Laser_Control", "Speed"))
+        self.label_14.setText(_translate("Laser_Control", "Speed preset"))
         self.label_15.setText(_translate("Laser_Control", "X"))
         self.label_16.setText(_translate("Laser_Control", "Y"))
         self.label_speed_z.setText(_translate("Laser_Control", "Z"))
         self.laser_stage_reference.setText(_translate("Laser_Control", "Reference"))
         self.laser_stage_stop.setText(_translate("Laser_Control", "STOP"))
-        self.laser_up.setText(_translate("Laser_Control", "up"))
-        self.laser_left.setText(_translate("Laser_Control", "Left"))
-        self.leser_right.setText(_translate("Laser_Control", "Right"))
-        self.laser_down.setText(_translate("Laser_Control", "Down"))
-        self.laser_forward.setText(_translate("Laser_Control", "Forward"))
-        self.laser_backward.setText(_translate("Laser_Control", "Backward"))
+        self.laser_up.setText(_translate("Laser_Control", "Y+\n▲"))
+        self.laser_left.setText(_translate("Laser_Control", "◀  X−"))
+        self.leser_right.setText(_translate("Laser_Control", "X+  ▶"))
+        self.laser_down.setText(_translate("Laser_Control", "▼\nY−"))
+        self.laser_forward.setText(_translate("Laser_Control", "Z+\nForward"))
+        self.laser_backward.setText(_translate("Laser_Control", "Z−\nBackward"))
         self.laser_home.setText(_translate("Laser_Control", "Home"))
         self.Error.setText(_translate("Laser_Control", "<html><head/><body><p><br/></p></body></html>"))
         self.start_scanning.setText(_translate("Laser_Control", "Start scaning"))

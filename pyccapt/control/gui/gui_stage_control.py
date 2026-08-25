@@ -6,6 +6,11 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from pyccapt.control.core import runtime
 from pyccapt.control.gui import tooltips
+from pyccapt.control.gui.stage_control_widgets import (
+    JOG_GROUP_STYLE,
+    SpeedSelector,
+    make_jog_button,
+)
 from pyccapt.control.smaract_mcs2 import mcs2_stage
 
 # GUI session logger (lands in meta_data/files/logs/gui/). Used so a silent
@@ -54,17 +59,6 @@ def _make_lcd(parent):
     return lcd
 
 
-def _make_axis_slider(parent, lo, hi, default):
-    slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal, parent=parent)
-    slider.setMinimum(lo)
-    slider.setMaximum(hi)
-    slider.setValue(default)
-    slider.setTickPosition(QtWidgets.QSlider.TickPosition.TicksBelow)
-    slider.setTickInterval(1)
-    slider.setMinimumWidth(160)
-    return slider
-
-
 class Ui_Stage_Control(object):
     def __init__(self, variables, conf):
         self.variables = variables
@@ -85,7 +79,9 @@ class Ui_Stage_Control(object):
         self._speed_max_mm_s = float(self.conf.get('stage_speed_max_mm_s', 1.0))
         self._speed_max_level = int(self.conf.get('stage_speed_level_max', 11))
         self._speed_min_level = int(self.conf.get('stage_speed_level_min', 1))
-        self._speed_default = int(self.conf.get('stage_speed_level_default', 5))
+        # Level 3 in the default table is 0.004 mm/s. With the default
+        # 0.2-second jog cadence this advances exactly 0.8 µm per interval.
+        self._speed_default = int(self.conf.get('stage_speed_level_default', 3))
         self._click_duration_s = float(self.conf.get('stage_click_duration_s', 0.2))
         self._speed_table = self.conf.get('stage_speed_table_mm_s') or None
         self._home_target_m = (
@@ -160,13 +156,18 @@ class Ui_Stage_Control(object):
             self.gridLayout_4.addWidget(nm, row, 3, 1, 1)
         self.gridLayout_3.addLayout(self.gridLayout_4, 0, 0, 1, 1)
 
-        # --- Per-axis speed sliders (X, Y, Z) ------------------------------
+        # --- Per-axis exact speed presets (X, Y, Z) ------------------------
         self.gridLayout_2 = QtWidgets.QGridLayout()
-        # Header
-        header_label = QtWidgets.QLabel("Speed", parent=Stage_Control)
+        header_label = QtWidgets.QLabel("Speed preset", parent=Stage_Control)
         header_label.setFont(bold)
         header_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.gridLayout_2.addWidget(header_label, 0, 1, 1, 1)
+        jog_header = QtWidgets.QLabel(
+            f"Jog / {self._click_duration_s:g} s", parent=Stage_Control
+        )
+        jog_header.setFont(bold)
+        jog_header.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.gridLayout_2.addWidget(jog_header, 0, 2, 1, 1)
 
         self.label_speed_x = QtWidgets.QLabel("X", parent=Stage_Control)
         self.label_speed_x.setFont(bold)
@@ -175,22 +176,37 @@ class Ui_Stage_Control(object):
         self.label_speed_z = QtWidgets.QLabel("Z", parent=Stage_Control)
         self.label_speed_z.setFont(bold)
 
-        self.stage_speed_x = _make_axis_slider(
-            Stage_Control, self._speed_min_level, self._speed_max_level, self._speed_default
+        self.stage_speed_x = SpeedSelector(
+            Stage_Control,
+            self._speed_min_level,
+            self._speed_max_level,
+            self._speed_default,
+            self._speed_max_mm_s,
+            self._speed_table,
         )
-        self.stage_speed_y = _make_axis_slider(
-            Stage_Control, self._speed_min_level, self._speed_max_level, self._speed_default
+        self.stage_speed_y = SpeedSelector(
+            Stage_Control,
+            self._speed_min_level,
+            self._speed_max_level,
+            self._speed_default,
+            self._speed_max_mm_s,
+            self._speed_table,
         )
-        self.stage_speed_z = _make_axis_slider(
-            Stage_Control, self._speed_min_level, self._speed_max_level, self._speed_default
+        self.stage_speed_z = SpeedSelector(
+            Stage_Control,
+            self._speed_min_level,
+            self._speed_max_level,
+            self._speed_default,
+            self._speed_max_mm_s,
+            self._speed_table,
         )
 
         self.stage_speed_x_label = QtWidgets.QLabel(parent=Stage_Control)
-        self.stage_speed_x_label.setMinimumWidth(230)
+        self.stage_speed_x_label.setMinimumWidth(85)
         self.stage_speed_y_label = QtWidgets.QLabel(parent=Stage_Control)
-        self.stage_speed_y_label.setMinimumWidth(230)
+        self.stage_speed_y_label.setMinimumWidth(85)
         self.stage_speed_z_label = QtWidgets.QLabel(parent=Stage_Control)
-        self.stage_speed_z_label.setMinimumWidth(230)
+        self.stage_speed_z_label.setMinimumWidth(85)
 
         for row, (lbl, sl, val) in enumerate(
             (
@@ -211,67 +227,46 @@ class Ui_Stage_Control(object):
 
         self.gridLayout_3.addLayout(self.gridLayout_2, 0, 1, 1, 1)
 
-        # --- Direction buttons (X/Y plane) ---------------------------------
-        self.gridLayout = QtWidgets.QGridLayout()
-        self.gridLayout.addItem(
-            QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum),
-            0,
-            0,
-            1,
-            1,
-        )
-        self.stage_up = QtWidgets.QPushButton("up", parent=Stage_Control)
-        self.stage_up.setMinimumSize(QtCore.QSize(50, 25))
-        self.gridLayout.addWidget(self.stage_up, 0, 1, 1, 1)
-        self.gridLayout.addItem(
-            QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum),
-            0,
-            2,
-            1,
-            1,
-        )
-        self.stage_left = QtWidgets.QPushButton("Left", parent=Stage_Control)
-        self.stage_left.setMinimumSize(QtCore.QSize(50, 25))
-        self.gridLayout.addWidget(self.stage_left, 1, 0, 1, 1)
-        self.gridLayout.addItem(
-            QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum),
-            1,
-            1,
-            1,
-            1,
-        )
-        self.stage_right = QtWidgets.QPushButton("Right", parent=Stage_Control)
-        self.stage_right.setMinimumSize(QtCore.QSize(50, 25))
-        self.gridLayout.addWidget(self.stage_right, 1, 2, 1, 1)
-        self.gridLayout.addItem(
-            QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum),
-            2,
-            0,
-            1,
-            1,
-        )
-        self.stage_down = QtWidgets.QPushButton("Down", parent=Stage_Control)
-        self.stage_down.setMinimumSize(QtCore.QSize(50, 25))
-        self.gridLayout.addWidget(self.stage_down, 2, 1, 1, 1)
-        self.gridLayout.addItem(
-            QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum),
-            2,
-            2,
-            1,
-            1,
-        )
-        self.gridLayout_3.addLayout(self.gridLayout, 0, 2, 1, 1)
+        # --- Standard three-axis jog controls ------------------------------
+        # X/Y use the familiar D-pad convention; Z has a separate rocker so
+        # depth motion cannot be confused with movement in the image plane.
+        self.xy_jog_group = QtWidgets.QGroupBox("X / Y Jog", parent=Stage_Control)
+        self.xy_jog_group.setStyleSheet(JOG_GROUP_STYLE)
+        self.gridLayout = QtWidgets.QGridLayout(self.xy_jog_group)
+        self.gridLayout.setContentsMargins(7, 11, 7, 7)
+        self.gridLayout.setHorizontalSpacing(4)
+        self.gridLayout.setVerticalSpacing(4)
 
-        # --- Forward / backward (Z) ----------------------------------------
-        self.verticalLayout = QtWidgets.QVBoxLayout()
-        self.stage_forward = QtWidgets.QPushButton("Forward", parent=Stage_Control)
-        self.verticalLayout.addWidget(self.stage_forward)
-        self.verticalLayout.addItem(
-            QtWidgets.QSpacerItem(17, 24, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
+        self.stage_up = make_jog_button(self.xy_jog_group, "Y+\n▲")
+        self.stage_left = make_jog_button(self.xy_jog_group, "◀  X−")
+        self.stage_right = make_jog_button(self.xy_jog_group, "X+  ▶")
+        self.stage_down = make_jog_button(self.xy_jog_group, "▼\nY−")
+        xy_center = QtWidgets.QLabel("X / Y", parent=self.xy_jog_group)
+        xy_center.setFixedSize(QtCore.QSize(58, 42))
+        xy_center.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        xy_center.setStyleSheet(
+            "QLabel{background:#f5f7f9;color:#526b7c;border:1px solid #c4ced6;"
+            "border-radius:7px;font-weight:bold;}"
         )
-        self.stage_backward = QtWidgets.QPushButton("Backward", parent=Stage_Control)
+
+        self.gridLayout.addWidget(self.stage_up, 0, 1)
+        self.gridLayout.addWidget(self.stage_left, 1, 0)
+        self.gridLayout.addWidget(xy_center, 1, 1)
+        self.gridLayout.addWidget(self.stage_right, 1, 2)
+        self.gridLayout.addWidget(self.stage_down, 2, 1)
+        self.gridLayout_3.addWidget(self.xy_jog_group, 0, 2, 1, 1)
+
+        self.z_jog_group = QtWidgets.QGroupBox("Z Jog", parent=Stage_Control)
+        self.z_jog_group.setStyleSheet(JOG_GROUP_STYLE)
+        self.verticalLayout = QtWidgets.QVBoxLayout(self.z_jog_group)
+        self.verticalLayout.setContentsMargins(7, 11, 7, 7)
+        self.verticalLayout.setSpacing(6)
+        self.stage_forward = make_jog_button(self.z_jog_group, "Z+\nForward", width=76)
+        self.stage_backward = make_jog_button(self.z_jog_group, "Z−\nBackward", width=76)
+        self.verticalLayout.addWidget(self.stage_forward)
+        self.verticalLayout.addStretch(1)
         self.verticalLayout.addWidget(self.stage_backward)
-        self.gridLayout_3.addLayout(self.verticalLayout, 0, 3, 1, 1)
+        self.gridLayout_3.addWidget(self.z_jog_group, 0, 3, 1, 1)
 
         # --- Home / Reference / Stop / Override ----------------------------
         home_layout = QtWidgets.QVBoxLayout()
@@ -310,8 +305,8 @@ class Ui_Stage_Control(object):
         tooltips.apply_tooltips(self, tooltips.STAGE_TOOLTIPS)
 
         self._connect_signals()
-        for sl in (self.stage_speed_x, self.stage_speed_y, self.stage_speed_z):
-            self._update_speed_label(sl)
+        for selector in (self.stage_speed_x, self.stage_speed_y, self.stage_speed_z):
+            self._update_speed_label(selector)
         self._connect_device()
 
     def retranslateUi(self, Stage_Control):
@@ -330,7 +325,7 @@ class Ui_Stage_Control(object):
         # button. pressed starts a timer that fires _jog_axis every
         # click_duration_s seconds (the same step the old single-click
         # jog used), so consecutive steps chain back-to-back into
-        # smooth motion at the slider-selected velocity. released
+        # smooth motion at the selected velocity. released
         # stops the timer and sends a Stop to truncate any in-flight
         # step so motion ends within one click_duration.
         for button, axis, sign in (
@@ -448,16 +443,16 @@ class Ui_Stage_Control(object):
     # --------------------------------------------------------------- handlers
 
     def _axis_velocity_m_s(self, axis):
-        slider = (self.stage_speed_x, self.stage_speed_y, self.stage_speed_z)[axis]
+        selector = (self.stage_speed_x, self.stage_speed_y, self.stage_speed_z)[axis]
         return mcs2_stage.speed_level_to_m_s(
-            slider.value(),
+            selector.value(),
             self._speed_max_level,
             self._speed_max_mm_s,
             table=self._speed_table,
         )
 
-    def _update_speed_label(self, slider):
-        level = slider.value()
+    def _update_speed_label(self, selector):
+        level = selector.value()
         v_m_s = mcs2_stage.speed_level_to_m_s(
             level,
             self._speed_max_level,
@@ -467,13 +462,13 @@ class Ui_Stage_Control(object):
         step_m = mcs2_stage.click_step_m(v_m_s, self._click_duration_s)
         step_um = step_m * 1e6
         step_text = f"{step_um:.0f}" if step_um >= 10 else f"{step_um:.2f}"
-        text = f"L{level}  {v_m_s * 1000:.3f} mm/s, step {step_text} µm"
+        text = f"{step_text} µm"
         mapping = {
             self.stage_speed_x: self.stage_speed_x_label,
             self.stage_speed_y: self.stage_speed_y_label,
             self.stage_speed_z: self.stage_speed_z_label,
         }
-        mapping[slider].setText(text)
+        mapping[selector].setText(text)
 
     def _jog_axis(self, axis, sign):
         if self.stage_device is None:
@@ -495,7 +490,7 @@ class Ui_Stage_Control(object):
         """Begin firing single-step jogs at the click cadence.
 
         Each tick is just a normal ``_jog_axis`` call, so the velocity
-        the user picked with the speed slider is still honoured and a
+        the user picked with the speed selector is still honoured and a
         per-step error gets reported in the status banner. Tick period
         equals ``_click_duration_s`` (typically 200 ms) so consecutive
         steps butt up against each other and the user perceives the
@@ -554,8 +549,8 @@ class Ui_Stage_Control(object):
             return
         x_m, y_m, z_m = self._home_target_m
         # Home uses a dedicated velocity (stage_home_velocity_mm_s in
-        # config.toml) instead of whatever per-axis slider happens to be
-        # set right now - otherwise a Home click with the X slider at
+        # config.toml) instead of whatever per-axis speed preset happens to
+        # be selected - otherwise a Home click with X at
         # level 1 (a few um/s) takes minutes to complete.
         try:
             self.stage_device.move_absolute(

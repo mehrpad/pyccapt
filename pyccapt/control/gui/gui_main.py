@@ -11,6 +11,7 @@ from PyQt6.QtCore import Qt
 from pyccapt.control.core import device_checks, loggi, runtime
 from pyccapt.control.devices import camera as camera_device
 from pyccapt.control.gui import (
+    app_icon,
     main_parameters,
     process_coordinator,
     gui_baking,
@@ -2648,8 +2649,12 @@ def get_package_version(package_name):
 class MyPyCCAPT(QtWidgets.QMainWindow):
     def __init__(self, variables, conf, x_plot, y_plot, t_plot, main_v_dc_plot):
         super(MyPyCCAPT, self).__init__()
+        # Also configure here so custom launchers that construct MyPyCCAPT
+        # directly cannot bypass the application/taskbar icon setup.
+        app_icon.apply_application_icon(window=self)
         self.ui = Ui_PyCCAPT(variables, conf, x_plot, y_plot, t_plot, main_v_dc_plot)
         self.ui.setupUi(self)
+        app_icon.apply_application_icon(window=self)
 
     def closeEvent(self, event):
         reply = QtWidgets.QMessageBox.question(
@@ -2723,8 +2728,10 @@ if __name__ == "__main__":
     shared = runtime.create_shared_context(conf)
     shared.variables.log_path = str(project_root)
 
+    app_icon.set_windows_app_user_model_id()
     app = QtWidgets.QApplication(sys.argv)
     app.setStyle('Fusion')
+    app_icon.apply_application_icon(app)
     window = MyPyCCAPT(
         shared.variables,
         conf,

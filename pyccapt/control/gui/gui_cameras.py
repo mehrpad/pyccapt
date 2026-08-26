@@ -733,6 +733,15 @@ class Ui_Cameras_Alignment(object):
             region = img[roi_coords[0][0], roi_coords[0][1]]
             self.cam_angle_d.setImage(region, autoRange=False, autoLevels=True)
 
+    def _configured_illumination_color(self):
+        """Return the configured RGB illumination colour, defaulting to green."""
+        color_name = str(self.conf.get("camera_illumination_color", "green")).strip().lower()
+        color = ILLUMINATION_RGB.get(color_name)
+        if color is None:
+            print(f"Unknown camera illumination color {color_name!r}; using green.")
+            return "green", ILLUMINATION_RGB["green"]
+        return color_name, color
+
     def _initialise_illumination(self):
         """Connect to the Arduino and turn the camera illumination on.
 
@@ -750,14 +759,7 @@ class Ui_Cameras_Alignment(object):
                 self.conf.get("COM_PORT_camera_illumination", "auto")
             )
             port = controller.connect()
-            color_name = str(self.conf.get("camera_illumination_color", "green")).strip().lower()
-            color = ILLUMINATION_RGB.get(color_name, ILLUMINATION_RGB["green"])
-            if color_name not in ILLUMINATION_RGB:
-                print(
-                    f"Unknown camera illumination color {color_name!r}; "
-                    "using green."
-                )
-                color_name = "green"
+            color_name, color = self._configured_illumination_color()
             try:
                 controller.set_color(*color)
             except RuntimeError as exc:
@@ -815,10 +817,12 @@ class Ui_Cameras_Alignment(object):
         self._refresh_exposure_widgets()
 
     def update_illumination_percent(self, percent):
-        """Apply an operator-selected brightness percentage to the Arduino."""
+        """Reapply the configured colour, then the selected brightness."""
         if not self.flag_super_user or self.illumination_controller is None:
             return
         try:
+            _, color = self._configured_illumination_color()
+            self.illumination_controller.set_color(*color)
             self.illumination_controller.set_brightness(percent)
         except Exception as exc:
             self._report_illumination_error(exc)

@@ -121,7 +121,7 @@ live_calibration_ema_window = 3
 # a warning for a given gauge.
 vacuum_threshold_main = 1e-9
 vacuum_threshold_buffer = 1e-9
-vacuum_threshold_buffer_back = 1e-2
+vacuum_threshold_buffer_back = 1e-1
 vacuum_threshold_load_lock = 1e-5
 vacuum_threshold_load_lock_back = 1e-1
 vacuum_threshold_cryo_load_lock = 1e-5
@@ -271,7 +271,7 @@ COM_PORT_thorlab_motor = "27261754"
 # Set either one to "" (empty string) to disable that GUI's stage section
 # without showing any error - useful when only one MCS2 is plugged in.
 stage_smartact_main = "network:sn:MCS2-00017944"
-stage_smartact_laser = "network:sn:MCS2-00017951"
+stage_smartact_laser = "network:sn:MCS2-00017939"
 
 # Default "home" position for the Home button on the stage / laser GUIs.
 # Values are in millimetres.  The Home button moves all three axes to these

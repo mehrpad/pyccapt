@@ -327,10 +327,7 @@ PUMPS_TOOLTIPS = {
     "target_tempreature_ll": "Load-lock target temperature (°C).",
     # --- Baking ---------------------------------------------------------
     "ll_baking_time": "Load-lock bake-out duration (minutes).  Type an integer, then start the bake from the Baking window.",
-    # --- Override / status ----------------------------------------------
-    "superuser": "Override Access - bypass pump / vacuum safety "
-    "interlocks.  Click for a warning dialog; button turns "
-    "green while active.",
+    # --- Status ---------------------------------------------------------
     "Error": "Status / error messages from the pump and gauge controllers.",
 }
 

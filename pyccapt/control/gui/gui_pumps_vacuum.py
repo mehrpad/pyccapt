@@ -30,7 +30,6 @@ class Ui_Pumps_Vacuum(object):
         Return:
                         None
         """
-        self.flag_super_user = None
         self.default_color = None
         self.variables = variables
         self.conf = conf
@@ -268,21 +267,6 @@ class Ui_Pumps_Vacuum(object):
         self.gridLayout_4.addLayout(self.gridLayout_2, 1, 1, 1, 2)
         self.gridLayout_3 = QtWidgets.QGridLayout()
         self.gridLayout_3.setObjectName("gridLayout_3")
-        self.superuser = QtWidgets.QPushButton(parent=Pumps_Vacuum)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Fixed)
-        sizePolicy.setHorizontalStretch(0)
-        sizePolicy.setVerticalStretch(0)
-        sizePolicy.setHeightForWidth(self.superuser.sizePolicy().hasHeightForWidth())
-        self.superuser.setSizePolicy(sizePolicy)
-        self.superuser.setMinimumSize(QtCore.QSize(0, 25))
-        self.superuser.setStyleSheet(
-            "QPushButton{\n"
-            "                                    background: rgb(193, 193, 193)\n"
-            "                                    }\n"
-            "                                "
-        )
-        self.superuser.setObjectName("superuser")
-        self.gridLayout_3.addWidget(self.superuser, 0, 0, 1, 2)
         # "Vent CLL" - partial vent of the cryo load lock for fast sample/cryo
         # exchange (drives a 3-valve sequence). Sits between "Fully Vent CLL"
         # and "Vent LL".
@@ -531,7 +515,6 @@ class Ui_Pumps_Vacuum(object):
         Pumps_Vacuum.setTabOrder(self.ll_baking_time, self.pump_load_lock_switch)
         Pumps_Vacuum.setTabOrder(self.pump_load_lock_switch, self.vent_cryo_load_lock_partial_switch)
         Pumps_Vacuum.setTabOrder(self.vent_cryo_load_lock_partial_switch, self.pump_cryo_load_lock_switch)
-        Pumps_Vacuum.setTabOrder(self.pump_cryo_load_lock_switch, self.superuser)
 
         self.pump_load_lock_switch.clicked.connect(self.pump_switch_ll)
         self.pump_cryo_load_lock_switch.clicked.connect(self.pump_switch_cryo_ll)
@@ -542,8 +525,7 @@ class Ui_Pumps_Vacuum(object):
         self.pump_load_lock_default_style = self.pump_load_lock_switch.styleSheet()
         self.pump_cryo_load_lock_default_style = self.pump_cryo_load_lock_switch.styleSheet()
         self._sync_pump_action_styles()
-        # "Fully vented CLL" fully vents the cryo load lock; it is interlocked
-        # behind Override Access, so keep it disabled until override is granted.
+        # Full CLL venting is intentionally unavailable from this window.
         self.pump_cryo_load_lock_switch.setEnabled(False)
         # Initialise the CLL vent valve CLOSED and HOLD the line low. The
         # USB-6501 output floats HIGH via its pull-up when undriven, which would
@@ -623,8 +605,6 @@ class Ui_Pumps_Vacuum(object):
         # default Qlcd color
         self.default_color = self.vacuum_buffer_back.style().standardPalette().color(QtGui.QPalette.ColorRole.WindowText)
 
-        self.superuser.clicked.connect(self.super_user_access)
-        self.original_button_style = self.superuser.styleSheet()
 
     def retranslateUi(self, Pumps_Vacuum):
         """
@@ -648,7 +628,6 @@ class Ui_Pumps_Vacuum(object):
         self.label_214.setText(_translate("Pumps_Vacuum", "Buffer Chamber Pre (mBar)"))
         self.label_217.setText(_translate("Pumps_Vacuum", "CryoLoad Lock Pre(mBar)"))
         self.label_213.setText(_translate("Pumps_Vacuum", "Load Lock Pre(mBar)"))
-        self.superuser.setText(_translate("Pumps_Vacuum", "Override Access"))
         self.pump_cryo_load_lock_switch.setText(_translate("Pumps_Vacuum", "Fully Vent CLL"))
         self.vent_cryo_load_lock_partial_switch.setText(_translate("Pumps_Vacuum", "Vent CLL"))
         self.pump_load_lock_switch.setText(_translate("Pumps_Vacuum", "Vent LL"))
@@ -882,41 +861,6 @@ class Ui_Pumps_Vacuum(object):
     def update_vacuum_cryo_load_lock_back(self, value):
         self._update_gauge(self.vacuum_cryo_load_lock_back, self.label_217, value, 'vacuum_threshold_cryo_load_lock_back')
 
-    def super_user_access(self):
-        """
-        The function for override access
-
-        Args:
-                None
-
-        Returns:
-                None
-        """
-        if not self.flag_super_user:
-            warning = QtWidgets.QMessageBox(parent=self.superuser)
-            warning.setIcon(QtWidgets.QMessageBox.Icon.Warning)
-            warning.setWindowTitle("Confirm Access Override")
-            warning.setText("Pump and vacuum override can bypass safety interlocks.")
-            warning.setInformativeText("Only continue if you really want to override access.")
-            warning.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No)
-            warning.setDefaultButton(QtWidgets.QMessageBox.StandardButton.No)
-            if warning.exec() != QtWidgets.QMessageBox.StandardButton.Yes:
-                self.error_message("Override Access canceled.")
-                self.timer.start(8000)
-                return
-            self.flag_super_user = True
-            self.superuser.setStyleSheet("QPushButton{\nbackground: rgb(0, 255, 26)\n}")
-            # "Fully vented CLL" is only usable while override is active.
-            self.pump_cryo_load_lock_switch.setEnabled(True)
-            self.error_message("!!! Override Access Granted !!!")
-        elif self.flag_super_user:
-            self.flag_super_user = False
-            self.superuser.setStyleSheet(self.original_button_style)
-            # Re-lock "Fully vented CLL" when override is deactivated.
-            self.pump_cryo_load_lock_switch.setEnabled(False)
-            self.error_message("!!! Override Access deactivated !!!")
-            self.timer.start(8000)
-
     def hideMessage(self):
         """
         Hide the warning message
@@ -965,7 +909,7 @@ class Ui_Pumps_Vacuum(object):
                 None
         """
         try:
-            if self.flag_super_user or (
+            if (
                 not self.variables.start_flag
                 and not self.variables.flag_main_gate
                 and not self.variables.flag_cryo_gate
@@ -1011,7 +955,7 @@ class Ui_Pumps_Vacuum(object):
                 None
         """
         try:
-            if self.flag_super_user or (
+            if (
                 not self.variables.start_flag
                 and not self.variables.flag_main_gate
                 and not self.variables.flag_cryo_gate
@@ -1028,8 +972,7 @@ class Ui_Pumps_Vacuum(object):
                     self.variables.flag_pump_cryo_load_lock_click = True
                     self.pump_cryo_load_lock_switch.setEnabled(False)
                     time.sleep(1)
-                    # Stay locked behind Override Access after the toggle.
-                    self.pump_cryo_load_lock_switch.setEnabled(bool(self.flag_super_user))
+                    self.pump_cryo_load_lock_switch.setEnabled(False)
                 elif not self.variables.flag_pump_cryo_load_lock:
                     self._set_action_button_active(
                         self.pump_cryo_load_lock_switch, False, self.pump_cryo_load_lock_default_style
@@ -1037,7 +980,7 @@ class Ui_Pumps_Vacuum(object):
                     self.variables.flag_pump_cryo_load_lock_click = True
                     self.pump_cryo_load_lock_switch.setEnabled(False)
                     time.sleep(1)
-                    self.pump_cryo_load_lock_switch.setEnabled(bool(self.flag_super_user))
+                    self.pump_cryo_load_lock_switch.setEnabled(False)
                 self._sync_pump_action_styles()
             else:  # SHow error message in the GUI
                 if self.variables.start_flag:
@@ -1088,8 +1031,7 @@ class Ui_Pumps_Vacuum(object):
         state table.
 
         Starting a vent is interlocked: it is refused while an experiment is
-        running or any gate is open, unless Override Access is active (which
-        bypasses the interlock). Stopping a vent is always allowed.
+        running or any gate is open. Stopping a vent is always allowed.
 
         Press (start venting):
                 - CLL backing valve OFF and CLL Turbo valve OFF (immediately)
@@ -1118,16 +1060,12 @@ class Ui_Pumps_Vacuum(object):
             if not self.flag_vent_cll_partial:
                 # ---- start venting (sample/cryo exchange) ----
                 # Interlock: opening the CLL to atmosphere is only allowed when
-                # no experiment is running and every gate is closed. Override
-                # Access bypasses this interlock.
+                # no experiment is running and every gate is closed.
                 if not (
-                    self.flag_super_user
-                    or (
-                        not self.variables.start_flag
-                        and not self.variables.flag_main_gate
-                        and not self.variables.flag_cryo_gate
-                        and not self.variables.flag_load_gate
-                    )
+                    not self.variables.start_flag
+                    and not self.variables.flag_main_gate
+                    and not self.variables.flag_cryo_gate
+                    and not self.variables.flag_load_gate
                 ):
                     if self.variables.start_flag:
                         self.error_message("!!! An experiment is running !!!")

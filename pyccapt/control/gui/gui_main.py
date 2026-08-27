@@ -2255,7 +2255,12 @@ class Ui_PyCCAPT(object):
         self.Pumps_vacuum.setWindowStyleFusion()
         self.gui_pumps_vacuum.setupUi(self.Pumps_vacuum)
 
-        self.gui_gates = gui_gates.Ui_Gates(self.variables, self.conf, parent=self.Pumps_vacuum)
+        self.gui_gates = gui_gates.Ui_Gates(
+            self.variables,
+            self.conf,
+            parent=self.Pumps_vacuum,
+            override_changed=self.gui_pumps_vacuum.set_access_override,
+        )
         self.Gates = gui_gates.GatesWindow(self.gui_gates, parent=self.Pumps_vacuum)
         self.gui_gates.setupUi(self.Gates)
         self.gui_pumps_vacuum.gridLayout_9.addWidget(self.Gates, 0, 1, 1, 1)

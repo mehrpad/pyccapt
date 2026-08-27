@@ -30,6 +30,7 @@ class Ui_Pumps_Vacuum(object):
         Return:
                         None
         """
+        self.flag_super_user = False
         self.default_color = None
         self.variables = variables
         self.conf = conf
@@ -525,7 +526,7 @@ class Ui_Pumps_Vacuum(object):
         self.pump_load_lock_default_style = self.pump_load_lock_switch.styleSheet()
         self.pump_cryo_load_lock_default_style = self.pump_cryo_load_lock_switch.styleSheet()
         self._sync_pump_action_styles()
-        # Full CLL venting is intentionally unavailable from this window.
+        # Full CLL venting is unlocked by the shared Gates override.
         self.pump_cryo_load_lock_switch.setEnabled(False)
         # Initialise the CLL vent valve CLOSED and HOLD the line low. The
         # USB-6501 output floats HIGH via its pull-up when undriven, which would
@@ -861,6 +862,15 @@ class Ui_Pumps_Vacuum(object):
     def update_vacuum_cryo_load_lock_back(self, value):
         self._update_gauge(self.vacuum_cryo_load_lock_back, self.label_217, value, 'vacuum_threshold_cryo_load_lock_back')
 
+    def set_access_override(self, enabled):
+        """Apply the shared Gates override to pump and vacuum controls."""
+        self.flag_super_user = bool(enabled)
+        self.pump_cryo_load_lock_switch.setEnabled(self.flag_super_user)
+        if self.flag_super_user:
+            self.error_message("!!! Gate and Vacuum Override Access Granted !!!")
+        else:
+            self.error_message("!!! Gate and Vacuum Override Access deactivated !!!")
+
     def hideMessage(self):
         """
         Hide the warning message
@@ -909,7 +919,7 @@ class Ui_Pumps_Vacuum(object):
                 None
         """
         try:
-            if (
+            if self.flag_super_user or (
                 not self.variables.start_flag
                 and not self.variables.flag_main_gate
                 and not self.variables.flag_cryo_gate
@@ -955,7 +965,7 @@ class Ui_Pumps_Vacuum(object):
                 None
         """
         try:
-            if (
+            if self.flag_super_user or (
                 not self.variables.start_flag
                 and not self.variables.flag_main_gate
                 and not self.variables.flag_cryo_gate
@@ -972,7 +982,7 @@ class Ui_Pumps_Vacuum(object):
                     self.variables.flag_pump_cryo_load_lock_click = True
                     self.pump_cryo_load_lock_switch.setEnabled(False)
                     time.sleep(1)
-                    self.pump_cryo_load_lock_switch.setEnabled(False)
+                    self.pump_cryo_load_lock_switch.setEnabled(self.flag_super_user)
                 elif not self.variables.flag_pump_cryo_load_lock:
                     self._set_action_button_active(
                         self.pump_cryo_load_lock_switch, False, self.pump_cryo_load_lock_default_style
@@ -980,7 +990,7 @@ class Ui_Pumps_Vacuum(object):
                     self.variables.flag_pump_cryo_load_lock_click = True
                     self.pump_cryo_load_lock_switch.setEnabled(False)
                     time.sleep(1)
-                    self.pump_cryo_load_lock_switch.setEnabled(False)
+                    self.pump_cryo_load_lock_switch.setEnabled(self.flag_super_user)
                 self._sync_pump_action_styles()
             else:  # SHow error message in the GUI
                 if self.variables.start_flag:
@@ -1031,7 +1041,8 @@ class Ui_Pumps_Vacuum(object):
         state table.
 
         Starting a vent is interlocked: it is refused while an experiment is
-        running or any gate is open. Stopping a vent is always allowed.
+        running or any gate is open, unless the shared Gates override is
+        active. Stopping a vent is always allowed.
 
         Press (start venting):
                 - CLL backing valve OFF and CLL Turbo valve OFF (immediately)
@@ -1060,12 +1071,16 @@ class Ui_Pumps_Vacuum(object):
             if not self.flag_vent_cll_partial:
                 # ---- start venting (sample/cryo exchange) ----
                 # Interlock: opening the CLL to atmosphere is only allowed when
-                # no experiment is running and every gate is closed.
+                # no experiment is running and every gate is closed. The
+                # shared Gates override bypasses this interlock.
                 if not (
-                    not self.variables.start_flag
-                    and not self.variables.flag_main_gate
-                    and not self.variables.flag_cryo_gate
-                    and not self.variables.flag_load_gate
+                    self.flag_super_user
+                    or (
+                        not self.variables.start_flag
+                        and not self.variables.flag_main_gate
+                        and not self.variables.flag_cryo_gate
+                        and not self.variables.flag_load_gate
+                    )
                 ):
                     if self.variables.start_flag:
                         self.error_message("!!! An experiment is running !!!")

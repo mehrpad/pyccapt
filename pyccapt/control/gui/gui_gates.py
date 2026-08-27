@@ -21,7 +21,7 @@ class Ui_Gates(object):
         None
     """
 
-    def __init__(self, variables, conf, parent=None):
+    def __init__(self, variables, conf, parent=None, override_changed=None):
         """
         Load the GUI based on the configuration file.
 
@@ -29,6 +29,8 @@ class Ui_Gates(object):
             variables (object): Global variables
             conf (dict): Configuration file
             parent (object): Parent object
+            override_changed (callable): Optional callback receiving the
+                shared gate/pump override state.
 
         Returns:
             None
@@ -37,6 +39,7 @@ class Ui_Gates(object):
         self.variables = variables
         self.conf = conf
         self.parent = parent
+        self.override_changed = override_changed
 
     def setupUi(self, Gates):
         """
@@ -279,8 +282,8 @@ class Ui_Gates(object):
             warning = QtWidgets.QMessageBox(parent=self.superuser)
             warning.setIcon(QtWidgets.QMessageBox.Icon.Warning)
             warning.setWindowTitle("Confirm Access Override")
-            warning.setText("Gate override can bypass interlocks and may be dangerous.")
-            warning.setInformativeText("Only continue if you really want to override gate access.")
+            warning.setText("Gate and vacuum override can bypass safety interlocks.")
+            warning.setInformativeText("Only continue if you really want to override gate and vacuum access.")
             warning.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No)
             warning.setDefaultButton(QtWidgets.QMessageBox.StandardButton.No)
             if warning.exec() != QtWidgets.QMessageBox.StandardButton.Yes:
@@ -295,6 +298,8 @@ class Ui_Gates(object):
             self.superuser.setStyleSheet(self.original_button_style)
             self.error_message("!!! Override Access deactivated !!!")
             self.timer.start(8000)
+        if self.override_changed is not None:
+            self.override_changed(self.flag_super_user)
 
     def _vacuum_ok_to_open(self, gate_label, sides):
         """Confirm the vacuum is safe before opening a gate.

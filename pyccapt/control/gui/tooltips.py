@@ -286,8 +286,8 @@ GATES_TOOLTIPS = {
     "are wrong.  Bypass via Override Access.",
     "load_lock_switch": "Open / close the load-lock gate valve.",
     "cryo_switch": "Open / close the cryo gate valve.",
-    "superuser": "Override Access - bypass the gate-vacuum "
-    "interlocks.  Click for a warning dialog; "
+    "superuser": "Override Access - bypass the gate and pump/vacuum "
+    "interlocks. Click for a warning dialog; "
     "button turns green while active.  USE WITH "
     "CARE: opening a gate against the wrong "
     "vacuum can damage hardware.",

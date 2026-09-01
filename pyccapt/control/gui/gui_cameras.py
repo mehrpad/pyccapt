@@ -60,7 +60,9 @@ class Ui_Cameras_Alignment(object):
         None
         """
         Cameras_Alignment.setObjectName("Cameras_Alignment")
-        Cameras_Alignment.resize(1210, 938)
+        # Keep the camera tool window practical on smaller displays. The
+        # original 1210x938 footprint and image minimums are reduced by ~20%.
+        Cameras_Alignment.resize(970, 750)
         self.gridLayout_5 = QtWidgets.QGridLayout(Cameras_Alignment)
         self.gridLayout_5.setObjectName("gridLayout_5")
         self.gridLayout_4 = QtWidgets.QGridLayout()
@@ -89,7 +91,7 @@ class Ui_Cameras_Alignment(object):
         sizePolicy.setVerticalStretch(1)
         sizePolicy.setHeightForWidth(self.cam_s_d.sizePolicy().hasHeightForWidth())
         self.cam_s_d.setSizePolicy(sizePolicy)
-        self.cam_s_d.setMinimumSize(QtCore.QSize(600, 250))
+        self.cam_s_d.setMinimumSize(QtCore.QSize(480, 200))
         self.cam_s_d.setMaximumSize(QtCore.QSize(16777215, 16777215))
         self.cam_s_d.setStyleSheet(
             "QWidget{\n"
@@ -119,7 +121,7 @@ class Ui_Cameras_Alignment(object):
         sizePolicy.setVerticalStretch(1)
         sizePolicy.setHeightForWidth(self.cam_b_d.sizePolicy().hasHeightForWidth())
         self.cam_b_d.setSizePolicy(sizePolicy)
-        self.cam_b_d.setMinimumSize(QtCore.QSize(600, 250))
+        self.cam_b_d.setMinimumSize(QtCore.QSize(480, 200))
         self.cam_b_d.setMaximumSize(QtCore.QSize(16777215, 16777215))
         self.cam_b_d.setStyleSheet(
             "QWidget{\n"
@@ -150,7 +152,7 @@ class Ui_Cameras_Alignment(object):
         sizePolicy.setVerticalStretch(1)
         sizePolicy.setHeightForWidth(self.cam_s_o.sizePolicy().hasHeightForWidth())
         self.cam_s_o.setSizePolicy(sizePolicy)
-        self.cam_s_o.setMinimumSize(QtCore.QSize(250, 250))
+        self.cam_s_o.setMinimumSize(QtCore.QSize(200, 200))
         self.cam_s_o.setStyleSheet(
             "QWidget{\n"
             "                                            border: 2px solid gray;\n"
@@ -180,7 +182,7 @@ class Ui_Cameras_Alignment(object):
         sizePolicy.setVerticalStretch(1)
         sizePolicy.setHeightForWidth(self.cam_b_o.sizePolicy().hasHeightForWidth())
         self.cam_b_o.setSizePolicy(sizePolicy)
-        self.cam_b_o.setMinimumSize(QtCore.QSize(250, 250))
+        self.cam_b_o.setMinimumSize(QtCore.QSize(200, 200))
         self.cam_b_o.setMaximumSize(QtCore.QSize(16777215, 16777215))
         self.cam_b_o.setStyleSheet(
             "QWidget{\n"
@@ -228,7 +230,7 @@ class Ui_Cameras_Alignment(object):
         sizePolicy.setVerticalStretch(1)
         sizePolicy.setHeightForWidth(self.cam_angle_o.sizePolicy().hasHeightForWidth())
         self.cam_angle_o.setSizePolicy(sizePolicy)
-        self.cam_angle_o.setMinimumSize(QtCore.QSize(250, 250))
+        self.cam_angle_o.setMinimumSize(QtCore.QSize(200, 200))
         self.cam_angle_o.setMaximumSize(QtCore.QSize(16777215, 16777215))
         self.cam_angle_o.setStyleSheet(
             "QWidget{\n"
@@ -253,7 +255,7 @@ class Ui_Cameras_Alignment(object):
         sizePolicy.setVerticalStretch(1)
         sizePolicy.setHeightForWidth(self.cam_angle_d.sizePolicy().hasHeightForWidth())
         self.cam_angle_d.setSizePolicy(sizePolicy)
-        self.cam_angle_d.setMinimumSize(QtCore.QSize(600, 250))
+        self.cam_angle_d.setMinimumSize(QtCore.QSize(480, 200))
         self.cam_angle_d.setMaximumSize(QtCore.QSize(16777215, 16777215))
         self.cam_angle_d.setStyleSheet(
             "QWidget{\n"
@@ -374,10 +376,6 @@ class Ui_Cameras_Alignment(object):
         )
         self.exposure_time_cam_1.setObjectName("exposure_time_cam_1")
         self.gridLayout_2.addWidget(self.exposure_time_cam_1, 3, 1, 1, 1)
-        spacerItem2 = QtWidgets.QSpacerItem(
-            20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding
-        )
-        self.gridLayout_2.addItem(spacerItem2, 7, 1, 1, 1)
         self.exposure_time_cam_2 = QtWidgets.QLineEdit(parent=Cameras_Alignment)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Minimum)
         sizePolicy.setHorizontalStretch(0)
@@ -444,15 +442,67 @@ class Ui_Cameras_Alignment(object):
         # Angle" row instead of widening the whole window. One row per
         # detected Basler camera; refreshed every 1.5 s.
         self.camera_list_box = QtWidgets.QGroupBox("Cameras detected", parent=Cameras_Alignment)
+        self.camera_list_box.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Maximum
+        )
+        self.camera_list_box.setMaximumWidth(310)
+        self.camera_list_box.setMaximumHeight(135)
         self.camera_list_layout = QtWidgets.QVBoxLayout(self.camera_list_box)
-        self.camera_list_layout.setContentsMargins(6, 6, 6, 6)
-        self.camera_list_layout.setSpacing(2)
+        self.camera_list_layout.setContentsMargins(5, 3, 5, 3)
+        self.camera_list_layout.setSpacing(1)
         self._camera_row_widgets = {}  # serial -> dict(widget, label, connect_btn, disconnect_btn)
         self.camera_list_empty_label = QtWidgets.QLabel("(scanning …)", parent=self.camera_list_box)
         self.camera_list_empty_label.setStyleSheet("color: gray;")
         self.camera_list_layout.addWidget(self.camera_list_empty_label)
         self.camera_list_layout.addStretch(1)
         self.verticalLayout_2.addWidget(self.camera_list_box)
+
+        # Compact, display-only instrument monitor for alignment work. Values
+        # come from the existing Manager namespace populated by the pumps and
+        # vacuum process; the camera window never touches gauge hardware.
+        self.instrument_monitor_box = QtWidgets.QGroupBox("Instrument monitor", parent=Cameras_Alignment)
+        self.instrument_monitor_box.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Maximum
+        )
+        monitor_layout = QtWidgets.QGridLayout(self.instrument_monitor_box)
+        monitor_layout.setContentsMargins(5, 3, 5, 4)
+        monitor_layout.setHorizontalSpacing(6)
+        monitor_layout.setVerticalSpacing(2)
+        self.camera_monitor_labels = {}
+        self.camera_monitor_lcds = {}
+        stage_sensor_name = self.conf.get('cryo_sensor_3', 'stage').replace('_', ' ').title()
+        monitor_specs = (
+            ("vacuum_main", "Main Chamber (mBar)", "#2ca02c"),
+            ("vacuum_buffer", "Buffer Chamber (mBar)", "#8c564b"),
+            ("vacuum_load_lock", "Load Lock (mBar)", "#1f77b4"),
+            ("vacuum_cryo_load_lock", "Cryo Load Lock (mBar)", "#d627a8"),
+            ("temperature", f"Temp. {stage_sensor_name} (K)", "#ff8c00"),
+        )
+        for row, (attribute, label_text, color) in enumerate(monitor_specs):
+            label = QtWidgets.QLabel(label_text, parent=self.instrument_monitor_box)
+            label.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
+            label.setMinimumWidth(145)
+            label_font = label.font()
+            label_font.setBold(True)
+            label.setFont(label_font)
+            lcd = QtWidgets.QLCDNumber(parent=self.instrument_monitor_box)
+            lcd.setDigitCount(8)
+            lcd.setSegmentStyle(QtWidgets.QLCDNumber.SegmentStyle.Flat)
+            lcd.setSizePolicy(
+                QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed
+            )
+            lcd.setMinimumSize(QtCore.QSize(150, 34))
+            lcd.setMaximumHeight(34)
+            lcd.setStyleSheet(f"QLCDNumber{{border: 1px solid {color}; border-radius: 4px;}}")
+            lcd.setToolTip(label_text)
+            monitor_layout.addWidget(label, row, 0)
+            monitor_layout.addWidget(lcd, row, 1)
+            self.camera_monitor_labels[attribute] = label
+            self.camera_monitor_lcds[attribute] = lcd
+        monitor_layout.setColumnStretch(1, 1)
+        self.instrument_monitor_box.setMaximumHeight(215)
+        self.verticalLayout_2.addWidget(self.instrument_monitor_box)
+        self.verticalLayout_2.addStretch(1)
 
         self.gridLayout_4.addLayout(self.verticalLayout_2, 0, 1, 1, 1)
         self.gridLayout_5.addLayout(self.gridLayout_4, 0, 0, 1, 1)
@@ -614,6 +664,38 @@ class Ui_Cameras_Alignment(object):
         # Run once immediately so the panel is populated before the
         # first 1.5s tick.
         QtCore.QTimer.singleShot(200, self._refresh_camera_panel)
+
+        self.instrument_monitor_timer = QtCore.QTimer(self.Cameras_Alignment)
+        self.instrument_monitor_timer.timeout.connect(self._refresh_instrument_monitor)
+        self.instrument_monitor_timer.start(1000)
+        self._refresh_instrument_monitor()
+
+    def _refresh_instrument_monitor(self):
+        """Refresh the compact vacuum and stage-temperature LCDs."""
+        pressure_specs = (
+            ("vacuum_main", "vacuum_threshold_main"),
+            ("vacuum_buffer", "camera_warning_threshold_buffer"),
+            ("vacuum_load_lock", "vacuum_threshold_load_lock"),
+            ("vacuum_cryo_load_lock", "vacuum_threshold_cryo_load_lock"),
+        )
+        for attribute, threshold_key in pressure_specs:
+            value = self._shared_numeric_value(attribute)
+            self.camera_monitor_lcds[attribute].display("Error" if value is None or value < 0 else f"{value:.2e}")
+            default_threshold = 1e-8 if attribute == "vacuum_buffer" else float("inf")
+            threshold = float(self.conf.get(threshold_key, default_threshold))
+            color = "red" if value is not None and value >= 0 and value > threshold else "black"
+            self.camera_monitor_labels[attribute].setStyleSheet(f"color: {color};")
+
+        temperature = self._shared_numeric_value("temperature")
+        self.camera_monitor_lcds["temperature"].display(
+            "Error" if temperature is None or temperature < 0 else f"{temperature:.2f}"
+        )
+
+    def _shared_numeric_value(self, attribute):
+        try:
+            return float(getattr(self.variables, attribute))
+        except (AttributeError, TypeError, ValueError):
+            return None
 
     def set_default_exposure_time(self, exposure_time_default):
         """
@@ -962,6 +1044,10 @@ class Ui_Cameras_Alignment(object):
         # Add any additional cleanup code here
         # with self.variables.lock_setup_parameters:
         self.variables.flag_camera_grab = False
+        for timer_name in ('timer', 'camera_list_timer', 'instrument_monitor_timer'):
+            timer = getattr(self, timer_name, None)
+            if timer is not None:
+                timer.stop()
         if hasattr(self, 'camera_thread'):
             self.camera_thread.wait()
         if self.illumination_controller is not None:
@@ -1018,10 +1104,13 @@ class Ui_Cameras_Alignment(object):
         layout.setContentsMargins(2, 2, 2, 2)
         layout.setSpacing(6)
         label = QtWidgets.QLabel(parent=row)
-        label.setMinimumWidth(220)
+        label.setMinimumWidth(130)
+        label.setStyleSheet("font-size: 9px;")
         layout.addWidget(label, 1)
         connect_btn = QtWidgets.QPushButton("Connect", parent=row)
         disconnect_btn = QtWidgets.QPushButton("Disconnect", parent=row)
+        connect_btn.setFixedWidth(62)
+        disconnect_btn.setFixedWidth(76)
         layout.addWidget(connect_btn)
         layout.addWidget(disconnect_btn)
         # Insert above the trailing stretch.

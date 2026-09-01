@@ -121,6 +121,9 @@ live_calibration_ema_window = 3
 # a warning for a given gauge.
 vacuum_threshold_main = 1e-9
 vacuum_threshold_buffer = 1e-9
+# Display-only warning used by the compact monitor in the Cameras GUI.
+# Kept separate from vacuum_threshold_buffer, which also protects gate interlocks.
+camera_warning_threshold_buffer = 1e-8
 vacuum_threshold_buffer_back = 1e-1
 vacuum_threshold_load_lock = 1e-5
 vacuum_threshold_load_lock_back = 1e-1

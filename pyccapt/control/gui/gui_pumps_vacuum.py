@@ -2,7 +2,9 @@ import os
 import sys
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
+import json
+import math
 
 import numpy as np
 import pandas as pd
@@ -10,10 +12,33 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import QTimer, pyqtSignal, QObject
 from PyQt6.QtGui import QFont
 
+# Qt requires WebEngineWidgets to be imported before QApplication is created.
+# This module is loaded during GUI startup, so resolve the optional dependency
+# here rather than lazily inside setupUi().
+try:
+    from PyQt6.QtWebEngineWidgets import QWebEngineView
+except ImportError as exc:
+    QWebEngineView = None
+    WEBENGINE_IMPORT_ERROR = exc
+else:
+    WEBENGINE_IMPORT_ERROR = None
+
 # Local module and scripts
 from pyccapt.control.core import runtime
 from pyccapt.control.devices import initialize_devices
 from pyccapt.control.gui import tooltips
+from pyccapt.control.gui.vacuum_history import VACUUM_CHANNELS, VacuumHistory
+
+
+VACUUM_WINDOWS = {
+    "1 min": 60,
+    "30 min": 30 * 60,
+    "1 h": 60 * 60,
+    "6 h": 6 * 60 * 60,
+    "12 h": 12 * 60 * 60,
+    "24 h": 24 * 60 * 60,
+    "1 week": 7 * 24 * 60 * 60,
+}
 
 
 class Ui_Pumps_Vacuum(object):
@@ -53,6 +78,8 @@ class Ui_Pumps_Vacuum(object):
         self.ll_baking_log_data = None
         self.ll_baking_log_file = None
         self.ll_baking_log_start = None
+        self.vacuum_history = VacuumHistory()
+        self._vacuum_plot_ready = False
 
     def setupUi(self, Pumps_Vacuum):
         """
@@ -64,7 +91,7 @@ class Ui_Pumps_Vacuum(object):
                 None
         """
         Pumps_Vacuum.setObjectName("Pumps_Vacuum")
-        Pumps_Vacuum.resize(757, 385)
+        Pumps_Vacuum.resize(1100, 700)
         self.gridLayout_9 = QtWidgets.QGridLayout(Pumps_Vacuum)
         self.gridLayout_9.setObjectName("gridLayout_9")
         self.verticalLayout = QtWidgets.QVBoxLayout()
@@ -172,14 +199,6 @@ class Ui_Pumps_Vacuum(object):
         self.vacuum_load_lock.setObjectName("vacuum_load_lock")
         self.gridLayout.addWidget(self.vacuum_load_lock, 3, 2, 1, 1)
         self.gridLayout_4.addLayout(self.gridLayout, 0, 0, 2, 1)
-        spacerItem = QtWidgets.QSpacerItem(
-            40, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum
-        )
-        self.gridLayout_4.addItem(spacerItem, 0, 1, 1, 1)
-        spacerItem1 = QtWidgets.QSpacerItem(
-            20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding
-        )
-        self.gridLayout_4.addItem(spacerItem1, 0, 2, 1, 1)
         self.gridLayout_2 = QtWidgets.QGridLayout()
         self.gridLayout_2.setObjectName("gridLayout_2")
         self.label_214 = QtWidgets.QLabel(parent=Pumps_Vacuum)
@@ -318,16 +337,17 @@ class Ui_Pumps_Vacuum(object):
         self.gridLayout_3.addWidget(self.pump_load_lock_switch, 3, 0, 1, 2)
         self.gridLayout_4.addLayout(self.gridLayout_3, 1, 3, 1, 1)
         self.verticalLayout.addLayout(self.gridLayout_4)
+        self._setup_vacuum_history_plot(Pumps_Vacuum)
         self.gridLayout_8 = QtWidgets.QGridLayout()
         self.gridLayout_8.setObjectName("gridLayout_8")
-        self.gridLayout_6 = QtWidgets.QGridLayout()
-        self.gridLayout_6.setObjectName("gridLayout_6")
         self.label_215 = QtWidgets.QLabel(parent=Pumps_Vacuum)
         font = QtGui.QFont()
         font.setBold(True)
         self.label_215.setFont(font)
         self.label_215.setObjectName("label_215")
-        self.gridLayout_6.addWidget(self.label_215, 0, 0, 1, 1)
+        self.gridLayout.addWidget(
+            self.label_215, 0, 3, 1, 1, QtCore.Qt.AlignmentFlag.AlignVCenter
+        )
         self.temp_stage = QtWidgets.QLCDNumber(parent=Pumps_Vacuum)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
@@ -344,7 +364,10 @@ class Ui_Pumps_Vacuum(object):
             "                                        "
         )
         self.temp_stage.setObjectName("temp_stage")
-        self.gridLayout_6.addWidget(self.temp_stage, 0, 1, 1, 2)
+        self.temp_stage.setFixedSize(QtCore.QSize(140, 55))
+        self.gridLayout.addWidget(
+            self.temp_stage, 0, 4, 1, 1, QtCore.Qt.AlignmentFlag.AlignVCenter
+        )
         self.set_temperature_cryo = QtWidgets.QPushButton(parent=Pumps_Vacuum)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Fixed)
         sizePolicy.setHorizontalStretch(0)
@@ -359,10 +382,10 @@ class Ui_Pumps_Vacuum(object):
             "                                "
         )
         self.set_temperature_cryo.setObjectName("set_temperature_cryo")
-        self.gridLayout_6.addWidget(self.set_temperature_cryo, 1, 0, 1, 2)
+        self.set_temperature_cryo.setFixedWidth(115)
+        self.gridLayout.addWidget(self.set_temperature_cryo, 1, 5, 1, 1)
         self.target_tempreature_cryo = QtWidgets.QSpinBox(parent=Pumps_Vacuum)
-        self.target_tempreature_cryo.setMinimumSize(QtCore.QSize(150, 0))
-        self.target_tempreature_cryo.setMaximumSize(QtCore.QSize(70, 16777215))
+        self.target_tempreature_cryo.setFixedWidth(115)
         self.target_tempreature_cryo.setStyleSheet(
             "QSpinBox{\n"
             "                                    background: rgb(223,223,233)\n"
@@ -370,8 +393,7 @@ class Ui_Pumps_Vacuum(object):
             "                                "
         )
         self.target_tempreature_cryo.setObjectName("target_tempreature_cryo")
-        self.gridLayout_6.addWidget(self.target_tempreature_cryo, 1, 2, 1, 1)
-        self.gridLayout_8.addLayout(self.gridLayout_6, 0, 0, 1, 1)
+        self.gridLayout.addWidget(self.target_tempreature_cryo, 0, 5, 1, 1)
         self.gridLayout_5 = QtWidgets.QGridLayout()
         self.gridLayout_5.setObjectName("gridLayout_5")
         self.label_219 = QtWidgets.QLabel(parent=Pumps_Vacuum)
@@ -423,23 +445,26 @@ class Ui_Pumps_Vacuum(object):
         )
         self.target_tempreature_ll.setObjectName("target_tempreature_ll")
         self.gridLayout_5.addWidget(self.target_tempreature_ll, 1, 2, 1, 1)
-        # Load Lock temp block moved to column 2 (swapped with the Cryo Head block).
-        self.gridLayout_8.addLayout(self.gridLayout_5, 0, 2, 1, 1)
+        # With Stage temperature moved to the top row, keep the remaining
+        # temperature blocks together without an empty first column.
+        self.gridLayout_8.addLayout(self.gridLayout_5, 0, 1, 1, 1)
         self.gridLayout_7 = QtWidgets.QGridLayout()
         self.gridLayout_7.setObjectName("gridLayout_7")
         self.label_218 = QtWidgets.QLabel(parent=Pumps_Vacuum)
         font = QtGui.QFont()
+        font.setPointSize(8)
         font.setBold(True)
         self.label_218.setFont(font)
+        self.label_218.setMaximumWidth(115)
         self.label_218.setObjectName("label_218")
-        self.gridLayout_7.addWidget(self.label_218, 0, 0, 1, 1)
+        self.gridLayout.addWidget(self.label_218, 0, 6, 1, 1)
         self.temp_cryo_head = QtWidgets.QLCDNumber(parent=Pumps_Vacuum)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.temp_cryo_head.sizePolicy().hasHeightForWidth())
         self.temp_cryo_head.setSizePolicy(sizePolicy)
-        self.temp_cryo_head.setMinimumSize(QtCore.QSize(150, 50))
+        self.temp_cryo_head.setFixedSize(QtCore.QSize(100, 40))
         self.temp_cryo_head.setStyleSheet(
             "QLCDNumber{\n"
             "                                            border: 2px solid orange;\n"
@@ -449,31 +474,33 @@ class Ui_Pumps_Vacuum(object):
             "                                        "
         )
         self.temp_cryo_head.setObjectName("temp_cryo_head")
-        self.gridLayout_7.addWidget(self.temp_cryo_head, 0, 1, 1, 1)
+        self.gridLayout.addWidget(self.temp_cryo_head, 0, 7, 1, 1)
         self.label_221 = QtWidgets.QLabel(parent=Pumps_Vacuum)
         font = QtGui.QFont()
+        font.setPointSize(8)
         font.setBold(True)
         self.label_221.setFont(font)
+        self.label_221.setMaximumWidth(115)
         self.label_221.setObjectName("label_221")
-        self.gridLayout_7.addWidget(self.label_221, 1, 0, 1, 1)
+        self.gridLayout.addWidget(self.label_221, 1, 6, 1, 1)
         self.temp_cryo_head_inside = QtWidgets.QLCDNumber(parent=Pumps_Vacuum)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.temp_cryo_head_inside.sizePolicy().hasHeightForWidth())
         self.temp_cryo_head_inside.setSizePolicy(sizePolicy)
-        self.temp_cryo_head_inside.setMinimumSize(QtCore.QSize(150, 50))
+        self.temp_cryo_head_inside.setFixedSize(QtCore.QSize(100, 40))
         self.temp_cryo_head_inside.setStyleSheet(
             "QLCDNumber{\n    border: 2px solid orange;\n    border-radius: 10px;\n    padding: 0 8px;\n    }\n"
         )
         self.temp_cryo_head_inside.setObjectName("temp_cryo_head_inside")
-        self.gridLayout_7.addWidget(self.temp_cryo_head_inside, 1, 1, 1, 1)
+        self.gridLayout.addWidget(self.temp_cryo_head_inside, 1, 7, 1, 1)
         self.label_220 = QtWidgets.QLabel(parent=Pumps_Vacuum)
         font = QtGui.QFont()
         font.setBold(True)
         self.label_220.setFont(font)
         self.label_220.setObjectName("label_220")
-        self.gridLayout_7.addWidget(self.label_220, 2, 0, 1, 1)
+        self.gridLayout_7.addWidget(self.label_220, 0, 0, 1, 1)
         self.ll_baking_time = QtWidgets.QLineEdit(parent=Pumps_Vacuum)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Minimum)
         sizePolicy.setHorizontalStretch(0)
@@ -488,9 +515,8 @@ class Ui_Pumps_Vacuum(object):
             "                                "
         )
         self.ll_baking_time.setObjectName("ll_baking_time")
-        self.gridLayout_7.addWidget(self.ll_baking_time, 2, 1, 1, 1)
-        # Cryo Head (outside/inside) block moved to column 1 (swapped with Load Lock).
-        self.gridLayout_8.addLayout(self.gridLayout_7, 0, 1, 1, 1)
+        self.gridLayout_7.addWidget(self.ll_baking_time, 0, 1, 1, 1)
+        self.gridLayout_8.addLayout(self.gridLayout_7, 0, 0, 1, 1)
         self.Error = QtWidgets.QLabel(parent=Pumps_Vacuum)
         self.Error.setMinimumSize(QtCore.QSize(600, 30))
         font = QtGui.QFont()
@@ -603,8 +629,203 @@ class Ui_Pumps_Vacuum(object):
 
         self.original_button_style = self.set_temperature_cryo.styleSheet()
 
+        self.vacuum_history_timer = QTimer(Pumps_Vacuum)
+        self.vacuum_history_timer.timeout.connect(self._sample_vacuum_history)
+        self.vacuum_history_timer.start(2000)
+
         # default Qlcd color
         self.default_color = self.vacuum_buffer_back.style().standardPalette().color(QtGui.QPalette.ColorRole.WindowText)
+
+    def _setup_vacuum_history_plot(self, parent):
+        """Add the compact Plotly panel between vacuum and temperature LCDs."""
+        panel = QtWidgets.QFrame(parent=parent)
+        panel.setObjectName("vacuum_history_frame")
+        panel.setMinimumWidth(900)
+        panel.setStyleSheet(
+            "QFrame#vacuum_history_frame{border: 0.5px solid gray;}"
+        )
+        layout = QtWidgets.QVBoxLayout(panel)
+        layout.setContentsMargins(5, 5, 5, 5)
+        toolbar = QtWidgets.QHBoxLayout()
+        toolbar.addStretch()
+        toolbar.addWidget(QtWidgets.QLabel("Window:", parent=panel))
+        self.vacuum_window = QtWidgets.QComboBox(parent=panel)
+        self.vacuum_window.addItems(VACUUM_WINDOWS)
+        self.vacuum_window.setCurrentText("1 h")
+        self.vacuum_window.currentTextChanged.connect(self._render_vacuum_history)
+        toolbar.addWidget(self.vacuum_window)
+        layout.addLayout(toolbar)
+
+        try:
+            if QWebEngineView is None:
+                raise WEBENGINE_IMPORT_ERROR
+            import plotly.graph_objects as go
+            from plotly.subplots import make_subplots
+        except ImportError as exc:
+            print(f"Plotly vacuum history unavailable: {exc}")
+            self.vacuum_plot = QtWidgets.QLabel(
+                "Plotly vacuum history could not start.\n"
+                f"{type(exc).__name__}: {exc}",
+                parent=panel,
+            )
+            self.vacuum_plot.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            self.vacuum_plot.setWordWrap(True)
+            self.vacuum_plot.setToolTip(
+                "Restart the Python process after installing Plotly and PyQt6-WebEngine."
+            )
+            layout.addWidget(self.vacuum_plot)
+        else:
+            self.vacuum_plot = QWebEngineView(parent=panel)
+            self.vacuum_plot.setMinimumSize(QtCore.QSize(880, 245))
+            self.vacuum_plot.setMaximumHeight(310)
+            colors = ("#2ca02c", "#8c564b", "#1f77b4", "#d627a8")
+            names = ("Main", "Buffer", "LL", "CLL")
+            figure = make_subplots(
+                rows=1,
+                cols=4,
+                shared_xaxes=False,
+                shared_yaxes=False,
+                horizontal_spacing=0.09,
+                subplot_titles=names,
+            )
+            for column, (channel, name, color) in enumerate(zip(VACUUM_CHANNELS, names, colors), start=1):
+                figure.add_trace(
+                    go.Scatter(x=[], y=[], mode="lines", name=name, line={"color": color, "width": 1.7}),
+                    row=1,
+                    col=column,
+                )
+                figure.update_xaxes(
+                    showline=True,
+                    mirror=True,
+                    linewidth=1,
+                    linecolor=color,
+                    gridcolor="#eeeeee",
+                    tickfont={"size": 9},
+                    showticklabels=True,
+                    row=1,
+                    col=column,
+                )
+                figure.update_yaxes(
+                    type="log",
+                    autorange=True,
+                    dtick=1,
+                    exponentformat="power",
+                    showexponent="all",
+                    showline=True,
+                    mirror=True,
+                    linewidth=1,
+                    linecolor=color,
+                    gridcolor="#dddddd",
+                    tickfont={"size": 9},
+                    showticklabels=True,
+                    automargin=True,
+                    row=1,
+                    col=column,
+                )
+            figure.update_layout(
+                template="plotly_white", autosize=True, height=270,
+                margin={"l": 52, "r": 14, "t": 30, "b": 34},
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                showlegend=False,
+            )
+            for annotation, color in zip(figure.layout.annotations, colors):
+                annotation.font = {"size": 11, "color": color}
+            # Plotly's inline JavaScript is larger than QWebEngineView.setHtml's
+            # data-URL limit (about 2 MB), which otherwise produces a blank
+            # white panel. Load the self-contained page from a temporary local
+            # file instead; QTemporaryDir keeps it alive for this UI instance.
+            self._vacuum_plot_temp_dir = QtCore.QTemporaryDir()
+            plot_path = self._vacuum_plot_temp_dir.filePath("vacuum_history.html")
+            figure.write_html(
+                plot_path,
+                include_plotlyjs=True,
+                full_html=True,
+                div_id="vacuum-history",
+                config={"displayModeBar": False, "responsive": True},
+            )
+            self.vacuum_plot.loadFinished.connect(self._vacuum_plot_loaded)
+            self.vacuum_plot.load(QtCore.QUrl.fromLocalFile(plot_path))
+            layout.addWidget(self.vacuum_plot)
+        self.verticalLayout.addWidget(panel)
+
+    def _vacuum_plot_loaded(self, ok):
+        self._vacuum_plot_ready = bool(ok)
+        if ok:
+            self.vacuum_plot.page().runJavaScript(
+                "document.documentElement.style.overflow='hidden';"
+                "document.body.style.margin='0';"
+                "document.body.style.overflow='hidden';"
+                "Plotly.Plots.resize(document.getElementById('vacuum-history'));"
+            )
+            self._render_vacuum_history()
+
+    def _sample_vacuum_history(self):
+        values = (
+            self.variables.vacuum_main,
+            self.variables.vacuum_buffer,
+            self.variables.vacuum_load_lock,
+            self.variables.vacuum_cryo_load_lock,
+        )
+        # Negative values are device-error sentinels and cannot be shown on a log axis.
+        cleaned = [value if isinstance(value, (int, float)) and value > 0 else float("nan") for value in values]
+        self.vacuum_history.add(datetime.now(), cleaned)
+        self._render_vacuum_history()
+
+    def _render_vacuum_history(self):
+        if not self._vacuum_plot_ready:
+            return
+        samples = self.vacuum_history.window(VACUUM_WINDOWS[self.vacuum_window.currentText()])
+        window_end = datetime.now()
+        window_start = window_end - timedelta(seconds=VACUUM_WINDOWS[self.vacuum_window.currentText()])
+        fixed_range = [
+            window_start.isoformat(timespec="seconds"),
+            window_end.isoformat(timespec="seconds"),
+        ]
+        x = [sample.timestamp.isoformat(timespec="seconds") for sample in samples]
+        data = []
+        y_axis_updates = {}
+        names = ("Main", "Buffer", "LL", "CLL")
+        colors = ("#2ca02c", "#8c564b", "#1f77b4", "#d627a8")
+        for axis_number, (channel, name, color) in enumerate(zip(VACUUM_CHANNELS, names, colors), start=1):
+            y = [getattr(sample, channel) for sample in samples]
+            axis_suffix = "" if axis_number == 1 else str(axis_number)
+            data.append({"x": x, "y": y, "type": "scatter", "mode": "lines", "name": name,
+                         "xaxis": f"x{axis_suffix}", "yaxis": f"y{axis_suffix}",
+                         "showlegend": False, "line": {"color": color, "width": 1.7}})
+            positive_values = [value for value in y if math.isfinite(value) and value > 0]
+            if positive_values:
+                low_exp = math.floor(math.log10(min(positive_values)))
+                high_exp = math.ceil(math.log10(max(positive_values)))
+                if low_exp == high_exp:
+                    low_exp -= 1
+                    high_exp += 1
+                tick_step = max(1, math.ceil((high_exp - low_exp) / 6))
+                exponents = list(range(low_exp, high_exp + 1, tick_step))
+                if exponents[-1] != high_exp:
+                    exponents.append(high_exp)
+                y_axis_name = f"yaxis{axis_suffix}"
+                y_axis_updates[f"{y_axis_name}.autorange"] = False
+                y_axis_updates[f"{y_axis_name}.range"] = [low_exp - 0.15, high_exp + 0.15]
+                y_axis_updates[f"{y_axis_name}.tickmode"] = "array"
+                y_axis_updates[f"{y_axis_name}.tickvals"] = [10 ** exponent for exponent in exponents]
+                y_axis_updates[f"{y_axis_name}.ticktext"] = [
+                    f"10<sup>{exponent}</sup>" for exponent in exponents
+                ]
+        axis_updates = {}
+        selected_seconds = VACUUM_WINDOWS[self.vacuum_window.currentText()]
+        time_tick_format = "%H:%M:%S" if selected_seconds <= 60 else "%H:%M"
+        for axis_number in range(1, 5):
+            axis_suffix = "" if axis_number == 1 else str(axis_number)
+            axis_updates[f"xaxis{axis_suffix}.range"] = fixed_range
+            axis_updates[f"xaxis{axis_suffix}.autorange"] = False
+            axis_updates[f"xaxis{axis_suffix}.tickformat"] = time_tick_format
+        axis_updates.update(y_axis_updates)
+        script = (
+            "(function(){const plot=document.getElementById('vacuum-history');"
+            "Plotly.react(plot, %s, Object.assign({}, plot.layout))"
+            ".then(() => Plotly.relayout(plot, %s));})()"
+        ) % (json.dumps(data), json.dumps(axis_updates))
+        self.vacuum_plot.page().runJavaScript(script)
 
 
     def retranslateUi(self, Pumps_Vacuum):
@@ -1280,6 +1501,8 @@ class Ui_Pumps_Vacuum(object):
         """
         # Stop any background processes, timers, or threads here
         self.timer.stop()  # If you want to stop this timer when closing
+        if hasattr(self, 'vacuum_history_timer'):
+            self.vacuum_history_timer.stop()
         # Flush and stop the LL baking log if a run is in progress.
         self._stop_ll_baking_log()
         # The backing/Turbo valves are on the USB-6525, which latches its

@@ -52,6 +52,7 @@ class Ui_Gates(object):
             None
         """
         Gates.setObjectName("Gates")
+        self.Gates = Gates
         Gates.resize(434, 426)
         self.gridLayout_3 = QtWidgets.QGridLayout(Gates)
         self.gridLayout_3.setObjectName("gridLayout_3")
@@ -185,6 +186,50 @@ class Ui_Gates(object):
         self.diagram_timer.start(250)
 
         self.original_button_style = self.superuser.styleSheet()
+
+    def attach_load_lock_temperature_controls(self, pumps_ui):
+        """Place the Pumps UI's LL temperature controls below Override Access.
+
+        The widgets are moved, not duplicated, so their existing signal
+        connections and baking logic continue to be handled by ``pumps_ui``.
+        """
+        if hasattr(self, "load_lock_temperature_group"):
+            return
+
+        group = QtWidgets.QGroupBox("Load Lock temperature", parent=self.Gates)
+        group.setObjectName("load_lock_temperature_group")
+        group.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Maximum
+        )
+        group.setMaximumHeight(155)
+        group.setStyleSheet(
+            "QGroupBox{font-weight: bold; border: 1px solid rgb(145,145,145); "
+            "border-radius: 5px; margin-top: 8px; padding-top: 5px;}"
+            "QGroupBox::title{subcontrol-origin: margin; left: 8px; padding: 0 4px;}"
+        )
+        layout = QtWidgets.QGridLayout(group)
+        layout.setContentsMargins(8, 10, 8, 7)
+        layout.setHorizontalSpacing(8)
+        layout.setVerticalSpacing(5)
+
+        pumps_ui.temp_ll.setFixedSize(QtCore.QSize(150, 45))
+        pumps_ui.target_tempreature_ll.setFixedSize(QtCore.QSize(150, 25))
+        pumps_ui.set_temperature_ll.setFixedSize(QtCore.QSize(190, 25))
+        pumps_ui.ll_baking_time.setFixedSize(QtCore.QSize(150, 25))
+
+        layout.addWidget(pumps_ui.label_219, 0, 0)
+        layout.addWidget(pumps_ui.temp_ll, 0, 1)
+        layout.addWidget(pumps_ui.label_220, 1, 0)
+        layout.addWidget(pumps_ui.ll_baking_time, 1, 1)
+        layout.addWidget(pumps_ui.set_temperature_ll, 2, 0)
+        layout.addWidget(pumps_ui.target_tempreature_ll, 2, 1)
+        layout.setColumnStretch(0, 1)
+
+        self.load_lock_temperature_group = group
+        # Put the group immediately under Override Access. Move the status
+        # label below it so an empty status row cannot create a large gap.
+        self.gridLayout_2.addWidget(group, 1, 0, 1, 3)
+        self.gridLayout_2.addWidget(self.Error, 2, 0, 1, 3)
 
     @staticmethod
     def _load_gate_background(filename):

@@ -357,6 +357,7 @@ CAMERAS_TOOLTIPS = {
     ),
     "led_auto_exposure": "Auto-exposure indicator: green = on (Continuous), red = off (manual).",
     "default_exposure_time": "Enable/disable manual camera exposure entry. Disabled until Override Access is granted.",
+    "instrument_monitor_box": "Compact live MC, BC, LL and CLL pressure plus stage-temperature monitor.",
     # --- Status ----------------------------------------------------------
     "Error": "Status / error messages from the camera controller.",
 }

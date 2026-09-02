@@ -340,14 +340,14 @@ class Ui_Pumps_Vacuum(object):
         self._setup_vacuum_history_plot(Pumps_Vacuum)
         self.gridLayout_8 = QtWidgets.QGridLayout()
         self.gridLayout_8.setObjectName("gridLayout_8")
+        self.gridLayout_6 = QtWidgets.QGridLayout()
+        self.gridLayout_6.setObjectName("gridLayout_6")
         self.label_215 = QtWidgets.QLabel(parent=Pumps_Vacuum)
         font = QtGui.QFont()
         font.setBold(True)
         self.label_215.setFont(font)
         self.label_215.setObjectName("label_215")
-        self.gridLayout.addWidget(
-            self.label_215, 0, 3, 1, 1, QtCore.Qt.AlignmentFlag.AlignVCenter
-        )
+        self.gridLayout_6.addWidget(self.label_215, 0, 0, 2, 1)
         self.temp_stage = QtWidgets.QLCDNumber(parent=Pumps_Vacuum)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
@@ -364,10 +364,8 @@ class Ui_Pumps_Vacuum(object):
             "                                        "
         )
         self.temp_stage.setObjectName("temp_stage")
-        self.temp_stage.setFixedSize(QtCore.QSize(140, 55))
-        self.gridLayout.addWidget(
-            self.temp_stage, 0, 4, 1, 1, QtCore.Qt.AlignmentFlag.AlignVCenter
-        )
+        self.temp_stage.setFixedSize(QtCore.QSize(150, 50))
+        self.gridLayout_6.addWidget(self.temp_stage, 0, 1, 2, 1)
         self.set_temperature_cryo = QtWidgets.QPushButton(parent=Pumps_Vacuum)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Fixed)
         sizePolicy.setHorizontalStretch(0)
@@ -382,10 +380,10 @@ class Ui_Pumps_Vacuum(object):
             "                                "
         )
         self.set_temperature_cryo.setObjectName("set_temperature_cryo")
-        self.set_temperature_cryo.setFixedWidth(115)
-        self.gridLayout.addWidget(self.set_temperature_cryo, 1, 5, 1, 1)
+        self.set_temperature_cryo.setFixedWidth(125)
+        self.gridLayout_6.addWidget(self.set_temperature_cryo, 1, 2, 1, 1)
         self.target_tempreature_cryo = QtWidgets.QSpinBox(parent=Pumps_Vacuum)
-        self.target_tempreature_cryo.setFixedWidth(115)
+        self.target_tempreature_cryo.setFixedWidth(125)
         self.target_tempreature_cryo.setStyleSheet(
             "QSpinBox{\n"
             "                                    background: rgb(223,223,233)\n"
@@ -393,7 +391,10 @@ class Ui_Pumps_Vacuum(object):
             "                                "
         )
         self.target_tempreature_cryo.setObjectName("target_tempreature_cryo")
-        self.gridLayout.addWidget(self.target_tempreature_cryo, 0, 5, 1, 1)
+        self.gridLayout_6.addWidget(self.target_tempreature_cryo, 0, 2, 1, 1)
+        # Stage temperature is monitored beside the Main Chamber gauge. The
+        # target field sits to its right with Set T Cryo directly underneath.
+        self.gridLayout_4.addLayout(self.gridLayout_6, 0, 1, 1, 3)
         self.gridLayout_5 = QtWidgets.QGridLayout()
         self.gridLayout_5.setObjectName("gridLayout_5")
         self.label_219 = QtWidgets.QLabel(parent=Pumps_Vacuum)
@@ -455,16 +456,16 @@ class Ui_Pumps_Vacuum(object):
         font.setPointSize(8)
         font.setBold(True)
         self.label_218.setFont(font)
-        self.label_218.setMaximumWidth(115)
+        self.label_218.setMaximumWidth(125)
         self.label_218.setObjectName("label_218")
-        self.gridLayout.addWidget(self.label_218, 0, 6, 1, 1)
+        self.gridLayout_6.addWidget(self.label_218, 0, 3, 1, 1)
         self.temp_cryo_head = QtWidgets.QLCDNumber(parent=Pumps_Vacuum)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.temp_cryo_head.sizePolicy().hasHeightForWidth())
         self.temp_cryo_head.setSizePolicy(sizePolicy)
-        self.temp_cryo_head.setFixedSize(QtCore.QSize(100, 40))
+        self.temp_cryo_head.setFixedSize(QtCore.QSize(110, 40))
         self.temp_cryo_head.setStyleSheet(
             "QLCDNumber{\n"
             "                                            border: 2px solid orange;\n"
@@ -474,27 +475,27 @@ class Ui_Pumps_Vacuum(object):
             "                                        "
         )
         self.temp_cryo_head.setObjectName("temp_cryo_head")
-        self.gridLayout.addWidget(self.temp_cryo_head, 0, 7, 1, 1)
+        self.gridLayout_6.addWidget(self.temp_cryo_head, 0, 4, 1, 1)
         self.label_221 = QtWidgets.QLabel(parent=Pumps_Vacuum)
         font = QtGui.QFont()
         font.setPointSize(8)
         font.setBold(True)
         self.label_221.setFont(font)
-        self.label_221.setMaximumWidth(115)
+        self.label_221.setMaximumWidth(125)
         self.label_221.setObjectName("label_221")
-        self.gridLayout.addWidget(self.label_221, 1, 6, 1, 1)
+        self.gridLayout_6.addWidget(self.label_221, 1, 3, 1, 1)
         self.temp_cryo_head_inside = QtWidgets.QLCDNumber(parent=Pumps_Vacuum)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.temp_cryo_head_inside.sizePolicy().hasHeightForWidth())
         self.temp_cryo_head_inside.setSizePolicy(sizePolicy)
-        self.temp_cryo_head_inside.setFixedSize(QtCore.QSize(100, 40))
+        self.temp_cryo_head_inside.setFixedSize(QtCore.QSize(110, 40))
         self.temp_cryo_head_inside.setStyleSheet(
             "QLCDNumber{\n    border: 2px solid orange;\n    border-radius: 10px;\n    padding: 0 8px;\n    }\n"
         )
         self.temp_cryo_head_inside.setObjectName("temp_cryo_head_inside")
-        self.gridLayout.addWidget(self.temp_cryo_head_inside, 1, 7, 1, 1)
+        self.gridLayout_6.addWidget(self.temp_cryo_head_inside, 1, 4, 1, 1)
         self.label_220 = QtWidgets.QLabel(parent=Pumps_Vacuum)
         font = QtGui.QFont()
         font.setBold(True)
@@ -676,8 +677,8 @@ class Ui_Pumps_Vacuum(object):
             layout.addWidget(self.vacuum_plot)
         else:
             self.vacuum_plot = QWebEngineView(parent=panel)
-            self.vacuum_plot.setMinimumSize(QtCore.QSize(880, 245))
-            self.vacuum_plot.setMaximumHeight(310)
+            self.vacuum_plot.setMinimumSize(QtCore.QSize(880, 290))
+            self.vacuum_plot.setMaximumHeight(320)
             colors = ("#2ca02c", "#8c564b", "#1f77b4", "#d627a8")
             names = ("Main", "Buffer", "LL", "CLL")
             figure = make_subplots(
@@ -700,7 +701,7 @@ class Ui_Pumps_Vacuum(object):
                     linewidth=1,
                     linecolor=color,
                     gridcolor="#eeeeee",
-                    tickfont={"size": 9},
+                    tickfont={"size": 10},
                     showticklabels=True,
                     row=1,
                     col=column,
@@ -716,15 +717,15 @@ class Ui_Pumps_Vacuum(object):
                     linewidth=1,
                     linecolor=color,
                     gridcolor="#dddddd",
-                    tickfont={"size": 9},
+                    tickfont={"size": 12},
                     showticklabels=True,
                     automargin=True,
                     row=1,
                     col=column,
                 )
             figure.update_layout(
-                template="plotly_white", autosize=True, height=270,
-                margin={"l": 52, "r": 14, "t": 30, "b": 34},
+                template="plotly_white", autosize=True, height=285,
+                margin={"l": 58, "r": 14, "t": 30, "b": 52},
                 paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                 showlegend=False,
             )

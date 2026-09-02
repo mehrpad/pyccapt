@@ -1,4 +1,5 @@
 import sys
+import math
 from pathlib import Path
 
 import numpy as np
@@ -20,6 +21,26 @@ ILLUMINATION_RGB = {
     "white": (255, 255, 255),
 }
 
+EXPOSURE_SLIDER_MIN_US = 100
+EXPOSURE_SLIDER_MAX_US = 2_000_000
+EXPOSURE_SLIDER_STEPS = 1000
+
+
+def exposure_us_to_slider(value):
+    """Map an exposure in microseconds onto the logarithmic GUI slider."""
+    value = max(EXPOSURE_SLIDER_MIN_US, min(EXPOSURE_SLIDER_MAX_US, float(value)))
+    low = math.log10(EXPOSURE_SLIDER_MIN_US)
+    span = math.log10(EXPOSURE_SLIDER_MAX_US) - low
+    return round((math.log10(value) - low) / span * EXPOSURE_SLIDER_STEPS)
+
+
+def exposure_slider_to_us(position):
+    """Map a logarithmic slider position back to integer microseconds."""
+    fraction = max(0, min(EXPOSURE_SLIDER_STEPS, int(position))) / EXPOSURE_SLIDER_STEPS
+    low = math.log10(EXPOSURE_SLIDER_MIN_US)
+    span = math.log10(EXPOSURE_SLIDER_MAX_US) - low
+    return round(10 ** (low + fraction * span))
+
 
 class Ui_Cameras_Alignment(object):
     def __init__(self, variables, conf, SignalEmitter):
@@ -31,11 +52,10 @@ class Ui_Cameras_Alignment(object):
                 conf: Configuration data.
                 SignalEmitter: Signal emitter for communication.
         """
-        # Cameras default to manual/preset exposure on startup: the Auto
-        # Exposure Time button starts deselected (off). It is a plain
-        # toggle that goes green while selected, like the other buttons.
+        # Cameras default to firmware auto exposure on startup. The Auto
+        # Exposure Time button starts selected (green), like the worker.
         # This flag mirrors the worker's `exposure_auto` state.
-        self.auto_exposure_time_flag = False
+        self.auto_exposure_time_flag = True
         # "Manual Exposure Time" toggle (only meaningful when auto is off):
         #   selected  -> the three µs fields are user-editable;
         #   unselected -> the worker drives them from light-dependent presets.
@@ -390,7 +410,7 @@ class Ui_Cameras_Alignment(object):
             "                                            "
         )
         self.exposure_time_cam_2.setObjectName("exposure_time_cam_2")
-        self.gridLayout_2.addWidget(self.exposure_time_cam_2, 4, 1, 1, 1)
+        self.gridLayout_2.addWidget(self.exposure_time_cam_2, 5, 1, 1, 1)
         self.exposure_time_cam_3 = QtWidgets.QLineEdit(parent=Cameras_Alignment)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Minimum)
         sizePolicy.setHorizontalStretch(0)
@@ -405,12 +425,20 @@ class Ui_Cameras_Alignment(object):
             "                                            "
         )
         self.exposure_time_cam_3.setObjectName("exposure_time_cam_3")
-        self.gridLayout_2.addWidget(self.exposure_time_cam_3, 5, 1, 1, 1)
+        self.gridLayout_2.addWidget(self.exposure_time_cam_3, 7, 1, 1, 1)
+        self.exposure_sliders = []
+        for row, slot_name in zip((4, 6, 8), ("side", "top", "angle")):
+            slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal, parent=Cameras_Alignment)
+            slider.setRange(0, EXPOSURE_SLIDER_STEPS)
+            slider.setObjectName(f"exposure_slider_{slot_name}")
+            slider.setToolTip("Logarithmic exposure adjustment: 100 µs to 2 s.")
+            self.gridLayout_2.addWidget(slider, row, 0, 1, 2)
+            self.exposure_sliders.append(slider)
         self.led_light_3 = QtWidgets.QLabel(parent=Cameras_Alignment)
         self.led_light_3.setMinimumSize(QtCore.QSize(130, 0))
         self.led_light_3.setMaximumSize(QtCore.QSize(500, 50))
         self.led_light_3.setObjectName("led_light_3")
-        self.gridLayout_2.addWidget(self.led_light_3, 4, 0, 1, 1)
+        self.gridLayout_2.addWidget(self.led_light_3, 5, 0, 1, 1)
         self.default_exposure_time = QtWidgets.QPushButton(parent=Cameras_Alignment)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Fixed)
         sizePolicy.setHorizontalStretch(0)
@@ -429,12 +457,12 @@ class Ui_Cameras_Alignment(object):
         self.led_light_4.setMinimumSize(QtCore.QSize(130, 0))
         self.led_light_4.setMaximumSize(QtCore.QSize(500, 50))
         self.led_light_4.setObjectName("led_light_4")
-        self.gridLayout_2.addWidget(self.led_light_4, 5, 0, 1, 1)
+        self.gridLayout_2.addWidget(self.led_light_4, 7, 0, 1, 1)
         self.exposure_mode_layout = QtWidgets.QHBoxLayout()
         self.exposure_mode_layout.setObjectName("exposure_mode_layout")
         self.exposure_mode_layout.addWidget(self.auto_exposure_time)
         self.exposure_mode_layout.addWidget(self.default_exposure_time)
-        self.gridLayout_2.addLayout(self.exposure_mode_layout, 6, 0, 1, 2)
+        self.gridLayout_2.addLayout(self.exposure_mode_layout, 9, 0, 1, 2)
         self.verticalLayout_2.addLayout(self.gridLayout_2)
         # ----- Camera list + connect/disconnect panel ---------------------
         # Compact box that lives right under the exposure-time controls
@@ -597,8 +625,14 @@ class Ui_Cameras_Alignment(object):
         self.exposure_time_cam_1.editingFinished.connect(self.update_exposure_time)
         self.exposure_time_cam_2.editingFinished.connect(self.update_exposure_time)
         self.exposure_time_cam_3.editingFinished.connect(self.update_exposure_time)
+        for index, slider in enumerate(self.exposure_sliders):
+            slider.valueChanged.connect(
+                lambda position, slot=index: self._exposure_slider_changed(slot, position)
+            )
+        self._sync_all_exposure_sliders()
 
         self.original_button_style = self.auto_exposure_time.styleSheet()
+        self.auto_exposure_time.setStyleSheet("QPushButton{background: rgb(0, 255, 26)}")
         self._original_superuser_style = self.superuser.styleSheet()
         # Captured so the "Manual Exposure Time" toggle can restore its own
         # look when deselected (it goes green while selected).
@@ -710,6 +744,33 @@ class Ui_Cameras_Alignment(object):
         self.exposure_time_cam_1.setText(str(exposure_time_default[0]))
         self.exposure_time_cam_2.setText(str(exposure_time_default[1]))
         self.exposure_time_cam_3.setText(str(exposure_time_default[2]))
+        self._sync_all_exposure_sliders()
+
+    def _sync_exposure_slider(self, index, value):
+        slider = self.exposure_sliders[index]
+        slider.blockSignals(True)
+        slider.setValue(exposure_us_to_slider(value))
+        slider.blockSignals(False)
+
+    def _sync_all_exposure_sliders(self):
+        fields = (self.exposure_time_cam_1, self.exposure_time_cam_2, self.exposure_time_cam_3)
+        for index, field in enumerate(fields):
+            try:
+                value = int(field.text())
+            except (TypeError, ValueError):
+                continue
+            self._sync_exposure_slider(index, value)
+
+    def _exposure_slider_changed(self, index, position):
+        value = exposure_slider_to_us(position)
+        fields = (self.exposure_time_cam_1, self.exposure_time_cam_2, self.exposure_time_cam_3)
+        signals = (
+            self.emitter.cam_1_exposure_time,
+            self.emitter.cam_2_exposure_time,
+            self.emitter.cam_3_exposure_time,
+        )
+        fields[index].setText(str(value))
+        signals[index].emit(value)
 
     def _update_current_exposure_fields(self, values):
         """Reflect the camera's live ExposureTime in each line edit.
@@ -722,7 +783,7 @@ class Ui_Cameras_Alignment(object):
         if not values:
             return
         widgets = (self.exposure_time_cam_1, self.exposure_time_cam_2, self.exposure_time_cam_3)
-        for widget, value in zip(widgets, values):
+        for index, (widget, value) in enumerate(zip(widgets, values)):
             if value is None:
                 continue
             if widget.hasFocus():
@@ -730,6 +791,7 @@ class Ui_Cameras_Alignment(object):
             text = str(int(value))
             if widget.text() != text:
                 widget.setText(text)
+            self._sync_exposure_slider(index, value)
 
     def update_exposure_time(self):
         """
@@ -748,8 +810,8 @@ class Ui_Cameras_Alignment(object):
         # values (10**9 us = 1000 s, also rejected). Basler / generic
         # USB cameras typically accept ~100 us .. ~10 s; clamp here
         # and surface the bound to the user.
-        EXPOSURE_MIN_US = 1
-        EXPOSURE_MAX_US = 10_000_000  # 10 seconds
+        EXPOSURE_MIN_US = EXPOSURE_SLIDER_MIN_US
+        EXPOSURE_MAX_US = EXPOSURE_SLIDER_MAX_US
 
         def _clamp(field):
             txt = field.text().strip()
@@ -773,12 +835,15 @@ class Ui_Cameras_Alignment(object):
         try:
             v1 = _clamp(self.exposure_time_cam_1)
             if v1 is not None:
+                self._sync_exposure_slider(0, v1)
                 self.emitter.cam_1_exposure_time.emit(v1)
             v2 = _clamp(self.exposure_time_cam_2)
             if v2 is not None:
+                self._sync_exposure_slider(1, v2)
                 self.emitter.cam_2_exposure_time.emit(v2)
             v3 = _clamp(self.exposure_time_cam_3)
             if v3 is not None:
+                self._sync_exposure_slider(2, v3)
                 self.emitter.cam_3_exposure_time.emit(v3)
         except Exception as e:
             print(e)
@@ -976,6 +1041,8 @@ class Ui_Cameras_Alignment(object):
         fields_editable = access_granted and (not auto) and manual
         for widget in (self.exposure_time_cam_1, self.exposure_time_cam_2, self.exposure_time_cam_3):
             widget.setEnabled(fields_editable)
+        for slider in self.exposure_sliders:
+            slider.setEnabled(fields_editable)
 
     def manual_exposure_time_switch(self):
         """Toggle user-manual exposure entry (only when auto is off).
@@ -1141,13 +1208,19 @@ class Ui_Cameras_Alignment(object):
             color = "color: rgb(180,90,0);"
         entry['label'].setText(f"<b>{model}</b> &nbsp; {sn} &nbsp; — {state}")
         entry['label'].setStyleSheet(color)
-        entry['connect_btn'].setEnabled(not cam['attached'])
-        entry['disconnect_btn'].setEnabled(cam['attached'] or not cam['user_disabled'])
+        # Cameras attach automatically. Connect is only meaningful after the
+        # operator explicitly disconnected that camera; leaving it enabled for
+        # an active/auto-attaching device invites a second open attempt.
+        entry['connect_btn'].setEnabled(cam['user_disabled'])
+        entry['disconnect_btn'].setEnabled(cam['attached'])
 
     def _on_connect_clicked(self, serial):
         worker = getattr(self, 'camera_worker', None)
         if worker is None:
             return
+        entry = self._camera_row_widgets.get(serial)
+        if entry is not None:
+            entry['connect_btn'].setEnabled(False)
         try:
             worker.connect_serial(serial)
         except Exception as e:

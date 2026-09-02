@@ -198,6 +198,13 @@ camera_illumination_percent = 25
 camera_exposure_light_side_us = 20000
 camera_exposure_light_top_us = 10000
 camera_exposure_light_angle_us = 20000
+# Basler ExposureAuto brightness target (0..1). GainAuto stays disabled so
+# exposure time is the only automatic brightness adjustment.
+camera_auto_target_brightness = 0.5
+# Basler's recommended moderate PGI pairing. Higher sharpness can create
+# halos, while excessive noise reduction removes fine structure.
+camera_noise_reduction = 0.2
+camera_sharpness_enhancement = 1.0
 # Requested maximum stream rate. Actual rate can be lower due to exposure,
 # ROI, camera model, or USB bandwidth.
 camera_alignment_frame_rate_hz = 30.0

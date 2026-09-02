@@ -352,6 +352,9 @@ CAMERAS_TOOLTIPS = {
     "exposure_time_cam_1": "Exposure time for the side camera, microseconds.  Increase if the image is too dark.",
     "exposure_time_cam_2": "Exposure time for the top camera (µs).",
     "exposure_time_cam_3": "Exposure time for the angle camera (µs).",
+    "exposure_slider_side": "Logarithmic Side exposure adjustment from 100 µs to 2 seconds.",
+    "exposure_slider_top": "Logarithmic Top exposure adjustment from 100 µs to 2 seconds.",
+    "exposure_slider_angle": "Logarithmic Angle exposure adjustment from 100 µs to 2 seconds.",
     "auto_exposure_time": (
         "Toggle automatic exposure for all cameras. Disabled until Override Access is granted."
     ),

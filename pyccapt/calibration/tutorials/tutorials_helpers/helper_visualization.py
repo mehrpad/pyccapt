@@ -19,6 +19,9 @@ from pyccapt.calibration.reconstructions import reconstruction, sdm, rdf, densit
 from pyccapt.calibration.tutorials.tutorials_helpers.helper_mc_tof_calculator import (
     build_mc_tof_calculator_panel,
 )
+from pyccapt.calibration.tutorials.tutorials_helpers.helper_concentration_profile import (
+    build_concentration_profile_panel,
+)
 from pyccapt.calibration.tutorials.tutorials_helpers.helper_peak_spectral_analysis import \
     build_peak_spectral_analysis_panel
 
@@ -2258,6 +2261,10 @@ def call_visualization(variables, colab=False):
     tab13 = build_peak_spectral_analysis_panel(variables, label_layout=label_layout)
 
     tab_mc_tof_calculator = build_mc_tof_calculator_panel(variables)
+    tab_concentration_profile = build_concentration_profile_panel(
+        variables,
+        label_layout=label_layout,
+    )
 
     tab14 = widgets.VBox(
         [
@@ -2283,6 +2290,7 @@ def call_visualization(variables, colab=False):
                 tab9,
                 tab10,
                 tab11,
+                tab_concentration_profile,
                 tab12,
                 tab13,
                 tab14,
@@ -2302,9 +2310,10 @@ def call_visualization(variables, colab=False):
         tab.set_title(10, 'RDF')
         tab.set_title(11, 'Iso surface')
         tab.set_title(12, 'Proxigram')
-        tab.set_title(13, 'Clustering')
-        tab.set_title(14, 'Peak analysis')
-        tab.set_title(15, 'Change Color')
+        tab.set_title(13, 'Concentration profile')
+        tab.set_title(14, 'Clustering')
+        tab.set_title(15, 'Peak analysis')
+        tab.set_title(16, 'Change Color')
 
         out = Output()
 
@@ -2326,6 +2335,7 @@ def call_visualization(variables, colab=False):
             tab9,
             tab10,
             tab11,
+            tab_concentration_profile,
             tab12,
             tab13,
             tab14,
@@ -2348,6 +2358,7 @@ def call_visualization(variables, colab=False):
                 'RDF',
                 'Iso surface',
                 'Proxigram',
+                'Concentration profile',
                 'Clustering',
                 'Peak analysis',
                 'Change Color',

@@ -928,6 +928,7 @@ class Ui_Visualization(object):
 
     def update_graphs_helper(
         self,
+        final_drain=False,
     ):
         """
         Update the graphs
@@ -947,7 +948,13 @@ class Ui_Visualization(object):
             self.hitmap_count.setText(str(0))
         self.variables.elapsed_time = time.time() - self.start_time
         # with self.variables.lock_statistics:
-        if self.index_wait_on_plot_start <= 16:
+        if final_drain:
+            # Final export must not inherit the live view's short startup
+            # delay; the producer is stopped and all available hits should be
+            # consumed now, even for a very short/aborted experiment.
+            self.counter_source = self.variables.counter_source
+            self.index_wait_on_plot_start = max(self.index_wait_on_plot_start, 17)
+        elif self.index_wait_on_plot_start <= 16:
             if self.index_wait_on_plot_start == 0:
                 self.counter_source = self.variables.counter_source
             self.index_wait_on_plot_start += 1
@@ -1384,7 +1391,22 @@ class Ui_Visualization(object):
         if not self.variables.start_flag and self.length_events > 0:
             self._render_static_views()
 
-    def _export_all_plots(self, path_meta, suffix):
+    def _disable_last_event_views_for_final_export(self):
+        """Select the cumulative 1D spectrum and 2D FDM for final metadata.
+
+        Change both controls directly instead of clicking them: click handlers
+        can trigger an intermediate stopped-view redraw before the remaining
+        detector buffers have been drained. The caller performs exactly one
+        final ``update_graphs_helper`` pass after this state change.
+        """
+        self.mc_tof_last_events_flag = False
+        self.spectrum_last_events_switch.setStyleSheet(self.original_button_style)
+
+        self._fdm_use_last_events = False
+        self.fdm_last_events_switch.setChecked(False)
+        self.fdm_last_events_switch.setStyleSheet(self._original_fdm_button_style)
+
+    def _export_all_plots(self, path_meta, suffix, *, render_window_offscreen=False):
         """Export every Visualization plot (+ a full-window grab) to PNGs.
 
         ``suffix`` is appended to each filename, e.g. ``'email'`` for the
@@ -1404,8 +1426,82 @@ class Ui_Visualization(object):
             exporter.params['height'] = 800
             exporter.export('%s/%s_%s.png' % (path_meta, name, suffix))
 
-        screenshot = QtWidgets.QApplication.primaryScreen().grabWindow(self.visualization_window.winId())
+        if render_window_offscreen:
+            # Render directly into a pixmap. This captures the temporary
+            # cumulative plot state without repainting it onto the operator's
+            # visible window or requiring an event-loop turn.
+            screenshot = QtGui.QPixmap(self.visualization_window.size())
+            screenshot.fill(QtCore.Qt.GlobalColor.transparent)
+            self.visualization_window.render(screenshot)
+        else:
+            screenshot = QtWidgets.QApplication.primaryScreen().grabWindow(
+                self.visualization_window.winId()
+            )
         screenshot.save('%s/visualization_screenshot_%s.png' % (path_meta, suffix), 'png')
+
+    def _export_interval_snapshots(self, path_meta, suffix):
+        """Export Last Events and cumulative plots without changing the live view.
+
+        Plot items and controls are switched only for synchronous exporters and
+        off-screen renders, then immediately restored to the user's selections.
+        No event processing occurs while temporary states are active, so the
+        visible GUI does not flicker.
+        """
+        spectrum_last_events = self.mc_tof_last_events_flag
+        fdm_last_events = self._fdm_use_last_events
+        fdm_checked = self.fdm_last_events_switch.isChecked()
+
+        try:
+            # Additional interval set: both histogram views limited to their
+            # configured Last Events windows.
+            self.mc_tof_last_events_flag = True
+            self._fdm_use_last_events = True
+            self.fdm_last_events_switch.setChecked(True)
+            self.spectrum_last_events_switch.setStyleSheet(
+                "QPushButton{background: rgb(0, 255, 26)}"
+            )
+            self.fdm_last_events_switch.setStyleSheet(
+                "QPushButton{background: rgb(0, 255, 26)}"
+            )
+            self._draw_spectrum(self._last_events_spectrum_hist(self._t_0()))
+            self._draw_fdm_display()
+            self._export_all_plots(
+                path_meta,
+                f"last_events_{suffix}",
+                render_window_offscreen=True,
+            )
+
+            # Existing interval set: complete cumulative experiment.
+            self.mc_tof_last_events_flag = False
+            self._fdm_use_last_events = False
+            self.fdm_last_events_switch.setChecked(False)
+            self.spectrum_last_events_switch.setStyleSheet(self.original_button_style)
+            self.fdm_last_events_switch.setStyleSheet(self._original_fdm_button_style)
+            self._draw_spectrum(None)
+            self._draw_fdm_display()
+            self._export_all_plots(
+                path_meta,
+                suffix,
+                render_window_offscreen=True,
+            )
+        finally:
+            self.mc_tof_last_events_flag = spectrum_last_events
+            self._fdm_use_last_events = fdm_last_events
+            self.fdm_last_events_switch.setChecked(fdm_checked)
+            self.spectrum_last_events_switch.setStyleSheet(
+                "QPushButton{background: rgb(0, 255, 26)}"
+                if spectrum_last_events else self.original_button_style
+            )
+            self.fdm_last_events_switch.setStyleSheet(
+                "QPushButton{background: rgb(0, 255, 26)}"
+                if fdm_last_events else self._original_fdm_button_style
+            )
+            le_hist = (
+                self._last_events_spectrum_hist(self._t_0())
+                if spectrum_last_events else None
+            )
+            self._draw_spectrum(le_hist)
+            self._draw_fdm_display()
 
     def update_graphs(
         self,
@@ -1518,30 +1614,10 @@ class Ui_Visualization(object):
             # save plots to the file
             if time.time() - self.start_time_metadata >= self.variables.save_meta_interval_visualization:
                 self.path_meta = self.variables.path_meta
-                exporter = pg.exporters.ImageExporter(self.vdc_time.plotItem)
-                exporter.params['width'] = 1000  # Set the width of the image
-                exporter.params['height'] = 800  # Set the height of the image
-                exporter.export(self.variables.path_meta + '/visualization_v_dc_p_%s.png' % self.index_plot_save)
-                exporter = pg.exporters.ImageExporter(self.detection_rate_viz.plotItem)
-                exporter.params['width'] = 1000  # Set the width of the image
-                exporter.params['height'] = 800  # Set the height of the image
-                exporter.export(self.path_meta + '/visualization_detection_rate_%s.png' % self.index_plot_save)
-                # Hitmap and FDM are now separate panels - export both.
-                exporter = pg.exporters.ImageExporter(self.detector_heatmap.plotItem)
-                exporter.params['width'] = 1000
-                exporter.params['height'] = 800
-                exporter.export(self.path_meta + '/visualization_detector_hitmap_%s.png' % self.index_plot_save)
-                exporter = pg.exporters.ImageExporter(self.detector_fdm.plotItem)
-                exporter.params['width'] = 1000
-                exporter.params['height'] = 800
-                exporter.export(self.path_meta + '/visualization_detector_fdm_%s.png' % self.index_plot_save)
-                exporter = pg.exporters.ImageExporter(self.histogram.plotItem)
-                exporter.params['width'] = 1000  # Set the width of the image
-                exporter.params['height'] = 800  # Set the height of the image
-                exporter.export(self.path_meta + '/visualization_mc_tof_%s.png' % self.index_plot_save)
-
-                screenshot = QtWidgets.QApplication.primaryScreen().grabWindow(self.visualization_window.winId())
-                screenshot.save(self.path_meta + '/visualization_screenshot_%s.png' % self.index_plot_save, 'png')
+                self._export_interval_snapshots(
+                    self.path_meta,
+                    str(self.index_plot_save),
+                )
                 self.start_time_metadata = time.time()
                 # Increase the index
                 self.index_plot_save += 1
@@ -1552,8 +1628,9 @@ class Ui_Visualization(object):
                 self.dc_hold.click()
             # (No more heatmap_fdm_switch click - both views are always
             # rendered into their own panels.)
-            if self.mc_tof_last_events_flag:
-                self.spectrum_last_events_switch.click()
+            # Final metadata must show the complete cumulative experiment,
+            # regardless of the operator's live Last Events selections.
+            self._disable_last_event_views_for_final_export()
             if self.change_detection_rate_range:
                 self.detection_rate_range_switch.click()
             if self.conf["visualization"] == "tof":
@@ -1561,7 +1638,11 @@ class Ui_Visualization(object):
                 # keeping the current calibrated/raw choice.
                 self._select_spectrum_view("mc", self.uncalibrated_mode)
 
-            self.update_graphs_helper()
+            # The producer has stopped by this point. Drain all remaining
+            # detector events and redraw once with both Last Events filters
+            # disabled before any plot or full-window screenshot is saved.
+            self.update_graphs_helper(final_drain=True)
+            QtWidgets.QApplication.processEvents()
 
             exporter = pg.exporters.ImageExporter(self.vdc_time.plotItem)
             exporter.params['width'] = 1000  # Set the width of the image

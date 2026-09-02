@@ -2265,7 +2265,9 @@ class Ui_PyCCAPT(object):
         self.gui_gates.setupUi(self.Gates)
         self.gui_gates.attach_load_lock_temperature_controls(self.gui_pumps_vacuum)
         self.gui_pumps_vacuum.gridLayout_9.addWidget(self.Gates, 0, 1, 1, 1)
-        self.Pumps_vacuum.resize(1480, max(760, self.Pumps_vacuum.height()))
+        # Fit the unified tool around its controls and compact error rows;
+        # avoid forcing a large unused area below the Gates/Pumps content.
+        self.Pumps_vacuum.resize(1480, 650)
         self.Pumps_vacuum.setWindowTitle("PyCCAPT Pumps, Vacuum and Gates Control")
         self.Pumps_vacuum.closed.connect(self._combined_vacuum_gates_closed)
         self.variables.flag_pumps_vacuum_start = True

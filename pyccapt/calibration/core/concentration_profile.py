@@ -281,7 +281,7 @@ def plot_concentration_profile(profile: pd.DataFrame, *, figure_size=(9.0, 5.0))
     if np.isfinite(other):
         # Legend-only entry: Other atoms are part of normalization but are not
         # plotted as a curve, matching the notebook control's description.
-        ax.plot([], [], linestyle="none", marker="", label=f"Other ranged atoms: {other:.2f} at.%")
+        ax.plot([], [], linestyle="none", marker="", label=f"Others: {other:.2f} at.%")
     ax.set_xlabel("Ion sequence")
     ax.set_ylabel("Concentration [at.%]")
     ax.set_ylim(0, 100)

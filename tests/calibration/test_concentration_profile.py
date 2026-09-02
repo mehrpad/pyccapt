@@ -52,7 +52,7 @@ def test_plot_legend_reports_overall_selected_and_other_percentages():
     fig, axis = plot_concentration_profile(profile)
     labels = axis.get_legend_handles_labels()[1]
     assert "H: 60.00 at.%" in labels
-    assert "Other ranged atoms: 40.00 at.%" in labels
+    assert "Others: 40.00 at.%" in labels
     fig.clear()
 
 

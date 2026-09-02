@@ -1,9 +1,9 @@
-"""Sequential concentration profiles for ranged atom-probe events.
+"""Sequential concentration profiles for atom-probe events.
 
 The profile is evaluated in fixed, non-overlapping acquisition-order windows.
-Every ranged species contributes its stoichiometric atom count to the
-denominator; only user-selected elements or ions are returned as curves.
-Unranged events are excluded because their atomic identity is unknown.
+Every ranged species contributes its stoichiometric atom count and every
+unranged event contributes one unknown atom-equivalent to the denominator.
+Only user-selected elements, ions, or the unranged fraction are plotted.
 """
 
 from __future__ import annotations
@@ -86,6 +86,7 @@ def profile_species_options(range_data: pd.DataFrame) -> list[tuple[str, str]]:
     for item in species:
         suffix = f" (range {item.index})" if name_counts[item.name] > 1 else ""
         options.append((f"Ion: {item.name}{suffix}", f"ion:{item.index}"))
+    options.append(("Unranged", "unranged"))
     return options
 
 
@@ -95,7 +96,9 @@ def _resolve_selectors(selectors: Iterable[str], species: list[_RangeSpecies]):
     used_labels = set()
     for raw in selectors:
         token = str(raw).strip()
-        if token.startswith("element:"):
+        if token.lower() == "unranged":
+            label, kind, value = "Unranged", "unranged", None
+        elif token.startswith("element:"):
             symbol = token.split(":", 1)[1].strip()
             if symbol not in element_names:
                 raise ValueError(f"Element {symbol!r} is not present in the range table")
@@ -126,6 +129,8 @@ def _resolve_selectors(selectors: Iterable[str], species: list[_RangeSpecies]):
 
 def _assign_species(mc: np.ndarray, species: list[_RangeSpecies]) -> np.ndarray:
     """Return one species-list index per event, or -1 when it is unranged."""
+    if not species:
+        return np.full(mc.size, -1, dtype=np.int32)
     ordered = sorted(enumerate(species), key=lambda pair: pair[1].lower)
     non_overlapping = all(
         left.upper <= right.lower
@@ -186,8 +191,6 @@ def calculate_concentration_profile(
 
     mc = np.asarray(mc_values, dtype=float).reshape(-1)
     species = _range_species(range_data)
-    if not species:
-        raise ValueError("The range table contains no usable ranged ions")
     selectors = _resolve_selectors(selected_species, species)
     assigned = _assign_species(mc, species)
     denominator_weights = np.asarray([item.atom_count for item in species], dtype=float)
@@ -197,39 +200,28 @@ def calculate_concentration_profile(
             numerator_weights[label] = np.asarray(
                 [item.element_count(value) for item in species], dtype=float
             )
-        else:
+        elif kind == "ion":
             numerator_weights[label] = np.asarray(
                 [item.atom_count if item.index == value else 0.0 for item in species],
                 dtype=float,
             )
+        else:
+            numerator_weights[label] = None
 
-    # Whole-dataset values are attached as dataframe metadata for the plot
-    # legend. "Other" uses the union of selected atoms, so selecting both an
-    # element and one of its molecular ions never produces a negative value.
-    selected_elements = {value for _, kind, value in selectors if kind == "element"}
-    selected_ions = {value for _, kind, value in selectors if kind == "ion"}
-    selected_union_weights = np.asarray(
-        [
-            item.atom_count
-            if item.index in selected_ions
-            else sum(item.element_count(element) for element in selected_elements)
-            for item in species
-        ],
-        dtype=float,
-    )
     all_ranged = assigned >= 0
     all_counts = np.bincount(assigned[all_ranged], minlength=len(species))
-    overall_denominator = float(all_counts @ denominator_weights)
+    overall_unranged = int((~all_ranged).sum())
+    overall_ranged_atoms = float(all_counts @ denominator_weights)
+    overall_denominator = overall_ranged_atoms + overall_unranged
     overall_percentages = {
-        label: (float(all_counts @ weights) / overall_denominator * 100.0)
+        label: (
+            (overall_unranged if weights is None else float(all_counts @ weights))
+            / overall_denominator
+            * 100.0
+        )
         if overall_denominator else np.nan
         for label, weights in numerator_weights.items()
     }
-    selected_union = float(all_counts @ selected_union_weights)
-    other_percentage = (
-        max(0.0, overall_denominator - selected_union) / overall_denominator * 100.0
-        if overall_denominator else np.nan
-    )
 
     rows = []
     for start in range(0, mc.size, window_size):
@@ -239,9 +231,11 @@ def calculate_concentration_profile(
         assigned_window = assigned[start:stop]
         ranged = assigned_window >= 0
         counts = np.bincount(assigned_window[ranged], minlength=len(species))
-        denominator = float(counts @ denominator_weights)
+        ranged_atoms = float(counts @ denominator_weights)
+        unranged_events = int((~ranged).sum())
+        denominator = ranged_atoms + unranged_events
         numerators = {
-            label: float(counts @ weights)
+            label: (unranged_events if weights is None else float(counts @ weights))
             for label, weights in numerator_weights.items()
         }
 
@@ -250,7 +244,9 @@ def calculate_concentration_profile(
             "sequence_start": start + 1,
             "sequence_end": stop,
             "detected_events": stop - start,
-            "ranged_atoms": denominator,
+            "ranged_atoms": ranged_atoms,
+            "unranged_events": unranged_events,
+            "total_atom_equivalents": denominator,
         }
         for label, _, _ in selectors:
             record[label] = numerators[label] / denominator * 100.0 if denominator else np.nan
@@ -258,8 +254,9 @@ def calculate_concentration_profile(
 
     profile = pd.DataFrame(rows)
     profile.attrs["overall_percentages"] = overall_percentages
-    profile.attrs["other_percentage"] = other_percentage
-    profile.attrs["overall_ranged_atoms"] = overall_denominator
+    profile.attrs["overall_ranged_atoms"] = overall_ranged_atoms
+    profile.attrs["overall_unranged_events"] = overall_unranged
+    profile.attrs["overall_atom_equivalents"] = overall_denominator
     return profile
 
 
@@ -267,7 +264,10 @@ def plot_concentration_profile(profile: pd.DataFrame, *, figure_size=(9.0, 5.0))
     """Plot concentration-profile columns and return ``(figure, axis)``."""
     import matplotlib.pyplot as plt
 
-    metadata = {"sequence", "sequence_start", "sequence_end", "detected_events", "ranged_atoms"}
+    metadata = {
+        "sequence", "sequence_start", "sequence_end", "detected_events",
+        "ranged_atoms", "unranged_events", "total_atom_equivalents",
+    }
     curves = [column for column in profile.columns if column not in metadata]
     if profile.empty or not curves:
         raise ValueError("The concentration profile has no windows or selected curves")
@@ -277,14 +277,21 @@ def plot_concentration_profile(profile: pd.DataFrame, *, figure_size=(9.0, 5.0))
         display_name = column.removesuffix(" (element)")
         label = f"{display_name}: {overall:.2f} at.%" if np.isfinite(overall) else display_name
         ax.plot(profile["sequence"], profile[column], marker="o", markersize=3, linewidth=1.5, label=label)
-    other = profile.attrs.get("other_percentage", np.nan)
-    if np.isfinite(other):
-        # Legend-only entry: Other atoms are part of normalization but are not
-        # plotted as a curve, matching the notebook control's description.
-        ax.plot([], [], linestyle="none", marker="", label=f"Others: {other:.2f} at.%")
     ax.set_xlabel("Ion sequence")
     ax.set_ylabel("Concentration [at.%]")
-    ax.set_ylim(0, 100)
+    finite_values = profile[curves].to_numpy(dtype=float)
+    finite_values = finite_values[np.isfinite(finite_values)]
+    if finite_values.size:
+        low = float(np.min(finite_values))
+        high = float(np.max(finite_values))
+        padding = max((high - low) * 0.08, max(abs(low), abs(high), 1.0) * 0.03, 0.25)
+        lower = max(0.0, low - padding)
+        upper = min(100.0, high + padding)
+        if lower == upper:
+            lower, upper = max(0.0, lower - 1.0), min(100.0, upper + 1.0)
+        ax.set_ylim(lower, upper)
+    else:
+        ax.set_ylim(0, 100)
     ax.grid(True, alpha=0.3, linestyle="--")
     ax.legend(loc="best")
     fig.tight_layout()

@@ -16,6 +16,10 @@ from pyccapt.calibration.core.mc_plot_peak_helpers import (
 )
 from pyccapt.calibration.data_tools import data_loadcrop
 from pyccapt.calibration.reconstructions import reconstruction, sdm, rdf, density_map, iso_surface, proxigram
+from pyccapt.calibration.reconstructions.species_display import (
+    default_element_controls,
+    resolve_element_controls,
+)
 from pyccapt.calibration.tutorials.tutorials_helpers.helper_mc_tof_calculator import (
     build_mc_tof_calculator_panel,
 )
@@ -62,26 +66,8 @@ def call_visualization(variables, colab=False):
     show_color = widgets.Button(description='Show color')
     change_color = widgets.Button(description='Change color')
 
-    if variables.range_data.empty or variables.range_data['ion'].iloc[0] == 'unranged':
-        element_percentage = str({'unranged': 0.01})
-    else:
-        # Iterate over unique elements in the "element" column
-        element_percentage = {}
-        for element_list in variables.range_data['element']:
-            for element in element_list:
-                # Check if the element is already a key in the dictionary
-                if element not in element_percentage:
-                    element_percentage[element] = 0.01
-        element_percentage = str(element_percentage)
-    if variables.range_data.empty or variables.range_data['ion'].iloc[0] == 'unranged':
-        element_alpha = str({'unranged': 0.9})
-    else:
-        element_alpha = {}
-        for element_list in variables.range_data['element']:
-            for element in element_list:
-                if element not in element_alpha:
-                    element_alpha[element] = 0.9
-        element_alpha = str(element_alpha)
+    element_percentage = str(default_element_controls(variables.range_data, 0.01))
+    element_alpha = str(default_element_controls(variables.range_data, 0.9))
 
     #############
     peak_find_plot = widgets.Dropdown(options=[('True', True), ('False', False)])
@@ -426,6 +412,8 @@ def call_visualization(variables, colab=False):
     ions_individually_plots = widgets.Dropdown(options=[('True', True), ('False', False)], value=False)
     make_gif_p3 = widgets.Dropdown(options=[('True', True), ('False', False)], value=False)
     make_evap_3d = widgets.Dropdown(options=[('True', True), ('False', False)], value=False)
+    evaporation_gif_frames = widgets.BoundedIntText(value=120, min=2, max=1000, step=10)
+    evaporation_gif_fps = widgets.BoundedIntText(value=15, min=1, max=60, step=1)
     cluster_precipitate_3d = widgets.Dropdown(options=[('False', False), ('True', True)], value=False)
     cluster_labels_3d = widgets.Text(value='', placeholder='Ni3Al, Al')
     cluster_method_3d = widgets.Dropdown(
@@ -494,16 +482,12 @@ def call_visualization(variables, colab=False):
                     # Handle invalid input
                     print(f"Invalid range input")
 
-                element_percentage_dic = ast.literal_eval(element_percentage_p3.value)
-                # Iterate through the 'element' column
-                element_percentage_list = []
-                for row_elements in variables.range_data['element']:
-                    max_value = 0.1  # Default value if no matching element is found
-                    for element in row_elements:
-                        if element in element_percentage_dic:
-                            max_value = element_percentage_dic[element]
-                    element_percentage_list.append(max_value)
-                element_alpha_list = _build_element_value_list(element_alpha_p3.value, 0.9)
+                element_percentage_list, unranged_fraction = resolve_element_controls(
+                    variables.range_data, ast.literal_eval(element_percentage_p3.value), 0.1, 0.01
+                )
+                element_alpha_list, unranged_alpha = resolve_element_controls(
+                    variables.range_data, ast.literal_eval(element_alpha_p3.value), 0.9
+                )
 
                 if cluster_result_override is not None:
                     cluster_result = cluster_result_override
@@ -543,6 +527,10 @@ def call_visualization(variables, colab=False):
                     cluster_display_mode=cluster_display_mode,
                     cluster_opacity_override=cluster_opacity_override,
                     element_alpha=element_alpha_list,
+                    unranged_fraction=unranged_fraction,
+                    unranged_alpha=unranged_alpha,
+                    evaporation_gif_frames=evaporation_gif_frames.value,
+                    evaporation_gif_fps=evaporation_gif_fps.value,
                 )
         finally:
             plot_3d_button.disabled = False
@@ -1199,26 +1187,7 @@ def call_visualization(variables, colab=False):
         return normalized
 
     def _build_element_percentage_list(value):
-        element_percentage_dic = ast.literal_eval(value)
-        element_percentage_list = []
-        for row_elements in variables.range_data['element']:
-            max_value = 0.1
-            for element in row_elements:
-                if element in element_percentage_dic:
-                    max_value = element_percentage_dic[element]
-            element_percentage_list.append(max_value)
-        return element_percentage_list
-
-    def _build_element_value_list(value, default_value):
-        element_value_dic = ast.literal_eval(value)
-        element_value_list = []
-        for row_elements in variables.range_data['element']:
-            max_value = default_value
-            for element in row_elements:
-                if element in element_value_dic:
-                    max_value = element_value_dic[element]
-            element_value_list.append(max_value)
-        return element_value_list
+        return resolve_element_controls(variables.range_data, ast.literal_eval(value), 0.1, 0.01)
 
     def _run_cluster_segmentation(
         *,
@@ -1423,7 +1392,9 @@ def call_visualization(variables, colab=False):
                         allow_multiple=True,
                         field_name='Iso surface dictionary',
                     )
-                    element_percentage_list_iso = _build_element_percentage_list(element_percentage_p3_iso.value)
+                    element_percentage_list_iso, unranged_fraction_iso = _build_element_percentage_list(
+                        element_percentage_p3_iso.value
+                    )
                 except (json.JSONDecodeError, ValueError, SyntaxError) as exc:
                     print(f'Invalid iso plot input: {exc}')
                     return
@@ -1473,6 +1444,7 @@ def call_visualization(variables, colab=False):
                     min_isosurface_vertices=min_vertices_iso.value,
                     pure_element_only=pure_element_only_iso.value,
                     cluster_display_mode=cluster_display_mode,
+                    unranged_fraction=unranged_fraction_iso,
                 )
         finally:
             plot_3d_button_iso.disabled = False
@@ -1906,6 +1878,8 @@ def call_visualization(variables, colab=False):
                     widgets.HBox([widgets.Label(value='Rotary save:', layout=label_layout), rotary_fig_save_p3]),
                     widgets.HBox([widgets.Label(value='Save GIF:', layout=label_layout), make_gif_p3]),
                     widgets.HBox([widgets.Label(value='Save evaporation GIF:', layout=label_layout), make_evap_3d]),
+                    widgets.HBox([widgets.Label(value='Evaporation GIF frames:', layout=label_layout), evaporation_gif_frames]),
+                    widgets.HBox([widgets.Label(value='Evaporation GIF FPS:', layout=label_layout), evaporation_gif_fps]),
                     widgets.HBox([widgets.Label(value='Save fig:', layout=label_layout), save_3d]),
                     widgets.HBox([plot_3d_button, clear_button]),
                 ]
@@ -2130,7 +2104,7 @@ def call_visualization(variables, colab=False):
                         value="<b>Iso surface dictionary</b>: one or more entries are allowed, for example "
                         "<code>{Al: [3,3,3], Ni: [4,4,4]}</code>."
                     ),
-                    widgets.HBox([widgets.Label(value='Element percentage:', layout=label_layout), element_percentage_p3_iso]),
+                    widgets.HBox([widgets.Label(value='Display fraction:', layout=label_layout), element_percentage_p3_iso]),
                     widgets.HBox([widgets.Label(value='Opacity:', layout=label_layout), opacity_iso]),
                     widgets.HBox(
                         [widgets.Label(value='Ions individually plots:', layout=label_layout), ions_individually_plots_iso]

@@ -5,6 +5,10 @@ from IPython.display import display
 from ipywidgets import Output
 
 from pyccapt.calibration.reconstructions import reconstruction
+from pyccapt.calibration.reconstructions.species_display import (
+    default_element_controls,
+    resolve_element_controls,
+)
 
 # Define a layout for labels to make them a fixed width
 label_layout = widgets.Layout(width='200px')
@@ -19,17 +23,7 @@ def call_x_y_z_calculation(variables, flight_path_length, element_selected, cola
     avg_dens = element_selected.value[1]
     field_evap = element_selected.value[2]
 
-    if variables.range_data.empty or variables.range_data['ion'].iloc[0] == 'unranged':
-        element_percentage = str({'unranged': 0.01})
-    else:
-        # Iterate over unique elements in the "element" column
-        element_percentage = {}
-        for element_list in variables.range_data['element']:
-            for element in element_list:
-                # Check if the element is already a key in the dictionary
-                if element not in element_percentage:
-                    element_percentage[element] = 0.01
-        element_percentage = str(element_percentage)
+    element_percentage = str(default_element_controls(variables.range_data, 0.01))
 
     # Create widgets with initial values
     kf_widget = widgets.FloatText(value=4, step=0.1)
@@ -66,14 +60,9 @@ def call_x_y_z_calculation(variables, flight_path_length, element_selected, cola
             out.clear_output()
             # Call the function
             element_percentage_dic = ast.literal_eval(element_percentage_value)
-            # Iterate through the 'element' column
-            element_percentage_list = []
-            for row_elements in variables.range_data['element']:
-                max_value = 0.1  # Default value if no matching element is found
-                for element in row_elements:
-                    if element in element_percentage_dic:
-                        max_value = element_percentage_dic[element]
-                element_percentage_list.append(max_value)
+            element_percentage_list, unranged_fraction = resolve_element_controls(
+                variables.range_data, element_percentage_dic, 0.1, 0.01
+            )
 
             reconstruction.x_y_z_calculation_and_plot(
                 kf=kf_value,
@@ -90,7 +79,8 @@ def call_x_y_z_calculation(variables, flight_path_length, element_selected, cola
                 opacity=opacity_value,
                 save=save_value,
                 colab=colab,
-	            cluster_result=None,
+                cluster_result=None,
+                unranged_fraction=unranged_fraction,
             )
 
         # Enable the button when the code is finished
@@ -109,7 +99,7 @@ def call_x_y_z_calculation(variables, flight_path_length, element_selected, cola
             widgets.HBox(
                 [widgets.Label(value='Avg_dens:', layout=label_layout), avg_dens_widget, widgets.Label(value='(Amu/nm^3)')]
             ),
-            widgets.HBox([widgets.Label(value='Element_percentage:', layout=label_layout), element_percentage_widget]),
+            widgets.HBox([widgets.Label(value='Display fraction:', layout=label_layout), element_percentage_widget]),
             widgets.HBox([widgets.Label(value='Fig name:', layout=label_layout), figname_widget]),
             widgets.HBox([widgets.Label(value='Save fig:', layout=label_layout), save_widget]),
             widgets.HBox([widgets.Label(value='Mode:', layout=label_layout), mode_widget]),

@@ -1,4 +1,4 @@
-"""Notebook controls for sequential ranged-ion concentration profiles."""
+"""Notebook controls for sequential concentration profiles."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ def build_concentration_profile_panel(variables, *, label_layout=None):
     figure_name = widgets.Text(value="concentration_profile")
     figure_width = widgets.FloatText(value=9.0)
     figure_height = widgets.FloatText(value=5.0)
-    save_result = widgets.Checkbox(value=False, description="Save PNG, PDF and CSV")
+    save_result = widgets.Dropdown(options=[("True", True), ("False", False)], value=False)
     plot_button = widgets.Button(description="Plot concentration profile", button_style="primary")
     output = widgets.Output()
 
@@ -75,8 +75,9 @@ def build_concentration_profile_panel(variables, *, label_layout=None):
             widgets.HTML(
                 "<b>Sequential concentration profile</b><br>"
                 "Each point uses a fixed acquisition-order event window. "
-                "Percentages use all ranged atoms as the denominator; only "
-                "the selected elements/ions are plotted. Unranged events are excluded."
+                "Percentages include ranged atoms and unranged events in every window; only "
+                "the selected elements, ions, or Unranged series are plotted. "
+                "Use Ctrl/Cmd-click to select multiple materials."
             ),
             widgets.HBox([widgets.Label("Materials to plot:", layout=label_layout), selected_species]),
             widgets.HBox([widgets.Label("Window length (events):", layout=label_layout), window_size]),
@@ -85,7 +86,7 @@ def build_concentration_profile_panel(variables, *, label_layout=None):
             widgets.HBox(
                 [widgets.Label("Figure size:", layout=label_layout), figure_width, figure_height]
             ),
-            widgets.HBox([widgets.Label("Save:", layout=label_layout), save_result]),
+            widgets.HBox([widgets.Label("Save fig:", layout=label_layout), save_result]),
             plot_button,
             output,
         ]

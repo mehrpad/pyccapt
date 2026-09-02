@@ -21,7 +21,7 @@ def _ranges():
     )
 
 
-def test_profile_uses_all_ranged_atoms_as_denominator_and_stoichiometry():
+def test_profile_uses_all_events_as_denominator_and_stoichiometry():
     mc = np.array([1.0, 2.0, 16.0, 99.0, 16.0, 16.1])
     profile = calculate_concentration_profile(
         mc,
@@ -32,17 +32,18 @@ def test_profile_uses_all_ranged_atoms_as_denominator_and_stoichiometry():
 
     assert profile["sequence_start"].tolist() == [1, 5]
     assert profile["sequence_end"].tolist() == [4, 6]
-    # First window: H contributes 1 atom, H2 contributes 2, O contributes 1;
-    # the unranged 99-Da event is excluded. H = 3/4, H2 ion = 2/4.
-    assert profile["H (element)"].tolist() == [75.0, 0.0]
-    assert profile["H2 (ion)"].tolist() == [50.0, 0.0]
+    # First window: H contributes 1 atom, H2 contributes 2, O contributes 1,
+    # and the unranged event contributes one unknown atom-equivalent.
+    assert profile["H (element)"].tolist() == [60.0, 0.0]
+    assert profile["H2 (ion)"].tolist() == [40.0, 0.0]
     assert profile["ranged_atoms"].tolist() == [4.0, 2.0]
-    assert profile.attrs["overall_percentages"]["H (element)"] == 50.0
-    assert np.isclose(profile.attrs["overall_percentages"]["H2 (ion)"], 100 / 3)
-    assert profile.attrs["other_percentage"] == 50.0
+    assert profile["unranged_events"].tolist() == [1, 0]
+    assert profile["total_atom_equivalents"].tolist() == [5.0, 2.0]
+    assert np.isclose(profile.attrs["overall_percentages"]["H (element)"], 300 / 7)
+    assert np.isclose(profile.attrs["overall_percentages"]["H2 (ion)"], 200 / 7)
 
 
-def test_plot_legend_reports_overall_selected_and_other_percentages():
+def test_plot_legend_reports_only_selected_overall_percentages():
     profile = calculate_concentration_profile(
         np.array([1.0, 2.0, 16.0, 16.1]),
         _ranges(),
@@ -51,8 +52,7 @@ def test_plot_legend_reports_overall_selected_and_other_percentages():
     )
     fig, axis = plot_concentration_profile(profile)
     labels = axis.get_legend_handles_labels()[1]
-    assert "H: 60.00 at.%" in labels
-    assert "Others: 40.00 at.%" in labels
+    assert labels == ["H: 60.00 at.%"]
     fig.clear()
 
 
@@ -90,6 +90,61 @@ def test_species_options_include_elements_and_individual_ions():
     options = dict(profile_species_options(_ranges()))
     assert options["Element: H"] == "element:H"
     assert options["Ion: H2"] == "ion:1"
+    assert options["Unranged"] == "unranged"
+
+
+def test_multiple_selected_series_and_unranged_share_the_full_denominator():
+    ranges = pd.DataFrame(
+        {
+            "name": ["H", "D"],
+            "mc_low": [0.5, 1.5],
+            "mc_up": [1.5, 2.5],
+            "element": [["H"], ["D"]],
+            "complex": [[1], [1]],
+        }
+    )
+    profile = calculate_concentration_profile(
+        np.array([1.0, 2.0, 9.0, 10.0]),
+        ranges,
+        ["element:H", "element:D", "unranged"],
+        window_size=4,
+    )
+    assert profile.iloc[0]["H (element)"] == 25.0
+    assert profile.iloc[0]["D (element)"] == 25.0
+    assert profile.iloc[0]["Unranged"] == 50.0
+    assert sum(profile.iloc[0][name] for name in ("H (element)", "D (element)", "Unranged")) == 100.0
+
+    fig, axis = plot_concentration_profile(profile)
+    assert len(axis.lines) == 3
+    assert axis.get_legend_handles_labels()[1] == [
+        "H: 25.00 at.%", "D: 25.00 at.%", "Unranged: 50.00 at.%"
+    ]
+    fig.clear()
+
+
+def test_unranged_profile_works_without_any_real_ranges():
+    placeholder = pd.DataFrame(
+        {
+            "name": ["unranged"],
+            "mc_low": [0.0],
+            "mc_up": [400.0],
+            "element": [["unranged"]],
+            "complex": [[0]],
+        }
+    )
+    profile = calculate_concentration_profile(
+        np.array([1.0, 2.0, 3.0]), placeholder, ["unranged"], window_size=2
+    )
+    assert profile["Unranged"].tolist() == [100.0, 100.0]
+
+
+def test_plot_y_axis_expands_around_a_constant_concentration():
+    profile = pd.DataFrame({"sequence": [1.0, 2.0], "H (element)": [25.0, 25.0]})
+    profile.attrs["overall_percentages"] = {"H (element)": 25.0}
+    fig, axis = plot_concentration_profile(profile)
+    lower, upper = axis.get_ylim()
+    assert 0.0 < lower < 25.0 < upper < 100.0
+    fig.clear()
 
 
 def test_bundled_isotope_table_contains_deuterium_alias():

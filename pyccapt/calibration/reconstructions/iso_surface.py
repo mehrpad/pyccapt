@@ -20,6 +20,7 @@ from pyccapt.calibration.reconstructions.io_utils import (
     write_plotly_html,
     write_plotly_image,
 )
+from pyccapt.calibration.reconstructions.species_display import range_row_masks_and_unranged
 
 
 def build_range_mask(
@@ -416,6 +417,7 @@ def reconstruction_plot(
     pure_element_only=False,
     manual_iso_value=None,
     cluster_display_mode='overlay',
+    unranged_fraction=0.01,
 ):
     """
     Generate a 3D plot for atom probe reconstruction data.
@@ -444,6 +446,7 @@ def reconstruction_plot(
         only_iso (bool): Whether to plot only the isosurface.
         cluster_result: Optional Min-Max precipitate segmentation overlay.
         cluster_display_mode (str): `overlay` or `clusters-only`.
+        unranged_fraction (float): Fraction of ions outside every mass range to display.
 
     Returns:
         None
@@ -483,7 +486,7 @@ def reconstruction_plot(
 
     def _safe_random_subset(mask_s, fraction):
         true_indices = np.flatnonzero(mask_s)
-        if len(true_indices) == 0:
+        if len(true_indices) == 0 or float(fraction) <= 0:
             return np.zeros_like(mask_s, dtype=bool)
 
         size = int(len(true_indices) * float(fraction))
@@ -531,23 +534,24 @@ def reconstruction_plot(
 
     # Create a subplots with shared axes
     if variables.range_data is not None:
-        colors = reconstruction._normalize_plotly_colors(variables.range_data['color'].tolist())
-        mc_low = variables.range_data['mc_low'].tolist()
-        mc_up = variables.range_data['mc_up'].tolist()
-        ion = variables.range_data['ion'].tolist()
-        element = variables.range_data['element'].tolist()
-        complex = variables.range_data['complex'].tolist()
-        # add the noise color and name
+        all_colors = reconstruction._normalize_plotly_colors(variables.range_data['color'].tolist())
+        all_mc_low = variables.range_data['mc_low'].tolist()
+        all_mc_up = variables.range_data['mc_up'].tolist()
+        all_ion = variables.range_data['ion'].tolist()
+        all_element = variables.range_data['element'].tolist()
+        all_complex = variables.range_data['complex'].tolist()
+        _, mask_unranged, ranged_indices = range_row_masks_and_unranged(variables.mc, variables.range_data)
+        colors = [all_colors[i] for i in ranged_indices]
+        mc_low = [all_mc_low[i] for i in ranged_indices]
+        mc_up = [all_mc_up[i] for i in ranged_indices]
+        ion = [all_ion[i] for i in ranged_indices]
+        element = [all_element[i] for i in ranged_indices]
+        complex = [all_complex[i] for i in ranged_indices]
+        supplied_percentage = [0.01] * len(all_ion) if element_percentage is None else list(element_percentage)
+        element_percentage = [supplied_percentage[i] for i in ranged_indices]
         colors.append('#000000')
-        ion.append('$noise$')
-        mask_noise = np.full(len(variables.mc), False)
-
-        if element_percentage is None:
-            print('The element percentage is not provided, setting it to 0.01')
-            element_percentage = [0.01] * len(ion)
-            element_percentage[-1] = 0.0001  # add the noise percentage
-        else:
-            element_percentage.append(0.0001)  # add the noise percentage
+        ion.append('unranged')
+        element_percentage.append(float(unranged_fraction))
 
         if not detailed_isotope_charge:
             # Create the ion list
@@ -567,7 +571,6 @@ def reconstruction_plot(
             mask_new = []
             element_percentage_new = []
             ion_iso_targets_new = []
-            mask_noise = np.full(len(variables.mc), False)
             for ion_k, indexes in ion_to_indexes.items():
                 ion_new.append(ion_k)
                 colors_new.append(colors[indexes[0]])
@@ -576,7 +579,6 @@ def reconstruction_plot(
                 for idx in indexes:
                     mask_tmp = mask_tmp | ((variables.mc > mc_low[idx]) & (variables.mc < mc_up[idx]))
                 mask_new.append(mask_tmp)
-                mask_noise = mask_noise | mask_tmp
                 ion_iso_target = None
                 if isosurface_dic is not None:
                     for idx in indexes:
@@ -586,10 +588,10 @@ def reconstruction_plot(
                         if ion_iso_target is not None:
                             break
                 ion_iso_targets_new.append(ion_iso_target)
-            ion_new.append('$noise$')
+            ion_new.append('unranged')
             colors_new.append('#000000')
-            element_percentage_new.append(0.0001)
-            mask_new.append(mask_noise)
+            element_percentage_new.append(float(unranged_fraction))
+            mask_new.append(mask_unranged)
             ion_iso_targets_new.append(None)
             ion = ion_new
             colors = colors_new
@@ -620,11 +622,10 @@ def reconstruction_plot(
                     if index == len(ion):
                         break
                     if detailed_isotope_charge:
-                        if ion[index] == 'noise':
-                            mask_s = mask_noise
+                        if ion[index] == 'unranged':
+                            mask_s = mask_unranged
                         else:
                             mask_s = (variables.mc > mc_low[index]) & (variables.mc < mc_up[index])
-                            mask_noise = mask_noise | mask_s
                     else:
                         mask_s = mask_new[index]
                     new_mask = _safe_random_subset(mask_s, element_percentage[index])
@@ -691,11 +692,10 @@ def reconstruction_plot(
             drawn_iso_targets = set()
             for index, elemen in enumerate(ion):
                 if detailed_isotope_charge:
-                    if ion[index] == 'noise':
-                        mask_s = mask_noise
+                    if ion[index] == 'unranged':
+                        mask_s = mask_unranged
                     else:
                         mask_s = (variables.mc > mc_low[index]) & (variables.mc < mc_up[index])
-                        mask_noise = mask_noise | mask_s
                 else:
                     mask_s = mask_new[index]
                 new_mask = _safe_random_subset(mask_s, element_percentage[index])

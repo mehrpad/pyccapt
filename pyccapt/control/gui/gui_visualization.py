@@ -813,7 +813,7 @@ class Ui_Visualization(object):
     def _dc_voltage_limits(self):
         """(min, max) DC voltage the Set field allows, from config.toml."""
         lo = int(self.conf.get('default_vdc_min', 500))
-        hi = int(self.conf.get('default_vdc_max', 4000))
+        hi = int(self.conf.get('default_vdc_max', 9000))
         return (lo, hi) if lo <= hi else (hi, lo)
 
     def _set_dc_voltage_controls_enabled(self, enabled):

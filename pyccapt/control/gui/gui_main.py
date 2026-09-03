@@ -1277,7 +1277,7 @@ class Ui_PyCCAPT(object):
         self.label_email_every.setText(_translate("PyCCAPT", "Every (ions)"))
         self.email_interval.setText(_translate("PyCCAPT", "1000000"))
         self.label_179.setText(_translate("PyCCAPT", "DC Start Voltage (V)"))
-        self.vdc_max.setText(_translate("PyCCAPT", "4000"))
+        self.vdc_max.setText(_translate("PyCCAPT", "9000"))
         self.label_180.setText(_translate("PyCCAPT", "DC Max. Voltage (V)"))
         self.label_177.setText(_translate("PyCCAPT", "Max. Number of Ions"))
         self.vdc_min.setText(_translate("PyCCAPT", "500"))
@@ -1372,6 +1372,7 @@ class Ui_PyCCAPT(object):
         * ``default_vdc_min``         -> DC Min. Voltage (V)
         * ``default_vdc_max``         -> DC Max. Voltage (V)
           (separate from ``max_vdc``, which is the *safety* upper bound)
+        * ``default_criteria_vdc``    -> Stop at max DC voltage checkbox
         * ``default_max_ions``        -> Max. Number of Ions
         * ``default_ex_time_s``       -> Max. Experiment Time (s)
         * ``default_ex_freq_hz``      -> Control Refresh Freq. (Hz)
@@ -1413,6 +1414,7 @@ class Ui_PyCCAPT(object):
         _set_text(self.vp_max, 'max_vp')
         _set_text(self.vdc_min, 'default_vdc_min')
         _set_text(self.vdc_max, 'default_vdc_max')
+        self.criteria_vdc.setChecked(bool(conf.get('default_criteria_vdc', True)))
 
         _set_text(self.max_ions, 'default_max_ions')
         _set_text(self.ex_time, 'default_ex_time_s')

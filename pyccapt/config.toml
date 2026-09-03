@@ -38,10 +38,11 @@ pulse_fraction_max = 20
 # back to the hardcoded values inside the GUI source.
 #
 # Note: ``default_vdc_max`` is the *experiment-target* upper bound shown in
-# the GUI (e.g. 4000 V), separate from ``max_vdc`` above which is the
-# system *safety* cap (e.g. 14000 V) the firmware will never exceed.
+# the GUI, separate from ``max_vdc`` above which is the system *safety* cap
+# the firmware will never exceed.
 default_vdc_min = 500
-default_vdc_max = 4000
+default_vdc_max = 9000
+default_criteria_vdc = true
 default_max_ions = 2000000
 default_ex_time_s = 3600
 default_ex_freq_hz = 5

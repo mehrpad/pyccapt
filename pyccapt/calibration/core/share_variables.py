@@ -27,6 +27,7 @@ import numpy as np
 import pandas as pd
 
 from pyccapt.calibration.core.exceptions import CalibrationInputError, CalibrationStateError
+from pyccapt.calibration.core.dataset import CalibrationDataset
 from pyccapt.calibration.core.validation import CALIBRATION_MODES, ensure_choice
 from pyccapt.calibration.path_utils import build_output_path, ensure_directory
 
@@ -251,24 +252,26 @@ class SharedVariablesBase:
         if frame is None:
             raise CalibrationStateError("No dataframe is available to synchronize shared variables")
 
-        frame = frame.reset_index(drop=True).copy()
+        dataset = CalibrationDataset.from_frame(frame)
+        frame = dataset.frame
+        self.dataset = dataset
         self.data = frame
         if update_backups or self.data_backup is None:
             self.data_backup = frame.copy()
 
-        self.dld_high_voltage = self._column_or_zeros(frame, "high_voltage (V)")
+        self.dld_high_voltage = dataset.values("high_voltage (V)")
         if "pulse_v (V)" in frame.columns:
             self.dld_pulse_v = frame["pulse_v (V)"].to_numpy()
         elif "pulse" in frame.columns:
             self.dld_pulse_v = frame["pulse"].to_numpy()
         else:
             self.dld_pulse_v = np.zeros(len(frame))
-        self.dld_pulse_l = self._column_or_zeros(frame, "pulse_l (pJ)", like="high_voltage (V)")
-        self.dld_t = self._column_or_zeros(frame, "t (ns)")
-        self.dld_t_c = self._column_or_zeros(frame, "t_c (ns)", like="t (ns)")
-        self.dld_x_det = self._column_or_nan(frame, "x_det (cm)")
-        self.dld_y_det = self._column_or_nan(frame, "y_det (cm)")
-        self.has_detector_positions = "x_det (cm)" in frame.columns and "y_det (cm)" in frame.columns
+        self.dld_pulse_l = dataset.values("pulse_l (pJ)")
+        self.dld_t = dataset.values("t (ns)")
+        self.dld_t_c = dataset.values("t_c (ns)")
+        self.dld_x_det = dataset.values("x_det (cm)", missing=np.nan)
+        self.dld_y_det = dataset.values("y_det (cm)", missing=np.nan)
+        self.has_detector_positions = dataset.capabilities["detector_positions"]
 
         self.mc = self._column_or_zeros(frame, "mc (Da)", like="t (ns)")
         if "mc_uc (Da)" in frame.columns:
@@ -283,11 +286,11 @@ class SharedVariablesBase:
         if update_backups or self.mc_calib_backup.shape != self.mc_calib.shape:
             self.mc_calib_backup = self.mc_calib.copy()
 
-        self.x = self._column_or_nan(frame, "x (nm)")
-        self.y = self._column_or_nan(frame, "y (nm)")
-        self.z = self._column_or_nan(frame, "z (nm)")
-        self.has_reconstruction = {"x (nm)", "y (nm)", "z (nm)"} <= set(frame.columns)
-        self.has_mass_spectrum = "mc (Da)" in frame.columns or "mc_uc (Da)" in frame.columns
+        self.x = dataset.values("x (nm)", missing=np.nan)
+        self.y = dataset.values("y (nm)", missing=np.nan)
+        self.z = dataset.values("z (nm)", missing=np.nan)
+        self.has_reconstruction = dataset.capabilities["reconstruction"]
+        self.has_mass_spectrum = dataset.capabilities["mass_spectrum"]
 
         self.mask = None
         self.AptHistPlotter = None
@@ -416,6 +419,7 @@ class Variables(SharedVariablesBase):
 
         self.plotly_3d_reconstruction = None
         self.data = None
+        self.dataset = None
         self.data_backup = None
         self.data_tdc = None
         self.data_tdc_backup = None

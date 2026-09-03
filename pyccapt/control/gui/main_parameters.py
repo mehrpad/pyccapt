@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from pyccapt.control.apt.detector_models import normalize_counter_source
+from pyccapt.control.core.contracts import RunConfig
 from pyccapt.control.core import read_files
 
 
@@ -74,42 +75,23 @@ class FormValues:
     email_interval_events: str = "1000000"
 
 
-@dataclass(frozen=True)
-class RunConfig:
-    """Validated immutable snapshot consumed when a process is started."""
-
-    ex_freq: float
-    ex_time: float
-    max_ions: int
-    vdc_min: float
-    vdc_max: float
-    v_p_min: float
-    v_p_max: float
-    pulse_fraction: float
-    pulse_frequency: float
-    detection_rate: float
-    pulse_amp_per_supply_voltage: float
-    counter_source: str
-    pulse_mode: str
-
-    @classmethod
-    def from_variables(cls, variables: Any) -> "RunConfig":
-        return cls(
-            ex_freq=float(variables.ex_freq), ex_time=float(variables.ex_time),
-            max_ions=int(variables.max_ions), vdc_min=float(variables.vdc_min),
-            vdc_max=float(variables.vdc_max), v_p_min=float(variables.v_p_min),
-            v_p_max=float(variables.v_p_max), pulse_fraction=float(variables.pulse_fraction),
-            pulse_frequency=float(variables.pulse_frequency), detection_rate=float(variables.detection_rate),
-            pulse_amp_per_supply_voltage=float(getattr(variables, "pulse_amp_per_supply_voltage", 1.0)),
-            counter_source=normalize_counter_source(variables.counter_source),
-            pulse_mode=str(getattr(variables, "pulse_mode", "Voltage")).strip(),
-        )
+def _run_config_from_variables(variables: Any) -> RunConfig:
+    return RunConfig(
+        ex_freq=float(variables.ex_freq), ex_time=float(variables.ex_time),
+        max_ions=int(variables.max_ions), vdc_min=float(variables.vdc_min),
+        vdc_max=float(variables.vdc_max), v_p_min=float(variables.v_p_min),
+        v_p_max=float(variables.v_p_max), pulse_fraction=float(variables.pulse_fraction),
+        pulse_frequency=float(variables.pulse_frequency), detection_rate=float(variables.detection_rate),
+        pulse_amp_per_supply_voltage=float(getattr(variables, "pulse_amp_per_supply_voltage", 1.0)),
+        counter_source=normalize_counter_source(variables.counter_source),
+        pulse_mode=str(getattr(variables, "pulse_mode", "Voltage")).strip(),
+    )
 
 
 def validate_run_parameters(variables: Any, conf: Mapping[str, Any]) -> RunConfig:
     """Validate cross-field and hardware limits before creating a worker."""
     try:
-        run = RunConfig.from_variables(variables)
+        run = _run_config_from_variables(variables)
     except (TypeError, ValueError, AttributeError) as exc:
         raise ParameterError(f"Experiment parameters are incomplete or non-numeric: {exc}") from exc
     numeric_values = (

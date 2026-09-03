@@ -1,6 +1,7 @@
 import copy
 import datetime
 import multiprocessing
+import queue
 import threading
 import time
 from pathlib import Path
@@ -25,6 +26,16 @@ from pyccapt.control.apt.experiment_state import (
     validate_detector_data_lengths,
 )
 from pyccapt.control.core import experiment_statistics, hdf5_creator, loggi, runtime
+from pyccapt.control.core.chunk_store import atomic_write_chunk_group
+from pyccapt.control.core.safety import audit_safety_override, build_safety_interlock
+from pyccapt.control.core.health import build_health_snapshot
+from pyccapt.control.core.contracts import (
+    CommandKind,
+    CompletionAck,
+    RunConfig,
+    StatusKind,
+    WorkerStatus,
+)
 from pyccapt.control.devices import initialize_devices, signal_generator
 
 
@@ -33,7 +44,20 @@ class APT_Exp_Control:
     This class is responsible for controlling the experiment.
     """
 
-    def __init__(self, variables, conf, experiment_finished_event, x_plot, y_plot, t_plot, main_v_dc_plot):
+    def __init__(
+        self,
+        variables,
+        conf,
+        experiment_finished_event,
+        x_plot,
+        y_plot,
+        t_plot,
+        main_v_dc_plot,
+        run_config: RunConfig | None = None,
+        command_queue=None,
+        status_queue=None,
+        completion_queue=None,
+    ):
 
         self.stop_event = None
         self.control_algorithm = None
@@ -44,11 +68,21 @@ class APT_Exp_Control:
         self.pulse_mode = None
         self.variables = variables
         self.conf = conf
+        self.run_config = run_config
+        if run_config is not None:
+            # Legacy device helpers still read the namespace. Apply the
+            # authoritative immutable snapshot before deriving any worker
+            # timing or limits from that namespace.
+            for key, value in run_config.as_dict().items():
+                setattr(self.variables, key, value)
         self.experiment_finished_event = experiment_finished_event
         self.x_plot = x_plot
         self.y_plot = y_plot
         self.t_plot = t_plot
         self.main_v_dc_plot = main_v_dc_plot
+        self.command_queue = command_queue
+        self.status_queue = status_queue
+        self.completion_queue = completion_queue
 
         self.com_port_v_p = None
         self.log_apt = None
@@ -102,11 +136,58 @@ class APT_Exp_Control:
         self._outputs_safe = True
         self._cleanup_complete = False
         self._completion_published = False
+        self.safety_interlock = None
+        self._last_health_publish = 0.0
 
         # apt/* metadata chunk state: how many items have already been flushed
         # to disk and which chunk file ID to use next.
         self._apt_meta_flush_offset = 0
         self._apt_meta_chunk_id = 0
+
+    def _publish_status(self, kind: StatusKind, message: str = "", **metrics) -> None:
+        if self.status_queue is None:
+            return
+        status = WorkerStatus(
+            worker="experiment",
+            kind=kind,
+            state=str(getattr(self.variables, "experiment_state", "unknown")),
+            message=message,
+            metrics=metrics,
+        )
+        try:
+            self.status_queue.put_nowait(status)
+        except queue.Full:
+            # Low-rate status is lossy by design; acquisition data is not.
+            pass
+
+    def _drain_commands(self) -> None:
+        if self.command_queue is None:
+            return
+        while True:
+            try:
+                command = self.command_queue.get_nowait()
+            except queue.Empty:
+                return
+            kind = getattr(command, "kind", command)
+            if kind in {CommandKind.STOP, CommandKind.EMERGENCY_STOP, "stop", "emergency_stop"}:
+                self.variables.stop_flag = True
+                if kind in {CommandKind.EMERGENCY_STOP, "emergency_stop"}:
+                    self.variables.experiment_error = getattr(command, "reason", "Emergency stop requested")
+
+    def _publish_health_if_due(self) -> None:
+        now = time.monotonic()
+        if now - self._last_health_publish < 1.0:
+            return
+        self._last_health_publish = now
+        previous_heartbeat = float(getattr(self.variables, "experiment_heartbeat_monotonic", 0.0)) or now
+        self.variables.experiment_heartbeat_monotonic = now
+        snapshot = build_health_snapshot(
+            self.variables,
+            self.detector_runtime,
+            (self.x_plot, self.y_plot, self.t_plot, self.main_v_dc_plot),
+            heartbeat_monotonic=previous_heartbeat,
+        )
+        self._publish_status(StatusKind.HEALTH, snapshot.summary(), **snapshot.metrics())
 
     def _is_config_enabled(self, key):
         value = str(self.conf.get(key, "off")).strip().lower()
@@ -175,22 +256,25 @@ class APT_Exp_Control:
             self._apt_meta_chunk_id += 1
             cid = self._apt_meta_chunk_id
 
-            def _save(stem: str, seq, dtype) -> None:
-                arr = np.asarray(seq[start:end], dtype=dtype)
-                np.save(chunk_dir / f"{stem}_chunk_{cid}.npy", arr)
-
-            _save("apt_id",              time_counter,             np.uint64)
-            _save("apt_timestamps",      time_ex,                  np.float64)
-            _save("apt_num_events",      self.main_counter,        np.uint32)
-            _save("apt_num_raw_signals", self.main_raw_counter,    np.uint32)
-            _save("apt_temperature",     self.main_temperature,    np.float64)
-            _save("apt_vacuum",          self.main_chamber_vacuum, np.float64)
-            _save("apt_laser_x", self.main_laser_x, np.float64)
-            _save("apt_laser_y", self.main_laser_y, np.float64)
-            _save("apt_laser_z", self.main_laser_z, np.float64)
-            _save("apt_stage_x", self.main_stage_x, np.float64)
-            _save("apt_stage_y", self.main_stage_y, np.float64)
-            _save("apt_stage_z", self.main_stage_z, np.float64)
+            atomic_write_chunk_group(
+                chunk_dir,
+                stream_name="apt",
+                chunk_id=cid,
+                arrays={
+                    "apt_id": np.asarray(time_counter[start:end], dtype=np.uint64),
+                    "apt_timestamps": np.asarray(time_ex[start:end], dtype=np.float64),
+                    "apt_num_events": np.asarray(self.main_counter[start:end], dtype=np.uint32),
+                    "apt_num_raw_signals": np.asarray(self.main_raw_counter[start:end], dtype=np.uint32),
+                    "apt_temperature": np.asarray(self.main_temperature[start:end], dtype=np.float64),
+                    "apt_vacuum": np.asarray(self.main_chamber_vacuum[start:end], dtype=np.float64),
+                    "apt_laser_x": np.asarray(self.main_laser_x[start:end], dtype=np.float64),
+                    "apt_laser_y": np.asarray(self.main_laser_y[start:end], dtype=np.float64),
+                    "apt_laser_z": np.asarray(self.main_laser_z[start:end], dtype=np.float64),
+                    "apt_stage_x": np.asarray(self.main_stage_x[start:end], dtype=np.float64),
+                    "apt_stage_y": np.asarray(self.main_stage_y[start:end], dtype=np.float64),
+                    "apt_stage_z": np.asarray(self.main_stage_z[start:end], dtype=np.float64),
+                },
+            )
 
             self._apt_meta_flush_offset = end
         except Exception as exc:
@@ -413,15 +497,17 @@ class APT_Exp_Control:
     def run_experiment(self):
         """Run one experiment with a safety envelope covering every phase."""
         set_experiment_state(self.variables, ExperimentState.INITIALIZING)
+        self._publish_status(StatusKind.STATE, "Experiment initializing")
         self.variables.hardware_safe = True
+        failure_error = ""
         try:
             self._run_experiment_impl()
         except BaseException as exc:
-            set_experiment_state(
-                self.variables,
-                ExperimentState.FAILED,
-                f"{exc.__class__.__name__}: {exc}",
-            )
+            failure_error = f"{exc.__class__.__name__}: {exc}"
+            self.variables.experiment_error = failure_error
+            current = ExperimentState(self.variables.experiment_state)
+            if current in {ExperimentState.INITIALIZING, ExperimentState.RUNNING}:
+                set_experiment_state(self.variables, ExperimentState.STOPPING, failure_error)
             if self.log_apt is not None:
                 self.log_apt.exception("Experiment failed")
             else:
@@ -430,18 +516,56 @@ class APT_Exp_Control:
             try:
                 self.clear_up()
             except Exception as exc:
-                set_experiment_state(
-                    self.variables,
-                    ExperimentState.FAILED,
-                    f"Cleanup failed: {exc.__class__.__name__}: {exc}",
-                )
+                cleanup_error = f"Cleanup failed: {exc.__class__.__name__}: {exc}"
+                failure_error = f"{failure_error}; {cleanup_error}".strip("; ")
+                self.variables.experiment_error = failure_error
                 if self.log_apt is not None:
                     self.log_apt.exception("Experiment cleanup failed")
-            if self.variables.experiment_state != ExperimentState.FAILED.value:
+
+            current = ExperimentState(self.variables.experiment_state)
+            if bool(self.variables.hardware_safe) and current in {
+                ExperimentState.INITIALIZING,
+                ExperimentState.RUNNING,
+                ExperimentState.STOPPING,
+            }:
+                set_experiment_state(self.variables, ExperimentState.SAFE_OFF, failure_error)
+                current = ExperimentState.SAFE_OFF
+            if current == ExperimentState.SAFE_OFF:
+                set_experiment_state(self.variables, ExperimentState.FINALIZING, failure_error)
+                current = ExperimentState.FINALIZING
+            if failure_error:
+                set_experiment_state(self.variables, ExperimentState.FAILED, failure_error)
+            elif current != ExperimentState.FAILED:
                 set_experiment_state(self.variables, ExperimentState.COMPLETE)
             # State/flags are authoritative and must be visible before wake-up.
             self.variables.flag_end_experiment = True
             self._completion_published = True
+            acknowledgement = CompletionAck(
+                state=self.variables.experiment_state,
+                hardware_safe=bool(self.variables.hardware_safe),
+                error=str(self.variables.experiment_error),
+            )
+            if self.completion_queue is not None:
+                # A stale acknowledgement must never deadlock a later run.
+                # The GUI normally drains this single-slot queue; replacement
+                # here is the final guard if it was closed or paused.
+                try:
+                    self.completion_queue.put_nowait(acknowledgement)
+                except queue.Full:
+                    try:
+                        self.completion_queue.get_nowait()
+                    except queue.Empty:
+                        pass
+                    try:
+                        self.completion_queue.put(acknowledgement, timeout=0.2)
+                    except queue.Full:
+                        if self.log_apt is not None:
+                            self.log_apt.error("Completion acknowledgement queue remained full")
+            self._publish_status(
+                StatusKind.STATE,
+                "Experiment finished",
+                hardware_safe=acknowledgement.hardware_safe,
+            )
             self.experiment_finished_event.set()
 
     def _request_detector_stop(self):
@@ -485,6 +609,12 @@ class APT_Exp_Control:
             self.variables.stop_flag = True
             self.initialization_error = True
 
+        self.safety_interlock = build_safety_interlock(self.conf)
+        physical_safe = bool(self.safety_interlock.is_safe())
+        self.variables.physical_estop_ok = physical_safe
+        if not physical_safe:
+            raise RuntimeError("Physical E-stop/interlock is open; experiment start is blocked")
+
         if self._is_config_enabled('tdc') and not self.initialization_error and not self._is_override_disabled("tdc"):
             self.variables.flag_tdc_failure = False
             self.initialize_detector_process()
@@ -510,6 +640,12 @@ class APT_Exp_Control:
             if self.access_override_enabled:
                 self.log_apt.warning(
                     'Super-user override active. Disabled devices: %s', sorted(self.override_disabled_devices)
+                )
+                audit_safety_override(
+                    path_meta,
+                    operator=str(getattr(self.variables, "user_name", "unknown")),
+                    disabled_devices=self.override_disabled_devices,
+                    reason=str(getattr(self.variables, "override_reason", "GUI super-user override")),
                 )
             loggi.log_configuration_snapshot(self.log_apt, self.conf, self.variables)
         except Exception:
@@ -643,6 +779,7 @@ class APT_Exp_Control:
         time.sleep(8)
         self.log_apt.info('Experiment is started')
         set_experiment_state(self.variables, ExperimentState.RUNNING)
+        self._publish_status(StatusKind.STATE, "Experiment running")
         # Main loop of experiment
         remaining_time_list = []
         total_ions_tmp = 0
@@ -658,6 +795,14 @@ class APT_Exp_Control:
             pass
         else:
             while True:
+                self._drain_commands()
+                self._publish_health_if_due()
+                self.safety_interlock.kick_watchdog()
+                self.variables.physical_estop_ok = bool(self.safety_interlock.is_safe())
+                if not self.variables.physical_estop_ok:
+                    self.variables.experiment_error = "Physical E-stop/interlock opened during acquisition"
+                    self._request_detector_stop()
+                    break
                 start_time = time.perf_counter()
                 self.vdc_max = self.variables.vdc_max
                 self.vdc_min = self.variables.vdc_min
@@ -985,6 +1130,13 @@ class APT_Exp_Control:
         """Best-effort, idempotent transition of every energized output to off."""
         if self._outputs_safe:
             self.variables.hardware_safe = True
+            current = ExperimentState(self.variables.experiment_state)
+            if current in {
+                ExperimentState.INITIALIZING,
+                ExperimentState.RUNNING,
+                ExperimentState.STOPPING,
+            }:
+                set_experiment_state(self.variables, ExperimentState.SAFE_OFF)
             return
 
         errors = []
@@ -1064,14 +1216,34 @@ class APT_Exp_Control:
             self.t_plot,
             self.main_v_dc_plot,
         )
+        interlock_error = None
+        if self.safety_interlock is not None:
+            try:
+                self.safety_interlock.close()
+            except Exception as exc:
+                interlock_error = exc
         self._cleanup_complete = True
         if self.log_apt is not None:
             self.log_apt.info('Cleanup is finished')
         if safe_off_error is not None:
             raise safe_off_error
+        if interlock_error is not None:
+            raise interlock_error
 
 
-def run_experiment(variables, conf, experiment_finished_event, x_plot, y_plot, t_plot, main_v_dc_plot):
+def run_experiment(
+    variables,
+    conf,
+    experiment_finished_event,
+    x_plot,
+    y_plot,
+    t_plot,
+    main_v_dc_plot,
+    run_config=None,
+    command_queue=None,
+    status_queue=None,
+    completion_queue=None,
+):
     """
     Run the main experiment.
 
@@ -1100,6 +1272,18 @@ def run_experiment(variables, conf, experiment_finished_event, x_plot, y_plot, t
         # Logging setup must never block the experiment from starting.
         print(f"[apt] Could not initialise application logging: {_exc}")
 
-    apt_exp_control = APT_Exp_Control(variables, conf, experiment_finished_event, x_plot, y_plot, t_plot, main_v_dc_plot)
+    apt_exp_control = APT_Exp_Control(
+        variables,
+        conf,
+        experiment_finished_event,
+        x_plot,
+        y_plot,
+        t_plot,
+        main_v_dc_plot,
+        run_config,
+        command_queue,
+        status_queue,
+        completion_queue,
+    )
 
     apt_exp_control.run_experiment()

@@ -1,6 +1,5 @@
 import multiprocessing as mp
 import os
-import json
 import time
 from pathlib import Path
 from queue import Empty, Queue
@@ -9,6 +8,7 @@ import numpy as np
 
 # local imports
 from pyccapt.control.core import runtime as _runtime
+from pyccapt.control.core.chunk_store import atomic_write_chunk_group
 from pyccapt.control.devices import initialize_devices
 from pyccapt.control.tdc_surface_concept import scTDC
 
@@ -137,30 +137,20 @@ def save_chunk_worker(save_queue):
         if task is None:  # Stop signal
             break
 
-        chunk_id, path, chunk_data = task  # Extract data
-        chunk_dir = Path(path) / "chunks"
-        lengths = {len(data) for data in chunk_data.values()}
-        if len(lengths) != 1:
-            raise ValueError(f"Chunk {chunk_id} fields have mismatched lengths: {sorted(lengths)}")
-        manifest_fields = {}
-        for key, data in chunk_data.items():
-            target_dtype = CHUNK_DTYPES.get(key)
-            arr = np.asarray(data, dtype=target_dtype) if target_dtype is not None else np.asarray(data)
-            target = chunk_dir / f"{key}_chunk_{chunk_id}.npy"
-            temporary = target.with_suffix(".npy.tmp")
-            with temporary.open("wb") as stream:
-                np.save(stream, arr)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, target)
-            manifest_fields[key] = {"length": int(arr.size), "dtype": str(arr.dtype)}
-
-        # The manifest record is appended only after every component has been
-        # atomically published, so recovery never treats a partial group as valid.
-        with (chunk_dir / "manifest.jsonl").open("a", encoding="utf-8") as manifest:
-            manifest.write(json.dumps({"chunk_id": chunk_id, "fields": manifest_fields}, sort_keys=True) + "\n")
-            manifest.flush()
-            os.fsync(manifest.fileno())
+        chunk_id, path, chunk_data = task
+        normalized = {
+            key: np.asarray(data, dtype=CHUNK_DTYPES.get(key))
+            if CHUNK_DTYPES.get(key) is not None
+            else np.asarray(data)
+            for key, data in chunk_data.items()
+        }
+        stream_name = "tdc" if "channel" in normalized else "dld"
+        atomic_write_chunk_group(
+            Path(path) / "chunks",
+            stream_name=stream_name,
+            chunk_id=chunk_id,
+            arrays=normalized,
+        )
 
         # No artificial throttle: save_queue.get() already blocks when idle,
         # so the worker never busy-waits. A fixed per-chunk sleep would cap

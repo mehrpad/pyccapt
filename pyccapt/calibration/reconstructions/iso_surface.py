@@ -13,6 +13,7 @@ import plotly.io as pio
 
 
 from pyccapt.calibration.clustering import build_cluster_context_trace, build_cluster_scatter_traces
+from pyccapt.calibration.clustering import isosurface as voxel_tools
 from pyccapt.calibration.reconstructions import reconstruction
 from pyccapt.calibration.reconstructions.io_utils import (
     save_gif,
@@ -1011,195 +1012,18 @@ def format_ion(elements, complexities):
 
 
 def bin_vectors_from_distance(dist, bin_values, mode='distance'):
-    """
-    Create a set of grid vectors to be used in nD binning. The bounds are calculated
-    such that they don't go beyond the size of the dataset.
-
-    Args:
-        dist (numpy.ndarray): The distance variable to be binned. One column per dimension.
-                              It is the generalized distance.
-        bin_values (list or numpy.ndarray): The bin 'distance' per bin in either a distance metric or a count.
-                                             Non-isometric bins are possible.
-        mode (str): Mode can be 'distance' (constant distance) or 'count' (constant count). Default is 'distance'.
-
-    Returns:
-        tuple:
-            - bin_centers (list of numpy.ndarray): The bin centers of each bin.
-            - bin_edges (list of numpy.ndarray): The edges of each bin.
-    """
-    if mode not in ['distance', 'count']:
-        raise ValueError("Mode must be 'distance' or 'count'.")
-
-    is_constant_count = mode == 'count'
-    is_constant_distance = mode == 'distance'
-    num_dim = len(bin_values)
-    # if dist is list of numpy arrays, convert to numpy array and reshape it
-    if isinstance(dist, list):
-        dist = np.array(dist).reshape(-1, num_dim)
-
-    if dist.shape[1] != num_dim:
-        raise ValueError("Dimensions of distance variable and bin variable must match.")
-    if is_constant_count and num_dim != 1:
-        raise ValueError("Constant count mode is only available for 1D binning.")
-
-    bin_centers = []
-    bin_edges = []
-
-    # Constant bin distance interval
-    if is_constant_distance:
-        for dim in range(num_dim):
-            # Size the raw bin vector from the ACTUAL data span instead of
-            # a fixed 10001-entry grid capped at 10000*bin. The old fixed
-            # grid silently clipped any point beyond +/- 500 nm (e.g. a
-            # 600 nm specimen with 0.05 nm bins), lumping out-of-range
-            # ions into the end bin -- a silently wrong histogram -- while
-            # also over-allocating 20001 entries for small specimens.
-            bin = float(bin_values[dim])
-            dmin = float(dist[:, dim].min())
-            dmax = float(dist[:, dim].max())
-            reach = max(abs(dmin), abs(dmax)) + bin
-            n_steps = max(1, int(np.ceil(reach / bin)))
-            bin_vector_raw = np.arange(0, (n_steps + 1)) * bin
-            bin_vector_raw = np.concatenate((-np.flip(bin_vector_raw[1:]), bin_vector_raw))
-
-            # Filter bin centers within the distance range
-            centers = bin_vector_raw[
-                (bin_vector_raw >= dist[:, dim].min() - bin_values[dim])
-                & (bin_vector_raw <= dist[:, dim].max() + bin_values[dim])
-            ]
-            bin_centers.append(centers)
-
-            # Calculate bin edges
-            edges = (centers[1:] + centers[:-1]) / 2
-            edges = np.concatenate(
-                ([centers[0] - (centers[1] - centers[0]) / 2], edges, [centers[-1] + (centers[-1] - centers[-2]) / 2])
-            )
-            bin_edges.append(edges)
-
-    # Constant bin count interval
-    elif is_constant_count:
-        dist = np.sort(dist.flatten())
-        idx_edge = np.arange(0, len(dist), bin_values[0])
-
-        # Handle remainder
-        if idx_edge[-1] < len(dist):
-            idx_edge = np.append(idx_edge, len(dist))
-
-        idx_cent = np.round((idx_edge[1:] + idx_edge[:-1]) / 2).astype(int)
-        centers = dist[idx_cent]
-        edges = dist[idx_edge]
-
-        # Adjust edges to avoid creating extra bins
-        edges[0] -= 0.0001
-        edges[-1] += 0.0001
-
-        bin_centers.append(centers)
-        bin_edges.append(edges)
-
-    return bin_centers, bin_edges
+    """Compatibility wrapper for the canonical voxel implementation."""
+    return voxel_tools.bin_vectors_from_distance(dist, bin_values, mode=mode)
 
 
 def pos_to_voxel(data, grid_vec, species=None):
-    """
-        Creates a voxelization of the data in 'pos' based on the bin centers in 'grid_vec'
-        for the atoms/ions in the specified species.
-
-        Args:
-            data (pyccapt DataFrame): The data to be voxelized. when input species is given, ranges must be allocated.
-    %          A decomposed DataFrame file is also possible. Use range_to_pyccapt to decompose the data.
-            grid_vec (list of numpy.ndarray): Grid vectors for the voxel grid. These are the bin centers.
-            species (list, str, or numpy.ndarray, optional): The species to filter by. Can be:
-                                                             - List of species names (e.g., ['Fe', 'Mn']).
-                                                             - Boolean array matching the length of `pos`.
-                                                             - None, to include all atoms/ions.
-
-        Returns:
-            numpy.ndarray: A 3D array representing the voxelized data.
-    """
-    # Ensure `pos` is a numpy array
-    if hasattr(data, "columns"):  # Assume pandas.DataFrame
-        # pos_array = np.array([data["x (nm)"], data["y (nm)"], data["z (nm)"]]).T
-        x = data["x (nm)"].to_numpy()
-        y = data["y (nm)"].to_numpy()
-        z = data["z (nm)"].to_numpy()
-        pos_array = np.column_stack([x, y, z])
-    elif isinstance(data, list):
-        pos_array = np.array(data).T
-    else:
-        pos_array = data
-
-    # Check for species filtering
-    if species is not None:
-        if isinstance(species, list):
-            element_col = data.columns.get_loc("element") if "element" in data.columns else None
-            species_mask = np.full(len(data), False)
-            if element_col is not None:
-                for s in species:
-                    mask_s = data['element'].apply(lambda x: s in x)
-                    species_mask |= mask_s
-
-            else:
-                raise ValueError("Invalid species filter or table format.")
-        elif isinstance(species, np.ndarray) and species.dtype == bool:
-            species_mask = species
-        else:
-            raise ValueError("Species must be a list, boolean array, or None.")
-
-        pos_array = pos_array[species_mask]
-
-    if pos_array.size == 0:
-        return np.zeros(tuple(len(axis) for axis in grid_vec), dtype=int)
-
-    # Calculate bin sizes and edge vectors
-    bin_sizes = [grid_vec[d][1] - grid_vec[d][0] for d in range(3)]
-    edge_vec = [np.concatenate(([grid_vec[d][0] - bin_sizes[d] / 2], grid_vec[d] + bin_sizes[d] / 2)) for d in range(3)]
-
-    # Determine voxel indices
-    loc = np.empty((pos_array.shape[0], 3), dtype=int)
-    for d in range(3):
-        loc[:, d] = np.digitize(pos_array[:, d], edge_vec[d]) - 1  # Adjust for 0-based indexing
-
-    grid_size = np.asarray([len(axis) for axis in grid_vec], dtype=int)
-    valid = np.all((loc >= 0) & (loc < grid_size), axis=1)
-    loc = loc[valid]
-
-    # Count atoms in each voxel
-    vox = np.zeros(grid_size, dtype=int)
-    for i in range(loc.shape[0]):
-        vox[tuple(loc[i])] += 1
-
-    # ``vox`` is indexed [ix, iy, iz] (matches np.meshgrid(..., indexing='ij'));
-    # the downstream ``isosurface`` builder also assumes 'ij' ordering and
-    # flattens the data with the same convention. Returning ``vox.T`` here
-    # silently transposed to [iz, iy, ix] and put voxel concentration at the
-    # wrong spatial coordinate. Mirror the leap-clustering copy in
-    # clustering/isosurface.py and return ``vox`` directly.
-    return vox
+    """Compatibility wrapper for the canonical voxel implementation."""
+    return voxel_tools.pos_to_voxel(data, grid_vec, species=species)
 
 
 def isosurface(gridVec, data, isovalue):
-    """
-    Extract isosurface using pyvista for a custom 3D grid.
-
-    Args:
-        gridVec (list of np.ndarray): List of 3 arrays representing the grid points in x, y, and z.
-        data (np.ndarray): 3D scalar field (same shape as the meshgrid defined by gridVec).
-        isovalue (float): Scalar value to extract the isosurface.
-
-    Returns:
-        pyvista.PolyData: Isosurface with faces and vertices.
-    """
-    reordered_gridVec = [gridVec[0], gridVec[1], gridVec[2]]
-
-    # Create a pyvista structured grid
-    x, y, z = np.meshgrid(reordered_gridVec[0], reordered_gridVec[1], reordered_gridVec[2], indexing='ij')
-    grid = pv.StructuredGrid(x, y, z)
-    grid.point_data["values"] = np.asarray(data).flatten(order='F')
-
-    # Extract the isosurface
-    isosurf = grid.contour([isovalue])  # Pass isovalue as a list for compatibility
-    return isosurf
-
+    """Compatibility wrapper for the canonical voxel implementation."""
+    return voxel_tools.isosurface(gridVec, data, isovalue)
 
 def calculate_iso_value(conc, save_path=None, fig_name=None):
     """

@@ -11,7 +11,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from pyccapt.control.core import hdf5_creator, read_files
+from pyccapt.control.core import chunk_store, hdf5_creator, read_files
 
 
 CHUNK_DATASETS = (
@@ -32,14 +32,30 @@ CHUNK_DATASETS = (
 
 
 def validate_hdf5(path: str | Path) -> dict[str, object]:
-    """Validate required groups, one-dimensional datasets, and aligned lengths."""
+    """Validate schema metadata, dimensions, units, and aligned stream lengths."""
     file_path = Path(path).expanduser().resolve()
     issues: list[str] = []
     lengths: dict[str, int] = {}
     with h5py.File(file_path, "r") as handle:
-        for group_name in ("apt", "dld"):
-            if group_name not in handle:
-                issues.append(f"missing required group: {group_name}")
+        if "apt" not in handle:
+            issues.append("missing required group: apt")
+        schema_version = ""
+        if "provenance" in handle:
+            schema_version = str(handle["provenance"].attrs.get("schema_version", ""))
+        if schema_version.startswith("2"):
+            for key in (
+                "control_config_sha256", "calibration_input_sha256",
+                "pyccapt_version", "created_utc", "model_provenance_json",
+            ):
+                if key not in handle["provenance"].attrs:
+                    issues.append(f"missing provenance attribute: {key}")
+            config_hash = str(handle["provenance"].attrs.get("control_config_sha256", ""))
+            if len(config_hash) != 64 or any(character not in "0123456789abcdef" for character in config_hash.lower()):
+                issues.append("control_config_sha256 is not a SHA-256 hex digest")
+            try:
+                json.loads(str(handle["provenance"].attrs.get("model_provenance_json", "")))
+            except json.JSONDecodeError:
+                issues.append("model_provenance_json is not valid JSON")
         for group_name in ("apt", "dld", "tdc", "hsd"):
             if group_name not in handle:
                 continue
@@ -53,11 +69,16 @@ def validate_hdf5(path: str | Path) -> dict[str, object]:
                     continue
                 lengths[dataset_path] = int(dataset.shape[0])
                 group_lengths.append(int(dataset.shape[0]))
+                if schema_version.startswith("2") and not str(dataset.attrs.get("units", "")):
+                    issues.append(f"{dataset_path} has no units metadata")
             # HSD voltage arrays are per waveform while channel arrays are per
             # sample, so only enforce equality on the other synchronized groups.
             if group_name in {"apt", "dld", "tdc"} and group_lengths and len(set(group_lengths)) != 1:
                 issues.append(f"{group_name} dataset lengths differ: {sorted(set(group_lengths))}")
-    return {"path": str(file_path), "valid": not issues, "issues": issues, "lengths": lengths}
+    return {
+        "path": str(file_path), "valid": not issues, "issues": issues,
+        "lengths": lengths, "schema_version": schema_version,
+    }
 
 
 def validate_config(path: str | Path) -> dict[str, object]:
@@ -82,6 +103,7 @@ def recover_chunks(chunk_directory: str | Path, output_path: str | Path) -> dict
     output = Path(output_path).expanduser().resolve()
     if not chunk_dir.is_dir():
         raise FileNotFoundError(f"Chunk directory not found: {chunk_dir}")
+    valid_manifest, invalid_manifest = chunk_store.validate_manifest_records(chunk_dir, quarantine=True)
     temporary = output.with_suffix(output.suffix + ".tmp")
     written: dict[str, int] = {}
     try:
@@ -105,22 +127,33 @@ def recover_chunks(chunk_directory: str | Path, output_path: str | Path) -> dict
     result = validate_hdf5(output)
     # A crash-recovery file may lack apt metadata, so report it but distinguish
     # successful detector recovery from full-schema validity.
-    result.update({"recovered": True, "datasets_written": written})
+    result.update(
+        {
+            "recovered": True,
+            "datasets_written": written,
+            "manifest_records": len(valid_manifest),
+            "quarantined_records": len(invalid_manifest),
+        }
+    )
     return result
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="pyccapt-data", description=__doc__)
+def main(argv: list[str] | None = None, *, prog: str = "pyccapt-data") -> int:
+    parser = argparse.ArgumentParser(prog=prog, description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
-    hdf_parser = subparsers.add_parser("validate-hdf", help="validate a PyCCAPT HDF5 file")
+    hdf_parser = subparsers.add_parser(
+        "validate-hdf5", aliases=["validate-hdf"], help="validate a PyCCAPT HDF5 file"
+    )
     hdf_parser.add_argument("path")
     config_parser = subparsers.add_parser("validate-config", help="validate control config TOML")
     config_parser.add_argument("path")
-    recover_parser = subparsers.add_parser("recover-chunks", help="recover detector chunks into a new HDF5 file")
+    recover_parser = subparsers.add_parser(
+        "recover-run", aliases=["recover-chunks"], help="recover detector chunks into a new HDF5 file"
+    )
     recover_parser.add_argument("chunk_directory")
     recover_parser.add_argument("output_path")
     args = parser.parse_args(argv)
-    if args.command == "validate-hdf":
+    if args.command in {"validate-hdf", "validate-hdf5"}:
         result = validate_hdf5(args.path)
     elif args.command == "validate-config":
         result = validate_config(args.path)

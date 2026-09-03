@@ -24,41 +24,12 @@ CALIBRATION_FOLDERS = (
 #
 # The rule still bites every other calibration module, including new ones.
 #
-# TODO(helper_auto_raw_analysis): currently 1389 lines after the peak-units
-# dropdown + signal preview + chunked DLTS classifier landed. The pure pieces
-# (detect_detector_kind, _delay_line_pairs, _classify_pulse_chunks, plot_*,
-# species_from_*, markdown formatters) are easy to extract into a sibling
-# `_auto_raw_analysis_pure.py`; the UI closures (call_auto_raw_data_analysis,
-# call_signal_preview, run_analysis) stay here. Schedule that split next time
-# this file gets a substantive change.
+# The auto-raw-analysis domain and Surface Concept peak/combinatorial layers
+# have been extracted and are now held to the normal limit.
 KNOWN_OFFENDERS_TO_REFACTOR = frozenset(
     {
         Path("tutorials/tutorials_helpers/helper_visualization.py").as_posix(),
         Path("tutorials/tutorials_helpers/helper_calibration.py").as_posix(),
-        Path("tutorials/tutorials_helpers/helper_auto_raw_analysis.py").as_posix(),
-        # TODO(_raw_workflow_surface_concept): currently 1565 lines after the
-        # combinatorial per-pulse hit recovery (greedy + exhaustive) + per-peak
-        # diagnostics + length-tracking landed. The pure pieces (candidate
-        # generation, validity scoring, selection algorithms) are easy to
-        # extract into a sibling `_raw_workflow_sc_combinatorial.py`; the
-        # legacy chunked recovery + plotting helpers stay here. Schedule that
-        # split next time this file gets a substantive change.
-        Path("data_tools/_raw_workflow_surface_concept.py").as_posix(),
-        # TODO(iso_surface): currently 1253 lines. The voxelisation helpers
-        # (pos_to_voxel, isosurface, calculate_iso_value, _safe_random_subset)
-        # and the plotly mesh assembly are independent and easy to extract;
-        # the dominant size is the calculate_element_isosurface flow. Split
-        # into iso_surface_voxel.py + iso_surface_plot.py next time this
-        # file gets a substantive change.
-        Path("reconstructions/iso_surface.py").as_posix(),
-        # TODO(calibration): split the public workflow orchestration from
-        # sampling/plotting helpers. The fitted model primitives already live
-        # in correction_models.py; the next extraction should move the large
-        # plotting-only branches without changing the notebook API.
-        Path("core/calibration.py").as_posix(),
-        # TODO(mc_plot_peak_helpers): extract Gaussian/Voigt/asymmetric peak
-        # models into core/peak_models.py; they are independent of plot state.
-        Path("core/mc_plot_peak_helpers.py").as_posix(),
     }
 )
 

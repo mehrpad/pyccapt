@@ -25,10 +25,39 @@ class ExperimentState(str, Enum):
     FAILED = "failed"
 
 
-def set_experiment_state(variables: Any, state: ExperimentState, error: str = "") -> None:
-    """Publish lifecycle state before any related wake-up event is emitted."""
+_ALLOWED_TRANSITIONS = {
+    ExperimentState.IDLE: {ExperimentState.INITIALIZING},
+    ExperimentState.INITIALIZING: {
+        ExperimentState.RUNNING,
+        ExperimentState.STOPPING,
+        ExperimentState.SAFE_OFF,
+    },
+    ExperimentState.RUNNING: {ExperimentState.STOPPING, ExperimentState.SAFE_OFF},
+    ExperimentState.STOPPING: {ExperimentState.SAFE_OFF},
+    ExperimentState.SAFE_OFF: {ExperimentState.FINALIZING},
+    ExperimentState.FINALIZING: {ExperimentState.COMPLETE},
+    ExperimentState.COMPLETE: {ExperimentState.IDLE, ExperimentState.INITIALIZING},
+    ExperimentState.FAILED: {ExperimentState.IDLE, ExperimentState.INITIALIZING},
+}
+
+
+class InvalidExperimentTransition(RuntimeError):
+    """Raised when a caller attempts an impossible lifecycle transition."""
+
+
+def set_experiment_state(variables: Any, state: ExperimentState, error: str = "", *, strict: bool = True) -> None:
+    """Validate and publish lifecycle state before related wake-up events."""
+    current_value = str(getattr(variables, "experiment_state", ExperimentState.IDLE.value))
+    try:
+        current = ExperimentState(current_value)
+    except ValueError:
+        current = ExperimentState.IDLE
+    if state != current and state != ExperimentState.FAILED:
+        if state not in _ALLOWED_TRANSITIONS[current] and strict:
+            raise InvalidExperimentTransition(f"Invalid experiment transition: {current.value} -> {state.value}")
     variables.experiment_state = state.value
-    variables.experiment_error = error
+    if error or state != ExperimentState.FAILED:
+        variables.experiment_error = error
 
 
 def _safe_path_component(value: Any, fallback: str) -> str:

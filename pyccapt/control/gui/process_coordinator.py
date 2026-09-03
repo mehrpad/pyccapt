@@ -52,10 +52,18 @@ class ProcessCoordinator:
         y_plot: Any,
         t_plot: Any,
         main_v_dc_plot: Any,
+        run_config: Any = None,
+        command_queue: Any = None,
+        status_queue: Any = None,
+        completion_queue: Any = None,
     ) -> Any:
         process = self._process_factory(
             target=self._get_experiment_target(),
-            args=(variables, conf, experiment_finished_event, x_plot, y_plot, t_plot, main_v_dc_plot),
+            args=(
+                variables, conf, experiment_finished_event, x_plot, y_plot,
+                t_plot, main_v_dc_plot, run_config, command_queue,
+                status_queue, completion_queue,
+            ),
         )
         process.start()
         return process

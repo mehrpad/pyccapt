@@ -414,3 +414,20 @@ control_pid_kd = 0.05
 # Hard cap on the per-iteration PID voltage step (V), applied symmetrically
 # (-cap .. +cap).  Mirrors the 40 V cap on the Proportional branch.
 control_pid_max_step_v = 40.0
+
+# ---------------------------------------------------------------------------
+# Physical safety boundary and deterministic dry-run detector.
+# Keep the interlock backend disabled only on legacy rigs or for simulation.
+# A production NI-DAQ installation should set the exact digital channels.
+# ---------------------------------------------------------------------------
+safety_interlock_backend = "none" # "none", "simulator", or "nidaq"
+safety_estop_input_channel = ""
+safety_watchdog_output_channel = ""
+safety_estop_safe_when_high = true
+
+# Used when tdc_model = "Simulator".  Set fail_after_batches to a positive
+# value only in fault-injection tests.
+simulator_seed = 42
+simulator_batch_size = 128
+simulator_interval_s = 0.02
+simulator_fail_after_batches = 0

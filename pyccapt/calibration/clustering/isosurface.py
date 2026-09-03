@@ -25,7 +25,9 @@ def bin_vectors_from_distance(dist, bin_values, mode='distance'):
     is_constant_count = mode == 'count'
     is_constant_distance = mode == 'distance'
     num_dim = len(bin_values)
-    dist = np.array(dist).reshape(-1, num_dim)
+    dist = np.asarray(dist, dtype=float).reshape(-1, num_dim)
+    if dist.shape[0] == 0:
+        raise ValueError("Distance data cannot be empty")
     if dist.shape[1] != num_dim:
         raise ValueError("Dimensions of distance variable and bin variable must match.")
     if is_constant_count and num_dim != 1:
@@ -37,8 +39,12 @@ def bin_vectors_from_distance(dist, bin_values, mode='distance'):
     # Constant bin distance interval
     if is_constant_distance:
         for dim in range(num_dim):
-            # Generate raw bin vector
-            bin_vector_raw = np.linspace(0, 10000 * bin_values[dim], 10001)
+            step = float(bin_values[dim])
+            if not np.isfinite(step) or step <= 0:
+                raise ValueError("Bin distances must be finite and greater than zero")
+            reach = max(abs(float(dist[:, dim].min())), abs(float(dist[:, dim].max()))) + step
+            n_steps = max(1, int(np.ceil(reach / step)))
+            bin_vector_raw = np.arange(n_steps + 1, dtype=float) * step
             bin_vector_raw = np.concatenate((-np.flip(bin_vector_raw[1:]), bin_vector_raw))
 
             # Filter bin centers within the distance range
@@ -100,10 +106,10 @@ def pos_to_voxel(data, grid_vec, species=None):
     """
     # Ensure `pos` is a numpy array
     if hasattr(data, "columns"):  # Assume pandas.DataFrame
-        pos_array = np.array([data["x (nm)"], data["y (nm)"], data["z (nm)"]]).T
+        pos_array = data[["x (nm)", "y (nm)", "z (nm)"]].to_numpy(dtype=float, copy=False)
         element_col = data.columns.get_loc("element") if "element" in data.columns else None
     else:
-        pos_array = np.array(data)
+        pos_array = np.asarray(data, dtype=float)
         element_col = None
 
     # Check for species filtering
@@ -112,7 +118,11 @@ def pos_to_voxel(data, grid_vec, species=None):
         # truthily rejected a valid list filter when 'element' is the FIRST
         # column (position 0 is falsy). Test against None instead.
         if isinstance(species, list) and element_col is not None:
-            species_mask = data['element'].isin(species)
+            species_mask = data['element'].apply(
+                lambda value: any(item in value for item in species)
+                if isinstance(value, (list, tuple, set, np.ndarray))
+                else value in species
+            ).to_numpy(dtype=bool)
         elif isinstance(species, np.ndarray) and species.dtype == bool:
             species_mask = species
         else:
@@ -120,7 +130,16 @@ def pos_to_voxel(data, grid_vec, species=None):
                 "Species must be a list (requires an 'element' column), a boolean array, or None."
             )
 
+        species_mask = np.asarray(species_mask, dtype=bool)
+        if species_mask.shape != (len(pos_array),):
+            raise ValueError("Species mask length must match the position data")
         pos_array = pos_array[species_mask]
+
+    grid_size = np.asarray([len(axis) for axis in grid_vec], dtype=int)
+    if np.any(grid_size < 2):
+        raise ValueError("Each voxel grid axis must contain at least two centers")
+    if pos_array.size == 0:
+        return np.zeros(tuple(grid_size), dtype=int)
 
     # Calculate bin sizes and edge vectors
     bin_sizes = [grid_vec[d][1] - grid_vec[d][0] for d in range(3)]
@@ -131,13 +150,13 @@ def pos_to_voxel(data, grid_vec, species=None):
     for d in range(3):
         loc[:, d] = np.digitize(pos_array[:, d], edge_vec[d]) - 1  # Adjust for 0-based indexing
 
-    # Calculate the voxel grid size
-    grid_size = np.maximum(np.max(loc, axis=0) + 1, [len(e) - 1 for e in edge_vec])
+    valid = np.all((loc >= 0) & (loc < grid_size), axis=1)
+    loc = loc[valid]
 
     # Count atoms in each voxel
     vox = np.zeros(grid_size, dtype=int)
-    for i in range(loc.shape[0]):
-        vox[tuple(loc[i])] += 1
+    if loc.size:
+        np.add.at(vox, tuple(loc.T), 1)
 
     return vox
 

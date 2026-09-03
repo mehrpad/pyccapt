@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import queue
 from types import SimpleNamespace
 
 import numpy as np
 
 from pyccapt.control.apt.apt_exp_control import APT_Exp_Control
 from pyccapt.control.apt.experiment_state import ExperimentState
+from pyccapt.control.apt.experiment_state import InvalidExperimentTransition, set_experiment_state
+from pyccapt.control.core.contracts import CompletionAck, RunConfig
 from pyccapt.control.core.data_integrity import recover_chunks
 from pyccapt.control.gui.main_parameters import ParameterError, validate_run_parameters
 
@@ -49,6 +52,39 @@ def test_safe_off_does_not_overwrite_failed_state():
     assert variables.experiment_error == "original"
 
 
+def test_experiment_state_machine_rejects_skipping_safety_phases():
+    variables = SimpleNamespace(experiment_state="idle", experiment_error="")
+    set_experiment_state(variables, ExperimentState.INITIALIZING)
+    with np.testing.assert_raises(InvalidExperimentTransition):
+        set_experiment_state(variables, ExperimentState.COMPLETE)
+
+
+def test_completion_ack_is_structured_and_immutable():
+    ack = CompletionAck(state="complete", hardware_safe=True)
+    assert ack.hardware_safe is True
+    with np.testing.assert_raises(AttributeError):
+        ack.state = "failed"
+
+
+def test_stale_completion_ack_cannot_deadlock_next_run():
+    variables = SimpleNamespace(ex_freq=1, flag_end_experiment=False, experiment_state="idle", experiment_error="")
+    event = _CompletionEvent(variables)
+    completion_queue = queue.Queue(maxsize=1)
+    completion_queue.put(CompletionAck(state="complete", hardware_safe=True))
+    control = APT_Exp_Control(
+        variables, {}, event, None, None, None, None,
+        completion_queue=completion_queue,
+    )
+    control._run_experiment_impl = lambda: (_ for _ in ()).throw(RuntimeError("new failure"))
+    control.clear_up = lambda: None
+
+    control.run_experiment()
+
+    acknowledgement = completion_queue.get_nowait()
+    assert acknowledgement.state == ExperimentState.FAILED.value
+    assert "new failure" in acknowledgement.error
+
+
 def test_run_config_rejects_zero_frequency():
     variables = SimpleNamespace(
         ex_freq=0, ex_time=1, max_ions=1, vdc_min=1, vdc_max=2,
@@ -63,6 +99,21 @@ def test_run_config_rejects_zero_frequency():
         assert "frequency" in str(exc).lower()
     else:
         raise AssertionError("zero experiment frequency was accepted")
+
+
+def test_worker_derives_timing_from_immutable_run_snapshot():
+    variables = SimpleNamespace(ex_freq=1)
+    snapshot = RunConfig(
+        ex_freq=20, ex_time=1, max_ions=10, vdc_min=1, vdc_max=2,
+        v_p_min=1, v_p_max=2, pulse_fraction=1, pulse_frequency=1,
+        detection_rate=1, pulse_amp_per_supply_voltage=1,
+        counter_source="TDC", pulse_mode="Voltage",
+    )
+
+    control = APT_Exp_Control(variables, {}, None, None, None, None, None, snapshot)
+
+    assert variables.ex_freq == 20
+    assert control.sleep_time == 0.05
 
 
 def test_laser_run_does_not_require_voltage_pulse_range():

@@ -395,6 +395,20 @@ class Ui_Visualization(object):
             1,
             1,
         )
+        # Experiment-state indicator in the top-right corner.  The existing
+        # graph refresh timer keeps it synchronized with the shared
+        # ``start_flag`` used by the acquisition process.
+        self.experiment_status_row = QtWidgets.QHBoxLayout()
+        self.experiment_status_row.setSpacing(5)
+        self.experiment_status_led = QtWidgets.QLabel(parent=Visualization)
+        self.experiment_status_led.setFixedSize(QtCore.QSize(16, 16))
+        self.experiment_status_led.setObjectName("experiment_status_led")
+        self.experiment_status_led.setAccessibleName("Experiment status")
+        self.experiment_status_text = QtWidgets.QLabel(parent=Visualization)
+        self.experiment_status_text.setObjectName("experiment_status_text")
+        self.experiment_status_row.addWidget(self.experiment_status_led)
+        self.experiment_status_row.addWidget(self.experiment_status_text)
+        self.gridLayout_3b.addLayout(self.experiment_status_row, 0, 3, 1, 1)
 
         self.detector_fdm = pg.PlotWidget(parent=Visualization)
         self.detector_fdm.setBackground('w')
@@ -405,7 +419,7 @@ class Ui_Visualization(object):
         self.detector_fdm.setMinimumSize(QtCore.QSize(250, 250))
         self.detector_fdm.setStyleSheet("QWidget{border: 0.5px solid gray;}")
         self.detector_fdm.setObjectName("detector_fdm")
-        self.gridLayout_3b.addWidget(self.detector_fdm, 1, 0, 1, 3)
+        self.gridLayout_3b.addWidget(self.detector_fdm, 1, 0, 1, 4)
 
         # Bottom row: [Last Events toggle] [N input]
         # When the toggle is OFF (default), the FDM accumulates ions
@@ -425,7 +439,7 @@ class Ui_Visualization(object):
         self.fdm_max_ions.setText("1000000")
         self.fdm_max_ions.setObjectName("fdm_max_ions")
         self.fdm_bottom_row.addWidget(self.fdm_max_ions)
-        self.gridLayout_3b.addLayout(self.fdm_bottom_row, 2, 0, 1, 3)
+        self.gridLayout_3b.addLayout(self.fdm_bottom_row, 2, 0, 1, 4)
 
         self.gridLayout_5.addLayout(self.gridLayout_3b, 0, 3, 1, 1)
         self.gridLayout_2 = QtWidgets.QGridLayout()
@@ -745,6 +759,27 @@ class Ui_Visualization(object):
         self.hitmap_plot_size.setValue(1.0)
         self.hitmap_plot_size.setSingleStep(0.1)
         self.hitmap_plot_size.setDecimals(1)
+        self._experiment_status_running = None
+        self._update_experiment_status_indicator()
+
+    def _update_experiment_status_indicator(self):
+        """Show green while an experiment runs and red while it is stopped."""
+        running = bool(self.variables.start_flag)
+        if running == self._experiment_status_running:
+            return
+
+        self._experiment_status_running = running
+        color = "#22a447" if running else "#d32f2f"
+        state = "Running" if running else "Stopped"
+        self.experiment_status_led.setStyleSheet(
+            "QLabel {"
+            f"background-color: {color};"
+            "border: 1px solid #555;"
+            "border-radius: 8px;"
+            "}"
+        )
+        self.experiment_status_led.setToolTip(f"Experiment {state.lower()}")
+        self.experiment_status_text.setText(state)
 
     def retranslateUi(self, Visualization):
         """
@@ -1514,6 +1549,8 @@ class Ui_Visualization(object):
         Return:
             None
         """
+
+        self._update_experiment_status_indicator()
 
         if self.variables.plot_clear_flag:
             self.x_vdc = [i * 0.5 for i in range(200)]  # 100 time points

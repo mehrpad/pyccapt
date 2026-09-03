@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from pyccapt.control.apt import simulator
+from pyccapt.control.apt.detector_runtime import ProcessDetectorBackend
 from pyccapt.control.core import chunk_store
 
 
@@ -74,3 +75,43 @@ def test_corrupt_manifest_line_does_not_hide_valid_chunk(tmp_path):
     assert len(valid) == 1
     assert len(invalid) == 1
     assert "invalid JSON" in invalid[0]["error"]
+
+
+@pytest.mark.fault_injection
+def test_forced_close_escalates_a_hung_detector_worker():
+    class HungProcess:
+        exitcode = None
+
+        def __init__(self):
+            self.alive = True
+            self.terminated = False
+
+        def start(self):
+            return None
+
+        def join(self, timeout):
+            return None
+
+        def is_alive(self):
+            return self.alive
+
+        def terminate(self):
+            self.terminated = True
+            self.alive = False
+            self.exitcode = -15
+
+    process = HungProcess()
+    backend = ProcessDetectorBackend(
+        name="fault-test",
+        counter_source="TDC",
+        target=lambda: None,
+        args=(),
+        variables=SimpleNamespace(path=""),
+        process_factory=lambda **_: process,
+        event_factory=lambda: SimpleNamespace(set=lambda: None, is_set=lambda: False),
+    )
+
+    backend.join(timeout=0.01)
+
+    assert process.terminated is True
+    assert process.alive is False

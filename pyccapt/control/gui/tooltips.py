@@ -283,9 +283,9 @@ GATES_TOOLTIPS = {
     "diagram": "Live chamber state: pale blue = vented. Gate symbols follow the pipe direction; green = open flow, red = closed barrier.",
     "main_chamber_switch": "Open / close the main-chamber gate valve.  "
     "Interlocked: cannot open if vacuum levels "
-    "are wrong.  Bypass via Override Access.",
-    "load_lock_switch": "Open / close the load-lock gate valve.",
-    "cryo_switch": "Open / close the cryo gate valve.",
+    "are wrong or either load lock is vented. Bypass via Override Access.",
+    "load_lock_switch": "Open / close the load-lock gate valve. Opening is disabled while LL or CLL is vented.",
+    "cryo_switch": "Open / close the cryo gate valve. Opening is disabled while LL or CLL is vented.",
     "superuser": "Override Access - bypass the gate and pump/vacuum "
     "interlocks. Click for a warning dialog; "
     "button turns green while active.  USE WITH "

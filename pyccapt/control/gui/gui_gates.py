@@ -261,13 +261,33 @@ class Ui_Gates(object):
         else:
             painter.drawLine(QtCore.QPointF(x - 27, y), QtCore.QPointF(x + 27, y))
 
-    def _refresh_gate_diagram(self, force=False):
-        """Render the current three-gate/two-vent state (32 combinations)."""
+    def _vent_state(self):
+        """Return ``(cryo_vented, load_vented)`` from shared pump state."""
         cryo_vented = (
             not bool(getattr(self.variables, 'flag_pump_cryo_load_lock', True))
             or bool(getattr(self.variables, 'flag_vent_cryo_load_lock_partial', False))
         )
         load_vented = not bool(getattr(self.variables, 'flag_pump_load_lock', True))
+        return cryo_vented, load_vented
+
+    def _refresh_gate_access(self):
+        """Disable opening controls while either load lock is vented.
+
+        A button for an already-open gate stays enabled so the operator can
+        always close it. Override Access deliberately bypasses this lock.
+        """
+        vented = any(self._vent_state())
+        for button, gate_is_open in (
+            (self.main_chamber_switch, self.variables.flag_main_gate),
+            (self.load_lock_switch, self.variables.flag_load_gate),
+            (self.cryo_switch, self.variables.flag_cryo_gate),
+        ):
+            button.setEnabled(self.flag_super_user or not vented or bool(gate_is_open))
+
+    def _refresh_gate_diagram(self, force=False):
+        """Render the current three-gate/two-vent state (32 combinations)."""
+        cryo_vented, load_vented = self._vent_state()
+        self._refresh_gate_access()
         state = (
             bool(self.variables.flag_cryo_gate),
             bool(self.variables.flag_main_gate),
@@ -345,6 +365,7 @@ class Ui_Gates(object):
             self.timer.start(8000)
         if self.override_changed is not None:
             self.override_changed(self.flag_super_user)
+        self._refresh_gate_access()
 
     def _vacuum_ok_to_open(self, gate_label, sides):
         """Confirm the vacuum is safe before opening a gate.
@@ -480,6 +501,36 @@ class Ui_Gates(object):
             else:
                 self.error_message("!!! Close the previous opened gate first !!!")
             self.timer.start(8000)
+
+        gate_is_open = {
+            1: bool(self.variables.flag_main_gate),
+            2: bool(self.variables.flag_load_gate),
+            3: bool(self.variables.flag_cryo_gate),
+        }.get(gate_num)
+        if gate_is_open is False and any(self._vent_state()) and not self.flag_super_user:
+            self.error_message(
+                "!!! Gate opening disabled while the LL or CLL is vented. "
+                "Use Override Access only if it is safe. !!!"
+            )
+            self.timer.start(8000)
+            self._refresh_gate_access()
+            return
+
+        # A safety interlock must never trap an open gate. Closing is always
+        # allowed, including while a load lock is vented or an experiment is
+        # running. Only the opening path below is interlocked.
+        if gate_is_open is True:
+            close_line = {1: 1, 2: 3, 3: 5}.get(gate_num)
+            if close_line is not None and self.conf["gates"] == "on":
+                switch_gate(close_line)
+            if gate_num == 1:
+                self.variables.flag_main_gate = False
+            elif gate_num == 2:
+                self.variables.flag_load_gate = False
+            elif gate_num == 3:
+                self.variables.flag_cryo_gate = False
+            self._refresh_gate_diagram(force=True)
+            return
 
         # Main gate
         if gate_num == 1:

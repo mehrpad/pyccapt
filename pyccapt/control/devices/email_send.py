@@ -368,13 +368,17 @@ def send_email(email: str, subject: str, message: str, variables=None, interim: 
 
         def smtp_cls():
             s = smtplib.SMTP(server_name, port, timeout=30)
-            s.ehlo()
             try:
+                s.ehlo()
                 s.starttls(context=context)
                 s.ehlo()
-            except smtplib.SMTPException:
-                # Server may be plain SMTP without TLS — still OK in trusted lab nets.
-                _log.warning("STARTTLS not available on %s:%s", server_name, port)
+            except Exception:
+                # Never transmit SMTP credentials or experiment metadata after
+                # a failed TLS upgrade. Close the plaintext connection first.
+                try:
+                    s.close()
+                finally:
+                    raise
             return s
 
     with smtp_cls() as server:

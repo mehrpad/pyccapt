@@ -138,13 +138,15 @@ def build_calibration_mask(data, policy: str = "single_hit_only") -> np.ndarray:
         return np.ones(n, dtype=bool)
 
     if policy == "single_hit_only":
-        return ion_pp <= 1
+        return ion_pp == 1
     if policy == "downweight_multihit":
         # Mask is "is this ion non-zero-weight?" — all are, so all True.
         return np.ones(n, dtype=bool)
     if policy == "exclude_correlation_tracks":
-        # Start with single-hit; then layer dissociation-track exclusion.
-        mask = ion_pp <= 1
+        # Keep valid single- and multi-hit ions, then remove only detected
+        # correlation-track pairs. Starting from the single-hit mask made the
+        # detector below a no-op because it necessarily examines ion_pp == 2.
+        mask = ion_pp >= 1
         df = _as_dataframe_or_none(data)
         if df is None or "pulse_pi" not in df.columns or "mc_uc (Da)" not in df.columns:
             return mask
@@ -179,7 +181,7 @@ def build_calibration_weights(data, policy: str = "downweight_multihit") -> np.n
         return np.ones(n, dtype=float)
 
     if policy == "single_hit_only":
-        return (ion_pp <= 1).astype(float)
+        return (ion_pp == 1).astype(float)
     if policy == "downweight_multihit":
         # 1 / sqrt(max(ion_pp, 1))
         clipped = np.maximum(ion_pp, 1).astype(float)

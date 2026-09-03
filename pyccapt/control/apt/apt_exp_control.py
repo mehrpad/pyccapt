@@ -16,10 +16,12 @@ from pyccapt.control.apt.detector_runtime import (
     start_detector_processes,
 )
 from pyccapt.control.apt.experiment_state import (
+    ExperimentState,
     append_main_loop_results,
     ensure_output_directories,
     prepare_experiment_output_paths,
     reset_runtime_variables,
+    set_experiment_state,
     validate_detector_data_lengths,
 )
 from pyccapt.control.core import experiment_statistics, hdf5_creator, loggi, runtime
@@ -97,6 +99,9 @@ class APT_Exp_Control:
         # event, so we don't blindly raise the specimen voltage while the
         # detector isn't confirmed to be receiving anything yet.
         self._tdc_first_event_seen = False
+        self._outputs_safe = True
+        self._cleanup_complete = False
+        self._completion_published = False
 
         # apt/* metadata chunk state: how many items have already been flushed
         # to disk and which chunk file ID to use next.
@@ -343,18 +348,9 @@ class APT_Exp_Control:
                             self.variables.pulse_voltage = self.pulse_voltage
 
     def precise_sleep(self, seconds):
-        """
-        Precise sleep function.
-
-        Args:
-            seconds:    Seconds to sleep
-
-        Returns:
-            None
-        """
-        start_time = time.perf_counter()
-        while time.perf_counter() - start_time < seconds:
-            pass
+        """Yield the CPU while pacing the experiment loop."""
+        if seconds > 0:
+            time.sleep(seconds)
 
     def _send_interim_email_async(self):
         """Send a progress e-mail (off the control loop) every N ions.
@@ -415,6 +411,47 @@ class APT_Exp_Control:
             self.pid = None
 
     def run_experiment(self):
+        """Run one experiment with a safety envelope covering every phase."""
+        set_experiment_state(self.variables, ExperimentState.INITIALIZING)
+        self.variables.hardware_safe = True
+        try:
+            self._run_experiment_impl()
+        except BaseException as exc:
+            set_experiment_state(
+                self.variables,
+                ExperimentState.FAILED,
+                f"{exc.__class__.__name__}: {exc}",
+            )
+            if self.log_apt is not None:
+                self.log_apt.exception("Experiment failed")
+            else:
+                print(f"Experiment failed: {exc.__class__.__name__}: {exc}")
+        finally:
+            try:
+                self.clear_up()
+            except Exception as exc:
+                set_experiment_state(
+                    self.variables,
+                    ExperimentState.FAILED,
+                    f"Cleanup failed: {exc.__class__.__name__}: {exc}",
+                )
+                if self.log_apt is not None:
+                    self.log_apt.exception("Experiment cleanup failed")
+            if self.variables.experiment_state != ExperimentState.FAILED.value:
+                set_experiment_state(self.variables, ExperimentState.COMPLETE)
+            # State/flags are authoritative and must be visible before wake-up.
+            self.variables.flag_end_experiment = True
+            self._completion_published = True
+            self.experiment_finished_event.set()
+
+    def _request_detector_stop(self):
+        """Signal every detector backend; inactive backends ignore the flags."""
+        self.variables.stop_flag = True
+        self.variables.flag_stop_tdc = True
+        if self.stop_event is not None:
+            self.stop_event.set()
+
+    def _run_experiment_impl(self):
         """
         Run the main experiment.
 
@@ -486,6 +523,8 @@ class APT_Exp_Control:
             self.initialization_error = apt_exp_control_func.initialization_signal_generator(self.variables, self.log_apt)
             if not self.initialization_error:
                 self.initialization_signal_generator = True
+                self._outputs_safe = False
+                self.variables.hardware_safe = False
 
         if self._is_config_enabled('v_dc') and not self._is_override_disabled("v_dc") and not self.initialization_error:
             try:
@@ -499,7 +538,8 @@ class APT_Exp_Control:
             except Exception as e:
                 print('Can not open the COM port for V_dc')
                 print(e)
-                self.initialization_v_dc = True
+                self.initialization_v_dc = False
+                self.initialization_error = True
             if not self.initialization_error:
                 self.initialization_error = apt_exp_control_func.initialization_v_dc(
                     self.com_port_v_dc, self.log_apt, self.variables
@@ -518,7 +558,8 @@ class APT_Exp_Control:
             except Exception as e:
                 print('Can not open the COM port for V_p')
                 print(e)
-                self.initialization_v_p = True
+                self.initialization_v_p = False
+                self.initialization_error = True
             if not self.initialization_error:
                 self.initialization_error = apt_exp_control_func.initialization_v_p(
                     self.com_port_v_p, self.log_apt, self.variables
@@ -550,6 +591,8 @@ class APT_Exp_Control:
             if self.pulse_mode in ['Voltage', 'VoltageLaser']:
                 if self._vp_active():
                     apt_exp_control_func.command_v_p(self.com_port_v_p, 'OUTPut ON')
+                    self._outputs_safe = False
+                    self.variables.hardware_safe = False
                     vol = self.variables.v_p_min / self.variables.pulse_amp_per_supply_voltage
                     cmd = 'VOLT %s' % vol
                     apt_exp_control_func.command_v_p(self.com_port_v_p, cmd)
@@ -562,6 +605,8 @@ class APT_Exp_Control:
                     )
             if self._vdc_active():
                 apt_exp_control_func.command_v_dc(self.com_port_v_dc, "F1")
+                self._outputs_safe = False
+                self.variables.hardware_safe = False
                 time.sleep(0.1)
 
         self.pulse_fraction = self.variables.pulse_fraction
@@ -597,6 +642,7 @@ class APT_Exp_Control:
         # Wait for 8 second to all devices get ready specially tdc
         time.sleep(8)
         self.log_apt.info('Experiment is started')
+        set_experiment_state(self.variables, ExperimentState.RUNNING)
         # Main loop of experiment
         remaining_time_list = []
         total_ions_tmp = 0
@@ -750,24 +796,14 @@ class APT_Exp_Control:
 
                 if self.variables.stop_flag:
                     self.log_apt.info('Experiment is stopped')
-                    if self._is_config_enabled('tdc'):
-                        if self.variables.counter_source == 'TDC':
-                            self.variables.flag_stop_tdc = True
-                            if self.stop_event is not None:
-                                self.stop_event.set()  # Signal the tdc to stop
-                    time.sleep(1)
+                    self._request_detector_stop()
                     break
 
                 if self.variables.flag_tdc_failure:
                     self.log_apt.info('Experiment is stopped because of tdc failure')
                     print(f"{initialize_devices.bcolors.FAIL}Experiment is stopped because of TDC failure")
                     print(f"{initialize_devices.bcolors.FAIL}Restart the TDC and start the experiment again")
-                    if self._is_config_enabled('tdc'):
-                        if self.variables.counter_source == 'TDC':
-                            self.variables.stop_flag = True  # Set the STOP flag
-                            if self.stop_event is not None:
-                                self.stop_event.set()  # Signal the tdc to stop
-                    time.sleep(1)
+                    self._request_detector_stop()
                     break
 
                 if self.variables.criteria_ions:
@@ -776,25 +812,13 @@ class APT_Exp_Control:
                     # (both sides == 0) and stop the experiment immediately.
                     if self.variables.max_ions > 0 and self.variables.max_ions <= self.total_ions:
                         self.log_apt.info('Experiment is stopped because total number of ions is achieved')
-                        if self._is_config_enabled('tdc'):
-                            if self.variables.counter_source == 'TDC':
-                                self.variables.flag_stop_tdc = True
-                                self.variables.stop_flag = True  # Set the STOP flag
-                                if self.stop_event is not None:
-                                    self.stop_event.set()  # Signal the tdc to stop
-                        time.sleep(1)
+                        self._request_detector_stop()
                         break
                 if self.variables.criteria_vdc:
                     if self.vdc_max <= self.specimen_voltage:
                         if flag_achieved_high_voltage > self.ex_freq * 10:
                             self.log_apt.info('Experiment is stopped because dc voltage Max. is achieved')
-                            if self._is_config_enabled('tdc'):
-                                if self.variables.counter_source == 'TDC':
-                                    self.variables.flag_stop_tdc = True
-                                    self.variables.stop_flag = True  # Set the STOP flag
-                                    if self.stop_event is not None:
-                                        self.stop_event.set()  # Signal the tdc to stop
-                            time.sleep(1)
+                            self._request_detector_stop()
                             break
                         flag_achieved_high_voltage += 1
                     else:
@@ -806,18 +830,12 @@ class APT_Exp_Control:
                 if self.variables.criteria_time:
                     if self.variables.elapsed_time >= self.variables.ex_time:
                         self.log_apt.info('Experiment is stopped because experiment time Max. is achieved')
-                        if self._is_config_enabled('tdc'):
-                            if self.variables.counter_source == 'TDC':
-                                self.variables.flag_stop_tdc = True
-                                if self.stop_event is not None:
-                                    self.stop_event.set()  # Signal the tdc to stop
                         # Set the stop flag and exit the loop unconditionally —
                         # without this break the loop kept running for one more
                         # iteration before stop_flag handling caught it on the
                         # next pass, which is inconsistent with the criteria_ions
                         # and criteria_vdc branches above.
-                        self.variables.stop_flag = True
-                        time.sleep(1)
+                        self._request_detector_stop()
                         break
 
                 end_time = time.perf_counter()
@@ -837,7 +855,10 @@ class APT_Exp_Control:
                     self._flush_apt_meta_chunks(time_counter, time_ex)
 
         self.variables.start_flag = False  # Set the START flag
-        time.sleep(1)
+        set_experiment_state(self.variables, ExperimentState.STOPPING)
+        self._request_detector_stop()
+        # Hardware safety must not wait for detector joins or HDF5/email work.
+        self.safe_outputs_off()
 
         self.log_apt.info('Experiment is finished')
         print(
@@ -902,6 +923,7 @@ class APT_Exp_Control:
         # This flag set to True to save the last screenshot of the experiment in the GUI visualization
         self.variables.last_screen_shot = True
         validate_detector_data_lengths(self.variables, self.conf, self.log_apt)
+        set_experiment_state(self.variables, ExperimentState.FINALIZING)
 
         # Sanity check: stage/laser positions are published by the Stage Control
         # and Laser Control GUIs' poll timers. If a SmarAct stage was not
@@ -957,18 +979,43 @@ class APT_Exp_Control:
             print(message)
             if self.log_apt is not None:
                 self.log_apt.exception(message)
-        finally:
-            try:
-                # Clear up all the variables and deinitialize devices
-                self.clear_up()
-                if self.log_apt is not None:
-                    self.log_apt.info('Variables and devices are cleared and deinitialized')
-            except Exception as exc:
-                print(f'Experiment cleanup failed: {exc.__class__.__name__}: {exc}')
-                if self.log_apt is not None:
-                    self.log_apt.exception('Experiment cleanup failed')
-            self.experiment_finished_event.set()
-            self.variables.flag_end_experiment = True
+            set_experiment_state(self.variables, ExperimentState.FAILED, message)
+
+    def safe_outputs_off(self):
+        """Best-effort, idempotent transition of every energized output to off."""
+        if self._outputs_safe:
+            self.variables.hardware_safe = True
+            return
+
+        errors = []
+        try:
+            if self._vdc_active():
+                apt_exp_control_func.command_v_dc(self.com_port_v_dc, 'F0')
+        except Exception as exc:
+            errors.append(f"Vdc: {exc}")
+        try:
+            if self._vp_active():
+                apt_exp_control_func.command_v_p(self.com_port_v_p, 'VOLT 0')
+                apt_exp_control_func.command_v_p(self.com_port_v_p, 'OUTPut OFF')
+        except Exception as exc:
+            errors.append(f"pulser: {exc}")
+        try:
+            if self._signal_generator_active():
+                signal_generator.turn_off_signal_generator(self.variables)
+        except Exception as exc:
+            errors.append(f"signal generator: {exc}")
+
+        self._outputs_safe = not errors
+        self.variables.hardware_safe = self._outputs_safe
+        if errors:
+            message = "Hardware safe-off incomplete: " + "; ".join(errors)
+            if self.log_apt is not None:
+                self.log_apt.error(message)
+            raise RuntimeError(message)
+        # Safe-off is a lifecycle milestone, not a recovery from failure.
+        # Preserve the original failure and its diagnostic through cleanup.
+        if self.variables.experiment_state != ExperimentState.FAILED.value:
+            set_experiment_state(self.variables, ExperimentState.SAFE_OFF)
 
     def clear_up(self):
         """
@@ -984,33 +1031,28 @@ class APT_Exp_Control:
             None
         """
 
-        self.log_apt.info('Starting cleanup')
+        if self._cleanup_complete:
+            return
+        if self.log_apt is not None:
+            self.log_apt.info('Starting cleanup')
+
+        safe_off_error = None
+        try:
+            self.safe_outputs_off()
+        except Exception as exc:
+            # Still close handles and reset shared buffers; report the safety
+            # failure after the remaining cleanup has had a chance to run.
+            safe_off_error = exc
 
         try:
             if self._vdc_active():
-                # Turn off the v_dc
-                apt_exp_control_func.command_v_dc(self.com_port_v_dc, 'F0')
                 self.com_port_v_dc.close()
         except Exception as e:
             print(e)
 
         try:
             if self._vp_active():
-                # Turn off the v_p
-                apt_exp_control_func.command_v_p(self.com_port_v_p, 'VOLT 0')
-                apt_exp_control_func.command_v_p(self.com_port_v_p, 'OUTPut OFF')
                 self.com_port_v_p.close()
-        except Exception as e:
-            print(e)
-
-        try:
-            if self._signal_generator_active():
-                # Turn off the signal generator. Pass variables so the
-                # VISA resource address comes from config; the previous
-                # hardcoded serial number silently no-op'd on every
-                # rig except the original developer machine.
-                signal_generator.turn_off_signal_generator(self.variables)
-
         except Exception as e:
             print(e)
 
@@ -1022,7 +1064,11 @@ class APT_Exp_Control:
             self.t_plot,
             self.main_v_dc_plot,
         )
-        self.log_apt.info('Cleanup is finished')
+        self._cleanup_complete = True
+        if self.log_apt is not None:
+            self.log_apt.info('Cleanup is finished')
+        if safe_off_error is not None:
+            raise safe_off_error
 
 
 def run_experiment(variables, conf, experiment_finished_event, x_plot, y_plot, t_plot, main_v_dc_plot):

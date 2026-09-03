@@ -1,7 +1,27 @@
 import os
+import shutil
+import uuid
+from contextlib import contextmanager
+from pathlib import Path
 
 import h5py
 import numpy as np
+
+
+@contextmanager
+def _transactional_hdf5_update(hdf5_file_path):
+    """Edit a sibling copy and atomically replace the original on success."""
+    target = Path(hdf5_file_path).resolve()
+    temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
+    shutil.copy2(target, temporary)
+    try:
+        with h5py.File(temporary, "r+") as handle:
+            yield handle
+            handle.flush()
+        os.replace(temporary, target)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 def rename_subcategory(hdf5_file_path, old_name, new_name):
@@ -17,7 +37,7 @@ def rename_subcategory(hdf5_file_path, old_name, new_name):
         None
     """
 
-    with h5py.File(hdf5_file_path, 'r+') as file:
+    with _transactional_hdf5_update(hdf5_file_path) as file:
         # data_x = file['dld/x']
         # del file[new_name]
         # file.create_dataset(new_name, data=np.zeros(len(data_x)), dtype=np.int64)
@@ -46,7 +66,7 @@ def correct_surface_concept_old_data(hdf5_file_path):
     XYFACTOR = 80.0 / DETBINS * BINNINGFAC  # XXX mm/bin
     XYBINSHIFT = DETBINS / BINNINGFAC / 2.0  # to center detector
 
-    with h5py.File(hdf5_file_path, 'r+') as file:
+    with _transactional_hdf5_update(hdf5_file_path) as file:
         data_x = file['dld/x']
         data_y = file['dld/y']
         data_t = file['dld/t']
@@ -103,7 +123,7 @@ def copy_npy_to_hdf_surface_concept(path, hdf5_file_name):
     # yy_tmp = (((y_det - XYBINSHIFT) * XYFACTOR) * 0.1)  # from mm to in cm by dividing by 10
     # tt_tmp = (t * TOFFACTOR)  # in ns
 
-    with h5py.File(hdf5_file_path, 'r+') as file:
+    with _transactional_hdf5_update(hdf5_file_path) as file:
         del file['dld/t']
         del file['dld/x']
         del file['dld/y']
@@ -124,7 +144,10 @@ def copy_npy_to_hdf_surface_concept(path, hdf5_file_name):
         del file['tdc/voltage_pulse']
         del file['tdc/laser_pulse']
         del file['tdc/start_counter']
-        del file['tdc/time_data']
+        if 'tdc/time_data' in file:
+            del file['tdc/time_data']
+        if 'tdc/time' in file:  # remove legacy typo when repairing old files
+            del file['tdc/time']
         file.create_dataset('tdc/channel', data=channel, dtype=np.uint32)
         file.create_dataset('tdc/high_voltage', data=high_voltage_tdc, dtype=np.float64)
         file.create_dataset('tdc/voltage_pulse', data=voltage_pulse_tdc, dtype=np.float64)
@@ -134,7 +157,7 @@ def copy_npy_to_hdf_surface_concept(path, hdf5_file_name):
 
 
 def load_and_copy_chunks_to_hdf(path, hdf5_file_path, chunk_id):
-    with h5py.File(hdf5_file_path, 'r+') as hdf_file:
+    with _transactional_hdf5_update(hdf5_file_path) as hdf_file:
         # Delete existing datasets (if needed)
         for group in ['dld', 'tdc']:
             if group in hdf_file:
@@ -178,7 +201,7 @@ def load_and_copy_chunks_to_hdf(path, hdf5_file_path, chunk_id):
         create_empty_dataset('tdc', 'voltage_pulse_tdc', 'voltage_pulse', np.float64)
         create_empty_dataset('tdc', 'laser_pulse_tdc', 'laser_pulse', np.float64)
         create_empty_dataset('tdc', 'tdc_start_counter', 'start_counter', np.uint64)
-        create_empty_dataset('tdc', 'time', 'time', np.uint64)
+        create_empty_dataset('tdc', 'time', 'time_data', np.uint64)
 
         # Write data chunk by chunk
         def write_chunked_data(group_name, dataset_name, dataset_name_new):
@@ -206,8 +229,8 @@ def load_and_copy_chunks_to_hdf(path, hdf5_file_path, chunk_id):
         write_chunked_data('tdc', 'high_voltage', 'voltage_tdc')
         write_chunked_data('tdc', 'voltage_pulse', 'voltage_pulse_tdc')
         write_chunked_data('tdc', 'start_counter', 'tdc_start_counter')
-        write_chunked_data('tdc', 'time', 'time')
-        write_chunked_data('tdd', 'laser_pulse', 'laser_pulse_tdc')
+        write_chunked_data('tdc', 'time_data', 'time')
+        write_chunked_data('tdc', 'laser_pulse', 'laser_pulse_tdc')
 
 
 def crop_dataset_to_new_file(original_path, new_path, num_of_samples):
@@ -264,7 +287,7 @@ def crop_dataset_to_new_file(original_path, new_path, num_of_samples):
 def concatenate_datasets(hdf5_file_path_1, hdf_file_path_2, index_2):
     """Concatenate datasets in nested HDF5 groups."""
 
-    with h5py.File(hdf5_file_path_1, 'r+') as file_1, h5py.File(hdf_file_path_2, 'r') as file_2:
+    with _transactional_hdf5_update(hdf5_file_path_1) as file_1, h5py.File(hdf_file_path_2, 'r') as file_2:
         for group_key in file_1.keys():
             print(f"Processing group: {group_key}")
             if group_key in file_2:

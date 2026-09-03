@@ -4,10 +4,14 @@ import logging
 import os
 import re
 import shutil
+import datetime as dt
+import json
+import platform
 from pathlib import Path
 
 import h5py
 import numpy as np
+import pyccapt
 
 from pyccapt.control.apt.detector_models import normalize_tdc_model
 
@@ -34,7 +38,14 @@ def _sorted_chunk_files(chunk_dir: Path, stem: str) -> list[Path]:
         match = pattern.match(path.name)
         if match is not None:
             files_with_ids.append((int(match.group(1)), path))
-    return [path for _, path in sorted(files_with_ids)]
+    files_with_ids.sort()
+    if files_with_ids:
+        ids = [chunk_id for chunk_id, _ in files_with_ids]
+        expected = list(range(ids[0], ids[-1] + 1))
+        if ids != expected:
+            missing = sorted(set(expected).difference(ids))
+            raise ValueError(f"Non-contiguous chunks for {stem!r}; missing ids: {missing}")
+    return [path for _, path in files_with_ids]
 
 
 # Stems written by APT_Exp_Control._flush_apt_meta_chunks() during the run.
@@ -89,44 +100,19 @@ def _load_apt_from_chunks(chunk_dir: Path) -> dict[str, np.ndarray] | None:
 
 def _coerce_chunk_to_target(values: np.ndarray, target_dtype: np.dtype,
                             chunk_file: Path, dataset_name: str) -> np.ndarray:
-    """Return *values* as *target_dtype*, casting only when it is lossless.
+    """Return a chunk only when its dtype exactly matches the schema.
 
-    The detector chunk writer (tdc_surface_concept.save_chunk_worker) builds
-    integer counter/channel/time arrays from Python ints, so older chunks were
-    saved as the platform default int64 while the HDF5 schema declares
-    uint64/uint32.  That widening is lossless for the non-negative values
-    acquisition produces, so we perform it rather than refusing the whole file.
-
-    A cast that would actually lose information is still refused -- that signals
-    genuinely corrupt or incompatible data, not the benign int64-vs-uint64 label
-    difference:
-      * negative value into an unsigned dataset, or any out-of-range overflow
-      * a fractional float into an integer dataset
+    Acquisition chunks are a persistence boundary. A dtype change indicates a
+    mixed writer version or corrupt/reused chunk directory and must be resolved
+    explicitly instead of being silently normalized during finalization.
     """
     src_dtype = np.dtype(values.dtype)
     if src_dtype == target_dtype:
         return values
-
-    if np.issubdtype(src_dtype, np.floating) and np.issubdtype(target_dtype, np.integer):
-        if not np.all(np.isfinite(values)) or np.any(values != np.rint(values)):
-            raise ValueError(
-                f"Chunk {chunk_file.name} for dataset {dataset_name!r} holds "
-                f"non-integer values incompatible with {target_dtype}. "
-                f"Refusing to truncate acquisition data."
-            )
-
-    if np.issubdtype(target_dtype, np.integer) and values.size:
-        info = np.iinfo(target_dtype)
-        vmin = int(values.min())
-        vmax = int(values.max())
-        if vmin < info.min or vmax > info.max:
-            raise ValueError(
-                f"Chunk {chunk_file.name} for dataset {dataset_name!r} holds "
-                f"values [{vmin}, {vmax}] outside the {target_dtype} range "
-                f"[{info.min}, {info.max}]. Refusing to wrap acquisition data."
-            )
-
-    return values.astype(target_dtype)
+    raise ValueError(
+        f"Chunk {chunk_file.name} for dataset {dataset_name!r} has dtype "
+        f"{src_dtype}, expected {target_dtype}. Refusing mixed acquisition data."
+    )
 
 
 # HDF5 chunk size (in elements) for compressed 1-D datasets. ~8 MiB per
@@ -169,7 +155,6 @@ def _write_chunked_dataset(hdf_file, dataset_name: str, chunk_files: list[Path],
 	    dataset_name, (total_size,), dtype=target_dtype, **_compression_opts(total_size)
     )
     offset = 0
-    cast_from: np.dtype | None = None
     for chunk_file, chunk_size in zip(chunk_files, chunk_sizes):
         # Stream the chunk via mmap so the whole file isn't pulled into RAM at
         # once.  A chunk whose dtype differs from the destination (e.g. the
@@ -177,8 +162,6 @@ def _write_chunked_dataset(hdf_file, dataset_name: str, chunk_files: list[Path],
         # code) is cast *only when that cast is provably lossless* -- otherwise
         # _coerce_chunk_to_target raises rather than silently wrap/truncate.
         chunk_array = np.load(chunk_file, mmap_mode="r")
-        if np.dtype(chunk_array.dtype) != target_dtype:
-            cast_from = np.dtype(chunk_array.dtype)
         values = _coerce_chunk_to_target(
             np.asarray(chunk_array), target_dtype, chunk_file, dataset_name
         )
@@ -186,12 +169,6 @@ def _write_chunked_dataset(hdf_file, dataset_name: str, chunk_files: list[Path],
         offset += chunk_size
         del chunk_array, values
 
-    if cast_from is not None:
-        logger.warning(
-            "Dataset %r: chunk dtype %s differed from schema %s; values were "
-            "losslessly cast on write (chunk-writer dtype drift).",
-            dataset_name, cast_from, target_dtype,
-        )
 
 
 def _coerce_numeric_array(data, dtype):
@@ -300,6 +277,14 @@ def hdf_creator(variables, conf, time_counter, time_ex):
     chunk_dir = Path(variables.path) / "temp_data" / "chunks"
     try:
         with h5py.File(tmp_path, "w") as hdf_file:
+            provenance = hdf_file.require_group("provenance")
+            provenance.attrs["schema_version"] = "1.0"
+            provenance.attrs["pyccapt_version"] = pyccapt.__version__
+            provenance.attrs["created_utc"] = dt.datetime.now(dt.timezone.utc).isoformat()
+            provenance.attrs["experiment_name"] = str(variables.exp_name)
+            provenance.attrs["python_version"] = platform.python_version()
+            provenance.attrs["platform"] = platform.platform()
+            provenance.attrs["control_config_json"] = json.dumps(conf, sort_keys=True, default=str)
             # apt/* group: prefer chunk files written during the run (crash-safe),
             # fall back to the in-memory lists for backwards-compatibility with
             # experiments that ran before chunk flushing was introduced.

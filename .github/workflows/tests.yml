@@ -38,7 +38,17 @@ jobs:
       - name: Run calibration tests
         run: pytest -q --run-calibration tests/calibration
 
-      # The control suite drives real hardware adapters; we don't run it in CI.
-      # If you add hardware-free fakes later, uncomment the step below.
-      # - name: Run control tests
-      #   run: pytest -q --run-control tests/control
+  control-unit:
+    name: control unit tests (Windows / hardware-free)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: setup.py
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[control,dev]"
+      - name: Run control suite against mocks/simulator
+        run: pytest -q --run-control tests/control

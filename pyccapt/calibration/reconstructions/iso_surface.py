@@ -215,7 +215,7 @@ def _structured_grid_from_volume(grid_vec, data, scalar_name):
     """Build a PyVista structured grid from a volume on the reconstruction grid."""
     x, y, z = np.meshgrid(grid_vec[0], grid_vec[1], grid_vec[2], indexing='ij')
     grid = pv.StructuredGrid(x, y, z)
-    grid.point_data[scalar_name] = np.asarray(data, dtype=float).flatten()
+    grid.point_data[scalar_name] = np.asarray(data, dtype=float).flatten(order='F')
     return grid
 
 
@@ -1133,7 +1133,7 @@ def pos_to_voxel(data, grid_vec, species=None):
         if isinstance(species, list):
             element_col = data.columns.get_loc("element") if "element" in data.columns else None
             species_mask = np.full(len(data), False)
-            if element_col:
+            if element_col is not None:
                 for s in species:
                     mask_s = data['element'].apply(lambda x: s in x)
                     species_mask |= mask_s
@@ -1147,6 +1147,9 @@ def pos_to_voxel(data, grid_vec, species=None):
 
         pos_array = pos_array[species_mask]
 
+    if pos_array.size == 0:
+        return np.zeros(tuple(len(axis) for axis in grid_vec), dtype=int)
+
     # Calculate bin sizes and edge vectors
     bin_sizes = [grid_vec[d][1] - grid_vec[d][0] for d in range(3)]
     edge_vec = [np.concatenate(([grid_vec[d][0] - bin_sizes[d] / 2], grid_vec[d] + bin_sizes[d] / 2)) for d in range(3)]
@@ -1156,8 +1159,9 @@ def pos_to_voxel(data, grid_vec, species=None):
     for d in range(3):
         loc[:, d] = np.digitize(pos_array[:, d], edge_vec[d]) - 1  # Adjust for 0-based indexing
 
-    # Calculate the voxel grid size
-    grid_size = np.maximum(np.max(loc, axis=0) + 1, [len(e) - 1 for e in edge_vec])
+    grid_size = np.asarray([len(axis) for axis in grid_vec], dtype=int)
+    valid = np.all((loc >= 0) & (loc < grid_size), axis=1)
+    loc = loc[valid]
 
     # Count atoms in each voxel
     vox = np.zeros(grid_size, dtype=int)
@@ -1190,7 +1194,7 @@ def isosurface(gridVec, data, isovalue):
     # Create a pyvista structured grid
     x, y, z = np.meshgrid(reordered_gridVec[0], reordered_gridVec[1], reordered_gridVec[2], indexing='ij')
     grid = pv.StructuredGrid(x, y, z)
-    grid.point_data["values"] = data.flatten()
+    grid.point_data["values"] = np.asarray(data).flatten(order='F')
 
     # Extract the isosurface
     isosurf = grid.contour([isovalue])  # Pass isovalue as a list for compatibility

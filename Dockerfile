@@ -6,15 +6,15 @@
 #
 # Build:
 #     docker build -t pyccapt .
-# Run JupyterLab on http://localhost:8888 (no token):
-#     docker run --rm -p 8888:8888 -v "$PWD":/work pyccapt
+# Run JupyterLab on http://localhost:8888 (a token is printed at startup):
+#     docker run --rm -p 127.0.0.1:8888:8888 -v "$PWD":/work pyccapt
 ###############################################################################
 
 FROM mambaorg/micromamba:1.5.8
 
 LABEL org.opencontainers.image.source="https://github.com/mmonajem/pyccapt"
 LABEL org.opencontainers.image.description="PyCCAPT calibration tools and tutorials"
-LABEL org.opencontainers.image.licenses="MIT"
+LABEL org.opencontainers.image.licenses="GPL-3.0-or-later"
 
 USER root
 RUN apt-get update \
@@ -53,12 +53,10 @@ RUN pip install --no-cache-dir ".[calibration]"
 
 EXPOSE 8888
 
-# Default command: JupyterLab on all interfaces, no token (suitable for local
-# Docker-only use; put a reverse proxy in front for anything internet-facing).
+# Jupyter generates a random access token by default. Binding the host port to
+# 127.0.0.1 (as in the example above) avoids exposing it to the LAN.
 CMD ["jupyter", "lab", \
      "--ip=0.0.0.0", \
      "--port=8888", \
      "--no-browser", \
-     "--ServerApp.token=''", \
-     "--ServerApp.password=''", \
      "--notebook-dir=/home/mambauser/pyccapt/pyccapt/calibration/tutorials/jupyter_files"]

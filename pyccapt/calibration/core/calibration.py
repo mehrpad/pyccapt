@@ -1102,9 +1102,12 @@ def bowl_correction_main(
 
     calibration_mc_tof = np.copy(variables.dld_t_calib) if calibration_mode == 'tof' else np.copy(variables.mc_calib)
 
-    print("Maximum value of f_bowl:", np.max(f_bowl))
-    print("Minimum value of f_bowl:", np.min(f_bowl))
-    calibration_mc_tof[mask_fv] = calibration_mc_tof[mask_fv] / f_bowl
+    valid_factor = np.isfinite(f_bowl) & (f_bowl > 0)
+    if f_bowl.size:
+        print("Maximum value of f_bowl:", np.max(f_bowl[valid_factor]) if valid_factor.any() else "n/a")
+        print("Minimum value of f_bowl:", np.min(f_bowl[valid_factor]) if valid_factor.any() else "n/a")
+    apply_indices = np.flatnonzero(mask_fv)[valid_factor]
+    calibration_mc_tof[apply_indices] = calibration_mc_tof[apply_indices] / f_bowl[valid_factor]
     # calibration_mc_tof[mask_fv] = calibration_mc_tof[mask_fv] * f_bowl
 
     mean_after = np.mean(calibration_mc_tof[mask_temporal])
@@ -1654,7 +1657,7 @@ def multi_peak_bowl_corr_main(
 
     if isinstance(parameters, dict):
         is_finite = np.all(np.isfinite(np.asarray(parameters.get('parameters', []), dtype=float)))
-    elif fit_mode == 'robust_fit':
+    elif fit_mode in {'robust_fit', 'ml_fit'}:
         trial_prediction = _predict_bowl_model(fit_mode, parameters, x_arr, y_arr)
         is_finite = np.all(np.isfinite(np.asarray(trial_prediction, dtype=float)))
     else:

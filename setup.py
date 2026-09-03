@@ -29,22 +29,17 @@ def unique(items: list[str]) -> list[str]:
 
 
 common_deps = [
-    "deepdiff",
     "h5py",
     "matplotlib",
-    "numba",
     "numpy",
     "pandas",
-    "requests",
     "scipy",
     "tables",
     "tomli; python_version < '3.11'",
-    "wget",
 ]
 
 control_deps = [
     "mcculw; platform_system == 'Windows'",
-    "networkx",
     "nidaqmx; platform_system == 'Windows'",
     "opencv-python",
     "PyQt6",
@@ -100,6 +95,7 @@ package_data = {
         "files/*.png",
         "files/*.jpg",
         "files/*.txt",
+        "files/*.toml",
         "files/PyQt6_UI/*.ui",
         "files/PyQt6_UI/*.md",
         "calibration/reflectron_correction/data/presets/*.csv",
@@ -131,25 +127,26 @@ setup(
         exclude=(
             "tests",
             "tests.*",
-            "pyccapt.calibration.tutorials",
-            "pyccapt.calibration.tutorials.*",
-            "pyccapt.calibration.leap_tools.tutorials",
-            "pyccapt.calibration.leap_tools.tutorials.*",
             "pyccapt.control.devices_test",
             "pyccapt.control.devices_test.*",
         ),
     ),
     include_package_data=False,
     package_data=package_data,
-    entry_points={"console_scripts": ["pyccapt=pyccapt.control.__main__:main"]},
-    python_requires=">=3.9",
+    entry_points={
+        "console_scripts": [
+            "pyccapt=pyccapt.control.__main__:main",
+            "pyccapt-data=pyccapt.control.core.data_integrity:main",
+        ]
+    },
+    python_requires=">=3.10",
     install_requires=unique(common_deps),
     extras_require={
         "calibration": unique(calibration_deps),
         "control": unique(control_deps),
         "full": unique(calibration_deps + control_deps),
         "all": unique(calibration_deps + control_deps),
-        "dev": ["build", "pytest", "pytest-mock", "twine"],
+        "dev": ["build", "pytest", "pytest-mock", "ruff", "sphinx", "twine"],
     },
     license="GPL-3.0-or-later",
     classifiers=[

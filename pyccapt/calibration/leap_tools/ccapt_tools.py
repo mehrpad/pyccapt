@@ -1,5 +1,3 @@
-import struct
-from itertools import chain
 from pathlib import Path
 
 import numpy as np
@@ -22,16 +20,44 @@ def ccapt_to_pos(data, path=None, name=None):
         bytes: POS data.
 
     """
-    dd = data[['x (nm)', 'y (nm)', 'z (nm)', 'mc (Da)']]
-    dd = dd.astype(np.single)
-    records = dd.to_records(index=False)
-    list_records = list(records)
-    d = tuple(chain(*list_records))
-    pos = struct.pack('>' + 'ffff' * len(dd), *d)
+    # POS is four interleaved big-endian float32 values per ion.  Converting
+    # the matrix once avoids materialising millions of Python tuples and
+    # passing each scalar through ``struct.pack``.
+    pos = np.ascontiguousarray(
+        data[['x (nm)', 'y (nm)', 'z (nm)', 'mc (Da)']].to_numpy(dtype='>f4', copy=True)
+    ).tobytes()
     if name is not None:
         with open(path + name, 'w+b') as f:
             f.write(pos)
     return pos
+
+
+_EPOS_DTYPE = np.dtype(
+    [
+        ('x', '>f4'), ('y', '>f4'), ('z', '>f4'), ('mc', '>f4'),
+        ('tof', '>f4'), ('high_voltage', '>f4'), ('pulse_voltage', '>f4'),
+        ('detector_x', '>f4'), ('detector_y', '>f4'),
+        ('delta_p', '>u4'), ('multi', '>u4'),
+    ]
+)
+
+
+def _epos_chunk_bytes(chunk):
+    """Encode one DataFrame slice as interleaved big-endian EPOS records."""
+    records = np.empty(len(chunk), dtype=_EPOS_DTYPE)
+    float_fields = (
+        ('x', 'x (nm)', 1.0), ('y', 'y (nm)', 1.0), ('z', 'z (nm)', 1.0),
+        ('mc', 'mc (Da)', 1.0), ('tof', 't (ns)', 1.0),
+        ('high_voltage', 'high_voltage (V)', 1.0),
+        ('pulse_voltage', 'pulse_v (V)', 1.0),
+        ('detector_x', 'x_det (cm)', 10.0),
+        ('detector_y', 'y_det (cm)', 10.0),
+    )
+    for field, column, scale in float_fields:
+        records[field] = chunk[column].to_numpy(dtype=np.float32, copy=False) * scale
+    records['delta_p'] = chunk['delta_p'].to_numpy(dtype=np.uint32, copy=False)
+    records['multi'] = chunk['multi'].to_numpy(dtype=np.uint32, copy=False)
+    return records.tobytes()
 
 
 def ccapt_to_epos(data, path=None, name=None, chunk_size=1_000_000):
@@ -48,47 +74,19 @@ def ccapt_to_epos(data, path=None, name=None, chunk_size=1_000_000):
         None: Writes EPOS data to file if path and name are provided.
     """
 
-    dd = data[
-        [
-            'x (nm)',
-            'y (nm)',
-            'z (nm)',
-            'mc (Da)',
-            't (ns)',
-            'high_voltage (V)',
-            'pulse_v (V)',
-            'x_det (cm)',
-            'y_det (cm)',
-            'delta_p',
-            'multi',
-        ]
-    ]
-    dd['x_det (cm)'] = dd['x_det (cm)'] * 10
-    dd['y_det (cm)'] = dd['y_det (cm)'] * 10
-
-    dd = dd.astype(np.single)
-    dd = dd.astype({'delta_p': np.uintc})
-    dd = dd.astype({'multi': np.uintc})
+    if not isinstance(chunk_size, int) or chunk_size <= 0:
+        raise ValueError('chunk_size must be a positive integer')
 
     if name is not None:
         with open(path + name, 'w+b') as f:
-            for i in range(0, len(dd), chunk_size):
-                chunk = dd.iloc[i : i + chunk_size]
-                records = chunk.to_records(index=False)
-                list_records = list(records)
-                d = tuple(chain(*list_records))
-                epos_chunk = struct.pack('>' + 'fffffffffII' * len(chunk), *d)
-                f.write(epos_chunk)
+            for i in range(0, len(data), chunk_size):
+                f.write(_epos_chunk_bytes(data.iloc[i : i + chunk_size]))
     else:
-        epos = b''
-        for i in range(0, len(dd), chunk_size):
-            chunk = dd.iloc[i : i + chunk_size]
-            records = chunk.to_records(index=False)
-            list_records = list(records)
-            d = tuple(chain(*list_records))
-            epos_chunk = struct.pack('>' + 'fffffffffII' * len(chunk), *d)
-            epos += epos_chunk
-        return epos
+        chunks = (
+            _epos_chunk_bytes(data.iloc[i : i + chunk_size])
+            for i in range(0, len(data), chunk_size)
+        )
+        return b''.join(chunks)
 
 
 def pos_to_ccapt(file_path):

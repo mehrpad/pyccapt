@@ -60,7 +60,9 @@ def hybrid_calibration_model(dld_x, dld_y, dld_t):
     from sklearn.model_selection import train_test_split
 
     x_values = np.column_stack((dld_x, dld_y))
-    y_values = 1 / dld_t
+    # The correction is applied as value / predicted_factor, so learn the
+    # normalized time/mass factor itself (not its reciprocal).
+    y_values = np.asarray(dld_t, dtype=float)
     x_train, x_test, y_train, y_test = train_test_split(x_values, y_values, test_size=0.2, random_state=42)
 
     model = RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42)

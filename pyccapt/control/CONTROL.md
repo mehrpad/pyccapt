@@ -27,6 +27,12 @@ The control application uses multiple processes:
 
 Shared state is managed through `core/share_variables.py` using a `multiprocessing.Manager().Namespace()` wrapper.
 
+Experiment lifecycle is explicit and observable through `variables.experiment_state`:
+`idle -> initializing -> running -> stopping -> safe_off -> finalizing -> complete`.
+Any unhandled failure transitions to `failed`, records `experiment_error`, requests detector shutdown, and attempts the
+idempotent hardware safe-off path before publishing the completion event. New code should use
+`apt/experiment_state.py` rather than inventing additional lifecycle flags.
+
 Configuration is loaded from `config.toml` (supports comments).
 `config.json` is no longer accepted by the control runtime.
 
@@ -94,6 +100,20 @@ uncaught exceptions with full stack traces.
 ## Data Structure
 
 HDF5 groups and dataset semantics are documented in [DATA_STRUCTURE.md](DATA_STRUCTURE.md).
+
+For hardware-free development set `tdc_model = "Simulator"`. The simulator follows the same stop-event and ring-buffer
+contract as the real detector backends, so startup, acquisition, finalization, and GUI behavior can be exercised without
+vendor SDKs.
+
+The `pyccapt-data` command provides operational checks and recovery:
+
+```text
+pyccapt-data validate-config pyccapt/config.toml
+pyccapt-data validate-hdf path/to/experiment.h5
+pyccapt-data recover-chunks path/to/chunks path/to/recovered.h5
+```
+
+Recovery never overwrites the source chunks and writes the destination transactionally.
 
 ## Folder Responsibilities
 

@@ -409,7 +409,11 @@ def _err_exp_decay(x, amp, center, sigma, tail, bg):
     tail = max(float(tail), 1e-12)
     activation = 0.5 * (1.0 + _erf((x - center) / (_SQRT2 * sigma)))
     dx = x - center
-    decay = np.where(dx > 0.0, np.exp(-dx / tail), 1.0)
+    # ``np.where`` evaluates both branches and used to overflow while fitting
+    # points on the rising side, even though those values were discarded.
+    decay = np.ones_like(dx, dtype=float)
+    trailing = dx > 0.0
+    decay[trailing] = np.exp(-dx[trailing] / tail)
     return amp * activation * decay + bg
 
 

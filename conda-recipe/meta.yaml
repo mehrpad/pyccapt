@@ -1,4 +1,4 @@
-{% set version = "0.2.0" %}
+{% set version = "0.2.3" %}
 
 package:
   name: pyccapt
@@ -13,15 +13,14 @@ build:
 
 requirements:
   host:
-    - python >=3.9
+    - python >=3.10
     - pip
     - setuptools
     - wheel
   run:
-    - python >=3.9
+    - python >=3.10
     - adjusttext
     - ase
-    - deepdiff
     - faker
     - fast-histogram
     - h5py
@@ -31,19 +30,19 @@ requirements:
     - jupyterlab
     - matplotlib-base
     - nglview
-    - numba
     - numpy
     - pandas
     - plotly
+    - anywidget
+    - kaleido
     - pybaselines
     - pymatgen
     - pyvista
-    - requests
     - scikit-learn
     - scipy
     - tqdm
+    - uproot
     - vispy
-    - wget
     - pytables
 
 test:

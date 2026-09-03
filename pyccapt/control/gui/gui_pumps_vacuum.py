@@ -1153,16 +1153,14 @@ class Ui_Pumps_Vacuum(object):
                     )
                     self.variables.flag_pump_load_lock_click = True
                     self.pump_load_lock_switch.setEnabled(False)
-                    time.sleep(1)
-                    self.pump_load_lock_switch.setEnabled(True)
+                    QTimer.singleShot(1000, lambda: self.pump_load_lock_switch.setEnabled(True))
                 elif not self.variables.flag_pump_load_lock:
                     self._set_action_button_active(
                         self.pump_load_lock_switch, False, self.pump_load_lock_default_style
                     )
                     self.variables.flag_pump_load_lock_click = True
                     self.pump_load_lock_switch.setEnabled(False)
-                    time.sleep(1)
-                    self.pump_load_lock_switch.setEnabled(True)
+                    QTimer.singleShot(1000, lambda: self.pump_load_lock_switch.setEnabled(True))
                 self._sync_pump_action_styles()
             else:  # SHow error message in the GUI
                 if self.variables.start_flag:
@@ -1203,16 +1201,18 @@ class Ui_Pumps_Vacuum(object):
                     )
                     self.variables.flag_pump_cryo_load_lock_click = True
                     self.pump_cryo_load_lock_switch.setEnabled(False)
-                    time.sleep(1)
-                    self.pump_cryo_load_lock_switch.setEnabled(self.flag_super_user)
+                    QTimer.singleShot(
+                        1000, lambda: self.pump_cryo_load_lock_switch.setEnabled(self.flag_super_user)
+                    )
                 elif not self.variables.flag_pump_cryo_load_lock:
                     self._set_action_button_active(
                         self.pump_cryo_load_lock_switch, False, self.pump_cryo_load_lock_default_style
                     )
                     self.variables.flag_pump_cryo_load_lock_click = True
                     self.pump_cryo_load_lock_switch.setEnabled(False)
-                    time.sleep(1)
-                    self.pump_cryo_load_lock_switch.setEnabled(self.flag_super_user)
+                    QTimer.singleShot(
+                        1000, lambda: self.pump_cryo_load_lock_switch.setEnabled(self.flag_super_user)
+                    )
                 self._sync_pump_action_styles()
             else:  # SHow error message in the GUI
                 if self.variables.start_flag:

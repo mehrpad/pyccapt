@@ -2,8 +2,8 @@ from pathlib import Path
 
 MAX_LINES_PER_FILE = 1250
 CALIBRATION_FOLDERS = (
-    "calibration",
     "clustering",
+    "core",
     "data_tools",
     "leap_tools",
     "mc",
@@ -51,6 +51,14 @@ KNOWN_OFFENDERS_TO_REFACTOR = frozenset(
         # into iso_surface_voxel.py + iso_surface_plot.py next time this
         # file gets a substantive change.
         Path("reconstructions/iso_surface.py").as_posix(),
+        # TODO(calibration): split the public workflow orchestration from
+        # sampling/plotting helpers. The fitted model primitives already live
+        # in correction_models.py; the next extraction should move the large
+        # plotting-only branches without changing the notebook API.
+        Path("core/calibration.py").as_posix(),
+        # TODO(mc_plot_peak_helpers): extract Gaussian/Voigt/asymmetric peak
+        # models into core/peak_models.py; they are independent of plot state.
+        Path("core/mc_plot_peak_helpers.py").as_posix(),
     }
 )
 

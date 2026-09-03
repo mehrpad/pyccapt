@@ -124,6 +124,8 @@ class SharedVariablesBase:
             right_value = float(right)
         except (TypeError, ValueError) as exc:
             raise CalibrationInputError("Peak range boundaries must be numeric") from exc
+        if not np.isfinite(left_value) or not np.isfinite(right_value):
+            raise CalibrationInputError("Peak range boundaries must be finite")
         if right_value <= left_value:
             raise CalibrationInputError(
                 f"Invalid peak range: left={left_value}, right={right_value}. 'right' must be greater than 'left'."
@@ -144,6 +146,8 @@ class SharedVariablesBase:
             right_value = float(right)
         except (TypeError, ValueError) as exc:
             raise CalibrationInputError("Peak range boundaries must be numeric") from exc
+        if not np.isfinite(left_value) or not np.isfinite(right_value):
+            raise CalibrationInputError("Peak range boundaries must be finite")
         if right_value <= left_value:
             raise CalibrationInputError(
                 f"Invalid peak range: left={left_value}, right={right_value}. 'right' must be greater than 'left'."
@@ -232,6 +236,13 @@ class SharedVariablesBase:
             return np.zeros(len(dataframe[like].to_numpy()))
         return np.zeros(len(dataframe))
 
+    @staticmethod
+    def _column_or_nan(dataframe: pd.DataFrame, column: str) -> np.ndarray:
+        """Return positional data, using NaN when the capability is absent."""
+        if column in dataframe.columns:
+            return dataframe[column].to_numpy()
+        return np.full(len(dataframe), np.nan, dtype=float)
+
     def sync_from_data(
         self, data: pd.DataFrame | None = None, *, update_backups: bool = False, clear_selection: bool = True
     ) -> pd.DataFrame:
@@ -255,8 +266,9 @@ class SharedVariablesBase:
         self.dld_pulse_l = self._column_or_zeros(frame, "pulse_l (pJ)", like="high_voltage (V)")
         self.dld_t = self._column_or_zeros(frame, "t (ns)")
         self.dld_t_c = self._column_or_zeros(frame, "t_c (ns)", like="t (ns)")
-        self.dld_x_det = self._column_or_zeros(frame, "x_det (cm)", like="t (ns)")
-        self.dld_y_det = self._column_or_zeros(frame, "y_det (cm)", like="t (ns)")
+        self.dld_x_det = self._column_or_nan(frame, "x_det (cm)")
+        self.dld_y_det = self._column_or_nan(frame, "y_det (cm)")
+        self.has_detector_positions = "x_det (cm)" in frame.columns and "y_det (cm)" in frame.columns
 
         self.mc = self._column_or_zeros(frame, "mc (Da)", like="t (ns)")
         if "mc_uc (Da)" in frame.columns:
@@ -271,9 +283,11 @@ class SharedVariablesBase:
         if update_backups or self.mc_calib_backup.shape != self.mc_calib.shape:
             self.mc_calib_backup = self.mc_calib.copy()
 
-        self.x = self._column_or_zeros(frame, "x (nm)", like="t (ns)")
-        self.y = self._column_or_zeros(frame, "y (nm)", like="t (ns)")
-        self.z = self._column_or_zeros(frame, "z (nm)", like="t (ns)")
+        self.x = self._column_or_nan(frame, "x (nm)")
+        self.y = self._column_or_nan(frame, "y (nm)")
+        self.z = self._column_or_nan(frame, "z (nm)")
+        self.has_reconstruction = {"x (nm)", "y (nm)", "z (nm)"} <= set(frame.columns)
+        self.has_mass_spectrum = "mc (Da)" in frame.columns or "mc_uc (Da)" in frame.columns
 
         self.mask = None
         self.AptHistPlotter = None

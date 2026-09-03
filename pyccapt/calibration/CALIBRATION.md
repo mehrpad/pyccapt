@@ -24,6 +24,9 @@ Calibration workflows use `Variables` from
 - `SharedVariablesBase` provides common validation and path helpers.
 - Validation/state issues should raise explicit calibration exceptions
   (`CalibrationInputError`, `CalibrationStateError`).
+- `sync_from_data(...)` is the single synchronization boundary after loading or replacing a dataframe. It also publishes
+  `has_detector_positions`, `has_reconstruction`, and `has_mass_spectrum`; unavailable coordinates remain `NaN` rather
+  than being represented by plausible-looking zero values.
 
 ## Naming Convention
 
@@ -49,6 +52,8 @@ These helpers are intended to work on both Windows and Linux.
 - Prefer explicit exceptions over `print` for invalid inputs.
 - Keep modules focused by responsibility.
 - Add tests for behavior changes under `tests/`.
+- Treat non-finite detector, time-of-flight, and mass values as unavailable input before histogramming, fitting, or spatial
+  indexing.
 
 ## Module Length Guardrail
 

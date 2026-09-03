@@ -27,7 +27,7 @@ PyCCAPT was developed and validated on the OXCART atom probe platform and is des
 
 ## Installation
 
-PyCCAPT requires Python `>=3.9`.
+PyCCAPT requires Python `>=3.10`.
 
 ### Recommended Quick Start (Conda)
 

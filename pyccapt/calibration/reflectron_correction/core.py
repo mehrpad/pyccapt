@@ -237,13 +237,19 @@ def correct_detector_coordinates(
     if detx.shape != dety.shape:
         raise ValueError("detx and dety must have the same shape")
 
-    query_points = np.column_stack([detx, dety])
+    finite_mask = np.isfinite(detx) & np.isfinite(dety)
+    corrected_detx = np.full(detx.shape, np.nan, dtype=float)
+    corrected_dety = np.full(dety.shape, np.nan, dtype=float)
+    if not finite_mask.any():
+        return corrected_detx, corrected_dety
+
+    query_points = np.column_stack([detx[finite_mask], dety[finite_mask]])
     detector_vertices = mesh.detector_vertices
     grid_vertices = mesh.grid_vertices
     triangles = np.asarray(mesh.triangles, dtype=int)
 
     tri_finder = _triangle_finder(mesh)
-    triangle_number = np.asarray(tri_finder(detx, dety), dtype=int)
+    triangle_number = np.asarray(tri_finder(detx[finite_mask], dety[finite_mask]), dtype=int)
     outside_mask = triangle_number < 0
     if np.any(outside_mask):
         nearest_tree = _nearest_vertex_tree(mesh)
@@ -261,8 +267,8 @@ def correct_detector_coordinates(
         bary = _barycentric_coordinates(detector_vertices[vertex_ids], query_points[point_mask])
         corrected_coords[point_mask] = bary @ grid_vertices[vertex_ids]
 
-    corrected_detx = corrected_coords[:, 0]
-    corrected_dety = corrected_coords[:, 1]
+    corrected_detx[finite_mask] = corrected_coords[:, 0]
+    corrected_dety[finite_mask] = corrected_coords[:, 1]
     return corrected_detx, corrected_dety
 
 
@@ -331,7 +337,10 @@ def correct_epos_file(
 
 def _detector_histogram(data: pd.DataFrame, bins: int = 256) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     detx_mm, dety_mm, _ = _extract_detector_mm(data)
-    histogram, x_edges, y_edges = np.histogram2d(detx_mm, dety_mm, bins=int(bins))
+    finite = np.isfinite(detx_mm) & np.isfinite(dety_mm)
+    if not finite.any():
+        raise ValueError("Detector map has no finite coordinate pairs")
+    histogram, x_edges, y_edges = np.histogram2d(detx_mm[finite], dety_mm[finite], bins=int(bins))
     return histogram.T, x_edges, y_edges
 
 

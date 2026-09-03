@@ -442,6 +442,7 @@ def state_update(conf, variables, emitter, stop_event=None):
                     temperature_cryo_head = -1
                     temperature_cryo_head_inside = -1
                     temperature_stage = -1
+                    temperature_ll = -1
                     print(e)
                     # Handle the case where response is not a valid float
                     temperature = -1

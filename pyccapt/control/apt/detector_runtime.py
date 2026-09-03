@@ -6,8 +6,15 @@ import multiprocessing
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from pyccapt.control.apt.detector_models import HSD_MODEL, ROENTDEK_MODEL, normalize_tdc_model
+from pyccapt.control.apt.detector_models import (
+    HSD_MODEL,
+    ROENTDEK_MODEL,
+    SIMULATOR_MODEL,
+    normalize_counter_source,
+    normalize_tdc_model,
+)
 from pyccapt.control.drs import drs
+from pyccapt.control.apt import simulator
 from pyccapt.control.tdc_roentdek import tdc_roentdek
 from pyccapt.control.tdc_surface_concept import tdc_surface_concept
 
@@ -39,8 +46,10 @@ def start_detector_processes(
         return runtime
 
     tdc_model = normalize_tdc_model(conf.get("tdc_model"))
+    counter_source = normalize_counter_source(variables.counter_source)
+    variables.counter_source = counter_source
 
-    if tdc_model == "Surface_Concept" and variables.counter_source == "TDC":
+    if tdc_model == "Surface_Concept" and counter_source == "TDC":
         runtime.stop_event = event_factory()
         runtime.tdc_process = process_factory(
             target=tdc_surface_concept.experiment_measure,
@@ -49,7 +58,7 @@ def start_detector_processes(
         runtime.tdc_process.start()
         return runtime
 
-    if tdc_model == ROENTDEK_MODEL and variables.counter_source == "TDC":
+    if tdc_model == ROENTDEK_MODEL and counter_source == "TDC":
         runtime.stop_event = event_factory()
         runtime.tdc_process = process_factory(
             target=tdc_roentdek.experiment_measure,
@@ -58,8 +67,21 @@ def start_detector_processes(
         runtime.tdc_process.start()
         return runtime
 
-    if tdc_model == HSD_MODEL and variables.counter_source == "HSD":
-        runtime.hsd_process = process_factory(target=drs.experiment_measure, args=(variables,))
+    if tdc_model == SIMULATOR_MODEL:
+        runtime.stop_event = event_factory()
+        runtime.tdc_process = process_factory(
+            target=simulator.experiment_measure,
+            args=(variables, x_plot, y_plot, t_plot, main_v_dc_plot, runtime.stop_event),
+        )
+        runtime.tdc_process.start()
+        return runtime
+
+    if tdc_model == HSD_MODEL and counter_source == "HSD":
+        runtime.stop_event = event_factory()
+        runtime.hsd_process = process_factory(
+            target=drs.experiment_measure,
+            args=(variables, x_plot, y_plot, t_plot, main_v_dc_plot, runtime.stop_event),
+        )
         runtime.hsd_process.start()
 
     return runtime
@@ -70,11 +92,10 @@ def join_detector_processes(conf: dict[str, Any], variables: Any, runtime: Detec
     if conf.get("tdc") != "on":
         return
 
-    if variables.counter_source == "TDC" and runtime.tdc_process is not None:
-        runtime.tdc_process.join(2)
-        if runtime.tdc_process.is_alive():
-            runtime.tdc_process.join(1)
-    elif variables.counter_source == "HSD" and runtime.hsd_process is not None:
-        runtime.hsd_process.join(2)
-        if runtime.hsd_process.is_alive():
-            runtime.hsd_process.join(1)
+    process = runtime.tdc_process if variables.counter_source == "TDC" else runtime.hsd_process
+    if process is None:
+        return
+    process.join(2)
+    if process.is_alive():
+        process.terminate()
+        process.join(2)

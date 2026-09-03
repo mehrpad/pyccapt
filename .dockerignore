@@ -13,6 +13,14 @@ analysis_outputs
 **/*.so
 **/.ipynb_checkpoints
 
+# Credentials and local environment files must never enter an image layer.
+**/.env
+**/.env.*
+**/email_credentials.toml
+**/*credentials*.toml
+**/*.pem
+**/*.key
+
 # Build artifacts
 build/
 dist/

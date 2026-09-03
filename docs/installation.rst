@@ -1,7 +1,7 @@
 ﻿Installation
 ============
 
-PyCCAPT requires Python ``>=3.9``.
+PyCCAPT requires Python ``>=3.10``.
 
 Recommended Conda Workflow
 --------------------------

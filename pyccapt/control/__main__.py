@@ -2,10 +2,7 @@ import multiprocessing
 import signal
 import sys
 
-from PyQt6 import QtWidgets
-
 from pyccapt.control.core import loggi, runtime
-from pyccapt.control.gui import app_icon, gui_main
 
 
 def main():
@@ -21,6 +18,15 @@ def main():
     Returns:
             None
     """
+    try:
+        from PyQt6 import QtWidgets
+        from pyccapt.control.gui import app_icon, gui_main
+    except ImportError as exc:
+        raise SystemExit(
+            "PyCCAPT control dependencies are not installed. "
+            "Install them with: pip install 'pyccapt[control]'"
+        ) from exc
+
     # Put this process in a kill-on-close Job Object so every worker
     # subprocess (camera, visualization, experiment, Manager) is terminated
     # if the GUI dies WITHOUT running cleanup() - e.g. PyCharm's red Stop

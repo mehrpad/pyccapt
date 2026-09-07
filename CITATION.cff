@@ -21,6 +21,6 @@ identifiers:
     value: 'https://doi.org/10.5281/zenodo.14718616'
 repository-code: 'https://github.com/mmonajem/pyccapt'
 url: 'https://pyccapt.readthedocs.io/'
-license: AGPL-3.0
+license: GPL-3.0-or-later
 version: 0.2.3
 date-released: '2026-06-16'

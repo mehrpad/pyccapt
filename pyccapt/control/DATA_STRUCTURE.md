@@ -9,6 +9,13 @@ Notation:
 - datatype is listed as NumPy/HDF5 type
 - `N/A` means dimensionless or not directly unit-bearing
 
+## Group `provenance`
+
+Schema 2.0 files record `schema_version`, `pyccapt_version`, creation time, platform and Python versions, the normalized
+control configuration plus its SHA-256, the chunk-manifest SHA-256, excluded-row count, and serialized calibration-model
+provenance. Every numeric dataset also carries a `units` attribute (`1` for dimensionless quantities). These attributes
+are checked by `pyccapt validate-hdf5` and let downstream tools distinguish schema evolution from data corruption.
+
 ## Group `apt`
 
 Control-loop metadata recorded each iteration.

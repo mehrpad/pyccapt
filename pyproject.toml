@@ -2,37 +2,148 @@
 requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[project]
+name = "pyccapt"
+dynamic = ["version"]
+description = "Open-source atom probe control, calibration, and reconstruction."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+authors = [{name = "Mehrpad Monajem", email = "mehrpad.monajem@fau.de"}]
+keywords = ["atom probe", "APT", "calibration", "instrument control"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Scientific/Engineering :: Visualization",
+]
+dependencies = [
+  "h5py",
+  "matplotlib",
+  "numpy",
+  "pandas",
+  "scipy",
+  "tables",
+  "tomli; python_version < '3.11'",
+]
+
+[project.urls]
+Homepage = "https://github.com/mmonajem/pyccapt"
+Repository = "https://github.com/mmonajem/pyccapt"
+Issues = "https://github.com/mmonajem/pyccapt/issues"
+
+[project.scripts]
+pyccapt = "pyccapt.control.__main__:main"
+pyccapt-data = "pyccapt.control.core.data_integrity:main"
+
+[project.optional-dependencies]
+control-core = ["pyserial", "pyvisa", "simple-pid"]
+control-gui = ["opencv-python", "PyQt6", "PyQt6-WebEngine", "pyqtgraph", "plotly"]
+control-hardware = [
+  "mcculw; platform_system == 'Windows'",
+  "nidaqmx; platform_system == 'Windows'",
+  "pypylon; platform_system == 'Windows'",
+]
+control = [
+  "pyserial", "pyvisa", "simple-pid", "opencv-python", "PyQt6",
+  "PyQt6-WebEngine", "pyqtgraph", "plotly",
+  "mcculw; platform_system == 'Windows'",
+  "nidaqmx; platform_system == 'Windows'",
+  "pypylon; platform_system == 'Windows'",
+]
+calibration-core = ["adjustText", "fast-histogram", "pybaselines", "scikit-learn", "tqdm"]
+calibration-viz = ["imageio", "kaleido", "plotly", "pyvista", "vispy"]
+calibration-notebooks = ["anywidget", "ipympl", "ipywidgets", "jupyterlab", "nglview"]
+calibration-materials = ["ase", "faker", "pymatgen"]
+calibration-cameca = ["uproot"]
+calibration = [
+  "adjustText", "anywidget", "ase", "faker", "fast-histogram", "imageio",
+  "ipympl", "ipywidgets", "jupyterlab", "kaleido", "nglview", "plotly",
+  "pybaselines", "pymatgen", "pyvista", "scikit-learn", "tqdm", "uproot", "vispy",
+]
+full = [
+  "adjustText", "anywidget", "ase", "faker", "fast-histogram", "imageio",
+  "ipympl", "ipywidgets", "jupyterlab", "kaleido", "nglview", "plotly",
+  "pybaselines", "pymatgen", "pyvista", "scikit-learn", "tqdm", "uproot", "vispy",
+  "pyserial", "pyvisa", "simple-pid", "opencv-python", "PyQt6", "PyQt6-WebEngine", "pyqtgraph",
+  "mcculw; platform_system == 'Windows'", "nidaqmx; platform_system == 'Windows'",
+  "pypylon; platform_system == 'Windows'",
+]
+all = [
+  "adjustText", "anywidget", "ase", "faker", "fast-histogram", "imageio",
+  "ipympl", "ipywidgets", "jupyterlab", "kaleido", "nglview", "plotly",
+  "pybaselines", "pymatgen", "pyvista", "scikit-learn", "tqdm", "uproot", "vispy",
+  "pyserial", "pyvisa", "simple-pid", "opencv-python", "PyQt6", "PyQt6-WebEngine", "pyqtgraph",
+  "mcculw; platform_system == 'Windows'", "nidaqmx; platform_system == 'Windows'",
+  "pypylon; platform_system == 'Windows'",
+]
+dev = [
+  "build", "coverage", "mypy", "pip-audit", "pytest", "pytest-cov",
+  "pytest-mock", "ruff", "sphinx", "twine",
+]
+
+[tool.setuptools.dynamic]
+version = {attr = "pyccapt.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["pyccapt", "pyccapt.*"]
+exclude = ["tests", "tests.*", "pyccapt.control.devices_test", "pyccapt.control.devices_test.*"]
+
+[tool.setuptools.package-data]
+pyccapt = [
+  "config.toml", "control/electrode.toml", "files/*.h5", "files/*.png",
+  "files/*.jpg", "files/*.txt", "files/*.toml", "files/PyQt6_UI/*.ui",
+  "files/PyQt6_UI/*.md", "calibration/reflectron_correction/data/presets/*.csv",
+  "control/*/*.dll", "control/*/*.lib", "control/*/*.exp", "control/*/*.ocx",
+  "control/*/*.chm", "control/*/*.cfg", "control/*/*.ini", "control/*/*.bit",
+  "control/*/*.exe", "control/*/*.lmf",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-    "calibration: calibration-module tests",
-    "control: control-module tests",
+  "calibration: calibration-module tests",
+  "control: control-module tests",
+  "performance: multi-million-row performance and memory regression tests",
+  "fault_injection: controlled worker, disk, and shutdown failure tests",
 ]
 
-###############################################################################
-# Ruff: linter + formatter (replaces flake8/black/isort).
-#
-# The starting ruleset is intentionally narrow so the existing codebase passes
-# without churn. Tighten incrementally by adding more rule families to `select`.
-###############################################################################
+[tool.coverage.run]
+branch = true
+source = ["pyccapt"]
+omit = ["pyccapt/control/devices_test/*"]
+
+[tool.coverage.report]
+fail_under = 25
+show_missing = true
+skip_covered = true
+
+[tool.mypy]
+python_version = "3.10"
+check_untyped_defs = true
+follow_imports = "skip"
+ignore_missing_imports = true
+warn_unused_ignores = true
+files = [
+  "pyccapt/control/core/contracts.py",
+  "pyccapt/control/core/chunk_store.py",
+  "pyccapt/control/core/health.py",
+  "pyccapt/control/core/safety.py",
+  "pyccapt/control/apt/detector_runtime.py",
+  "pyccapt/calibration/core/dataset.py",
+]
+
 [tool.ruff]
 line-length = 127
 target-version = "py310"
 extend-exclude = [
-    ".claude",
-    "docs/_build",
-    "docs/_static",
-    "**/_build/**",
-    ".tmp_paper",
-    "analysis_outputs",
-    "**/.ipynb_checkpoints",
-    "**/*.ipynb",
+  ".claude", "docs/_build", "docs/_static", "**/_build/**", ".tmp_paper",
+  "analysis_outputs", "**/.ipynb_checkpoints", "**/*.ipynb",
 ]
 
 [tool.ruff.lint]
-# Conservative starting set, matches what the previous flake8 step caught:
-# E9 = syntax errors, F63/F7/F82 = obvious bugs (undefined name, mis-imports).
-# Add more rule families as the codebase tightens up.
 select = ["E9", "F63", "F7", "F82"]
 ignore = []
 

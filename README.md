@@ -27,7 +27,7 @@ PyCCAPT was developed and validated on the OXCART atom probe platform and is des
 
 ## Installation
 
-PyCCAPT requires Python `>=3.9`.
+PyCCAPT requires Python `>=3.10`.
 
 ### Recommended Quick Start (Conda)
 
@@ -39,6 +39,9 @@ conda activate pyccapt
 python -m pip install --upgrade pip
 pip install "pyccapt[full]"
 ```
+
+Narrower PEP 621 extras are available for lean deployments: `control-core`, `control-gui`, `control-hardware`,
+`calibration-core`, `calibration-viz`, `calibration-notebooks`, `calibration-materials`, and `calibration-cameca`.
 
 If you want to work from this repository instead of PyPI:
 
@@ -126,6 +129,19 @@ pytest -q --run-calibration
 pytest -q --run-control
 pytest -q
 ```
+
+Validate or recover an acquisition without starting the GUI:
+
+```bash
+pyccapt validate-config pyccapt/config.toml
+pyccapt validate-hdf5 path/to/experiment.h5
+pyccapt recover-run path/to/chunks path/to/recovered.h5
+```
+
+The repository also provides deterministic detector/property tests, golden scientific fixtures, injected failure tests,
+and an opt-in two-million-ion regression benchmark (`PYCCAPT_RUN_BENCHMARKS=1 pytest tests/performance`). CI enforces
+critical-contract coverage and typing, clean wheel/sdist installation, dependency and secret scanning, CodeQL, and SBOM
+generation.
 
 Run calibration tutorials:
 

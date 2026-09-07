@@ -3,11 +3,68 @@
 from __future__ import annotations
 
 import datetime
+import re
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from pyccapt.control.apt.detector_models import normalize_tdc_model
 from pyccapt.control.core import runtime
+
+
+class ExperimentState(str, Enum):
+    """Authoritative lifecycle states shared by the GUI and workers."""
+
+    IDLE = "idle"
+    INITIALIZING = "initializing"
+    RUNNING = "running"
+    STOPPING = "stopping"
+    SAFE_OFF = "safe_off"
+    FINALIZING = "finalizing"
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
+_ALLOWED_TRANSITIONS = {
+    ExperimentState.IDLE: {ExperimentState.INITIALIZING},
+    ExperimentState.INITIALIZING: {
+        ExperimentState.RUNNING,
+        ExperimentState.STOPPING,
+        ExperimentState.SAFE_OFF,
+    },
+    ExperimentState.RUNNING: {ExperimentState.STOPPING, ExperimentState.SAFE_OFF},
+    ExperimentState.STOPPING: {ExperimentState.SAFE_OFF},
+    ExperimentState.SAFE_OFF: {ExperimentState.FINALIZING},
+    ExperimentState.FINALIZING: {ExperimentState.COMPLETE},
+    ExperimentState.COMPLETE: {ExperimentState.IDLE, ExperimentState.INITIALIZING},
+    ExperimentState.FAILED: {ExperimentState.IDLE, ExperimentState.INITIALIZING},
+}
+
+
+class InvalidExperimentTransition(RuntimeError):
+    """Raised when a caller attempts an impossible lifecycle transition."""
+
+
+def set_experiment_state(variables: Any, state: ExperimentState, error: str = "", *, strict: bool = True) -> None:
+    """Validate and publish lifecycle state before related wake-up events."""
+    current_value = str(getattr(variables, "experiment_state", ExperimentState.IDLE.value))
+    try:
+        current = ExperimentState(current_value)
+    except ValueError:
+        current = ExperimentState.IDLE
+    if state != current and state != ExperimentState.FAILED:
+        if state not in _ALLOWED_TRANSITIONS[current] and strict:
+            raise InvalidExperimentTransition(f"Invalid experiment transition: {current.value} -> {state.value}")
+    variables.experiment_state = state.value
+    if error or state != ExperimentState.FAILED:
+        variables.experiment_error = error
+
+
+def _safe_path_component(value: Any, fallback: str) -> str:
+    """Return a portable, traversal-safe directory-name component."""
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value).strip())
+    cleaned = cleaned.strip(" ._-")
+    return cleaned[:80] or fallback
 
 _CLEAR_LIST_FIELDS = (
     "x",
@@ -55,11 +112,16 @@ _CLEAR_LIST_FIELDS = (
 def prepare_experiment_output_paths(variables: Any) -> tuple[Path, Path]:
     """Create experiment output path and metadata path values."""
     now = datetime.datetime.now()
-    variables.exp_name = (
-        f"{variables.counter}_{now.strftime('%b-%d-%Y_%H-%M')}_{variables.electrode}_{variables.hdf5_data_name}"
-    )
+    counter = _safe_path_component(variables.counter, "0")
+    electrode = _safe_path_component(variables.electrode, "unknown-electrode")
+    data_name = _safe_path_component(variables.hdf5_data_name, "experiment")
+    # Microseconds make rapid retries unique while retaining a readable name.
+    variables.exp_name = f"{counter}_{now.strftime('%b-%d-%Y_%H-%M-%S-%f')}_{electrode}_{data_name}"
 
-    data_path = runtime.project_path("data", variables.exp_name)
+    data_root = runtime.project_path("data").resolve()
+    data_path = (data_root / variables.exp_name).resolve()
+    if data_path.parent != data_root:
+        raise ValueError("Experiment output path escapes the project data directory")
     meta_path = data_path / "meta_data"
     variables.path = str(data_path)
     variables.path_meta = str(meta_path)
@@ -68,9 +130,9 @@ def prepare_experiment_output_paths(variables: Any) -> tuple[Path, Path]:
 
 
 def ensure_output_directories(data_path: Path, meta_path: Path) -> None:
-    """Ensure data and metadata directories exist."""
-    data_path.mkdir(mode=0o777, parents=True, exist_ok=True)
-    meta_path.mkdir(mode=0o777, parents=True, exist_ok=True)
+    """Create a fresh output directory; never merge two experiment runs."""
+    data_path.mkdir(mode=0o777, parents=True, exist_ok=False)
+    meta_path.mkdir(mode=0o777, parents=False, exist_ok=False)
 
 
 def append_main_loop_results(

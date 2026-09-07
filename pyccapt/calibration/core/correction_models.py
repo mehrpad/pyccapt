@@ -3,9 +3,147 @@
 from __future__ import annotations
 
 import numpy as np
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from collections.abc import Mapping
 from scipy.optimize import curve_fit, minimize
 from scipy.signal import find_peaks, peak_widths
+
+
+class CalibrationModel(ABC):
+    """Serializable correction-model contract used by calibration workflows."""
+
+    @abstractmethod
+    def fit(self, features, target) -> "CalibrationModel":
+        """Fit and return this model."""
+
+    @abstractmethod
+    def predict_factor(self, features) -> np.ndarray:
+        """Predict the multiplicative/divisive correction factor."""
+
+    @property
+    @abstractmethod
+    def valid_domain(self) -> dict[str, tuple[float, float]]:
+        """Finite training domain for every feature."""
+
+    @abstractmethod
+    def provenance(self) -> dict:
+        """Return JSON-serializable model parameters and domain."""
+
+
+@dataclass
+class PolynomialCorrectionModel(CalibrationModel):
+    """Least-squares polynomial model for voltage or detector position."""
+
+    kind: str
+    degree: int = 2
+    coefficients: np.ndarray | None = None
+    _valid_domain: dict[str, tuple[float, float]] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.kind not in {"voltage", "bowl"}:
+            raise ValueError("Polynomial correction kind must be 'voltage' or 'bowl'")
+        if int(self.degree) < 0:
+            raise ValueError("Polynomial degree must be non-negative")
+        if self.kind == "bowl" and int(self.degree) != 2:
+            raise ValueError("The bowl correction currently supports degree=2 only")
+
+    def _design(self, features) -> np.ndarray:
+        values = np.asarray(features, dtype=float)
+        if self.kind == "voltage":
+            x = values.reshape(-1)
+            return np.vander(x, N=int(self.degree) + 1, increasing=True)
+        values = np.atleast_2d(values)
+        if values.shape[1] != 2:
+            raise ValueError("Bowl model requires [x, y] features")
+        x, y = values[:, 0], values[:, 1]
+        return np.column_stack((np.ones(x.size), x, y, x**2, x * y, y**2))
+
+    def fit(self, features, target) -> "PolynomialCorrectionModel":
+        values = np.asarray(features, dtype=float)
+        target_values = np.asarray(target, dtype=float).reshape(-1)
+        design = self._design(values)
+        if design.shape[0] != target_values.size:
+            raise ValueError("Feature and target row counts must match")
+        finite = np.isfinite(target_values) & np.all(np.isfinite(design), axis=1)
+        if finite.sum() < design.shape[1]:
+            raise ValueError("Insufficient finite rows to fit correction model")
+        self.coefficients = np.linalg.lstsq(design[finite], target_values[finite], rcond=None)[0]
+        domain_values = values.reshape(-1, 1) if self.kind == "voltage" else np.atleast_2d(values)
+        names = ("voltage",) if self.kind == "voltage" else ("x_det", "y_det")
+        self._valid_domain = {
+            name: (float(np.min(domain_values[finite, i])), float(np.max(domain_values[finite, i])))
+            for i, name in enumerate(names)
+        }
+        return self
+
+    def predict_factor(self, features) -> np.ndarray:
+        if self.coefficients is None:
+            raise RuntimeError("Model has not been fitted")
+        return self._design(features) @ self.coefficients
+
+    @property
+    def valid_domain(self) -> dict[str, tuple[float, float]]:
+        return dict(self._valid_domain)
+
+    def provenance(self) -> dict:
+        return {
+            "model_type": type(self).__name__,
+            "kind": self.kind,
+            "degree": self.degree,
+            "coefficients": [] if self.coefficients is None else self.coefficients.tolist(),
+            "valid_domain": {key: list(value) for key, value in self._valid_domain.items()},
+        }
+
+
+@dataclass
+class EstimatorCorrectionModel(CalibrationModel):
+    """Adapter for sklearn-like estimators using the same model contract."""
+
+    estimator: object
+    feature_names: tuple[str, ...]
+    _valid_domain: dict[str, tuple[float, float]] = field(default_factory=dict)
+
+    def fit(self, features, target) -> "EstimatorCorrectionModel":
+        values = np.asarray(features, dtype=float)
+        if values.ndim == 1:
+            values = values.reshape(-1, 1)
+        target_values = np.asarray(target, dtype=float).reshape(-1)
+        if values.shape[0] != target_values.size:
+            raise ValueError("Feature and target row counts must match")
+        if values.shape[1] != len(self.feature_names):
+            raise ValueError(
+                f"Expected {len(self.feature_names)} features {self.feature_names}, got {values.shape[1]}"
+            )
+        finite = np.isfinite(target_values) & np.all(np.isfinite(values), axis=1)
+        if not finite.any():
+            raise ValueError("No finite rows are available to fit the estimator")
+        self.estimator.fit(values[finite], target_values[finite])
+        self._valid_domain = {
+            name: (float(np.min(values[finite, i])), float(np.max(values[finite, i])))
+            for i, name in enumerate(self.feature_names)
+        }
+        return self
+
+    def predict_factor(self, features) -> np.ndarray:
+        values = np.asarray(features, dtype=float)
+        if values.ndim == 1:
+            values = values.reshape(-1, 1)
+        return np.asarray(self.estimator.predict(values), dtype=float)
+
+    @property
+    def valid_domain(self) -> dict[str, tuple[float, float]]:
+        return dict(self._valid_domain)
+
+    def provenance(self) -> dict:
+        parameters = self.estimator.get_params(deep=False) if hasattr(self.estimator, "get_params") else {}
+        serializable = {key: value for key, value in parameters.items() if isinstance(value, (str, int, float, bool, type(None)))}
+        return {
+            "model_type": type(self).__name__,
+            "estimator_type": type(self.estimator).__name__,
+            "parameters": serializable,
+            "valid_domain": {key: list(value) for key, value in self._valid_domain.items()},
+        }
 
 
 def voltage_corr(x, a, b, c):
@@ -60,7 +198,9 @@ def hybrid_calibration_model(dld_x, dld_y, dld_t):
     from sklearn.model_selection import train_test_split
 
     x_values = np.column_stack((dld_x, dld_y))
-    y_values = 1 / dld_t
+    # The correction is applied as value / predicted_factor, so learn the
+    # normalized time/mass factor itself (not its reciprocal).
+    y_values = np.asarray(dld_t, dtype=float)
     x_train, x_test, y_train, y_test = train_test_split(x_values, y_values, test_size=0.2, random_state=42)
 
     model = RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42)
@@ -99,6 +239,8 @@ def robust_fit(dld_x, dld_y, dld_t, degree=2):
 
 def _predict_voltage_model(model_name, fitresult, voltage_values):
     """Predict voltage correction values for the selected model."""
+    if isinstance(fitresult, CalibrationModel):
+        return fitresult.predict_factor(voltage_values)
     if model_name == "curve_fit":
         return voltage_corr(voltage_values, *fitresult)
     return fitresult.predict(voltage_values.reshape(-1, 1))
@@ -106,6 +248,8 @@ def _predict_voltage_model(model_name, fitresult, voltage_values):
 
 def _predict_bowl_model(fit_mode, parameters, dld_x, dld_y):
     """Predict bowl correction values for the selected fitting mode."""
+    if isinstance(parameters, CalibrationModel):
+        return parameters.predict_factor(np.column_stack((dld_x, dld_y)))
     if isinstance(parameters, Mapping) and parameters.get("model") in {"radial_curve_fit", "radial_linear"}:
         coeffs = np.asarray(parameters.get("parameters", ()), dtype=float)
         if coeffs.shape[0] != 5:
@@ -303,6 +447,9 @@ def refine_correction_nelder_mead(
 
 
 __all__ = [
+    "CalibrationModel",
+    "PolynomialCorrectionModel",
+    "EstimatorCorrectionModel",
     "voltage_corr",
     "bowl_corr",
     "bowl_corr_radial",

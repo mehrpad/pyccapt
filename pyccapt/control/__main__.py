@@ -2,13 +2,10 @@ import multiprocessing
 import signal
 import sys
 
-from PyQt6 import QtWidgets
-
 from pyccapt.control.core import loggi, runtime
-from pyccapt.control.gui import app_icon, gui_main
 
 
-def main():
+def main(argv=None):
     """
     Load the GUI based on the configuration file.
 
@@ -21,6 +18,24 @@ def main():
     Returns:
             None
     """
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] in {
+        "validate-config", "validate-hdf", "validate-hdf5",
+        "recover-chunks", "recover-run",
+    }:
+        from pyccapt.control.core.data_integrity import main as data_main
+
+        return data_main(argv, prog="pyccapt")
+
+    try:
+        from PyQt6 import QtWidgets
+        from pyccapt.control.gui import app_icon, gui_main
+    except ImportError as exc:
+        raise SystemExit(
+            "PyCCAPT control dependencies are not installed. "
+            "Install them with: pip install 'pyccapt[control]'"
+        ) from exc
+
     # Put this process in a kill-on-close Job Object so every worker
     # subprocess (camera, visualization, experiment, Manager) is terminated
     # if the GUI dies WITHOUT running cleanup() - e.g. PyCharm's red Stop

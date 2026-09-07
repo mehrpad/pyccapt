@@ -66,6 +66,8 @@ def _compute_sdm_displacements_kdtree(*, particles, mask_i, mask_j, axes, z_cut,
 
     pts_i = particles[mask_i]
     pts_j = particles[mask_j]
+    original_i = np.flatnonzero(mask_i)
+    original_j = np.flatnonzero(mask_j)
     n_i = len(pts_i)
     n_j = len(pts_j)
 
@@ -126,6 +128,10 @@ def _compute_sdm_displacements_kdtree(*, particles, mask_i, mask_j, axes, z_cut,
         if want_z and z_cut:
             cond = np.abs(cur_z) <= box
             keep = cond if keep is None else (keep & cond)
+        # Remove only an atom paired with itself. Distinct atoms may have a
+        # legitimate zero displacement on one or more axes and must remain.
+        not_self = original_i[i_idx] != original_j[j_idx]
+        keep = not_self if keep is None else (keep & not_self)
 
         if want_x:
             acc_x.append(cur_x[keep])
@@ -159,6 +165,8 @@ def _compute_sdm_displacements_bruteforce(*, particles, mask_i, mask_j, axes, z_
 
     pts_i = particles[mask_i]
     pts_j = particles[mask_j]
+    original_i = np.flatnonzero(mask_i)
+    original_j = np.flatnonzero(mask_j)
     n_i = len(pts_i)
     n_j = len(pts_j)
 
@@ -216,16 +224,8 @@ def _compute_sdm_displacements_bruteforce(*, particles, mask_i, mask_j, axes, z_
         if want_z and z_cut:
             keep = _and(keep, np.abs(cur_z) <= box)
 
-        if keep is None:
-            # Only reachable for the z-only / z_cut=False case: no cut,
-            # keep every pair (matches original behaviour).
-            if want_x:
-                acc_x.append(np.ravel(cur_x))
-            if want_y:
-                acc_y.append(np.ravel(cur_y))
-            if want_z:
-                acc_z.append(np.ravel(cur_z))
-            continue
+        local_i = original_i[start : start + len(ci)]
+        keep = _and(keep, local_i[:, None] != original_j[None, :])
 
         if want_x:
             acc_x.append(cur_x[keep])
@@ -234,9 +234,9 @@ def _compute_sdm_displacements_bruteforce(*, particles, mask_i, mask_j, axes, z_
         if want_z:
             acc_z.append(cur_z[keep])
 
-    out_x = np.concatenate(acc_x) if want_x else None
-    out_y = np.concatenate(acc_y) if want_y else None
-    out_z = np.concatenate(acc_z) if want_z else None
+    out_x = (np.concatenate(acc_x) if acc_x else np.empty(0, dtype=float)) if want_x else None
+    out_y = (np.concatenate(acc_y) if acc_y else np.empty(0, dtype=float)) if want_y else None
+    out_z = (np.concatenate(acc_z) if acc_z else np.empty(0, dtype=float)) if want_z else None
     return out_x, out_y, out_z
 
 
@@ -553,17 +553,14 @@ def sdm(
 
     if histogram_type == '1D':
         if 'x' in axes:
-            dx = dx[dx != 0]
             histo_dx, bins_dx = np.histogram(dx, bins=edges)
             histograms.append(histo_dx)
             edges_list.append(bins_dx)
         elif 'y' in axes:
-            dy = dy[dy != 0]
             histo_dy, bins_dy = np.histogram(dy, bins=edges)
             histograms.append(histo_dy)
             edges_list.append(bins_dy)
         elif 'z' in axes:
-            dz = dz[dz != 0]
             histo_dz, bins_dz = np.histogram(dz, bins=edges)
             histograms.append(histo_dz)
             edges_list.append(bins_dz)
@@ -574,25 +571,16 @@ def sdm(
 
     if histogram_type == '2D':
         if 'x' in axes and 'y' in axes:
-            mask = ~((dx == 0) & (dy == 0))
-            dx = dx[mask]
-            dy = dy[mask]
             hist2d, x_edges, y_edges = np.histogram2d(dx, dy, bins=[edges, edges])
             extent = [x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]]
             histograms.append(hist2d)
             edges_list.extend([x_edges, y_edges])
         elif 'y' in axes and 'z' in axes:
-            mask = ~((dy == 0) & (dz == 0))
-            dy = dy[mask]
-            dz = dz[mask]
             hist2d, x_edges, y_edges = np.histogram2d(dy, dz, bins=[edges, edges])
             extent = [x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]]
             histograms.append(hist2d)
             edges_list.extend([x_edges, y_edges])
         elif 'x' in axes and 'z' in axes:
-            mask = ~((dx == 0) & (dz == 0))
-            dx = dx[mask]
-            dz = dz[mask]
             hist2d, x_edges, y_edges = np.histogram2d(dx, dz, bins=[edges, edges])
             extent = [x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]]
             histograms.append(hist2d)
@@ -605,10 +593,6 @@ def sdm(
 
     if histogram_type == '3D':
         if 'x' in axes and 'y' in axes and 'z' in axes:
-            mask = ~((dx == 0) & (dy == 0) & (dz == 0))
-            dx = dx[mask]
-            dy = dy[mask]
-            dz = dz[mask]
             hist3d, edges = np.histogramdd((dx, dy, dz), bins=[edges, edges, edges])
             histograms.append(hist3d)
             edges_list.extend([edges])

@@ -1,6 +1,8 @@
 import logging
 import multiprocessing
+import queue
 import sys
+import time
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
@@ -8,7 +10,9 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import Qt
 
 # Local module and scripts
+from pyccapt.control.apt.experiment_state import ExperimentState, set_experiment_state
 from pyccapt.control.core import device_checks, loggi, runtime
+from pyccapt.control.core.contracts import CommandKind, ControlCommand
 from pyccapt.control.devices import camera as camera_device
 from pyccapt.control.gui import (
     app_icon,
@@ -55,10 +59,17 @@ class Ui_PyCCAPT(object):
         # the subprocess drains the queue every poll tick and dispatches.
         self.camera_command_queue = multiprocessing.Queue()
         self.visualization_command_queue = multiprocessing.Queue()
+        self.experiment_command_queue = multiprocessing.Queue(maxsize=32)
+        self.experiment_status_queue = multiprocessing.Queue(maxsize=128)
+        self.experiment_completion_queue = multiprocessing.Queue(maxsize=1)
+        self.latest_experiment_status = None
+        self.latest_completion_ack = None
         self.process_coordinator = process_coordinator.ProcessCoordinator()
         self.camera_process = None
         self.camera_available = False
         self.camera_status_message = ""
+        self._cleanup_started = False
+        self._reported_experiment_exit = False
 
     def setupUi(self, PyCCAPT):
         PyCCAPT.setObjectName("PyCCAPT")
@@ -1293,7 +1304,7 @@ class Ui_PyCCAPT(object):
         self.detection_rate_init.setText(_translate("PyCCAPT", "1"))
         self.label_192.setText(_translate("PyCCAPT", "Detection Mode"))
         self.counter_source.setItemText(0, _translate("PyCCAPT", "TDC"))
-        self.counter_source.setItemText(1, _translate("PyCCAPT", "Digitizer"))
+        self.counter_source.setItemText(1, _translate("PyCCAPT", "HSD"))
         self.label_191.setText(_translate("PyCCAPT", "Control Algorithm"))
         self.control_algorithm.setItemText(0, _translate("PyCCAPT", "Proportional"))
         self.control_algorithm.setItemText(1, _translate("PyCCAPT", "Proportional aggressive"))
@@ -1846,6 +1857,12 @@ class Ui_PyCCAPT(object):
         if not self.start_button.isEnabled():
             self.statistics_timer.stop()
             self.variables.stop_flag = True  # Set the STOP flag
+            try:
+                self.experiment_command_queue.put_nowait(
+                    ControlCommand(CommandKind.STOP, "Operator requested stop")
+                )
+            except queue.Full:
+                pass
             self.stop_button.setEnabled(False)  # Disable the stop button
             self.timer_stop_exp.start(1000)  # Start the timer to run stop actions after 8 seconds
 
@@ -1859,6 +1876,20 @@ class Ui_PyCCAPT(object):
         Return:
                 None
         """
+        try:
+            run_config = main_parameters.validate_run_parameters(self.variables, self.conf)
+        except main_parameters.ParameterError as exc:
+            self.error_message(str(exc))
+            return
+        # Completion acknowledgements are per-run. Clear a stale item before
+        # starting so a stopped GUI timer cannot make the next worker block.
+        try:
+            while True:
+                self.experiment_completion_queue.get_nowait()
+        except queue.Empty:
+            pass
+
+        self._reported_experiment_exit = False
         self.variables.start_flag = True
         self.variables.stop_flag = False
         self.variables.plot_clear_flag = True
@@ -1908,6 +1939,10 @@ class Ui_PyCCAPT(object):
                 self.y_plot,
                 self.t_plot,
                 self.main_v_dc_plot,
+                run_config,
+                self.experiment_command_queue,
+                self.experiment_status_queue,
+                self.experiment_completion_queue,
             )
         except Exception as exc:
             message = f"Experiment process could not start: {exc.__class__.__name__}: {exc}"
@@ -2167,11 +2202,14 @@ class Ui_PyCCAPT(object):
             self.variables.flag_cameras_take_screenshot = True
 
             # with self.variables.lock_statistics:
-            if self.variables.index_experiment_in_text_line < len(self.result_list):  # Do next experiment in case of TextLine
-                self.variables.index_experiment_in_text_line += 1
+            next_index = self.variables.index_experiment_in_text_line + 1
+            if self.parameters_source.currentText() == 'TextLine' and next_index < len(self.result_list):
+                self.variables.index_experiment_in_text_line = next_index
+                self.read_text_lines()
                 self.start_experiment_worker()
             else:
                 self.variables.index_line = 0
+                self.variables.index_experiment_in_text_line = 0
 
             self.variables.flag_end_experiment = False
             self.variables.flag_stop_tdc = False
@@ -2368,9 +2406,44 @@ class Ui_PyCCAPT(object):
             # Change the color of the push button when the camera window is closed
             self.reset_button_color(self.camears)
             self.camera_closed_event.clear()
+        try:
+            while True:
+                self.latest_experiment_status = self.experiment_status_queue.get_nowait()
+        except queue.Empty:
+            pass
+        try:
+            while True:
+                self.latest_completion_ack = self.experiment_completion_queue.get_nowait()
+        except queue.Empty:
+            pass
+        if self.latest_experiment_status is not None:
+            kind = getattr(self.latest_experiment_status.kind, "value", self.latest_experiment_status.kind)
+            statusbar = getattr(self, "statusbar", None)
+            if kind == "health" and statusbar is not None:
+                current = statusbar.currentMessage()
+                if not current.startswith(("Vacuum warning", "Laser warning")):
+                    age = max(0.0, time.monotonic() - self.latest_experiment_status.emitted_monotonic)
+                    statusbar.showMessage(f"{self.latest_experiment_status.message} | heartbeat {age:.1f}s")
+
         if self.experimetn_finished_event.is_set():
             self.experimetn_finished_event.clear()
             self.on_stop_experiment_worker()
+        else:
+            process = getattr(self, "experiment_process", None)
+            if (
+                process is not None
+                and bool(getattr(self.variables, "start_flag", False))
+                and not self._reported_experiment_exit
+                and not process.is_alive()
+            ):
+                self._reported_experiment_exit = True
+                exit_code = getattr(process, "exitcode", None)
+                message = f"Experiment worker exited unexpectedly (exit code {exit_code})"
+                set_experiment_state(self.variables, ExperimentState.FAILED, message)
+                self.variables.hardware_safe = False
+                self.variables.flag_end_experiment = True
+                self.error_message(message)
+                self.on_stop_experiment_worker()
         if self.visualization_closed_event.is_set():
             # Change the color of the push button when the camera window is closed
             self.reset_button_color(self.visualization)
@@ -2555,6 +2628,36 @@ class Ui_PyCCAPT(object):
           4. Quit the Qt event loop so app.exec() returns and __main__
              can release the shared context + os._exit.
         """
+        if self._cleanup_started:
+            return
+        self._cleanup_started = True
+
+        # Ask the experiment to perform its own safe-off sequence before
+        # any process is terminated. The event is published only after the
+        # hardware-safe state and cleanup have completed.
+        experiment_proc = getattr(self, "experiment_process", None)
+        if experiment_proc is not None:
+            try:
+                if experiment_proc.is_alive():
+                    set_experiment_state(self.variables, ExperimentState.STOPPING)
+                    self.variables.stop_flag = True
+                    self.variables.flag_stop_tdc = True
+                    try:
+                        self.experiment_command_queue.put_nowait(
+                            ControlCommand(CommandKind.EMERGENCY_STOP, "Application is closing")
+                        )
+                    except queue.Full:
+                        pass
+                    if not self.experimetn_finished_event.wait(timeout=8.0):
+                        print(
+                            "cleanup: experiment did not acknowledge safe shutdown "
+                            "within 8 s; escalating to process termination"
+                        )
+                    elif not bool(getattr(self.variables, "hardware_safe", False)):
+                        print("cleanup: experiment exited without a hardware-safe acknowledgement")
+            except Exception as exc:
+                print(f"cleanup: graceful experiment stop failed (non-fatal): {exc}")
+
         # --- 1. Stop in-process QThreads / timers / device handles ------
         for ui_attr in ("gui_baking", "gui_pumps_vacuum", "gui_gates", "gui_laser_control", "gui_stage_control"):
             ui = getattr(self, ui_attr, None)
@@ -2693,7 +2796,7 @@ class MyPyCCAPT(QtWidgets.QMainWindow):
             import os as _os
             import threading as _threading
 
-            _WATCHDOG_SECONDS = 10.0
+            _WATCHDOG_SECONDS = 20.0
 
             def _force_exit():
                 import time as _time

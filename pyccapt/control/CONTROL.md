@@ -27,6 +27,12 @@ The control application uses multiple processes:
 
 Shared state is managed through `core/share_variables.py` using a `multiprocessing.Manager().Namespace()` wrapper.
 
+Experiment lifecycle is explicit and observable through `variables.experiment_state`:
+`idle -> initializing -> running -> stopping -> safe_off -> finalizing -> complete`.
+Any unhandled failure transitions to `failed`, records `experiment_error`, requests detector shutdown, and attempts the
+idempotent hardware safe-off path before publishing the completion event. New code should use
+`apt/experiment_state.py` rather than inventing additional lifecycle flags.
+
 Configuration is loaded from `config.toml` (supports comments).
 `config.json` is no longer accepted by the control runtime.
 
@@ -94,6 +100,33 @@ uncaught exceptions with full stack traces.
 ## Data Structure
 
 HDF5 groups and dataset semantics are documented in [DATA_STRUCTURE.md](DATA_STRUCTURE.md).
+
+For hardware-free development set `tdc_model = "Simulator"`. The simulator follows the same stop-event and ring-buffer
+contract as the real detector backends, so startup, acquisition, finalization, and GUI behavior can be exercised without
+vendor SDKs. Its deterministic controls are `simulator_seed`, `simulator_batch_size`, and `simulator_interval_s`;
+`simulator_fail_after_batches` injects a worker crash for tests and must remain `0` in normal dry runs.
+
+Every detector now implements the same lifecycle contract (`start`, `stop`, `join`, `health`, and completed chunk
+streaming). The experiment worker consumes an immutable `RunConfig`, accepts typed stop commands, and emits typed status
+plus exactly one completion acknowledgement. The state sequence is guarded as `IDLE -> INITIALIZING -> RUNNING ->
+SAFE_OFF -> FINALIZING -> COMPLETE`, with failures transitioning to `FAILED` only after safe-off is attempted.
+
+For a physical interlock, configure `safety_interlock_backend = "nidaq"`, `safety_estop_input_channel`, and optionally
+`safety_watchdog_output_channel`. Software access overrides are appended and fsynced to
+`meta_data/safety_overrides.jsonl`; an override never bypasses a physical E-stop. The status bar reports worker health,
+queue depth, dropped plot records, chunk-write latency, heartbeat age, and the safe-state acknowledgement.
+
+The main command (and the backwards-compatible `pyccapt-data` alias) provides operational checks and recovery:
+
+```text
+pyccapt validate-config pyccapt/config.toml
+pyccapt validate-hdf5 path/to/experiment.h5
+pyccapt recover-run path/to/chunks path/to/recovered.h5
+```
+
+Chunks are published by temp-write/fsync/atomic-rename and recorded in per-stream JSONL manifests with row counts,
+shapes, dtypes, IDs, checksums, write latency, and completion state. Recovery never overwrites the source chunks,
+quarantines inconsistent evidence instead of deleting it, and writes the destination transactionally.
 
 ## Folder Responsibilities
 

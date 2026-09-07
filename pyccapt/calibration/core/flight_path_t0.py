@@ -270,12 +270,19 @@ def estimate_fixed_path_t0(
         pulse_mode,
     )
     tof_ns = peak_table["tof_ns"].to_numpy(dtype=float)
+    valid = np.isfinite(factor) & (factor > 0) & np.isfinite(tof_ns)
+    dropped_rows = int((~valid).sum())
+    factor = factor[valid]
+    tof_ns = tof_ns[valid]
+    if factor.size == 0:
+        raise ValueError("No finite, positive voltage/time rows remain for t0 estimation")
     t0_values = tof_ns - float(flight_path_length_mm) * factor
     return {
         "flight_path_length_mm": float(flight_path_length_mm),
         "t0_ns": float(np.mean(t0_values)),
         "t0_std_ns": float(np.std(t0_values)),
-        "num_ions": int(len(peak_table)),
+        "num_ions": int(factor.size),
+        "dropped_rows": dropped_rows,
         "factor": factor,
         "tof_ns": tof_ns,
         "t0_values_ns": t0_values,
@@ -291,6 +298,12 @@ def fit_flight_path_and_t0(peak_table: pd.DataFrame, *, pulse_mode: str) -> dict
         pulse_mode,
     )
     tof_ns = peak_table["tof_ns"].to_numpy(dtype=float)
+    valid = np.isfinite(factor) & (factor > 0) & np.isfinite(tof_ns)
+    dropped_rows = int((~valid).sum())
+    factor = factor[valid]
+    tof_ns = tof_ns[valid]
+    if factor.size < 2 or np.unique(factor).size < 2:
+        raise ValueError("At least two finite rows with distinct scaling factors are required")
     slope, intercept = np.polyfit(factor, tof_ns, deg=1)
     predicted = intercept + slope * factor
     residuals = tof_ns - predicted
@@ -302,7 +315,8 @@ def fit_flight_path_and_t0(peak_table: pd.DataFrame, *, pulse_mode: str) -> dict
         "t0_ns": float(intercept),
         "rmse_ns": float(np.sqrt(np.mean(residuals**2))),
         "r_squared": float(r_squared),
-        "num_ions": int(len(peak_table)),
+        "num_ions": int(factor.size),
+        "dropped_rows": dropped_rows,
         "factor": factor,
         "tof_ns": tof_ns,
         "predicted_tof_ns": predicted,

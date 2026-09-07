@@ -212,16 +212,24 @@ def create_shared_context(conf: dict[str, Any]) -> SharedContext:
     same shared blocks by name.
     """
     manager = multiprocessing.Manager()
-    namespace = manager.Namespace()
-    variables = share_variables.Variables(conf, namespace)
+    allocated_buffers: list[SharedRingBuffer] = []
+    try:
+        namespace = manager.Namespace()
+        variables = share_variables.Variables(conf, namespace)
 
-    # Unique per-launch suffix so we never collide with a stale block
-    # left behind by a crashed previous run.
-    suffix = uuid.uuid4().hex[:8]
-    x_plot = SharedRingBuffer.create(f"pyccapt_xplot_{suffix}", _PLOT_BUFFER_CAPACITY, "float32")
-    y_plot = SharedRingBuffer.create(f"pyccapt_yplot_{suffix}", _PLOT_BUFFER_CAPACITY, "float32")
-    t_plot = SharedRingBuffer.create(f"pyccapt_tplot_{suffix}", _PLOT_BUFFER_CAPACITY, "float32")
-    main_v_dc_plot = SharedRingBuffer.create(f"pyccapt_vplot_{suffix}", _PLOT_BUFFER_CAPACITY, "float32")
+        # Unique per-launch suffix so we never collide with a stale block
+        # left behind by a crashed previous run.
+        suffix = uuid.uuid4().hex[:8]
+        for label in ("xplot", "yplot", "tplot", "vplot"):
+            allocated_buffers.append(
+                SharedRingBuffer.create(f"pyccapt_{label}_{suffix}", _PLOT_BUFFER_CAPACITY, "float32")
+            )
+        x_plot, y_plot, t_plot, main_v_dc_plot = allocated_buffers
+    except Exception:
+        for buffer in allocated_buffers:
+            buffer.unlink()
+        manager.shutdown()
+        raise
 
     return SharedContext(
         manager=manager,

@@ -24,6 +24,13 @@ Calibration workflows use `Variables` from
 - `SharedVariablesBase` provides common validation and path helpers.
 - Validation/state issues should raise explicit calibration exceptions
   (`CalibrationInputError`, `CalibrationStateError`).
+- `sync_from_data(...)` is the single synchronization boundary after loading or replacing a dataframe. It also publishes
+  `has_detector_positions`, `has_reconstruction`, and `has_mass_spectrum`; unavailable coordinates remain `NaN` rather
+  than being represented by plausible-looking zero values.
+- At that boundary, `CalibrationDataset` owns schema version, units, aligned row count, finite masks, capability flags,
+  and a stable source hash. Reusing a `Variables` instance for a new load replaces this object and resets derived state.
+- New correction models implement `CalibrationModel.fit()`, `predict_factor()`, `valid_domain`, and JSON-serializable
+  `provenance()` so a fitted result can be audited and reproduced.
 
 ## Naming Convention
 
@@ -49,6 +56,8 @@ These helpers are intended to work on both Windows and Linux.
 - Prefer explicit exceptions over `print` for invalid inputs.
 - Keep modules focused by responsibility.
 - Add tests for behavior changes under `tests/`.
+- Treat non-finite detector, time-of-flight, and mass values as unavailable input before histogramming, fitting, or spatial
+  indexing.
 
 ## Module Length Guardrail
 
@@ -56,7 +65,11 @@ A test guardrail enforces a file-size ceiling for Python modules in calibration
 folders (including tutorial helpers):
 
 - maximum allowed: `1250` lines per `.py` file
-- enforced by: `tests/test_calibration_module_lengths.py`
+- enforced by: `tests/calibration/test_calibration_module_lengths.py`
+
+The numerical peak models, advanced calibration algorithms, schema boundary, and canonical voxel/isosurface operations
+live in focused domain modules rather than plotting or notebook UI modules. Compatibility imports preserve existing
+notebook APIs while letting the domain code be tested without constructing widgets.
 
 ## Tutorials
 

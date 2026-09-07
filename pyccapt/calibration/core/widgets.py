@@ -69,10 +69,10 @@ def onClickAdd(b, variables):
             selectedElement = elementDict['element']
             charge = chargeDict['charge']
             variables.charge.append(charge)
-            element = re.sub("\d+", "", selectedElement)
-            element = re.sub("[\(\[].*?[\)\]]", "", element)
+            element = re.sub(r"\d+", "", selectedElement)
+            element = re.sub(r"[\(\[].*?[\)\]]", "", element)
             variables.element.append(element)
-            isotope = int(re.findall("\d+", selectedElement)[0])
+            isotope = int(re.findall(r"\d+", selectedElement)[0])
             variables.isotope.append(isotope)
 
             print("Updated List: ", variables.list_material)
@@ -190,7 +190,7 @@ def compute_element_isotope_values_according_to_selected_charge(mode='calibratio
     charge = chargeDict['charge']
 
     if mode == 'calibration':
-        elem = re.findall('\[(.*?)\]', selectedElement)
+        elem = re.findall(r'\[(.*?)\]', selectedElement)
         elementWithCharge = round(float(elem[0]) / int(charge), 2)
         elementWithChargeDict['element'] = elementWithCharge
     elif mode == 'ions_selection':

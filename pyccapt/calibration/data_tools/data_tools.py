@@ -561,7 +561,7 @@ def load_data(dataset_path, data_type, mode="processed", *, load_tdc=False, tdc_
 
 
 def extract_data(data, variables, flightPathLength_d, max_mc):
-    """Extract common calibrated arrays and metadata into shared variables."""
+    """Normalize a loaded table and atomically synchronize calibration state."""
 
     def _resolve_column(candidates):
         for column in candidates:
@@ -569,6 +569,7 @@ def extract_data(data, variables, flightPathLength_d, max_mc):
                 return column
         return None
 
+    frame = data.copy()
     high_voltage_aliases = (
         "high_voltage (V)",
         "high_voltage",
@@ -577,37 +578,35 @@ def extract_data(data, variables, flightPathLength_d, max_mc):
         "VDC",
         "Vref",
     )
-    voltage_column = next((column for column in high_voltage_aliases if column in data.columns), None)
+    voltage_column = next((column for column in high_voltage_aliases if column in frame.columns), None)
     if voltage_column is None:
         warnings.warn(
             "Main dataframe does not have a high-voltage column; using zeros for 'high_voltage (V)'.",
             RuntimeWarning,
             stacklevel=2,
         )
-        variables.dld_high_voltage = np.zeros(len(data), dtype=float)
+        frame["high_voltage (V)"] = np.zeros(len(frame), dtype=float)
     else:
-        variables.dld_high_voltage = data[voltage_column].to_numpy()
-    if "pulse_v (V)" in data.columns:
-        variables.dld_pulse_v = data["pulse_v (V)"].to_numpy()
-    elif "pulse" in data.columns:
-        variables.dld_pulse_v = data["pulse"].to_numpy()
+        frame["high_voltage (V)"] = frame[voltage_column].to_numpy()
+    if "pulse_v (V)" in frame.columns:
+        pass
+    elif "pulse" in frame.columns:
+        frame["pulse_v (V)"] = frame["pulse"].to_numpy()
     else:
         warnings.warn(
             "Main dataframe does not have 'pulse' or 'pulse_v (V)'; using zeros for pulse values.",
             RuntimeWarning,
             stacklevel=2,
         )
-        variables.dld_pulse_v = np.zeros_like(variables.dld_high_voltage)
-    if "pulse_l (pJ)" not in data.columns:
-        variables.dld_pulse_l = np.zeros_like(variables.dld_high_voltage)
-    else:
-        variables.dld_pulse_l = data["pulse_l (pJ)"].to_numpy()
+        frame["pulse_v (V)"] = np.zeros(len(frame), dtype=float)
+    if "pulse_l (pJ)" not in frame.columns:
+        frame["pulse_l (pJ)"] = np.zeros(len(frame), dtype=float)
 
     tof_aliases = ("t (ns)", "TOF (ns)", "Epos ToF", "tof_ns", "tof", "tofc", "t_c (ns)")
-    tof_column = _resolve_column(tof_aliases)
+    tof_column = next((column for column in tof_aliases if column in frame.columns), None)
     if tof_column is None:
         raise KeyError(
-            "No TOF column found. Expected one of: " + ", ".join(tof_aliases) + f". Available columns: {list(data.columns)}"
+            "No TOF column found. Expected one of: " + ", ".join(tof_aliases) + f". Available columns: {list(frame.columns)}"
         )
     if tof_column != "t (ns)":
         warnings.warn(
@@ -615,64 +614,49 @@ def extract_data(data, variables, flightPathLength_d, max_mc):
             RuntimeWarning,
             stacklevel=2,
         )
-    variables.dld_t = data[tof_column].to_numpy()
+    frame["t (ns)"] = frame[tof_column].to_numpy()
 
-    x_det_cm_column = _resolve_column(("x_det (cm)", "x_det", "det_x (cm)", "XDet_cm"))
-    y_det_cm_column = _resolve_column(("y_det (cm)", "y_det", "det_y (cm)", "YDet_cm"))
-    x_det_mm_column = _resolve_column(("det_x (mm)", "XDet_mm", "det_x"))
-    y_det_mm_column = _resolve_column(("det_y (mm)", "YDet_mm", "det_y"))
+    x_det_cm_column = next((c for c in ("x_det (cm)", "x_det", "det_x (cm)", "XDet_cm") if c in frame), None)
+    y_det_cm_column = next((c for c in ("y_det (cm)", "y_det", "det_y (cm)", "YDet_cm") if c in frame), None)
+    x_det_mm_column = next((c for c in ("det_x (mm)", "XDet_mm", "det_x") if c in frame), None)
+    y_det_mm_column = next((c for c in ("det_y (mm)", "YDet_mm", "det_y") if c in frame), None)
 
     if x_det_cm_column is not None:
-        variables.dld_x_det = data[x_det_cm_column].to_numpy()
+        frame["x_det (cm)"] = frame[x_det_cm_column].to_numpy()
     elif x_det_mm_column is not None:
         warnings.warn(
             f"Using mm detector column '{x_det_mm_column}' and converting to cm for x_det.",
             RuntimeWarning,
             stacklevel=2,
         )
-        variables.dld_x_det = data[x_det_mm_column].to_numpy() / 10.0
+        frame["x_det (cm)"] = frame[x_det_mm_column].to_numpy() / 10.0
     else:
         warnings.warn(
-            "No x detector column found; using zeros for x_det (cm).",
+            "No x detector column found; marking x_det (cm) unavailable with NaN.",
             RuntimeWarning,
             stacklevel=2,
         )
-        variables.dld_x_det = np.zeros(len(data), dtype=float)
+        # Deliberately omit the canonical column; sync_from_data publishes NaN
+        # and has_detector_positions=False instead of inventing center hits.
 
     if y_det_cm_column is not None:
-        variables.dld_y_det = data[y_det_cm_column].to_numpy()
+        frame["y_det (cm)"] = frame[y_det_cm_column].to_numpy()
     elif y_det_mm_column is not None:
         warnings.warn(
             f"Using mm detector column '{y_det_mm_column}' and converting to cm for y_det.",
             RuntimeWarning,
             stacklevel=2,
         )
-        variables.dld_y_det = data[y_det_mm_column].to_numpy() / 10.0
+        frame["y_det (cm)"] = frame[y_det_mm_column].to_numpy() / 10.0
     else:
         warnings.warn(
-            "No y detector column found; using zeros for y_det (cm).",
+            "No y detector column found; marking y_det (cm) unavailable with NaN.",
             RuntimeWarning,
             stacklevel=2,
         )
-        variables.dld_y_det = np.zeros(len(data), dtype=float)
-
-    if "mc (Da)" in data.columns:
-        variables.mc = data["mc (Da)"].to_numpy()
-    if "t_c (ns)" in data.columns:
-        variables.dld_t_c = data["t_c (ns)"].to_numpy()
-    if "mc_uc (Da)" in data.columns:
-        variables.mc_calib = data["mc_uc (Da)"].to_numpy()
-        variables.mc_calib_backup = data["mc_uc (Da)"].to_numpy()
-        variables.mc_uc = data["mc_uc (Da)"].to_numpy()
 
     variables.max_tof = int(tof_tools.mc2tof(max_mc, 1000, 0, 0, flightPathLength_d))
-    variables.dld_t_calib = variables.dld_t.copy()
-    variables.dld_t_calib_backup = variables.dld_t.copy()
-
-    if {"x (nm)", "y (nm)", "z (nm)"} <= set(data.columns):
-        variables.x = data["x (nm)"].to_numpy()
-        variables.y = data["y (nm)"].to_numpy()
-        variables.z = data["z (nm)"].to_numpy()
+    variables.sync_from_data(frame, update_backups=True, clear_selection=True)
     print("The maximum possible time of flight is:", variables.max_tof)
     return variables
 

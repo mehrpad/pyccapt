@@ -107,8 +107,7 @@ def initialization_v_dc(com_port_v_dc, log_apt, variables):
             for cmd in range(len(cmd_list)):
                 command_v_dc(com_port_v_dc, cmd_list[cmd])
         else:
-            print("Couldn't open Port!")
-            exit()
+            raise RuntimeError("High-voltage serial port is not open")
         log_apt.info('High voltage is initialized')
         initialization_error = False
     except Exception as e:

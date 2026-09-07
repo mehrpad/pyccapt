@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from pyccapt.control.apt.detector_models import normalize_counter_source
+from pyccapt.control.core.contracts import RunConfig
 from pyccapt.control.core import read_files
 
 
@@ -70,6 +73,53 @@ class FormValues:
     # still construct a valid FormValues.
     criteria_email: bool = False
     email_interval_events: str = "1000000"
+
+
+def _run_config_from_variables(variables: Any) -> RunConfig:
+    return RunConfig(
+        ex_freq=float(variables.ex_freq), ex_time=float(variables.ex_time),
+        max_ions=int(variables.max_ions), vdc_min=float(variables.vdc_min),
+        vdc_max=float(variables.vdc_max), v_p_min=float(variables.v_p_min),
+        v_p_max=float(variables.v_p_max), pulse_fraction=float(variables.pulse_fraction),
+        pulse_frequency=float(variables.pulse_frequency), detection_rate=float(variables.detection_rate),
+        pulse_amp_per_supply_voltage=float(getattr(variables, "pulse_amp_per_supply_voltage", 1.0)),
+        counter_source=normalize_counter_source(variables.counter_source),
+        pulse_mode=str(getattr(variables, "pulse_mode", "Voltage")).strip(),
+    )
+
+
+def validate_run_parameters(variables: Any, conf: Mapping[str, Any]) -> RunConfig:
+    """Validate cross-field and hardware limits before creating a worker."""
+    try:
+        run = _run_config_from_variables(variables)
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise ParameterError(f"Experiment parameters are incomplete or non-numeric: {exc}") from exc
+    numeric_values = (
+        run.ex_freq, run.ex_time, run.vdc_min, run.vdc_max, run.v_p_min, run.v_p_max,
+        run.pulse_fraction, run.pulse_frequency, run.detection_rate, run.pulse_amp_per_supply_voltage,
+    )
+    if not all(math.isfinite(value) for value in numeric_values):
+        raise ParameterError("Experiment parameters must be finite")
+    if run.ex_freq <= 0:
+        raise ParameterError("Experiment frequency must be greater than zero")
+    if not 0 <= run.vdc_min < run.vdc_max <= float(conf["max_vdc"]):
+        raise ParameterError("Vdc must satisfy 0 <= minimum < maximum <= configured hardware maximum")
+    if run.pulse_mode == "Voltage" and not (
+        float(conf["min_vp"]) <= run.v_p_min < run.v_p_max <= float(conf["max_vp"])
+    ):
+        raise ParameterError("Pulse voltage must satisfy configured minimum <= minimum < maximum <= maximum")
+    if not 0 <= run.pulse_fraction <= float(conf["pulse_fraction_max"]):
+        raise ParameterError("Pulse fraction is outside the configured safe range")
+    if run.pulse_frequency <= 0 or run.pulse_amp_per_supply_voltage <= 0:
+        raise ParameterError("Pulse frequency and amplifier divisor must be greater than zero")
+    if not 0 <= run.detection_rate <= 100:
+        raise ParameterError("Detection rate must be between 0 and 100 percent")
+    if bool(getattr(variables, "criteria_time", False)) and run.ex_time <= 0:
+        raise ParameterError("Experiment time must be positive when the time criterion is enabled")
+    if bool(getattr(variables, "criteria_ions", False)) and run.max_ions <= 0:
+        raise ParameterError("Maximum ions must be positive when the ion criterion is enabled")
+    variables.counter_source = run.counter_source
+    return run
 
 
 def _electrode_names_from_mapping(data: Mapping[str, Any]) -> list[str]:
@@ -193,51 +243,26 @@ def apply_textline_item(
     emit_error: Callable[[str], None],
 ) -> None:
     """Apply one parsed text-line experiment definition to shared variables."""
-    variables.ex_user = str(item["ex_user"])
-    variables.ex_name = str(item["ex_name"])
-    variables.electrode = str(item["electrode"])
-    variables.ex_time = int(item["ex_time"])
-    variables.max_ions = int(item["max_ions"])
-    variables.ex_freq = int(item["ex_freq"])
-    variables.vdc_min = int(item["vdc_min"])
-
-    vdc_max = int(item["vdc_max"])
-    if vdc_max < conf["max_vdc"]:
-        variables.vdc_max = vdc_max
-    else:
-        emit_error(f"Maximum possible Vdc is {conf['max_vdc']}")
-
-    variables.vdc_steps_up = float(item["vdc_steps_up"])
-    variables.vdc_steps_down = float(item["vdc_steps_down"])
-    variables.control_algorithm = str(item["control_algorithm"])
-    variables.pulse_mode = str(item["pulse_mode"])
-
-    vp_min = int(item["vp_min"])
-    if vp_min < conf["min_vp"]:
-        variables.vp_min = conf["min_vp"]
-        emit_error(f"Minimum possible V_p is {conf['min_vp']}")
-    elif vp_min > conf["max_vp"]:
-        emit_error(f"Maximum possible V_p is {conf['max_vp']}")
-    else:
-        variables.vp_min = vp_min
-
-    vp_max = int(item["vp_max"])
-    if vp_max < conf["max_vp"]:
-        variables.vp_max = vp_max
-    else:
-        emit_error(f"Maximum possible V_p is {conf['max_vp']}")
-
-    variables.pulse_fraction = int(item["pulse_fraction"])
-    variables.pulse_frequency = int(item["pulse_frequency"])
-    variables.detection_rate_init = float(item["detection_rate_init"])
+    apply_form_values(
+        variables,
+        conf,
+        FormValues(
+            user_name=str(item["ex_user"]), ex_name=str(item["ex_name"]), electrode=str(item["electrode"]),
+            ex_time=str(item["ex_time"]), ex_freq=str(item["ex_freq"]), max_ions=str(item["max_ions"]),
+            vdc_min=str(item["vdc_min"]), vdc_max=str(item["vdc_max"]),
+            detection_rate_init=str(item["detection_rate_init"]), pulse_fraction=str(item["pulse_fraction"]),
+            email=str(item["email"]), vdc_steps_up=str(item["vdc_steps_up"]),
+            vdc_steps_down=str(item["vdc_steps_down"]), control_algorithm=str(item["control_algorithm"]),
+            pulse_mode=str(item["pulse_mode"]), vp_min=str(item["vp_min"]), vp_max=str(item["vp_max"]),
+            pulse_frequency=str(item["pulse_frequency"]), counter_source=str(item["counter_source"]),
+            criteria_time=bool(item["criteria_time"]), criteria_ions=bool(item["criteria_ions"]),
+            criteria_vdc=bool(item["criteria_vdc"]), criteria_email=bool(item.get("criteria_email", False)),
+            email_interval_events=str(item.get("email_interval_events", 1000000)),
+        ),
+        emit_error,
+    )
     variables.hit_display = int(item["hit_displayed"])
-    variables.email = str(item["email"])
-    variables.counter_source = str(item["counter_source"])
-    variables.criteria_time = bool(item["criteria_time"])
-    variables.criteria_ions = bool(item["criteria_ions"])
-    variables.criteria_vdc = bool(item["criteria_vdc"])
-    variables.criteria_email = bool(item.get("criteria_email", False))
-    variables.email_interval_events = int(item.get("email_interval_events", 1000000))
+    validate_run_parameters(variables, conf)
 
 
 def _bounded_pulse_frequency(value: int, pulse_mode: str, conf: Mapping[str, Any]) -> tuple[int, str | None]:
@@ -283,7 +308,7 @@ def apply_form_values(
     variables.pulse_mode = values.pulse_mode
     variables.v_p_min = int(float(values.vp_min))
     variables.v_p_max = int(float(values.vp_max))
-    variables.counter_source = values.counter_source
+    variables.counter_source = normalize_counter_source(values.counter_source)
 
     pulse_fraction_value = int(float(values.pulse_fraction))
     if pulse_fraction_value > conf["pulse_fraction_max"]:
@@ -326,5 +351,8 @@ def apply_form_values(
         variables.email_interval_events = int(float(values.email_interval_events))
     except (TypeError, ValueError):
         emit_error("Email interval must be a whole number of ions")
+
+    if getattr(variables, "email_interval_events", 0) <= 0:
+        raise ParameterError("Email interval must be greater than zero")
 
     return corrections

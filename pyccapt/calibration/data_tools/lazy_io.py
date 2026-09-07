@@ -548,6 +548,10 @@ def chunked_min_max(column: LazyColumn, *, chunk_size: int = DEFAULT_CHUNK_SIZE)
         chunk = column[start : start + chunk_size]
         if chunk.size == 0:
             continue
+        if np.issubdtype(np.asarray(chunk).dtype, np.number):
+            chunk = np.asarray(chunk)[np.isfinite(chunk)]
+            if chunk.size == 0:
+                continue
         c_lo = float(np.min(chunk))
         c_hi = float(np.max(chunk))
         lo = c_lo if lo is None else min(lo, c_lo)
@@ -584,6 +588,10 @@ def chunked_histogram(
         chunk = column[start : start + chunk_size]
         if chunk.size == 0:
             continue
+        if np.issubdtype(np.asarray(chunk).dtype, np.number):
+            chunk = np.asarray(chunk)[np.isfinite(chunk)]
+            if chunk.size == 0:
+                continue
         c_counts, _ = np.histogram(chunk, bins=edges)
         counts += c_counts.astype(np.int64, copy=False)
     return counts, edges

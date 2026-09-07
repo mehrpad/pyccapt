@@ -22,6 +22,7 @@ from pyccapt.calibration.reconstructions.io_utils import (
 from pyccapt.calibration.reconstructions.plot_bounds import evaporation_frame_boundaries, range_cube_from_mask, sample_mask
 from pyccapt.calibration.reconstructions.rotation_tools import (
     plotly_fig2array,
+    rotate_z,
     rotary_fig,
 )
 from pyccapt.calibration.reconstructions.species_display import range_row_masks_and_unranged

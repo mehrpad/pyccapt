@@ -66,19 +66,16 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e ".[calibration,dev]"
       - name: Enforce branch coverage floor on critical contracts
-        run: >-
-          pytest -q
-          tests/control/test_chunk_store.py
-          tests/control/test_fault_injection.py
-          tests/control/test_health_dashboard.py
-          tests/control/test_safety_interlock.py
-          tests/calibration/test_dataset_and_model_contracts.py
-          tests/calibration/test_property_and_golden_data.py
-          --cov=pyccapt.control.core.chunk_store
-          --cov=pyccapt.control.core.health
-          --cov=pyccapt.control.core.safety
-          --cov=pyccapt.calibration.core.dataset
-          --cov-branch --cov-report=term-missing --cov-fail-under=70
+        run: |
+          python -m coverage erase
+          python -m coverage run --rcfile=.github/coverage-contracts.ini -m pytest -q \
+            tests/control/test_chunk_store.py \
+            tests/control/test_fault_injection.py \
+            tests/control/test_health_dashboard.py \
+            tests/control/test_safety_interlock.py \
+            tests/calibration/test_dataset_and_model_contracts.py \
+            tests/calibration/test_property_and_golden_data.py
+          python -m coverage report --rcfile=.github/coverage-contracts.ini
 
   performance:
     name: multi-million-ion regression thresholds

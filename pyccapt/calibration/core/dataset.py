@@ -101,7 +101,7 @@ class CalibrationDataset:
         return np.full(self.row_count, missing, dtype=float)
 
     def finite_mask(self, *columns_or_capabilities: str) -> np.ndarray:
-        mask = np.ones(self.row_count, dtype=bool)
+        mask: np.ndarray = np.ones(self.row_count, dtype=bool)
         for name in columns_or_capabilities:
             try:
                 mask &= self.finite_masks[name]

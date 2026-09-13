@@ -298,4 +298,173 @@ def plot_concentration_profile(profile: pd.DataFrame, *, figure_size=(9.0, 5.0))
     return fig, ax
 
 
-__all__ = ["calculate_concentration_profile", "plot_concentration_profile", "profile_species_options"]
+def calculate_roi_concentration_profile(
+    x_values,
+    y_values,
+    z_values,
+    mc_values,
+    range_data: pd.DataFrame,
+    selected_species: Iterable[str],
+    *,
+    axis: str = "z",
+    transverse_center: tuple[float, float],
+    transverse_size: tuple[float, float],
+    bin_width: float = 1.0,
+    profile_start: float | None = None,
+    profile_end: float | None = None,
+) -> pd.DataFrame:
+    """Calculate concentration in an axis-aligned rectangular-prism ROI.
+
+    ``axis`` is the direction of the concentration profile.  The ROI extends
+    from ``profile_start`` to ``profile_end`` along that axis, and is centred
+    on ``transverse_center`` with full widths ``transverse_size`` in the other
+    two directions.  Coordinates and bins are expressed in nm.
+    """
+    axis = str(axis).lower().strip()
+    axis_indices = {"x": 0, "y": 1, "z": 2}
+    if axis not in axis_indices:
+        raise ValueError("Profile axis must be one of: x, y, z")
+    try:
+        bin_width = float(bin_width)
+        center = tuple(float(value) for value in transverse_center)
+        size = tuple(float(value) for value in transverse_size)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("ROI center, ROI size, and bin width must be numeric") from exc
+    if len(center) != 2 or len(size) != 2 or not np.all(np.isfinite([*center, *size, bin_width])):
+        raise ValueError("ROI center and size must each contain two finite values")
+    if bin_width <= 0 or any(value <= 0 for value in size):
+        raise ValueError("ROI widths and bin width must be greater than zero")
+
+    coordinates = np.column_stack(
+        [
+            np.asarray(x_values, dtype=float).reshape(-1),
+            np.asarray(y_values, dtype=float).reshape(-1),
+            np.asarray(z_values, dtype=float).reshape(-1),
+        ]
+    )
+    mc = np.asarray(mc_values, dtype=float).reshape(-1)
+    if coordinates.shape[0] != mc.size:
+        raise ValueError("Reconstruction coordinates and mass-to-charge values must have equal lengths")
+
+    profile_index = axis_indices[axis]
+    transverse_indices = tuple(index for index in range(3) if index != profile_index)
+    finite_coordinates = np.all(np.isfinite(coordinates), axis=1)
+    roi_mask = finite_coordinates.copy()
+    for index, value, width in zip(transverse_indices, center, size):
+        roi_mask &= np.abs(coordinates[:, index] - value) <= width / 2.0
+    if not roi_mask.any():
+        raise ValueError("The ROI contains no ions; adjust its centre or transverse widths")
+
+    profile_coordinates = coordinates[:, profile_index]
+    available_coordinates = profile_coordinates[roi_mask]
+    start = float(np.min(available_coordinates)) if profile_start is None else float(profile_start)
+    end = float(np.max(available_coordinates)) if profile_end is None else float(profile_end)
+    if not np.isfinite(start) or not np.isfinite(end) or end <= start:
+        raise ValueError("Profile end must be greater than profile start")
+    roi_mask &= (profile_coordinates >= start) & (profile_coordinates <= end)
+    if not roi_mask.any():
+        raise ValueError("No ROI ions fall within the requested profile range")
+
+    bin_count = max(1, int(np.ceil((end - start) / bin_width)))
+    edges = start + np.arange(bin_count + 1, dtype=float) * bin_width
+    edges[-1] = end
+    species = _range_species(range_data)
+    selectors = _resolve_selectors(selected_species, species)
+    assigned = _assign_species(mc, species)
+    denominator_weights = np.asarray([item.atom_count for item in species], dtype=float)
+    numerator_weights = {
+        label: (
+            np.asarray([item.element_count(value) for item in species], dtype=float)
+            if kind == "element"
+            else np.asarray(
+                [item.atom_count if item.index == value else 0.0 for item in species], dtype=float
+            )
+            if kind == "ion"
+            else None
+        )
+        for label, kind, value in selectors
+    }
+
+    roi_indices = np.flatnonzero(roi_mask)
+    roi_positions = profile_coordinates[roi_indices]
+    bin_indices = np.searchsorted(edges, roi_positions, side="right") - 1
+    bin_indices = np.clip(bin_indices, 0, bin_count - 1)
+    rows = []
+    for index in range(bin_count):
+        assigned_bin = assigned[roi_indices[bin_indices == index]]
+        ranged = assigned_bin >= 0
+        counts = np.bincount(assigned_bin[ranged], minlength=len(species))
+        ranged_atoms = float(counts @ denominator_weights)
+        unranged_events = int((~ranged).sum())
+        denominator = ranged_atoms + unranged_events
+        record = {
+            "position_nm": (edges[index] + edges[index + 1]) / 2.0,
+            "bin_start_nm": edges[index],
+            "bin_end_nm": edges[index + 1],
+            "detected_events": int(assigned_bin.size),
+            "ranged_atoms": ranged_atoms,
+            "unranged_events": unranged_events,
+            "total_atom_equivalents": denominator,
+        }
+        for label, _, _ in selectors:
+            weights = numerator_weights[label]
+            numerator = unranged_events if weights is None else float(counts @ weights)
+            record[label] = numerator / denominator * 100.0 if denominator else np.nan
+        rows.append(record)
+
+    profile = pd.DataFrame(rows)
+    assigned_roi = assigned[roi_indices]
+    ranged_roi = assigned_roi >= 0
+    roi_counts = np.bincount(assigned_roi[ranged_roi], minlength=len(species))
+    roi_unranged = int((~ranged_roi).sum())
+    roi_denominator = float(roi_counts @ denominator_weights) + roi_unranged
+    profile.attrs["overall_percentages"] = {
+        label: (
+            (roi_unranged if weights is None else float(roi_counts @ weights)) / roi_denominator * 100.0
+            if roi_denominator
+            else np.nan
+        )
+        for label, weights in numerator_weights.items()
+    }
+    profile.attrs["axis"] = axis
+    profile.attrs["roi_event_count"] = int(roi_indices.size)
+    profile.attrs["roi_center_nm"] = center
+    profile.attrs["roi_size_nm"] = size
+    profile.attrs["profile_range_nm"] = (start, end)
+    return profile
+
+
+def plot_roi_concentration_profile(profile: pd.DataFrame, *, figure_size=(9.0, 5.0)):
+    """Plot a rectangular-ROI concentration profile returned by this module."""
+    import matplotlib.pyplot as plt
+
+    metadata = {
+        "position_nm", "bin_start_nm", "bin_end_nm", "detected_events",
+        "ranged_atoms", "unranged_events", "total_atom_equivalents",
+    }
+    curves = [column for column in profile.columns if column not in metadata]
+    if profile.empty or not curves:
+        raise ValueError("The ROI concentration profile has no bins or selected curves")
+    fig, ax = plt.subplots(figsize=figure_size)
+    for column in curves:
+        overall = profile.attrs.get("overall_percentages", {}).get(column, np.nan)
+        display_name = column.removesuffix(" (element)")
+        label = f"{display_name}: {overall:.2f} at.%" if np.isfinite(overall) else display_name
+        ax.plot(profile["position_nm"], profile[column], marker="o", markersize=3, linewidth=1.5, label=label)
+    axis = profile.attrs.get("axis", "z")
+    ax.set_xlabel(f"{axis} position [nm]")
+    ax.set_ylabel("Concentration [at.%]")
+    ax.set_ylim(0, 100)
+    ax.grid(True, alpha=0.3, linestyle="--")
+    ax.legend(loc="best")
+    fig.tight_layout()
+    return fig, ax
+
+
+__all__ = [
+    "calculate_concentration_profile",
+    "calculate_roi_concentration_profile",
+    "plot_concentration_profile",
+    "plot_roi_concentration_profile",
+    "profile_species_options",
+]

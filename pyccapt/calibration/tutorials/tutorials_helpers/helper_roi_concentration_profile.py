@@ -61,13 +61,27 @@ def build_roi_concentration_profile_panel(variables, *, label_layout=None):
     figure_name = widgets.Text(value="roi_concentration_profile")
     figure_width = widgets.FloatText(value=9.0)
     figure_height = widgets.FloatText(value=5.0)
-    save_result = widgets.Checkbox(value=False, description="Save figure and CSV")
+    save_result = widgets.Dropdown(options=[("True", True), ("False", False)], value=False)
     preview_button = widgets.Button(description="Preview ROI", button_style="info")
     plot_button = widgets.Button(description="Plot ROI concentration", button_style="primary")
+    clear_plot_button = widgets.Button(description="Clear plot", button_style="warning")
     output = widgets.Output()
+    current_figure = [None]
 
     coordinate_names = ("x", "y", "z")
     coordinate_map = {"x": x_values, "y": y_values, "z": z_values}
+
+    def _set_current_figure(figure):
+        if current_figure[0] is not None:
+            plt.close(current_figure[0])
+        current_figure[0] = figure
+
+    def _clear_plot(_button):
+        if current_figure[0] is not None:
+            plt.close(current_figure[0])
+            current_figure[0] = None
+        with output:
+            clear_output(wait=True)
 
     def _update_axis_controls(*_args):
         profile_axis = axis.value
@@ -122,6 +136,7 @@ def build_roi_concentration_profile_panel(variables, *, label_layout=None):
                 plot_axis.set_title(f"ROI cross-section for {profile_axis}-axis profile")
                 plot_axis.set_aspect("equal", adjustable="box")
                 plot_axis.grid(True, alpha=0.25)
+                _set_current_figure(fig)
                 plt.show()
         except Exception as exc:
             with output:
@@ -148,6 +163,7 @@ def build_roi_concentration_profile_panel(variables, *, label_layout=None):
                 fig, _plot_axis = plot_roi_concentration_profile(
                     profile, figure_size=(figure_width.value, figure_height.value)
                 )
+                _set_current_figure(fig)
                 if save_result.value:
                     if not variables.result_path:
                         raise ValueError("Select a result directory before saving the profile")
@@ -166,6 +182,7 @@ def build_roi_concentration_profile_panel(variables, *, label_layout=None):
 
     preview_button.on_click(_preview)
     plot_button.on_click(_plot)
+    clear_plot_button.on_click(_clear_plot)
     return widgets.VBox(
         [
             widgets.HTML(
@@ -184,8 +201,8 @@ def build_roi_concentration_profile_panel(variables, *, label_layout=None):
             widgets.HBox([widgets.Label("Materials to plot:", layout=label_layout), selected_species]),
             widgets.HBox([widgets.Label("Figure name:", layout=label_layout), figure_name]),
             widgets.HBox([widgets.Label("Figure size:", layout=label_layout), figure_width, figure_height]),
-            save_result,
-            widgets.HBox([preview_button, plot_button]),
+            widgets.HBox([widgets.Label("Save fig:", layout=label_layout), save_result]),
+            widgets.HBox([preview_button, plot_button, clear_plot_button]),
             output,
         ]
     )

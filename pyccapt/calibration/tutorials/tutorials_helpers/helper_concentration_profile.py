@@ -34,7 +34,21 @@ def build_concentration_profile_panel(variables, *, label_layout=None):
     figure_height = widgets.FloatText(value=5.0)
     save_result = widgets.Dropdown(options=[("True", True), ("False", False)], value=False)
     plot_button = widgets.Button(description="Plot concentration profile", button_style="primary")
+    clear_plot_button = widgets.Button(description="Clear plot", button_style="warning")
     output = widgets.Output()
+    current_figure = [None]
+
+    def _set_current_figure(figure):
+        if current_figure[0] is not None:
+            plt.close(current_figure[0])
+        current_figure[0] = figure
+
+    def _clear_plot(_button):
+        if current_figure[0] is not None:
+            plt.close(current_figure[0])
+            current_figure[0] = None
+        with output:
+            clear_output(wait=True)
 
     def _plot(_button):
         plot_button.disabled = True
@@ -53,6 +67,7 @@ def build_concentration_profile_panel(variables, *, label_layout=None):
                     profile,
                     figure_size=(figure_width.value, figure_height.value),
                 )
+                _set_current_figure(fig)
                 if save_result.value:
                     if not variables.result_path:
                         raise ValueError("Select a result directory before saving the profile")
@@ -69,6 +84,7 @@ def build_concentration_profile_panel(variables, *, label_layout=None):
             plot_button.disabled = False
 
     plot_button.on_click(_plot)
+    clear_plot_button.on_click(_clear_plot)
 
     controls = widgets.VBox(
         [
@@ -87,7 +103,7 @@ def build_concentration_profile_panel(variables, *, label_layout=None):
                 [widgets.Label("Figure size:", layout=label_layout), figure_width, figure_height]
             ),
             widgets.HBox([widgets.Label("Save fig:", layout=label_layout), save_result]),
-            plot_button,
+            widgets.HBox([plot_button, clear_plot_button]),
             output,
         ]
     )

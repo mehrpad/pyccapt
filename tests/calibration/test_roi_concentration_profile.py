@@ -76,6 +76,8 @@ def test_roi_profile_plot_uses_spatial_axis_label():
     fig, axis = plot_roi_concentration_profile(profile)
     assert axis.get_xlabel() == "x position [nm]"
     assert axis.get_legend_handles_labels()[1] == ["A: 50.00 at.%"]
+    lower, upper = axis.get_ylim()
+    assert 0.0 < lower < 50.0 < upper < 100.0
     fig.clear()
 
 

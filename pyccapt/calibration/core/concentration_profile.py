@@ -454,7 +454,19 @@ def plot_roi_concentration_profile(profile: pd.DataFrame, *, figure_size=(9.0, 5
     axis = profile.attrs.get("axis", "z")
     ax.set_xlabel(f"{axis} position [nm]")
     ax.set_ylabel("Concentration [at.%]")
-    ax.set_ylim(0, 100)
+    finite_values = profile[curves].to_numpy(dtype=float)
+    finite_values = finite_values[np.isfinite(finite_values)]
+    if finite_values.size:
+        low = float(np.min(finite_values))
+        high = float(np.max(finite_values))
+        padding = max((high - low) * 0.08, max(abs(low), abs(high), 1.0) * 0.03, 0.25)
+        lower = max(0.0, low - padding)
+        upper = min(100.0, high + padding)
+        if lower == upper:
+            lower, upper = max(0.0, lower - 1.0), min(100.0, upper + 1.0)
+        ax.set_ylim(lower, upper)
+    else:
+        ax.set_ylim(0, 100)
     ax.grid(True, alpha=0.3, linestyle="--")
     ax.legend(loc="best")
     fig.tight_layout()

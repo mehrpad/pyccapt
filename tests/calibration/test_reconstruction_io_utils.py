@@ -39,6 +39,14 @@ def test_save_gif_writes_file_to_resolved_path(tmp_path: Path):
     assert (tmp_path / "movie.gif").exists()
 
 
+def test_save_gif_rejects_empty_frames(tmp_path: Path):
+    variables = _DummyVariables(result_path=str(tmp_path))
+    import pytest
+
+    with pytest.raises(ValueError, match="without frames"):
+        io_utils.save_gif([], variables, "movie.gif")
+
+
 def test_save_plotly_animation_uses_resolved_output_path(tmp_path: Path):
     variables = _DummyVariables(result_path=str(tmp_path))
     fig = object()

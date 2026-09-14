@@ -60,6 +60,10 @@ def save_gif(images, variables, filename: str, *, fps: int = 2) -> None:
     """Save a sequence of frames to GIF inside the reconstruction result directory."""
     from PIL import Image
 
+    if not images:
+        raise ValueError("Cannot save a GIF without frames")
+    if fps <= 0:
+        raise ValueError("GIF frames per second must be greater than zero")
     path = resolve_result_file(variables, filename)
     duration_ms = int(1000 / fps)
     frames = [Image.fromarray(img) if not isinstance(img, Image.Image) else img for img in images]
@@ -67,7 +71,9 @@ def save_gif(images, variables, filename: str, *, fps: int = 2) -> None:
         path,
         save_all=True,
         append_images=frames[1:],
-        optimize=True,
+        # Palette optimization is disproportionately slow for large 3D PNG
+        # frames and makes the UI appear frozen after rendering completes.
+        optimize=False,
         loop=0,
         duration=duration_ms,
     )

@@ -94,6 +94,18 @@ def test_write_plotly_html_uses_resolved_output_path(tmp_path: Path):
     assert Path(mock_write.call_args.args[1]) == tmp_path / "plot.html"
 
 
+def test_write_plotly_html_can_add_camera_gif_exporter(tmp_path: Path, monkeypatch):
+    variables = _DummyVariables(result_path=str(tmp_path))
+
+    def _write_html(_fig, filename, **_kwargs):
+        Path(filename).write_text("<html><body></body></html>", encoding="utf-8")
+
+    monkeypatch.setattr(io_utils.pio, "write_html", _write_html)
+    io_utils.write_plotly_html(object(), variables, "plot.html", add_camera_gif_exporter=True)
+
+    assert "Save rotating GIF" in (tmp_path / "plot.html").read_text(encoding="utf-8")
+
+
 def test_write_plotly_image_infers_format_from_filename(tmp_path: Path):
     variables = _DummyVariables(result_path=str(tmp_path))
     fig = object()

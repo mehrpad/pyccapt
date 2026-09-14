@@ -165,9 +165,19 @@ def save_matplotlib_figure(
     return save_figure(fig, directory=output_dir, stem=stem, formats=formats, dpi=dpi, **savefig_kwargs)
 
 
-def write_plotly_html(fig, variables, filename: str, *, include_mathjax: str = "cdn") -> None:
+def write_plotly_html(
+    fig,
+    variables,
+    filename: str,
+    *,
+    include_mathjax: str = "cdn",
+    add_camera_gif_exporter: bool = False,
+) -> None:
     """Write a Plotly figure to HTML inside the reconstruction result directory."""
-    pio.write_html(fig, resolve_result_file(variables, filename), include_mathjax=include_mathjax)
+    output_path = resolve_result_file(variables, filename)
+    pio.write_html(fig, output_path, include_mathjax=include_mathjax)
+    if add_camera_gif_exporter:
+        _add_camera_gif_exporter(output_path, filename)
 
 
 def write_plotly_image(

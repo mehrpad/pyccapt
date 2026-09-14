@@ -849,7 +849,9 @@ def reconstruction_plot(
                     eye=dict(x=4, y=4, z=4),  # Adjust the camera position for zooming
                 )
             )
-            write_plotly_html(fig, variables, f"{figname}_3d.html", include_mathjax='cdn')
+            write_plotly_html(
+                fig, variables, f"{figname}_3d.html", include_mathjax='cdn', add_camera_gif_exporter=True
+            )
             fig.update_layout(showlegend=False)
             layout = go.Layout(
                 margin=go.layout.Margin(
@@ -869,7 +871,9 @@ def reconstruction_plot(
             write_plotly_image(fig, variables, f"{figname}_3d_o.png", scale=3, image_format='png')
             write_plotly_image(fig, variables, f"{figname}_3d_o.svg", scale=3, image_format='svg')
             fig.update_layout(showlegend=True)
-            write_plotly_html(fig, variables, f"{figname}_3d_o.html", include_mathjax='cdn')
+            write_plotly_html(
+                fig, variables, f"{figname}_3d_o.html", include_mathjax='cdn', add_camera_gif_exporter=True
+            )
             fig.update_scenes(xaxis_visible=True, yaxis_visible=True, zaxis_visible=True)
         except Exception as e:
             print('The figure could not be saved')
@@ -995,6 +999,7 @@ def rotary_fig(fig, variables, rotary_fig_save, make_gif, figname):
             show_link=True,
             auto_open=False,
             include_mathjax='cdn',
+            add_camera_gif_exporter=True,
         )
 
 

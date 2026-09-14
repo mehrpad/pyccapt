@@ -26,6 +26,9 @@ from pyccapt.calibration.tutorials.tutorials_helpers.helper_mc_tof_calculator im
 from pyccapt.calibration.tutorials.tutorials_helpers.helper_concentration_profile import (
     build_concentration_profile_panel,
 )
+from pyccapt.calibration.tutorials.tutorials_helpers.helper_roi_concentration_profile import (
+    build_roi_concentration_profile_panel,
+)
 from pyccapt.calibration.tutorials.tutorials_helpers.helper_peak_spectral_analysis import \
     build_peak_spectral_analysis_panel
 
@@ -1875,7 +1878,7 @@ def call_visualization(variables, colab=False):
                         [widgets.Label(value='Ions individually plots:', layout=label_layout), ions_individually_plots]
                     ),
                     widgets.HBox([widgets.Label(value='Fig name:', layout=label_layout), figname_3d]),
-                    widgets.HBox([widgets.Label(value='Rotary save:', layout=label_layout), rotary_fig_save_p3]),
+                    widgets.HBox([widgets.Label(value='Rotary HTML (camera GIF):', layout=label_layout), rotary_fig_save_p3]),
                     widgets.HBox([widgets.Label(value='Save GIF:', layout=label_layout), make_gif_p3]),
                     widgets.HBox([widgets.Label(value='Save evaporation GIF:', layout=label_layout), make_evap_3d]),
                     widgets.HBox([widgets.Label(value='Evaporation GIF frames:', layout=label_layout), evaporation_gif_frames]),
@@ -2239,6 +2242,10 @@ def call_visualization(variables, colab=False):
         variables,
         label_layout=label_layout,
     )
+    tab_roi_concentration_profile = build_roi_concentration_profile_panel(
+        variables,
+        label_layout=label_layout,
+    )
 
     tab14 = widgets.VBox(
         [
@@ -2265,6 +2272,7 @@ def call_visualization(variables, colab=False):
                 tab10,
                 tab11,
                 tab_concentration_profile,
+                tab_roi_concentration_profile,
                 tab12,
                 tab13,
                 tab14,
@@ -2285,9 +2293,10 @@ def call_visualization(variables, colab=False):
         tab.set_title(11, 'Iso surface')
         tab.set_title(12, 'Proxigram')
         tab.set_title(13, 'Concentration profile')
-        tab.set_title(14, 'Clustering')
-        tab.set_title(15, 'Peak analysis')
-        tab.set_title(16, 'Change Color')
+        tab.set_title(14, 'ROI concentration')
+        tab.set_title(15, 'Clustering')
+        tab.set_title(16, 'Peak analysis')
+        tab.set_title(17, 'Change Color')
 
         out = Output()
 
@@ -2310,6 +2319,7 @@ def call_visualization(variables, colab=False):
             tab10,
             tab11,
             tab_concentration_profile,
+            tab_roi_concentration_profile,
             tab12,
             tab13,
             tab14,
@@ -2333,6 +2343,7 @@ def call_visualization(variables, colab=False):
                 'Iso surface',
                 'Proxigram',
                 'Concentration profile',
+                'ROI concentration',
                 'Clustering',
                 'Peak analysis',
                 'Change Color',

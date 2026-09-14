@@ -69,6 +69,8 @@ def test_camera_gif_exporter_is_added_to_saved_html(tmp_path: Path):
     assert "Save rotating GIF" in html
     assert 'const baseName = "rota_demo"' in html
     assert "showlegend: false" in html
+    assert "createWorkerScriptUrl" in html
+    assert "workerScript: workerScriptUrl" in html
 
 
 def test_save_plotly_animation_can_add_camera_gif_exporter(tmp_path: Path, monkeypatch):

@@ -60,6 +60,12 @@ _CAMERA_GIF_EXPORTER = r"""
       document.head.appendChild(script);
     }), 20000, 'GIF encoder download');
   };
+  const createWorkerScriptUrl = async () => {
+    const response = await withTimeout(fetch(workerUrl), 20000, 'GIF worker download');
+    if (!response.ok) throw new Error(`GIF worker could not be downloaded (${response.status})`);
+    const source = await response.text();
+    return URL.createObjectURL(new Blob([source], {type: 'text/javascript'}));
+  };
   const download = (blob) => {
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
@@ -89,9 +95,12 @@ _CAMERA_GIF_EXPORTER = r"""
     saveButton.disabled = true;
     cancelButton.disabled = false;
     cancelled = false;
+    let workerScriptUrl = null;
     try {
-      const GIF = await loadGifEncoder();
-      const gif = activeGif = new GIF({workers: 2, quality: 10, width, height, workerScript: workerUrl});
+      setStatus('Preparing GIF encoder…');
+      const [GIF, localWorkerScriptUrl] = await Promise.all([loadGifEncoder(), createWorkerScriptUrl()]);
+      workerScriptUrl = localWorkerScriptUrl;
+      const gif = activeGif = new GIF({workers: 2, quality: 10, width, height, workerScript: workerScriptUrl});
       await Plotly.relayout(graph, {showlegend: false});
       for (let frame = 0; frame < frameCount; frame += 1) {
         if (cancelled) throw new Error('GIF export cancelled');
@@ -117,6 +126,7 @@ _CAMERA_GIF_EXPORTER = r"""
       await restore(originalCamera, originalLegend).catch(() => {});
       setStatus(`GIF was not saved: ${error.message}`);
     } finally {
+      if (workerScriptUrl) URL.revokeObjectURL(workerScriptUrl);
       activeGif = null;
       saveButton.disabled = false;
       cancelButton.disabled = true;

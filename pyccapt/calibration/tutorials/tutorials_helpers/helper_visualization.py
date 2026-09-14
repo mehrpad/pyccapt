@@ -1878,7 +1878,7 @@ def call_visualization(variables, colab=False):
                         [widgets.Label(value='Ions individually plots:', layout=label_layout), ions_individually_plots]
                     ),
                     widgets.HBox([widgets.Label(value='Fig name:', layout=label_layout), figname_3d]),
-                    widgets.HBox([widgets.Label(value='Rotary save:', layout=label_layout), rotary_fig_save_p3]),
+                    widgets.HBox([widgets.Label(value='Rotary HTML (camera GIF):', layout=label_layout), rotary_fig_save_p3]),
                     widgets.HBox([widgets.Label(value='Save GIF:', layout=label_layout), make_gif_p3]),
                     widgets.HBox([widgets.Label(value='Save evaporation GIF:', layout=label_layout), make_evap_3d]),
                     widgets.HBox([widgets.Label(value='Evaporation GIF frames:', layout=label_layout), evaporation_gif_frames]),

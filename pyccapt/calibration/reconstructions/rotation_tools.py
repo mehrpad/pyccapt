@@ -202,6 +202,7 @@ def rotary_fig(fig, variables, rotary_fig_save, make_gif, figname):
             show_link=True,
             auto_open=False,
             include_mathjax="cdn",
+            add_camera_gif_exporter=True,
         )
 
 

@@ -37,6 +37,25 @@ def test_experiment_failure_publishes_state_before_completion_event():
     assert "boom" in variables.experiment_error
 
 
+def test_detector_timeout_is_reported_after_safe_cleanup():
+    variables = SimpleNamespace(ex_freq=1, flag_end_experiment=False, experiment_state="idle", experiment_error="")
+    event = _CompletionEvent(variables)
+    control = APT_Exp_Control(variables, {}, event, None, None, None, None)
+
+    def timed_out_run():
+        set_experiment_state(variables, ExperimentState.RUNNING)
+        control._run_failure = "No event for 10 seconds; check detector and TDC status."
+        set_experiment_state(variables, ExperimentState.STOPPING)
+
+    control._run_experiment_impl = timed_out_run
+    control.clear_up = lambda: setattr(variables, "hardware_safe", True)
+
+    control.run_experiment()
+
+    assert event.was_set
+    assert "No event for 10 seconds" in variables.experiment_error
+
+
 def test_safe_off_does_not_overwrite_failed_state():
     variables = SimpleNamespace(experiment_state=ExperimentState.FAILED.value, experiment_error="original", hardware_safe=False)
     control = APT_Exp_Control(variables, {}, None, None, None, None, None)
@@ -114,6 +133,16 @@ def test_worker_derives_timing_from_immutable_run_snapshot():
 
     assert variables.ex_freq == 20
     assert control.sleep_time == 0.05
+
+
+def test_pulse_fraction_is_sample_output_not_supply_command():
+    variables = SimpleNamespace(ex_freq=1, flat_test_active=True)
+    control = APT_Exp_Control(variables, {}, None, None, None, None, None)
+    control.pulse_fraction = 5
+    control.pulse_amp_per_supply_voltage = 21.875
+
+    assert control._pulse_supply_target(500) == 25 / 21.875
+    assert control._pulse_supply_target(9000) == 450 / 21.875
 
 
 def test_laser_run_does_not_require_voltage_pulse_range():

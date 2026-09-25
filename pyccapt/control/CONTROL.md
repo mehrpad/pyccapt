@@ -16,7 +16,16 @@ This module is responsible for:
 
 Calibration and reconstruction are implemented in `pyccapt.calibration`.
 
+Laser command units, readback semantics and recording corrections are documented
+in [LASER_MANUAL_AUDIT.md](LASER_MANUAL_AUDIT.md).
+
+Laser-stage scanning, focus, tracking, GUI controls and required calibration are
+documented in [LASER_ALIGNMENT.md](LASER_ALIGNMENT.md).
+
 ## Runtime Architecture
+
+The automatic sample-alignment sequence, commissioning settings, detector
+analysis and metadata are documented in [AUTOMATIC_ALIGNMENT.md](AUTOMATIC_ALIGNMENT.md).
 
 The control application uses multiple processes:
 

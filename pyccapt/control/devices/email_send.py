@@ -170,7 +170,7 @@ def _experiment_folder(variables) -> Path | None:
 def _experiment_id(variables) -> str:
     """Best-effort experiment identifier for the attachment filename.
 
-    Prefers ``exp_name`` (``<counter>_<date>_<electrode>_<name>``, set in
+    Prefers ``exp_name`` (``<counter>_<date>_<name>``, set in
     experiment_state.prepare_experiment_output_paths), then the experiment
     folder name, then ``hdf5_data_name``.
     """

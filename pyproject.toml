@@ -40,7 +40,7 @@ pyccapt-data = "pyccapt.control.core.data_integrity:main"
 
 [project.optional-dependencies]
 control-core = ["pyserial", "pyvisa", "simple-pid"]
-control-gui = ["opencv-python", "PyQt6", "PyQt6-WebEngine", "pyqtgraph", "plotly"]
+control-gui = ["opencv-python", "PyQt6", "PyQt6-WebEngine", "pyqtgraph", "PyOpenGL", "plotly"]
 control-hardware = [
   "mcculw; platform_system == 'Windows'",
   "nidaqmx; platform_system == 'Windows'",
@@ -48,7 +48,7 @@ control-hardware = [
 ]
 control = [
   "pyserial", "pyvisa", "simple-pid", "opencv-python", "PyQt6",
-  "PyQt6-WebEngine", "pyqtgraph", "plotly",
+  "PyQt6-WebEngine", "pyqtgraph", "PyOpenGL", "plotly",
   "mcculw; platform_system == 'Windows'",
   "nidaqmx; platform_system == 'Windows'",
   "pypylon; platform_system == 'Windows'",
@@ -67,7 +67,7 @@ full = [
   "adjustText", "anywidget", "ase", "faker", "fast-histogram", "imageio",
   "ipympl", "ipywidgets", "jupyterlab", "kaleido", "nglview", "plotly",
   "pybaselines", "pymatgen", "pyvista", "scikit-learn", "tqdm", "uproot", "vispy",
-  "pyserial", "pyvisa", "simple-pid", "opencv-python", "PyQt6", "PyQt6-WebEngine", "pyqtgraph",
+  "pyserial", "pyvisa", "simple-pid", "opencv-python", "PyQt6", "PyQt6-WebEngine", "pyqtgraph", "PyOpenGL",
   "mcculw; platform_system == 'Windows'", "nidaqmx; platform_system == 'Windows'",
   "pypylon; platform_system == 'Windows'",
 ]
@@ -75,7 +75,7 @@ all = [
   "adjustText", "anywidget", "ase", "faker", "fast-histogram", "imageio",
   "ipympl", "ipywidgets", "jupyterlab", "kaleido", "nglview", "plotly",
   "pybaselines", "pymatgen", "pyvista", "scikit-learn", "tqdm", "uproot", "vispy",
-  "pyserial", "pyvisa", "simple-pid", "opencv-python", "PyQt6", "PyQt6-WebEngine", "pyqtgraph",
+  "pyserial", "pyvisa", "simple-pid", "opencv-python", "PyQt6", "PyQt6-WebEngine", "pyqtgraph", "PyOpenGL",
   "mcculw; platform_system == 'Windows'", "nidaqmx; platform_system == 'Windows'",
   "pypylon; platform_system == 'Windows'",
 ]

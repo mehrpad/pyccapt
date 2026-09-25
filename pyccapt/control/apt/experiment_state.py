@@ -113,10 +113,9 @@ def prepare_experiment_output_paths(variables: Any) -> tuple[Path, Path]:
     """Create experiment output path and metadata path values."""
     now = datetime.datetime.now()
     counter = _safe_path_component(variables.counter, "0")
-    electrode = _safe_path_component(variables.electrode, "unknown-electrode")
     data_name = _safe_path_component(variables.hdf5_data_name, "experiment")
     # Microseconds make rapid retries unique while retaining a readable name.
-    variables.exp_name = f"{counter}_{now.strftime('%b-%d-%Y_%H-%M-%S-%f')}_{electrode}_{data_name}"
+    variables.exp_name = f"{counter}_{now.strftime('%b-%d-%Y_%H-%M-%S-%f')}_{data_name}"
 
     data_root = runtime.project_path("data").resolve()
     data_path = (data_root / variables.exp_name).resolve()

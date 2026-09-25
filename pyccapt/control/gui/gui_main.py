@@ -14,6 +14,8 @@ from pyccapt.control.apt.experiment_state import ExperimentState, set_experiment
 from pyccapt.control.core import device_checks, loggi, runtime
 from pyccapt.control.core.contracts import CommandKind, ControlCommand
 from pyccapt.control.devices import camera as camera_device
+from pyccapt.control.gui.alignment_gui import AlignmentGuiMixin
+from pyccapt.control.nkt_photonics.readback import fresh_snapshot
 from pyccapt.control.gui import (
     app_icon,
     main_parameters,
@@ -27,7 +29,8 @@ from pyccapt.control.gui import (
 )
 
 
-class Ui_PyCCAPT(object):
+
+class Ui_PyCCAPT(AlignmentGuiMixin):
     def __init__(self, variables, conf, x_plot, y_plot, t_plot, main_v_dc_plot):
         """
         Constructor for the PyCCAPT UI class.
@@ -70,6 +73,8 @@ class Ui_PyCCAPT(object):
         self.camera_status_message = ""
         self._cleanup_started = False
         self._reported_experiment_exit = False
+        self._flat_test_running = False
+        self._operator_stopped = False
 
     def setupUi(self, PyCCAPT):
         PyCCAPT.setObjectName("PyCCAPT")
@@ -343,7 +348,7 @@ class Ui_PyCCAPT(object):
         self.criteria_ions.setMouseTracking(True)
         self.criteria_ions.setStyleSheet("")
         self.criteria_ions.setText("")
-        self.criteria_ions.setChecked(True)
+        self.criteria_ions.setChecked(False)
         self.criteria_ions.setObjectName("criteria_ions")
         self.gridLayout_3.addWidget(self.criteria_ions, 1, 2, 1, 1)
         self.label_2 = QtWidgets.QLabel(parent=self.centralwidget)
@@ -420,7 +425,7 @@ class Ui_PyCCAPT(object):
         self.criteria_time.setMouseTracking(True)
         self.criteria_time.setStyleSheet("")
         self.criteria_time.setText("")
-        self.criteria_time.setChecked(True)
+        self.criteria_time.setChecked(False)
         self.criteria_time.setObjectName("criteria_time")
         self.gridLayout_3.addWidget(self.criteria_time, 0, 2, 1, 1)
         self.label_177 = QtWidgets.QLabel(parent=self.centralwidget)
@@ -989,6 +994,42 @@ class Ui_PyCCAPT(object):
         )
         self.stop_button.setObjectName("stop_button")
         self.gridLayout_6.addWidget(self.stop_button, 4, 2, 1, 1)
+        self.electrode_button = QtWidgets.QPushButton("Electrode In", parent=self.centralwidget)
+        self.electrode_button.setObjectName("electrode_button")
+        self.flat_test_button = QtWidgets.QPushButton("Flat Test", parent=self.centralwidget)
+        self.flat_test_button.setObjectName("flat_test_button")
+        self.automatic_alignment_button = QtWidgets.QPushButton("Automatic Alignment", parent=self.centralwidget)
+        self.automatic_alignment_button.setObjectName("automatic_alignment_button")
+        self.automatic_alignment_button.setCheckable(True)
+        button_width = max(
+            110,
+            self.automatic_alignment_button.fontMetrics().horizontalAdvance("Automatic Alignment") + 24,
+        )
+        for button in (self.start_button, self.stop_button, self.electrode_button,
+                       self.flat_test_button, self.automatic_alignment_button):
+            button.setFixedWidth(button_width)
+            button.setMinimumHeight(25)
+        for button in (self.electrode_button, self.flat_test_button, self.automatic_alignment_button):
+            button.setSizePolicy(sizePolicy)
+            button.setStyleSheet(self.start_button.styleSheet())
+        self.automatic_alignment_button.setStyleSheet(
+            "QPushButton { background: rgb(193, 193, 193); } "
+            "QPushButton:checked:enabled { background: rgb(0, 170, 0); color: white; }"
+            "QPushButton:disabled { background: #d0d0d0; color: #777; }"
+        )
+        self.flat_test_button.setStyleSheet(self.flat_test_button.styleSheet() +
+                                            'QPushButton:disabled { background: #d0d0d0; color: #777; }')
+        self.electrode_controls = QtWidgets.QVBoxLayout()
+        self.electrode_controls.addStretch()
+        self.electrode_controls.addWidget(self.electrode_button)
+        self.electrode_controls.addSpacing(12)
+        self.electrode_controls.addWidget(self.flat_test_button)
+        self.electrode_controls.addSpacing(12)
+        self.electrode_controls.addWidget(self.automatic_alignment_button)
+        self._setup_alignment_fields()
+        # Qt layout distances are in pixels; convert 5 cm at this screen's DPI.
+        self.electrode_controls.addSpacing(round(5 / 2.54 * self.centralwidget.logicalDpiY()))
+        self.gridLayout_6.addLayout(self.electrode_controls, 1, 2, 1, 1)
         self.gridLayout_7.addLayout(self.gridLayout_6, 0, 0, 1, 1)
         PyCCAPT.setCentralWidget(self.centralwidget)
         self.menubar = QtWidgets.QMenuBar(parent=PyCCAPT)
@@ -1184,8 +1225,9 @@ class Ui_PyCCAPT(object):
         self.timer_stop_exp.timeout.connect(self.on_stop_experiment_worker)  # timer to stop the experiment
 
         ###
+        self._update_parameter_editor_mode()
         self.setup_parameters_changes()
-        self.parameters_source.currentIndexChanged.connect(self.setup_parameters_changes)
+        self.parameters_source.currentIndexChanged.connect(self._update_parameter_editor_mode)
         self.ex_user.editingFinished.connect(self.setup_parameters_changes)
         self.ex_name.editingFinished.connect(self.setup_parameters_changes)
         self.electrode.currentIndexChanged.connect(self.setup_parameters_changes)
@@ -1214,6 +1256,8 @@ class Ui_PyCCAPT(object):
         ###
         self.start_button.clicked.connect(self.start_experiment_clicked)
         self.stop_button.clicked.connect(self.stop_experiment_clicked)
+        self.electrode_button.clicked.connect(self.toggle_electrode)
+        self.flat_test_button.clicked.connect(self.start_flat_test)
         self.superuser.clicked.connect(self.super_user_access)
 
         self.emitter.elapsed_time.connect(self.update_elapsed_time)
@@ -1243,6 +1287,8 @@ class Ui_PyCCAPT(object):
         self.ex_number.setEnabled(False)
         self.ex_number.setText(str(self.variables.counter))
         self.load_electrode_items(str(runtime.project_path("control", "electrode.toml")))
+        self.variables.electrode_out = True
+        self._sync_electrode_controls()
 
     def retranslateUi(self, PyCCAPT):
         """
@@ -1327,30 +1373,7 @@ class Ui_PyCCAPT(object):
         self.label_196.setText(_translate("PyCCAPT", "DC Voltage (V)"))
         self.label_197.setText(_translate("PyCCAPT", "Pulse Voltage (V)"))
         self.label_198.setText(_translate("PyCCAPT", "Detection Rate (%)"))
-        self.text_line.setHtml(
-            _translate(
-                "PyCCAPT",
-                "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
-                "<html><head><meta name=\"qrichtext\" content=\"1\" /><meta charset=\"utf-8\" /><style type=\"text/css\">\n"
-                "p, li { white-space: pre-wrap; }\n"
-                "</style></head><body style=\" font-family:'Segoe UI'; font-size:9pt; font-weight:400; font-style:normal;\">\n"
-                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'JetBrains Mono,monospace'; font-size:8pt; color:#000000;\">{ex_user=user1;</span><span style=\" font-family:'MS Shell Dlg 2'; font-size:7.875pt;\">ex_name=test1;</span>                                                                                </p>\n"
-                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'MS Shell Dlg 2'; font-size:7.875pt;\">ex_time=90;max_ions=2000;ex_freq=10;</span>                                                                                </p>\n"
-                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'MS Shell Dlg 2'; font-size:7.875pt;\">vdc_min=500;vdc_max=4000;vdc_steps_up=1;</span>                                                                                </p>\n"
-                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'MS Shell Dlg 2'; font-size:7.875pt;\">vdc_steps_down=1;</span><span style=\" font-family:'JetBrains Mono,monospace'; font-size:8pt; color:#000000;\">control_algorithm=PID;</span><span style=\" font-family:'MS Shell Dlg 2'; font-size:7.875pt;\">vp_min=328;</span>                                                                                </p>\n"
-                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'MS Shell Dlg 2'; font-size:7.875pt;\">vp_max=3281;pulse_fraction=20;pulse_frequency=200;</span>                                                                                </p>\n"
-                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'MS Shell Dlg 2'; font-size:7.875pt;\">detection_rate_init=1;hit_displayed=20000;email=;counter_source=TDC</span><span style=\" font-family:'JetBrains Mono,monospace'; font-size:8pt; color:#000000;\">;</span>                                         </p>\n"
-                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'JetBrains Mono,monospace'; font-size:8pt; color:#000000;\">criteria_time=True;criteria_ions=False;</span>                                                                                </p>\n"
-                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'JetBrains Mono,monospace'; font-size:8pt; color:#000000;\">criteria_vdc=False}</span>                                                                                </p>\n"
-                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'JetBrains Mono,monospace'; font-size:8pt; color:#000000;\">{ex_user=user2;ex_name=test2;ex_time=100;</span>                                                                                </p>\n"
-                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'JetBrains Mono,monospace'; font-size:8pt; color:#000000;\">max_ions=3000;ex_freq=5;vdc_min=1000;</span>                                                                                </p>\n"
-                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'JetBrains Mono,monospace'; font-size:8pt; color:#000000;\">vdc_max=3000;vdc_steps_up=0.5;vdc_steps_down=0.5;</span>                                                                                </p>\n"
-                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'JetBrains Mono,monospace'; font-size:8pt; color:#000000;\">control_algorithm=proportional;vp_min=400;vp_max=2000;</span>                                                                                </p>\n"
-                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'JetBrains Mono,monospace'; font-size:8pt; color:#000000;\">pulse_fraction=15;pulse_frequency=200;detection_rate_init=2;</span>                                                                                </p>\n"
-                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'JetBrains Mono,monospace'; font-size:8pt; color:#000000;\">hit_displayed=40000;email=;counter_source=DRS;</span>                                                                                </p>\n"
-                "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'JetBrains Mono,monospace'; font-size:8pt; color:#000000;\">criteria_time=False;criteria_ions=False;criteria_vdc=True}</span>                                                                            </p></body></html>",
-            )
-        )
+        self.text_line.setPlainText(main_parameters.DEFAULT_TEXTLINE_EXAMPLE)
         self.start_button.setText(_translate("PyCCAPT", "Start"))
         self.Error.setText(_translate("PyCCAPT", "<html><head/><body><p><br/></p></body></html>"))
         self.stop_button.setText(_translate("PyCCAPT", "Stop"))
@@ -1574,6 +1597,24 @@ class Ui_PyCCAPT(object):
                 self.error_message,
             )
 
+    def _update_parameter_editor_mode(self):
+        """Enable only the editor selected by Setup Parameters."""
+        use_text_line = self.parameters_source.currentText() == "TextLine"
+        alignment_locked = bool(getattr(self, '_alignment_batch', []))
+        self.text_line.setEnabled(use_text_line and not alignment_locked)
+        textbox_widgets = (
+            self.ex_user, self.ex_name, self.email, self.electrode,
+            self.ex_time, self.max_ions, self.ex_freq,
+            self.vdc_min, self.vdc_max, self.vdc_steps_up, self.vdc_steps_down,
+            self.vp_min, self.vp_max, self.pulse_mode, self.pulse_fraction,
+            self.pulse_frequency, self.detection_rate_init,
+            self.counter_source, self.control_algorithm,
+            self.criteria_time, self.criteria_ions, self.criteria_vdc,
+            self.criteria_email, self.email_interval,
+        )
+        for widget in textbox_widgets:
+            widget.setEnabled(not use_text_line and not alignment_locked)
+
     def setup_parameters_changes(self):
         """
         Function to set up parameters changes
@@ -1642,12 +1683,170 @@ class Ui_PyCCAPT(object):
         Return:
                 None
         """
+        if self.variables.electrode_out:
+            self.error_message("Electrode is out; insert it before starting an experiment.")
+            return
+        self.variables.automatic_alignment_enabled = False
+        self.variables.automatic_alignment_samples = ()
+        selected_samples = self._alignment_start_samples()
+        if selected_samples is None:
+            return
+        if self.parameters_source.currentText() == "TextLine":
+            try:
+                self.variables.index_experiment_in_text_line = 0
+                self.read_text_lines()
+            except (ValueError, main_parameters.ParameterError) as exc:
+                self.error_message(f"Check the TextLine setup parameters: {exc}")
+                return
         if not self.variables.flag_main_gate or self.flag_super_user:
             if not self._confirm_start_parameter_warnings():
                 return
-            self.start_experiment_worker()
+            self._operator_stopped = False
+            if selected_samples:
+                self._start_alignment_batch(selected_samples)
+                return
+            self.variables.automatic_alignment_enabled = bool(selected_samples)
+            self.variables.automatic_alignment_samples = selected_samples
+            if not self.start_experiment_worker():
+                self.variables.automatic_alignment_enabled = False
+                self.variables.automatic_alignment_samples = ()
         else:
             self.error_message("Please close the main gate or activate the Access Override")
+
+    def _alignment_start_samples(self):
+        """Confirm alignment mode and validate its saved sample setup."""
+        if not self.automatic_alignment_button.isChecked():
+            return ()
+        if not self._confirm_warning_dialog(
+            "Automatic Alignment",
+            "Automatic alignment is selected.",
+            "Are you sure you want to continue?",
+        ):
+            return None
+        positions = self.variables.sample_rough_positions
+        samples = tuple(sorted(number for number in positions if number in (1, 2, 3)))
+        if not samples:
+            QtWidgets.QMessageBox.information(
+                self.centralwidget,
+                "Automatic Alignment",
+                "Automatic alignment requires a saved coarse position for at least one sample "
+                "in the Cameras GUI.",
+            )
+            return None
+        if self.parameters_source.currentText() == "TextLine":
+            try:
+                self.result_list = main_parameters.parse_textline_experiments(self.text_line.toPlainText())
+            except main_parameters.ParameterError as exc:
+                QtWidgets.QMessageBox.information(
+                    self.centralwidget, "Automatic Alignment", f"Check the TextLine setup parameters: {exc}"
+                )
+                return None
+            if len(self.result_list) != len(samples):
+                QtWidgets.QMessageBox.information(
+                    self.centralwidget,
+                    "Automatic Alignment",
+                    "The number of saved coarse-position samples does not match the number of "
+                    "TextLine setup-parameter blocks. Match them and start again.",
+                )
+                return None
+        elif len(samples) > 1 and not self._confirm_warning_dialog(
+            "Automatic Alignment",
+            "All selected samples will use the same setup parameters.",
+            "Do you agree to use the TextBox parameters for every selected sample?",
+        ):
+            return None
+        return samples
+
+    def toggle_electrode(self):
+        """Track the operator's electrode position before a run begins."""
+        if self.variables.start_flag or self.variables.sample_selection_locked:
+            return
+        self.variables.electrode_out = not self.variables.electrode_out
+        self._sync_electrode_controls()
+        out = self.variables.electrode_out
+        logging.getLogger("pyccapt.gui").info("Electrode marked %s", "out" if out else "in")
+
+    def _sync_electrode_controls(self):
+        """Keep the displayed electrode position and run buttons aligned."""
+        out = self.variables.electrode_out
+        locked = bool(self.variables.start_flag or self.variables.sample_selection_locked
+                      or getattr(self, '_alignment_batch', []))
+        self.electrode_button.setText("Electrode Out" if out else "Electrode In")
+        self.electrode_button.setStyleSheet(
+            ("QPushButton:enabled { background: #d32f2f; color: white; }"
+             if out else self.start_button.styleSheet()) +
+            'QPushButton:disabled { background: #d0d0d0; color: #777; }'
+        )
+        self.electrode_button.setEnabled(not locked)
+        self.automatic_alignment_button.setEnabled(not locked)
+        self.start_button.setEnabled(not out and not locked)
+        self.stop_button.setEnabled(not out)
+        self.flat_test_button.setEnabled(not out and not locked)
+
+    def start_flat_test(self):
+        """Start a voltage sweep using the initial config limits."""
+        if self.variables.electrode_out or not self.start_button.isEnabled():
+            self.error_message("Insert the electrode before starting Flat Test.")
+            return
+        if self.variables.flag_main_gate and not self.flag_super_user:
+            self.error_message("Please close the main gate or activate the Access Override")
+            return
+        updated = float(self.variables.stage_pos_updated_at)
+        home = tuple(float(self.conf.get(f"stage_home_{axis}_mm", 0.0)) * 1e-3 for axis in "xyz")
+        position = (self.variables.stage_pos_x, self.variables.stage_pos_y, self.variables.stage_pos_z)
+        if time.monotonic() - updated > 2.0 or any(abs(actual - target) > 10e-6 for actual, target in zip(position, home)):
+            self.error_message("First home the sample stage in Stage Control, then retry Flat Test.")
+            return
+        try:
+            initial_min = float(self.conf["default_vdc_min"])
+            initial_max = float(self.conf["default_vdc_max"])
+            pulse_at_start = initial_min * 0.05
+            pulse_at_end = initial_max * 0.05
+            pulse_min = float(self.vp_min.text())
+            pulse_max = float(self.vp_max.text())
+        except (KeyError, TypeError, ValueError):
+            self.error_message("Flat Test voltage limits in the initial configuration are invalid.")
+            return
+        if pulse_at_start < pulse_min:
+            logging.getLogger("pyccapt.gui").warning(
+                "Flat Test starts with pulse at configured minimum %.3f V: "
+                "5%% of initial DC voltage is only %.3f V.",
+                pulse_min, pulse_at_start,
+            )
+            self.statusbar.showMessage(
+                f"Flat Test pulse starts at {pulse_min:g} V minimum; 5% target at "
+                f"{initial_min:g} V DC is {pulse_at_start:g} V.",
+                8000,
+            )
+        if pulse_at_end >= pulse_max:
+            self.error_message(
+                f"Flat Test cannot start: 5% of {initial_max:g} V DC is {pulse_at_end:g} V, "
+                f"at or above the {pulse_max:g} V pulse maximum."
+            )
+            return
+        self.parameters_source.setCurrentText("TextBox")
+        self.ex_name.setText("flat test")
+        self.pulse_mode.setCurrentText("Voltage")
+        self.pulse_fraction.setText("5")
+        self.detection_rate_init.setText("1")
+        self.vdc_min.setText(str(initial_min))
+        self.vdc_max.setText(str(initial_max))
+        self.criteria_vdc.setChecked(True)
+        self.criteria_time.setChecked(False)
+        self.criteria_ions.setChecked(False)
+        self.criteria_email.setChecked(False)
+        self.variables.vdc_hold = False
+        self.variables.automatic_alignment_enabled = False
+        self.variables.automatic_alignment_samples = ()
+        self.setup_parameters_changes()
+        self.variables.flat_test_peak_rate = 0.0
+        self.variables.flat_test_reached_max = False
+        self.variables.flat_test_active = True
+        self._flat_test_running = True
+        self.start_experiment_worker()
+        if self.start_button.isEnabled():
+            self.variables.flat_test_active = False
+            self._flat_test_running = False
 
     def _confirm_start_parameter_warnings(self):
         """Warn about risky start parameters and let the operator confirm.
@@ -1854,6 +2053,13 @@ class Ui_PyCCAPT(object):
         Return:
                 None
         """
+        self._operator_stopped = True
+        if getattr(self, '_alignment_batch', []):
+            self.variables.alignment_cancel_motion = True
+            self.gui_stage_control.alignment_service.cancel('Operator pressed Stop')
+            if self._alignment_transfer is not None or self._alignment_waiting_cleanup:
+                self._end_alignment_batch('Automatic sample sequence stopped.')
+                return
         if not self.start_button.isEnabled():
             self.statistics_timer.stop()
             self.variables.stop_flag = True  # Set the STOP flag
@@ -1874,22 +2080,53 @@ class Ui_PyCCAPT(object):
                 None
 
         Return:
-                None
+                True if the experiment process was started, otherwise False
         """
+        if self.variables.electrode_out:
+            self.error_message("Electrode is out; experiment start is blocked.")
+            return False
+        if getattr(self.variables, 'laser_alignment_enabled', False):
+            from pyccapt.control.apt.laser_alignment_runtime import validate_laser_alignment
+            try:
+                validate_laser_alignment(self.variables, self.conf)
+            except ValueError as exc:
+                self.error_message(str(exc))
+                return False
+        if self.variables.pulse_mode in ('Laser', 'VoltageLaser') and self.conf.get('laser') == 'on':
+            readings = fresh_snapshot(self.variables)
+            if not readings.get('valid'):
+                self.error_message('Laser monitor readings are unavailable. Check Laser Control before starting.')
+                return False
+            if (self.variables.pulse_mode == 'VoltageLaser'
+                    and abs(readings['output_frequency_hz']-self.variables.pulse_frequency*1000.) > 1.):
+                self.error_message('Voltage + Laser requires matching pulse frequencies. '
+                                   f"Laser readback is {readings['output_frequency_hz']/1000.:g} kHz.")
+                return False
         try:
             run_config = main_parameters.validate_run_parameters(self.variables, self.conf)
         except main_parameters.ParameterError as exc:
             self.error_message(str(exc))
-            return
-        # Completion acknowledgements are per-run. Clear a stale item before
-        # starting so a stopped GUI timer cannot make the next worker block.
-        try:
-            while True:
-                self.experiment_completion_queue.get_nowait()
-        except queue.Empty:
-            pass
+            return False
+        # Commands, status and completion acknowledgements belong to one run.
+        # In particular a Stop queued just after worker exit must not stop the
+        # following sample/new experiment.
+        for channel in (self.experiment_command_queue, self.experiment_status_queue,
+                        self.experiment_completion_queue):
+            try:
+                while True:
+                    channel.get_nowait()
+            except queue.Empty:
+                pass
+        self.latest_completion_ack = None
+        self.latest_experiment_status = None
 
         self._reported_experiment_exit = False
+        self.experimetn_finished_event.clear()
+        self.variables.flag_end_experiment = False
+        self.variables.flag_stop_tdc = False
+        self.variables.flag_tdc_failure = False
+        self.variables.detector_error = ''
+        self.variables.flag_new_min_voltage = False
         self.variables.start_flag = True
         self.variables.stop_flag = False
         self.variables.plot_clear_flag = True
@@ -1910,7 +2147,7 @@ class Ui_PyCCAPT(object):
         )
         self.variables.override_disabled_devices = [issue.device for issue in issues] if self.flag_super_user else []
         if issues:
-            if self.flag_super_user:
+            if self.flag_super_user and not self.variables.automatic_alignment_enabled:
                 details = "; ".join(f"{item.device}: {item.reason}" for item in issues)
                 warning_message = (
                     "Override active. Experiment is starting with unavailable enabled devices. "
@@ -1928,7 +2165,22 @@ class Ui_PyCCAPT(object):
                 self.error_message(message)
                 self.variables.start_flag = False
                 self.variables.stop_flag = False
-                return
+                return False
+
+        self.variables.elapsed_time = 0.0
+        self.variables.total_ions = 0
+        self.variables.specimen_voltage = 0.0
+        self.variables.pulse_voltage = 0.0
+        self.variables.detection_rate_current = 0.0
+
+        # Lock the run controls as soon as startup is accepted, including
+        # the short interval while the experiment process is launching.
+        self.start_button.setEnabled(False)
+        self.electrode_button.setEnabled(False)
+        self.flat_test_button.setEnabled(False)
+        self.automatic_alignment_button.setEnabled(False)
+        self.variables.sample_selection_locked = True
+        self._update_alignment_fields()
 
         try:
             self.experiment_process = self.process_coordinator.start_experiment(
@@ -1950,17 +2202,22 @@ class Ui_PyCCAPT(object):
             self.error_message(message)
             self.variables.start_flag = False
             self.variables.stop_flag = False
-            return
+            self.variables.sample_selection_locked = False
+            self._sync_electrode_controls()
+            self.electrode_button.setEnabled(True)
+            self.automatic_alignment_button.setEnabled(True)
+            self._update_alignment_fields()
+            return False
 
         gui_logger.info(
             "Experiment process started. pid=%s",
             getattr(self.experiment_process, "pid", "?"),
         )
 
-        self.start_button.setEnabled(False)
         self.counter_source.setEnabled(False)
         self.pulse_mode.setEnabled(False)
         self.parameters_source.setEnabled(False)
+        self.text_line.setEnabled(False)
         self.pulse_fraction.setEnabled(False)
         self.ex_freq.setEnabled(False)
         self.ex_name.setEnabled(False)
@@ -1969,13 +2226,8 @@ class Ui_PyCCAPT(object):
         # the user can switch between Proportional / Aggressive / Adaptive /
         # PID on the fly.
 
-        self.variables.elapsed_time = 0.0
-        self.variables.total_ions = 0
-        self.variables.specimen_voltage = 0.0
-        self.variables.pulse_voltage = 0.0
-        self.variables.detection_rate_current = 0.0
-
         self.statistics_timer.start()
+        return True
 
     def about(self):
         """
@@ -2176,19 +2428,48 @@ class Ui_PyCCAPT(object):
         """
         self.emitter.total_ions.emit(self.variables.total_ions)  # Update the total ions
         if self.variables.flag_end_experiment:
-            self.start_button.setEnabled(True)
-            self.stop_button.setEnabled(True)
+            # Completion is published just before the worker exits. Never reuse
+            # shared state or move to another sample while it can still write.
+            self.experiment_process.join(0)
+            if self.experiment_process.is_alive():
+                self.timer_stop_exp.start(100)
+                return
+            self.variables.start_flag = False
+            self.statistics_timer.stop()
+            self.start_button.setEnabled(not self.variables.electrode_out)
+            self.stop_button.setEnabled(not self.variables.electrode_out)
+            self.electrode_button.setEnabled(True)
+            self.flat_test_button.setEnabled(not self.variables.electrode_out)
+            self.automatic_alignment_button.setEnabled(True)
             self.counter_source.setEnabled(True)  # Enable the counter source
             self.pulse_mode.setEnabled(True)  # Enable the pulse mode
             self.parameters_source.setEnabled(True)  # Enable the parameters source
+            self.text_line.setEnabled(True)
             self.pulse_fraction.setEnabled(True)  # Enable the pulse fraction
             self.ex_freq.setEnabled(True)
             self.ex_name.setEnabled(True)
             self.electrode.setEnabled(True)
+            self._update_parameter_editor_mode()
             # control_algorithm was never disabled during the run; nothing
             # to re-enable here.
 
             self.ex_number.setText(str(self.variables.counter))
+            run_error = str(self.variables.experiment_error or "")
+            if self._flat_test_running:
+                peak = float(self.variables.flat_test_peak_rate)
+                reached_max = bool(getattr(self.variables, "flat_test_reached_max", False))
+                if not run_error and reached_max and peak <= 0.2:
+                    message = "Flat test was successful (peak detection rate %.3f%%)." % peak
+                    logging.getLogger("pyccapt.gui").info(message)
+                    self.success_message(message)
+                elif not run_error:
+                    message = "Flat test failed: peak detection rate %.3f%% or maximum voltage not reached." % peak
+                    logging.getLogger("pyccapt.gui").warning(message)
+                    self.error_message(message)
+                self._flat_test_running = False
+                self.variables.flat_test_active = False
+            if run_error:
+                self.error_message(run_error)
             self.experiment_process.join(1)
             print('experiment_process joined')
 
@@ -2201,19 +2482,45 @@ class Ui_PyCCAPT(object):
 
             self.variables.flag_cameras_take_screenshot = True
 
+            self.variables.flag_end_experiment = False
+            self.variables.flag_stop_tdc = False
+            self.experimetn_finished_event.clear()
+            self.timer_stop_exp.stop()
+            if getattr(self, '_alignment_batch', []):
+                self._alignment_sample_finished(run_error)
+                return
+
             # with self.variables.lock_statistics:
             next_index = self.variables.index_experiment_in_text_line + 1
-            if self.parameters_source.currentText() == 'TextLine' and next_index < len(self.result_list):
+            continue_textline = (
+                self.parameters_source.currentText() == 'TextLine'
+                and next_index < len(self.result_list)
+                and not self._operator_stopped
+                and not run_error
+                and self.variables.hardware_safe
+            )
+            if continue_textline:
                 self.variables.index_experiment_in_text_line = next_index
-                self.read_text_lines()
-                self.start_experiment_worker()
+                try:
+                    self.read_text_lines()
+                    next_started = self.start_experiment_worker()
+                except (ValueError, main_parameters.ParameterError) as exc:
+                    self.error_message(f"Check the next TextLine setup parameters: {exc}")
+                    next_started = False
+                if not next_started:
+                    self.variables.automatic_alignment_enabled = False
+                    self.variables.automatic_alignment_samples = ()
+                    self.variables.index_experiment_in_text_line = 0
+                    self.variables.sample_selection_locked = False
             else:
                 self.variables.index_line = 0
                 self.variables.index_experiment_in_text_line = 0
+                self.variables.automatic_alignment_enabled = False
+                self.variables.automatic_alignment_samples = ()
+                self.variables.sample_selection_locked = False
 
-            self.variables.flag_end_experiment = False
-            self.variables.flag_stop_tdc = False
-            self.timer_stop_exp.stop()
+            self._update_alignment_fields()
+            self._sync_electrode_controls()
 
     def reset_heatmap_clicked(self):
         """
@@ -2419,7 +2726,7 @@ class Ui_PyCCAPT(object):
         if self.latest_experiment_status is not None:
             kind = getattr(self.latest_experiment_status.kind, "value", self.latest_experiment_status.kind)
             statusbar = getattr(self, "statusbar", None)
-            if kind == "health" and statusbar is not None:
+            if kind == "health" and statusbar is not None and not self.variables.automatic_alignment_enabled:
                 current = statusbar.currentMessage()
                 if not current.startswith(("Vacuum warning", "Laser warning")):
                     age = max(0.0, time.monotonic() - self.latest_experiment_status.emitted_monotonic)
@@ -2591,6 +2898,11 @@ class Ui_PyCCAPT(object):
 
         self.timer.start(8000)
 
+    def success_message(self, message):
+        """Show a short positive result in the main GUI message area."""
+        self.Error.setText(f'<html><body><p style="color:#087d35;">{message}</p></body></html>')
+        self.timer.start(8000)
+
     def hideMessage(
         self,
     ):
@@ -2631,6 +2943,8 @@ class Ui_PyCCAPT(object):
         if self._cleanup_started:
             return
         self._cleanup_started = True
+        if getattr(self, '_alignment_plot_window', None) is not None:
+            self._alignment_plot_window.set_monitoring(False)
 
         # Ask the experiment to perform its own safe-off sequence before
         # any process is terminated. The event is published only after the

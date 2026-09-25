@@ -1,6 +1,7 @@
 import logging
 import sys
 import threading
+import time
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
@@ -12,6 +13,7 @@ from pyccapt.control.gui.stage_control_widgets import (
     make_jog_button,
 )
 from pyccapt.control.smaract_mcs2 import mcs2_stage
+from pyccapt.control.devices.alignment_stage import AlignmentStageService
 
 # GUI session logger (lands in meta_data/files/logs/gui/). Used so a silent
 # SmarAct connection failure - which leaves the specimen-stage position at 0
@@ -96,10 +98,15 @@ class Ui_Stage_Control(object):
         self._reference_timeout_s = float(self.conf.get('stage_reference_timeout_s', 120))
         self._reference_velocity_m_s = float(self.conf.get('stage_reference_velocity_mm_s', 5.0)) * 1e-3
         self._home_velocity_m_s = float(self.conf.get('stage_home_velocity_mm_s', 1.0)) * 1e-3
+        self.alignment_service = AlignmentStageService(variables, lambda: self.stage_device)
+        self._alignment_locked = False
 
     # ------------------------------------------------------------------- ui
 
     def setupUi(self, Stage_Control):
+        self._alignment_timer = QtCore.QTimer(Stage_Control)
+        self._alignment_timer.timeout.connect(self._alignment_tick)
+        self._alignment_timer.start(100)
         Stage_Control.setObjectName("Stage_Control")
         Stage_Control.resize(1020, 230)
         self.gridLayout_5 = QtWidgets.QGridLayout(Stage_Control)
@@ -471,6 +478,8 @@ class Ui_Stage_Control(object):
         mapping[selector].setText(text)
 
     def _jog_axis(self, axis, sign):
+        if self.variables.automatic_alignment_enabled:
+            return
         if self.stage_device is None:
             self._set_error(self._connect_error or "Stage not connected.")
             return
@@ -544,6 +553,8 @@ class Ui_Stage_Control(object):
         self._continuous_jog_sign = 0
 
     def _go_home(self):
+        if self.variables.automatic_alignment_enabled:
+            return
         if self.stage_device is None:
             self._set_error(self._connect_error or "Stage not connected.")
             return
@@ -564,6 +575,8 @@ class Ui_Stage_Control(object):
             self._set_error(f"Home failed: {exc}")
 
     def _reference(self):
+        if self.variables.automatic_alignment_enabled:
+            return
         if self.stage_device is None:
             self._set_error(self._connect_error or "Stage not connected.")
             return
@@ -668,6 +681,10 @@ class Ui_Stage_Control(object):
             btn.setEnabled(enabled and self.stage_device is not None)
 
     def _stop_stage(self):
+        if self.variables.automatic_alignment_enabled:
+            self.variables.alignment_cancel_motion = True
+            self.variables.stop_flag = True
+            self.alignment_service.cancel('Operator pressed Stage Stop')
         # Abort an in-flight reference search FIRST, then stop the axes.
         # This is the only call path that can interrupt referencing.
         if self._reference_cancel is not None:
@@ -675,6 +692,15 @@ class Ui_Stage_Control(object):
         if self.stage_device is None:
             return
         self.stage_device.stop()
+
+    def _alignment_tick(self):
+        locked = bool(self.variables.automatic_alignment_enabled)
+        if locked != self._alignment_locked:
+            if locked:
+                self._stop_continuous_jog()
+            self._alignment_locked = locked
+            self._set_movement_enabled(not locked and self.stage_device is not None)
+        self.alignment_service.tick()
 
     def _refresh_position(self):
         if self.stage_device is None:
@@ -712,6 +738,11 @@ class Ui_Stage_Control(object):
 	        self.variables.stage_pos_x = float(pos['x'])
 	        self.variables.stage_pos_y = float(pos['y'])
 	        self.variables.stage_pos_z = float(pos['z'])
+	        updated_at = time.monotonic()
+	        self.variables.stage_pos_updated_at = updated_at
+	        self.variables.stage_position_snapshot = (
+	            float(pos['x']), float(pos['y']), float(pos['z']), updated_at,
+	        )
         except Exception:
 	        pass
 

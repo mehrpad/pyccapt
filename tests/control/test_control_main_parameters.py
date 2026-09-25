@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -40,6 +41,21 @@ def test_parse_textline_experiments_parses_numeric_and_bool():
     items = main_parameters.parse_textline_experiments(block)
     assert items[0]["vdc_steps_up"] == 0.5
     assert items[0]["criteria_time"] is True
+
+
+def test_default_textline_example_is_valid_for_project_config():
+    config_path = Path(__file__).resolve().parents[2] / "pyccapt" / "config.toml"
+    conf = main_parameters.read_files.read_toml_file(config_path)
+    examples = main_parameters.parse_textline_experiments(main_parameters.DEFAULT_TEXTLINE_EXAMPLE)
+    assert len(examples) == 2
+
+    for item in examples:
+        variables = SimpleNamespace(pulse_amp_per_supply_voltage=conf["pulse_amp_per_supply_voltage"])
+        errors = []
+        main_parameters.apply_textline_item(variables, conf, item, errors.append)
+        assert errors == []
+        assert variables.counter_source == "TDC"
+        assert variables.vdc_min * variables.pulse_fraction / 100 >= variables.v_p_min
 
 
 def test_apply_form_values_returns_corrections(conf):

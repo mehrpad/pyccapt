@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 from numpy.ctypeslib import ndpointer
+from pyccapt.control.nkt_photonics.readback import pulse_energy_pj, experiment_frequency_hz
 
 
 class TDC:
@@ -114,9 +115,13 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
     raw_signal_detected = 0
     events_detected_tmp = 0
     start_time = time.time()
-    pulse_frequency = max(float(variables.pulse_frequency) * 1000.0, 1.0)
+    pulse_frequency = max(experiment_frequency_hz(variables), 1.0)
     _last_buf_error = None  # dedup transient SDK read errors
 
+    from pyccapt.control.apt.laser_alignment_data import LaserAlignmentPublisher
+    laser_alignment_publisher = LaserAlignmentPublisher(variables)
+    from pyccapt.control.apt.alignment_vision import AlignmentEventPublisher
+    alignment_publisher = AlignmentEventPublisher(variables)
     while not stop_event.is_set() and not variables.flag_stop_tdc:
         # A DLL fault here used to take down the subprocess silently.
         # Catch + dedup so transient hiccups don't spam stdout and
@@ -148,7 +153,7 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
 
         main_v_dc_list = np.tile(variables.specimen_voltage, buffer_length)
         pulse_data = np.tile(variables.pulse_voltage, buffer_length)
-        laser_data = np.tile(variables.laser_pulse_energy, buffer_length)
+        laser_data = np.tile(pulse_energy_pj(variables), buffer_length)
 
         # Push into the shared-memory ring buffers (one per signal).
         # Append is non-blocking and bounded; the visualization
@@ -159,6 +164,8 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
         y_plot.write(yy)
         t_plot.write(tt)
         main_v_dc_plot.write(main_v_dc_list)
+        alignment_publisher.append(xx, yy)
+        laser_alignment_publisher.append(tt)
 
         variables.extend_to('x', xx.tolist())
         variables.extend_to('y', yy.tolist())
@@ -185,7 +192,7 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
             # Re-read pulse_frequency every interval - if the user
             # changes it mid-run the rate calc otherwise stays wrong.
             try:
-                live_pulse_frequency = max(float(variables.pulse_frequency) * 1000.0, 1.0)
+                live_pulse_frequency = max(experiment_frequency_hz(variables), 1.0)
                 pulse_frequency = live_pulse_frequency
             except Exception:
                 pass

@@ -16,6 +16,7 @@ import pyccapt
 
 from pyccapt.control.apt.detector_models import normalize_tdc_model
 from pyccapt.control.core import chunk_store
+from pyccapt.control.nkt_photonics.readback import TELEMETRY_UNITS, json_safe
 
 logger = logging.getLogger("apt")
 
@@ -39,14 +40,18 @@ _DATASET_UNITS = {
 
 
 def _annotate_dataset(dataset, dataset_name: str) -> None:
-    dataset.attrs["units"] = _DATASET_UNITS.get(dataset_name, "1")
+    dataset.attrs["units"] = _DATASET_UNITS.get(dataset_name,
+        TELEMETRY_UNITS.get(dataset_name.removeprefix('apt/laser_'), '1'))
+    if dataset_name in ('dld/laser_pulse', 'tdc/laser_pulse'):
+        dataset.attrs['measurement_location'] = 'laser internal monitor; not calibrated specimen energy'
+        dataset.attrs['sampling'] = 'latest monitor estimate repeated per detector batch; NaN if unknown or stale'
 
 
 def _sanitize_for_path(name: str) -> str:
     """Replace characters that are illegal in Windows file names.
 
-    The experiment name is composed from user-typed fields (electrode,
-    hdf5_data_name) and may legitimately contain spaces, but a stray ``/`` or
+    The experiment name includes the user-typed hdf5_data_name and may
+    legitimately contain spaces, but a stray ``/`` or
     ``:`` typed by the operator would otherwise break path creation.
     """
     cleaned = _INVALID_FILENAME_CHARS.sub('_', str(name)).rstrip(' .')
@@ -90,6 +95,7 @@ _APT_CHUNK_STEMS: list[tuple[str, str, str]] = [
 	("apt_stage_y", "apt/stage_y", "float64"),
 	("apt_stage_z", "apt/stage_z", "float64"),
 ]
+_APT_CHUNK_STEMS.extend(('apt_laser_'+key, 'apt/laser_'+key, 'float64') for key in TELEMETRY_UNITS)
 
 
 def _load_apt_from_chunks(chunk_dir: Path) -> dict[str, np.ndarray] | None:
@@ -309,6 +315,29 @@ def hdf_creator(variables, conf, time_counter, time_ex):
             provenance.attrs["pyccapt_version"] = pyccapt.__version__
             provenance.attrs["created_utc"] = dt.datetime.now(dt.timezone.utc).isoformat()
             provenance.attrs["experiment_name"] = str(variables.exp_name)
+            provenance.attrs["electrode_name"] = str(getattr(variables, "electrode", ""))
+            provenance.attrs['laser_readback_revision'] = 'unit-aware-1'
+            provenance.attrs['laser_pulse_energy_storage_unit'] = 'pJ (nJ readback multiplied by 1000)'
+            provenance.attrs['laser_wavelength_basis'] = 'nominal selected harmonic; not live spectrum'
+            provenance.attrs['laser_final_readback_json'] = json.dumps(
+                json_safe(getattr(variables, 'laser_telemetry', {})), allow_nan=False, default=str)
+            provenance.attrs['laser_measurement_location'] = 'laser internal monitor; not specimen'
+            provenance.attrs['laser_alignment_enabled'] = bool(getattr(variables, 'laser_alignment_enabled', False))
+            provenance.attrs['laser_alignment_run_json'] = json.dumps(
+                json_safe(getattr(variables, 'laser_alignment_run', {})), allow_nan=False)
+            provenance.attrs['laser_alignment_final_status_json'] = json.dumps(
+                json_safe(getattr(variables, 'laser_alignment_status', {})), allow_nan=False)
+            provenance.attrs['laser_alignment_tracking'] = bool(getattr(variables, 'laser_alignment_tracking', False))
+            provenance.attrs['automatic_alignment'] = bool(getattr(variables, 'automatic_alignment_enabled', False))
+            if provenance.attrs['automatic_alignment']:
+                provenance.attrs['alignment_sequence_id'] = str(getattr(variables, 'alignment_sequence_id', ''))
+                provenance.attrs['alignment_selected_samples'] = getattr(variables, 'automatic_alignment_samples', ())
+                provenance.attrs['alignment_sample'] = int(variables.alignment_sample)
+                provenance.attrs['alignment_saved_position_m'] = variables.alignment_sample_position
+                provenance.attrs['alignment_outcome'] = str(variables.alignment_outcome)
+                provenance.attrs['alignment_settings_json'] = json.dumps(variables.alignment_settings)
+                provenance.attrs['alignment_final_status_json'] = json.dumps(variables.alignment_status)
+                provenance.attrs['alignment_transfer_json'] = json.dumps(variables.alignment_transfer_log)
             provenance.attrs["python_version"] = platform.python_version()
             provenance.attrs["platform"] = platform.platform()
             config_json = json.dumps(conf, sort_keys=True, default=str)

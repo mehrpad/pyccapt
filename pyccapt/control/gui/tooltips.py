@@ -126,6 +126,9 @@ MAIN_TOOLTIPS = {
     "Disabled until device checks pass (or override is "
     "active).",
     "stop_button": "Stop the running experiment cleanly (closes data files, ramps voltages down).",
+    "electrode_button": "Mark the electrode in or out. Experiments and Flat Test require it to be in.",
+    "flat_test_button": "Run a flat test after the sample stage reaches its home position.",
+    "automatic_alignment_button": "Enable alignment setup checks when starting an experiment.",
     "superuser": "Override Access - bypasses device-availability "
     "checks and other safety interlocks.  Click for a "
     "warning dialog; the button turns green while active.",
@@ -195,10 +198,9 @@ LASER_TOOLTIPS = {
     "laser_wavelegnth": "Output wavelength.  IR is the fundamental, Green "
     "is frequency-doubled, DUV is frequency-quadrupled.  "
     "Cannot be changed while the laser is emitting.",
-    "laser_power": "Average output power, milliwatts.  Capped by "
-    "max_laser_power in config.toml.  Type a number "
-    "or use the spin arrows; sent to the laser "
-    "immediately.",
+    "laser_power": "Relative IR AOM setting (%), converted to e_power 0..4000. "
+    "This is not a power setpoint in watts. Requires internal control mode. "
+    "Capped by laser_aom_max_percent in config.toml.",
     "laser_rate": "Base pulse-repetition frequency (Hz).  Above "
     "100 kHz the per-pulse energy decreases linearly "
     "with rate.  Effective rate at the sample = "
@@ -209,8 +211,9 @@ LASER_TOOLTIPS = {
     "changing the base oscillator.",
     # --- Mode buttons + LEDs ---------------------------------------------
     "laser_listen": "Put the laser into Listen mode (lowest activity, safe).  No emission, ready to receive commands.",
-    "laser_standby": "Bring the laser to Standby - powered, warmed up, but not emitting.  Required before Laser On.",
-    "laser_on": "Start laser emission.  Only works from Standby.  Wavelength becomes locked while On.",
+    "laser_standby": "Warm up in Standby. Residual seed emission remains Class 4 (manual p116).",
+    "laser_on": "From Standby: enables emission and opens output (manual pp116-117). "
+    "From Output Enabled: closes the output gate while leaving the amplifier on.",
     "laser_enable": "Enable / disable the AOM output gate.  "
     "Toggles the actual output at the sample "
     "without changing the laser's emission "
@@ -220,8 +223,8 @@ LASER_TOOLTIPS = {
     "led_laser_on": "Emission indicator.  Green = laser is emitting, orange = transitioning.",
     "led_laser_enable": "Output-enable indicator.  Green = AOM open.",
     # --- Live readouts ---------------------------------------------------
-    "laser_power_disp": "Live measured average power (mW) read back from the laser.",
-    "laser_pulse_energy_disp": "Live per-pulse energy (nJ) read back from the laser.",
+    "laser_power_disp": "Selected output internal-monitor power (W). Unknown readings show dashes.",
+    "laser_pulse_energy_disp": "Selected output pulse energy (microjoules). Internal-monitor estimate, not specimen energy.",
     "laser_repetion_rate_disp": "Effective pulse rate at the sample (kHz), accounting for the division factor.",
     # --- Scan / Focus mode -----------------------------------------------
     "laser_scan_mode5": "Scanning pattern selector.  Currently only 'Standard' is implemented.",

@@ -1,5 +1,5 @@
-import copy
 import datetime
+import json
 import multiprocessing
 import queue
 import threading
@@ -26,6 +26,7 @@ from pyccapt.control.apt.experiment_state import (
     validate_detector_data_lengths,
 )
 from pyccapt.control.core import experiment_statistics, hdf5_creator, loggi, runtime
+from pyccapt.control.nkt_photonics.readback import TELEMETRY_UNITS, fresh_snapshot, experiment_frequency_hz, json_safe
 from pyccapt.control.core.chunk_store import atomic_write_chunk_group
 from pyccapt.control.core.safety import audit_safety_override, build_safety_interlock
 from pyccapt.control.core.health import build_health_snapshot
@@ -121,23 +122,29 @@ class APT_Exp_Control:
         self.main_laser_x = []
         self.main_laser_y = []
         self.main_laser_z = []
+        self.main_laser_telemetry = {key: [] for key in TELEMETRY_UNITS}
+        self._last_laser_snapshot_time = None
         self.main_stage_x = []
         self.main_stage_y = []
         self.main_stage_z = []
 
         self.initialization_error = False
         self.detector_runtime = DetectorRuntime()
+        self._detector_joined = False
         self.access_override_enabled = False
         self.override_disabled_devices = set()
         # Gate voltage ramp-up until the TDC has produced at least one
         # event, so we don't blindly raise the specimen voltage while the
         # detector isn't confirmed to be receiving anything yet.
         self._tdc_first_event_seen = False
+        self._run_failure = ""
         self._outputs_safe = True
         self._cleanup_complete = False
         self._completion_published = False
         self.safety_interlock = None
         self._last_health_publish = 0.0
+        self.alignment = None
+        self.laser_alignment_runtime = None
 
         # apt/* metadata chunk state: how many items have already been flushed
         # to disk and which chunk file ID to use next.
@@ -270,6 +277,8 @@ class APT_Exp_Control:
                     "apt_laser_x": np.asarray(self.main_laser_x[start:end], dtype=np.float64),
                     "apt_laser_y": np.asarray(self.main_laser_y[start:end], dtype=np.float64),
                     "apt_laser_z": np.asarray(self.main_laser_z[start:end], dtype=np.float64),
+                    **{'apt_laser_' + key: np.asarray(values[start:end], dtype=np.float64)
+                       for key, values in self.main_laser_telemetry.items()},
                     "apt_stage_x": np.asarray(self.main_stage_x[start:end], dtype=np.float64),
                     "apt_stage_y": np.asarray(self.main_stage_y[start:end], dtype=np.float64),
                     "apt_stage_z": np.asarray(self.main_stage_z[start:end], dtype=np.float64),
@@ -280,6 +289,11 @@ class APT_Exp_Control:
         except Exception as exc:
             if self.log_apt is not None:
                 self.log_apt.warning("apt meta chunk flush failed (chunk %d): %s", self._apt_meta_chunk_id, exc)
+
+    def _pulse_supply_target(self, specimen_voltage):
+        """Convert the desired sample pulse into a pulser supply command."""
+        sample_pulse = specimen_voltage * (self.pulse_fraction / 100)
+        return sample_pulse / self.pulse_amp_per_supply_voltage
 
     def main_ex_loop(
         self,
@@ -308,11 +322,7 @@ class APT_Exp_Control:
         count_temp = self.total_ions - self.count_last
         self.count_last = self.total_ions
 
-        if (
-            not self._tdc_first_event_seen
-            and self.variables.counter_source == 'TDC'
-            and (self.total_ions > 0 or count_temp > 0)
-        ):
+        if not self._tdc_first_event_seen and (self.total_ions > 0 or count_temp > 0):
             self._tdc_first_event_seen = True
 
         count_raw_signals_temp = self.total_raw_signals - self.count_raw_signals_last
@@ -329,6 +339,15 @@ class APT_Exp_Control:
         self.main_laser_x.extend([self.variables.laser_pos_x])
         self.main_laser_y.extend([self.variables.laser_pos_y])
         self.main_laser_z.extend([self.variables.laser_pos_z])
+        laser_snapshot = fresh_snapshot(self.variables)
+        if laser_snapshot and laser_snapshot['monotonic'] != self._last_laser_snapshot_time:
+            meta_path = getattr(self.variables, 'path_meta', '')
+            if meta_path and Path(meta_path).is_dir():
+                with (Path(meta_path)/'laser_readings.jsonl').open('a', encoding='utf-8') as stream:
+                    stream.write(json.dumps(json_safe(laser_snapshot), allow_nan=False)+'\n')
+            self._last_laser_snapshot_time = laser_snapshot['monotonic']
+        for key, values in self.main_laser_telemetry.items():
+            values.append(float(laser_snapshot.get(key, 0. if key == 'valid' else float('nan'))))
         self.main_stage_x.extend([self.variables.stage_pos_x])
         self.main_stage_y.extend([self.variables.stage_pos_y])
         self.main_stage_z.extend([self.variables.stage_pos_z])
@@ -342,7 +361,15 @@ class APT_Exp_Control:
 
         error = self.detection_rate - self.variables.detection_rate_current
 
-        if self.control_algorithm == 'Proportional':
+        laser_step = (self.laser_alignment_runtime.voltage_step(self.specimen_voltage, self.sleep_time)
+                      if self.laser_alignment_runtime is not None else None)
+        if laser_step is not None:
+            voltage_step = laser_step
+        elif self.alignment is not None and self.alignment.phase != 'aligned':
+            # Alignment owns the voltage target during search. Do not call PID
+            # here: a held output must not accumulate an integral correction.
+            voltage_step = self.alignment.voltage_step(self.specimen_voltage, self.sleep_time)
+        elif self.control_algorithm == 'Proportional':
             # P with deadband + asymmetric up/down gains + hard cap.
             if error > 0.05:
                 voltage_step = error * self.variables.vdc_step_up * 10
@@ -404,18 +431,18 @@ class APT_Exp_Control:
         else:
             voltage_step = 0
 
-        # Don't ramp the voltage up before the TDC has confirmed it is
+        # Don't ramp the voltage up before the detector has confirmed it is
         # actually receiving events - only holds back increases, a
         # decrease (voltage_step < 0) is still allowed to go through.
         if (
             voltage_step > 0
-            and self.variables.counter_source == 'TDC'
             and not self._tdc_first_event_seen
+            and laser_step is None
         ):
             voltage_step = 0
 
         # update v_dc
-        if not self.variables.vdc_hold and voltage_step != 0:
+        if not self.variables.stop_flag and not self.variables.vdc_hold and voltage_step != 0:
             specimen_voltage_temp = min(self.specimen_voltage + voltage_step, self.vdc_max)
             if specimen_voltage_temp > self.vdc_min:
                 if specimen_voltage_temp != self.specimen_voltage:
@@ -425,7 +452,7 @@ class APT_Exp_Control:
                         self.variables.specimen_voltage = self.specimen_voltage
                         self.variables.specimen_voltage_plot = self.specimen_voltage
                     if self.pulse_mode in ['Voltage', 'VoltageLaser']:
-                        new_vp = self.specimen_voltage * (self.pulse_fraction / 100) / self.pulse_amp_per_supply_voltage
+                        new_vp = self._pulse_supply_target(self.specimen_voltage)
                         if self.pulse_voltage_max > new_vp > self.pulse_voltage_min and self._vp_active():
                             apt_exp_control_func.command_v_p(self.com_port_v_p, 'VOLT %s' % new_vp)
                             self.pulse_voltage = new_vp * self.pulse_amp_per_supply_voltage
@@ -513,6 +540,7 @@ class APT_Exp_Control:
             else:
                 print(f"Experiment failed: {exc.__class__.__name__}: {exc}")
         finally:
+            failure_error = failure_error or self._run_failure
             try:
                 self.clear_up()
             except Exception as exc:
@@ -585,6 +613,8 @@ class APT_Exp_Control:
         Returns:
             None
         """
+        if self.variables.electrode_out:
+            raise RuntimeError("Electrode is out; experiment start is blocked")
         self.variables.flag_visualization_start = True
         self.pulse_mode = self.variables.pulse_mode
         self.control_algorithm = self.variables.control_algorithm
@@ -609,6 +639,8 @@ class APT_Exp_Control:
             self.variables.stop_flag = True
             self.initialization_error = True
 
+        from pyccapt.control.apt.laser_alignment_runtime import LaserAlignmentRuntime
+        self.laser_alignment_runtime = LaserAlignmentRuntime(self)
         self.safety_interlock = build_safety_interlock(self.conf)
         physical_safe = bool(self.safety_interlock.is_safe())
         self.variables.physical_estop_ok = physical_safe
@@ -622,6 +654,9 @@ class APT_Exp_Control:
             self.variables.flag_finished_tdc = True
 
         self.log_apt = loggi.logger_creator('apt', self.variables, 'apt.log', path=self.variables.log_path)
+        if self.variables.automatic_alignment_enabled:
+            from pyccapt.control.apt.automatic_alignment import AutomaticAlignment
+            self.alignment = AutomaticAlignment(self.variables, self.conf)
         # Record the inputs that produced this experiment so the apt.log file
         # is self-contained for later debugging / forensics.
         try:
@@ -719,8 +754,10 @@ class APT_Exp_Control:
 
         desired_rate = self.variables.ex_freq  # Hz
         desired_period = 1.0 / desired_rate  # seconds
-        self.pulse_frequency = self.variables.pulse_frequency * 1000
+        self.pulse_frequency = experiment_frequency_hz(self.variables)
         self.counts_target = self.pulse_frequency * self.variables.detection_rate / 100
+        self.pulse_fraction = self.variables.pulse_fraction
+        self.pulse_amp_per_supply_voltage = self.variables.pulse_amp_per_supply_voltage
 
         # Turn on the v_dc and v_p
         if not self.initialization_error:
@@ -729,7 +766,7 @@ class APT_Exp_Control:
                     apt_exp_control_func.command_v_p(self.com_port_v_p, 'OUTPut ON')
                     self._outputs_safe = False
                     self.variables.hardware_safe = False
-                    vol = self.variables.v_p_min / self.variables.pulse_amp_per_supply_voltage
+                    vol = self.variables.v_p_min / self.pulse_amp_per_supply_voltage
                     cmd = 'VOLT %s' % vol
                     apt_exp_control_func.command_v_p(self.com_port_v_p, cmd)
                     time.sleep(0.1)
@@ -745,8 +782,6 @@ class APT_Exp_Control:
                 self.variables.hardware_safe = False
                 time.sleep(0.1)
 
-        self.pulse_fraction = self.variables.pulse_fraction
-        self.pulse_amp_per_supply_voltage = self.variables.pulse_amp_per_supply_voltage
         self.specimen_voltage = self.variables.specimen_voltage
         if self.pulse_mode in ['Voltage', 'VoltageLaser']:
             self.pulse_voltage = self.variables.pulse_voltage
@@ -775,15 +810,15 @@ class APT_Exp_Control:
 
         self.ex_freq = self.variables.ex_freq
 
-        # Wait for 8 second to all devices get ready specially tdc
-        time.sleep(8)
+        # The no-event deadline starts when the outputs are enabled. Poll the
+        # detector immediately; a fixed startup sleep would consume it.
+        last_event_at = time.monotonic()
+        last_event_count = int(self.variables.total_ions)
         self.log_apt.info('Experiment is started')
         set_experiment_state(self.variables, ExperimentState.RUNNING)
         self._publish_status(StatusKind.STATE, "Experiment running")
         # Main loop of experiment
         remaining_time_list = []
-        total_ions_tmp = 0
-        index_tdc_failure = 0
         last_pulse_mode = self.pulse_mode
         flag_change_pulse_mode = False
         pulse_frequency_tmp = self.pulse_frequency
@@ -792,7 +827,7 @@ class APT_Exp_Control:
         # interval itself is read live from the GUI field inside the loop.
         self._last_email_ions = 0
         if self.initialization_error:
-            pass
+            self._run_failure = 'Experiment device initialization failed.'
         else:
             while True:
                 self._drain_commands()
@@ -801,17 +836,22 @@ class APT_Exp_Control:
                 self.variables.physical_estop_ok = bool(self.safety_interlock.is_safe())
                 if not self.variables.physical_estop_ok:
                     self.variables.experiment_error = "Physical E-stop/interlock opened during acquisition"
+                    self._run_failure = self.variables.experiment_error
                     self._request_detector_stop()
                     break
                 start_time = time.perf_counter()
                 self.vdc_max = self.variables.vdc_max
                 self.vdc_min = self.variables.vdc_min
-                self.pulse_frequency = self.variables.pulse_frequency * 1000
+                if self.pulse_mode == 'Laser' and not fresh_snapshot(self.variables).get('valid'):
+                    self._run_failure = 'Laser readback lost or stale; check Laser Control.'
+                    self._request_detector_stop()
+                    break
+                self.pulse_frequency = experiment_frequency_hz(self.variables)
                 if self.pulse_mode in ['Voltage', 'VoltageLaser']:
                     self.pulse_voltage_min = self.variables.v_p_min / self.pulse_amp_per_supply_voltage
                     self.pulse_voltage_max = self.variables.v_p_max / self.pulse_amp_per_supply_voltage
                 if pulse_frequency_tmp != self.pulse_frequency:
-                    self.pulse_frequency = self.variables.pulse_frequency * 1000
+                    self.pulse_frequency = experiment_frequency_hz(self.variables)
                     pulse_frequency_tmp = self.pulse_frequency
                     self.counts_target = self.pulse_frequency * self.detection_rate / 100
                     if self.pulse_mode in ['Voltage', 'VoltageLaser'] and self._signal_generator_active():
@@ -827,19 +867,20 @@ class APT_Exp_Control:
 
                 self.total_ions = self.variables.total_ions
                 self.total_raw_signals = self.variables.total_raw_signals
-                # TDC failure detection should only run for an active TDC
-                # process and only after the detector has produced at least
-                # one event. Early zero-ion ramp-up is physically valid.
-                detector_running = self.variables.counter_source == 'TDC' and self.detector_runtime.tdc_process is not None
-                has_seen_tdc_events = self.total_ions > 0 or total_ions_tmp > 0
-                if detector_running and has_seen_tdc_events and total_ions_tmp == self.total_ions and not self.variables.vdc_hold:
-                    index_tdc_failure += 1
-                    if index_tdc_failure > 200:
-                        self.variables.flag_tdc_failure = True
-                else:
-                    index_tdc_failure = 0
-                    total_ions_tmp = copy.deepcopy(self.total_ions)
-
+                now = time.monotonic()
+                if self.total_ions > last_event_count:
+                    last_event_count = self.total_ions
+                    last_event_at = now
+                elif now - last_event_at >= 10.0:
+                    self._run_failure = "No event for 10 seconds; check detector and TDC status."
+                    self.log_apt.error(self._run_failure)
+                    self._request_detector_stop()
+                    break
+                if self.variables.flat_test_active:
+                    self.variables.flat_test_peak_rate = max(
+                        self.variables.flat_test_peak_rate,
+                        float(self.variables.detection_rate_current),
+                    )
                 # Interim progress e-mail every email_interval_events ions
                 # (only while the GUI checkbox is ticked and a recipient is
                 # set). The interval is read live from the GUI field. Sent on
@@ -885,7 +926,7 @@ class APT_Exp_Control:
                         # set the v_dc and v_p
                         self.pulse_voltage_min = self.variables.v_p_min / self.pulse_amp_per_supply_voltage
                         self.pulse_voltage_max = self.variables.v_p_max / self.pulse_amp_per_supply_voltage
-                        start_vp = self.specimen_voltage * (self.pulse_fraction / 100) / self.pulse_amp_per_supply_voltage
+                        start_vp = self._pulse_supply_target(self.specimen_voltage)
                         if start_vp < self.pulse_voltage_min:
                             start_vp = self.variables.v_p_min / self.variables.pulse_amp_per_supply_voltage
 
@@ -913,9 +954,7 @@ class APT_Exp_Control:
                                     apt_exp_control_func.command_v_dc(self.com_port_v_dc, ">S0 %s" % self.specimen_voltage)
                                 time.sleep(0.3)
                             if self._vdc_active() and self.pulse_mode in ['Voltage', 'VoltageLaser']:
-                                new_vp = (
-                                    self.specimen_voltage * (self.pulse_fraction / 100) / self.pulse_amp_per_supply_voltage
-                                )
+                                new_vp = self._pulse_supply_target(self.specimen_voltage)
                                 if self.pulse_voltage_max > new_vp > self.pulse_voltage_min and self._vp_active():
                                     apt_exp_control_func.command_v_p(self.com_port_v_p, 'VOLT %s' % new_vp)
                                     self.pulse_voltage = new_vp * self.pulse_amp_per_supply_voltage
@@ -926,6 +965,25 @@ class APT_Exp_Control:
                             self.variables.flag_new_min_voltage = False
 
                 # main loop function
+                if self.alignment is not None:
+                    if self.variables.flag_tdc_failure:
+                        self._run_failure = 'Detector failure during automatic alignment.'
+                        self._request_detector_stop()
+                        break
+                    was_aligned = self.alignment.phase == 'aligned'
+                    self.alignment.tick(self.specimen_voltage, self.variables.detection_rate_current)
+                    if not was_aligned and self.alignment.phase == 'aligned':
+                        self._switch_control_algorithm(self.variables.control_algorithm)
+                        self.log_apt.info('Automatic alignment complete; stage position locked.')
+                    if self.alignment.phase == 'finished':
+                        self.log_apt.info('Automatic alignment ended: %s', self.alignment.reason)
+                        if self.alignment.outcome not in ('voltage_limit', 'cancelled'):
+                            self._run_failure = self.alignment.reason
+                        self._request_detector_stop()
+                        break
+                if self.laser_alignment_runtime is not None and not self.laser_alignment_runtime.tick():
+                    self._request_detector_stop()
+                    break
                 self.main_ex_loop()
 
                 # Counter of iteration
@@ -945,6 +1003,7 @@ class APT_Exp_Control:
                     break
 
                 if self.variables.flag_tdc_failure:
+                    self._run_failure = str(self.variables.detector_error or 'Detector failure during acquisition.')
                     self.log_apt.info('Experiment is stopped because of tdc failure')
                     print(f"{initialize_devices.bcolors.FAIL}Experiment is stopped because of TDC failure")
                     print(f"{initialize_devices.bcolors.FAIL}Restart the TDC and start the experiment again")
@@ -961,6 +1020,8 @@ class APT_Exp_Control:
                         break
                 if self.variables.criteria_vdc:
                     if self.vdc_max <= self.specimen_voltage:
+                        if self.variables.flat_test_active:
+                            self.variables.flat_test_reached_max = True
                         if flag_achieved_high_voltage > self.ex_freq * 10:
                             self.log_apt.info('Experiment is stopped because dc voltage Max. is achieved')
                             self._request_detector_stop()
@@ -999,7 +1060,15 @@ class APT_Exp_Control:
                 if steps % self._APT_META_CHUNK_SIZE == 0:
                     self._flush_apt_meta_chunks(time_counter, time_ex)
 
+        if self.laser_alignment_runtime is not None:
+            self.laser_alignment_runtime.stop()
         self.variables.start_flag = False  # Set the START flag
+        if self.alignment is not None:
+            self.variables.alignment_cancel_motion = True
+            if not self.variables.alignment_outcome:
+                self.variables.alignment_outcome = 'fault' if self._run_failure else 'stop_condition'
+            self.alignment._event('experiment_stopping', outcome=self.variables.alignment_outcome,
+                                  error=self._run_failure or self.variables.experiment_error)
         set_experiment_state(self.variables, ExperimentState.STOPPING)
         self._request_detector_stop()
         # Hardware safety must not wait for detector joins or HDF5/email work.
@@ -1041,7 +1110,12 @@ class APT_Exp_Control:
 
         try:
             join_detector_processes(self.conf, self.variables, self.detector_runtime)
+            self._detector_joined = True
+            for process in (self.detector_runtime.tdc_process, self.detector_runtime.hsd_process):
+                if process is not None and (process.is_alive() or process.exitcode not in (None, 0)):
+                    self._run_failure = 'Detector worker did not complete cleanly; automatic sequence stopped.'
         except Exception as exc:
+            self._run_failure = f'Detector shutdown failed: {exc}'
             print(
                 f"{initialize_devices.bcolors.WARNING}Warning: The TDC or HSD process cannot be terminated "
                 f"properly{initialize_devices.bcolors.ENDC}"
@@ -1128,6 +1202,15 @@ class APT_Exp_Control:
 
     def safe_outputs_off(self):
         """Best-effort, idempotent transition of every energized output to off."""
+        if getattr(self, 'alignment', None) is not None:
+            self.variables.alignment_cancel_motion = True
+        if getattr(self, 'laser_alignment_runtime', None) is not None:
+            try:
+                self.laser_alignment_runtime.stop()
+            except Exception:
+                # Metadata / IPC failures must never prevent physical safe-off.
+                if self.log_apt is not None:
+                    self.log_apt.exception('Could not finalize laser alignment during safe-off')
         if self._outputs_safe:
             self.variables.hardware_safe = True
             current = ExperimentState(self.variables.experiment_state)
@@ -1196,6 +1279,17 @@ class APT_Exp_Control:
             # failure after the remaining cleanup has had a chance to run.
             safe_off_error = exc
 
+        # An exception before the normal finalization path must also stop the
+        # detector before buffers can be reused by another sample.
+        detector_cleanup_error = None
+        if not self._detector_joined:
+            try:
+                self._request_detector_stop()
+                join_detector_processes(self.conf, self.variables, self.detector_runtime)
+                self._detector_joined = True
+            except Exception as exc:
+                detector_cleanup_error = exc
+
         try:
             if self._vdc_active():
                 self.com_port_v_dc.close()
@@ -1229,6 +1323,8 @@ class APT_Exp_Control:
             raise safe_off_error
         if interlock_error is not None:
             raise interlock_error
+        if detector_cleanup_error is not None:
+            raise detector_cleanup_error
 
 
 def run_experiment(

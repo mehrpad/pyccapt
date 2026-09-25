@@ -10,6 +10,7 @@ import numpy as np
 from pyccapt.control.core import runtime as _runtime
 from pyccapt.control.core.chunk_store import atomic_write_chunk_group
 from pyccapt.control.devices import initialize_devices
+from pyccapt.control.nkt_photonics.readback import pulse_energy_pj, experiment_frequency_hz
 from pyccapt.control.tdc_surface_concept import scTDC
 
 QUEUE_DATA = 0
@@ -292,12 +293,16 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
         variables.flag_tdc_failure = False
         return 0
 
+    from pyccapt.control.apt.laser_alignment_data import LaserAlignmentPublisher
+    laser_alignment_publisher = LaserAlignmentPublisher(variables)
+    from pyccapt.control.apt.alignment_vision import AlignmentEventPublisher
+    alignment_publisher = AlignmentEventPublisher(variables, _conf)
     loop_time = 1 / variables.ex_freq
     events_detected = 0
     events_detected_tmp = 0
     raw_signal_detected = 0
     start_time = time.time()
-    pulse_frequency = variables.pulse_frequency * 1000
+    pulse_frequency = experiment_frequency_hz(variables)
     loop_counter = 0
     loop_delay_counter = 0
 
@@ -346,7 +351,7 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
         try:
             specimen_voltage = variables.specimen_voltage
             voltage_pulse = variables.pulse_voltage
-            laser_pulse = variables.laser_pulse_energy
+            laser_pulse = pulse_energy_pj(variables)
         except Exception as exc:
             # Manager IPC can transiently fail under heavy load; skip
             # this iteration but keep the loop alive.
@@ -377,6 +382,8 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
                 y_plot.write(yy_tmp)
                 t_plot.write(tt_tmp)
                 main_v_dc_plot.write(dc_voltage_tmp)
+                alignment_publisher.append(xx_tmp, yy_tmp)
+                laser_alignment_publisher.append(tt_tmp)
 
                 # change to list
                 xx_tmp = xx_tmp.tolist()
@@ -428,7 +435,7 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
             # against zero (would divide by zero on first chunk after a
             # bad value).
             try:
-                live_pulse_frequency = max(float(variables.pulse_frequency) * 1000.0, 1.0)
+                live_pulse_frequency = max(experiment_frequency_hz(variables), 1.0)
             except Exception:
                 live_pulse_frequency = pulse_frequency
             pulse_frequency = live_pulse_frequency

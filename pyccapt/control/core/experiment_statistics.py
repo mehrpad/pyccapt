@@ -1,5 +1,7 @@
 import datetime
+import json
 from pathlib import Path
+from pyccapt.control.nkt_photonics.readback import fresh_snapshot
 
 
 def build_statistics_text(variables, conf):
@@ -34,20 +36,20 @@ Specimen Max Achieved Pulse Voltage (V): {variables.pulse_voltage:.3f}
 Last detection rate: {variables.detection_rate_current_plot:.3f}%
 """
     elif variables.pulse_mode in ('Laser', 'VoltageLaser'):
+        laser = fresh_snapshot(variables)
         # variables.laser_freq is stored in Hz; the GUI's repetition-rate
         # combo selects 400 000, 500 000, ..., 1 000 000 Hz. Convert to kHz
         # for the human-readable summary so the label and value agree.
         # Effective output rate = base / division.
         try:
-            base_freq_khz = float(variables.laser_freq) / 1000.0
-            div = max(int(variables.laser_division_factor or 1), 1)
-            output_rate_khz = base_freq_khz / div
+            base_freq_khz = float(laser.get('base_frequency_hz', float('nan'))) / 1000.0
+            output_rate_khz = float(laser.get('output_frequency_hz', float('nan'))) / 1000.0
         except (TypeError, ValueError, ZeroDivisionError):
             base_freq_khz = float('nan')
             output_rate_khz = float('nan')
         # Pulse energy is now computed and tracked by the laser GUI; if it
         # was never set (laser disabled / never connected), fall back to 0.
-        pulse_energy_nJ = float(getattr(variables, 'laser_pulse_energy', 0) or 0)
+        pulse_energy_nJ = float(laser.get('pulse_energy_nj', float('nan')))
         statistics = f"""Run Statistics
 -------------------------------------------
 Experiment Timestamp: {current_datetime}
@@ -56,11 +58,16 @@ Experiment Total Ions: {variables.total_ions}
 Specimen Max Achieved Voltage (V): {variables.specimen_voltage:.3f}
 Specimen Max Achieved Pulse Voltage (V): {variables.pulse_voltage:.3f}
 Laser pulse energy (nJ): {pulse_energy_nJ:.3f}
-Laser average power (mW): {variables.laser_average_power:.3f}
+Laser average power (mW): {laser.get('output_power_mw', float('nan')):.3f}
 Laser base pulse frequency (kHz): {base_freq_khz:.3f}
-Laser division factor: {variables.laser_division_factor}
+Laser division factor: {laser.get('divider', 'unknown')}
 Laser output pulse frequency (kHz): {output_rate_khz:.3f}
-Laser IR power setpoint (W): {variables.laser_power:.3f}
+Laser wavelength (nominal nm): {laser.get('wavelength_nm', float('nan'))}
+Laser selected harmonic: {laser.get('wavelength', 'unknown')}
+Laser IR AOM setting (%): {laser.get('aom_percent', float('nan'))}
+Laser monitor source: {laser.get('source', 'unavailable')}
+Laser monitor reading valid: {laser.get('valid', False)}
+Laser energy location: internal monitor estimate, not calibrated energy at specimen
 Last detection rate: {variables.detection_rate_current_plot:.3f}%
 """
     else:
@@ -120,6 +127,13 @@ flight path distance (cm): {conf['flight_path_length']}
 TDC model: {conf['tdc_model']}
 """
 
+    if getattr(variables, 'automatic_alignment_enabled', False):
+        header += (f"Automatic Alignment: True\nSample: {variables.alignment_sample}\n"
+                   f"Alignment sequence: {getattr(variables, 'alignment_sequence_id', '')}\n"
+                   f"Saved stage position (m): {variables.alignment_sample_position}\n"
+                   f"Alignment outcome: {variables.alignment_outcome}\n"
+                   f"Alignment settings: {json.dumps(variables.alignment_settings, sort_keys=True)}\n"
+                   "Alignment movement/observation history: meta_data/alignment.jsonl\n")
     software_info = "Created by PyCCAPT software."
 
     return statistics + separator + header + software_info

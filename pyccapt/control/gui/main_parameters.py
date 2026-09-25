@@ -18,6 +18,22 @@ class ParameterError(ValueError):
     """Raised when GUI parameter blocks cannot be parsed or validated."""
 
 
+DEFAULT_TEXTLINE_EXAMPLE = """\
+{ex_user=user1;ex_name=test1;electrode=NiC1;pulse_mode=Voltage;
+ex_time=90;max_ions=2000;ex_freq=10;vdc_min=1640;vdc_max=4000;
+vdc_steps_up=1;vdc_steps_down=1;control_algorithm=PID;vp_min=328;vp_max=3281;
+pulse_fraction=20;pulse_frequency=200;detection_rate_init=1;
+hit_displayed=20000;email=;counter_source=TDC;
+criteria_time=True;criteria_ions=False;criteria_vdc=False}
+{ex_user=user2;ex_name=test2;electrode=NiC2;pulse_mode=Voltage;
+ex_time=100;max_ions=3000;ex_freq=5;vdc_min=2700;vdc_max=3000;
+vdc_steps_up=0.5;vdc_steps_down=0.5;control_algorithm=Proportional;
+vp_min=400;vp_max=2000;pulse_fraction=15;pulse_frequency=200;
+detection_rate_init=2;hit_displayed=40000;email=;counter_source=TDC;
+criteria_time=False;criteria_ions=False;criteria_vdc=True}
+"""
+
+
 TEXTLINE_REQUIRED_KEYS = (
     "ex_user",
     "ex_name",

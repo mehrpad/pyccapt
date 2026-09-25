@@ -17,7 +17,9 @@ from pyccapt.control.gui.stage_control_widgets import (
     SpeedSelector,
     make_jog_button,
 )
-from pyccapt.control.nkt_photonics import nktpbus_switch, origamiClassCLI
+from pyccapt.control.nkt_photonics import nktpbus_switch, origamiClassCLI, readback
+from pyccapt.control.gui.laser_readouts import LaserReadoutMixin
+from pyccapt.control.gui.laser_alignment_gui import LaserAlignmentGuiMixin
 from pyccapt.control.smaract_mcs2 import mcs2_stage
 
 
@@ -58,46 +60,11 @@ def _available_serial_ports_text():
     return ", ".join(ports) if ports else "none detected"
 
 
-# Magic number meaning "AOM fully open" for the OXPS CLI 'e_power=' command.
-# Per NKT support / QSG, the AOM e_power value is 0..4000 (12-bit), where 4000
-# = fully open. Used in several places in the status loop.
-AOM_FULL_OPEN = 4000
-
-# Per the Origami XP QSG and the test report (T:\Monajem\Oxcart_laser_manual\
-# Test Report O-02XPS-3P SN4906 ...), the laser produces a base pulse train at
-# 400..1000 kHz which is then divided down. The minimum *output* rate
-# specified for the OXP series is 50 kHz; below that the division factor is
-# refused by the firmware (and the user is in untested territory anyway).
-LASER_OUTPUT_RATE_MIN_HZ = 50_000
-
-# Numeric wavelengths (nm) reported by the test report; used purely for the
-# nm read-out next to the IR/Green/DUV dropdown.
-WAVELENGTH_NM = {
-    'IR': 1030.0,
-    'Green': 515.0,
-    'DUV': 257.5,
-}
+# Compatibility alias; parsing excludes digits embedded in command names.
+_parse_first_number = readback.scalar
 
 
-def _parse_first_number(text):
-    """Pull the first signed float / int out of a CLI response.
-
-    The OXPS CLI replies look like ``ly_oxp2_power 4.65`` or
-    ``e_freq 4`` — i.e. an echoed key followed by the value. We don't care
-    about the key; we only want the number.
-    """
-    if not text:
-        return None
-    match = re.search(r'[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?', text)
-    if match is None:
-        return None
-    try:
-        return float(match.group())
-    except (TypeError, ValueError):
-        return None
-
-
-class Ui_Laser_Control(object):
+class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin):
     def __init__(self, variables, conf):
         """
         Initialize the Ui_Laser_Control class.
@@ -137,11 +104,8 @@ class Ui_Laser_Control(object):
         self.gridLayout_5.setObjectName("gridLayout_5")
         self.gridLayout_3 = QtWidgets.QGridLayout()
         self.gridLayout_3.setObjectName("gridLayout_3")
-        # Wavelength dropdown plus a read-only "(nnnn nm)" label so an
-        # operator who isn't familiar with the IR/Green/DUV shorthand can
-        # see which physical wavelength they're selecting. Numeric values
-        # come from the WAVELENGTH_NM table at the top of this file and
-        # match the unit-test report for SN4906.
+        # Nominal harmonic wavelength from the accepted device readback.
+        # This is not the historical factory-measured spectrum of SN4906.
         wavelength_layout = QtWidgets.QHBoxLayout()
         self.laser_wavelegnth = QtWidgets.QComboBox(parent=Laser_Control)
         self.laser_wavelegnth.setStyleSheet("QComboBox{background: rgb(223,223,233)}")
@@ -727,8 +691,11 @@ class Ui_Laser_Control(object):
         # "Switch to CLI" button (gated behind Override Access).
         self.com_port_laser = self.conf['COM_PORT_laser']
         self.laser_device = None
-        self.variables.laser_pulse_energy = 0.0
-        self.variables.laser_intensity = 0.0
+        # Do not present the UI designer's example rates as instrument readback.
+        self.laser_rate.blockSignals(True)
+        self.laser_rate.clear()
+        self.laser_rate.blockSignals(False)
+        self._invalidate_laser_readouts('Waiting for laser readback')
         self._open_laser_cli(self.com_port_laser, initial_open=True)
 
         # Laser status loop.
@@ -786,6 +753,7 @@ class Ui_Laser_Control(object):
         for selector in (self.laser_speed_x, self.laser_speed_y, self.laser_speed_z):
             self._update_stage_speed_label(selector)
         self._connect_stage_device()
+        self._setup_laser_alignment(Laser_Control)
 
     # ------------------------------------------------------------------
     # SmarAct laser focusing stage
@@ -939,6 +907,9 @@ class Ui_Laser_Control(object):
         mapping[selector].setText(text)
 
     def _stage_jog_axis(self, axis, sign):
+        if self._laser_alignment_busy():
+            self.error_message('Stop laser alignment before manual stage movement.')
+            return
         if self.stage_device is None:
             self.error_message(self._stage_connect_error or "Laser stage not connected.")
             return
@@ -1001,6 +972,9 @@ class Ui_Laser_Control(object):
                 pass
 
     def _stage_go_home(self):
+        if self._laser_alignment_busy():
+            self.error_message('Stop laser alignment before manual stage movement.')
+            return
         if self.stage_device is None:
             self.error_message(self._stage_connect_error or "Laser stage not connected.")
             return
@@ -1020,6 +994,9 @@ class Ui_Laser_Control(object):
             self.error_message(f"Home failed: {exc}")
 
     def _stage_reference(self):
+        if self._laser_alignment_busy():
+            self.error_message('Stop laser alignment before manual stage movement.')
+            return
         if self.stage_device is None:
             self.error_message(self._stage_connect_error or "Laser stage not connected.")
             return
@@ -1076,6 +1053,8 @@ class Ui_Laser_Control(object):
             btn.setEnabled(enabled)
 
     def _stage_stop(self):
+        self._cancel_laser_alignment()
+        self._stop_continuous_stage_jog()
         # Abort an in-flight reference search FIRST, then stop the axes.
         if self._stage_reference_cancel is not None:
             self._stage_reference_cancel.set()
@@ -1114,6 +1093,7 @@ class Ui_Laser_Control(object):
 	        self.variables.laser_pos_x = float(pos['x'])
 	        self.variables.laser_pos_y = float(pos['y'])
 	        self.variables.laser_pos_z = float(pos['z'])
+	        self.variables.laser_stage_snapshot = (float(pos['x']), float(pos['y']), float(pos['z']), time.monotonic())
         except Exception:
 	        pass
 
@@ -1136,7 +1116,7 @@ class Ui_Laser_Control(object):
         self.laser_wavelegnth.setItemText(0, _translate("Laser_Control", "IR"))
         self.laser_wavelegnth.setItemText(1, _translate("Laser_Control", "Green"))
         self.laser_wavelegnth.setItemText(2, _translate("Laser_Control", "DUV"))
-        self.led_laser_on.setText(_translate("Laser_Control", "Laser on"))
+        self.led_laser_on.setText(_translate("Laser_Control", "Laser On (emits)"))
         self.laser_rate.setItemText(0, _translate("Laser_Control", "400000"))
         self.laser_rate.setItemText(1, _translate("Laser_Control", "500000"))
         self.laser_rate.setItemText(2, _translate("Laser_Control", "579710"))
@@ -1147,12 +1127,12 @@ class Ui_Laser_Control(object):
         self.led_laser_enable.setText(_translate("Laser_Control", "Output enable"))
         self.laser_standby.setText(_translate("Laser_Control", "Standby"))
         self.label_2.setText(_translate("Laser_Control", "Repetion rate (Hz)"))
-        self.laser_on.setText(_translate("Laser_Control", "Laser on"))
+        self.laser_on.setText(_translate("Laser_Control", "Laser On (emits)"))
         self.label_3.setText(_translate("Laser_Control", "Divition Factor"))
         self.laser_enable.setText(_translate("Laser_Control", "Output Enable"))
         self.led_laser_listen.setText(_translate("Laser_Control", "Listen"))
         self.led_laser_laser_standby.setText(_translate("Laser_Control", "Standby"))
-        self.label.setText(_translate("Laser_Control", "Power control (mW)"))
+        self.label.setText(_translate("Laser_Control", "IR AOM setting (%)"))
         self.laser_listen.setText(_translate("Laser_Control", "Listen"))
         self.label_4.setText(_translate("Laser_Control", "Wavelength"))
         self.label_12.setText(_translate("Laser_Control", "Scan mode"))
@@ -1162,9 +1142,8 @@ class Ui_Laser_Control(object):
         # Display in laser-physics-friendly units: W rather than mW (so a
         # 5 W laser shows "5.028" instead of "5028"), and µJ rather than nJ
         # (so a 12.5 µJ pulse shows "12.570" instead of "12570"). The
-        # underlying shared variables stay in mW / nJ so HDF5, the email
-        # report, and the parameters.txt are unaffected.
-        self.label_9.setText(_translate("Laser_Control", "Laser power (W)"))
+        # shared variables use mW / nJ; detector writers convert nJ to pJ.
+        self.label_9.setText(_translate("Laser_Control", "Selected output (W)"))
         self.label_10.setText(_translate("Laser_Control", "Pulse energy (µJ)"))
         self.label_11.setText(_translate("Laser_Control", "Frequency (kHz)"))
         self.label_19.setText(_translate("Laser_Control", "x"))
@@ -1193,16 +1172,11 @@ class Ui_Laser_Control(object):
         self.timer_hide_error = QtCore.QTimer()
         self.timer_hide_error.timeout.connect(self.hideMessage)
         self.laser_power.setMinimum(0.0)
-        self.laser_power.setMaximum(self.conf['max_laser_power'])
+        # Display actual readback even when it exceeds a local command limit.
+        self.laser_power.setMaximum(100.)
         self.laser_power.setSingleStep(0.1)
         self.laser_divition_factor.setMinimum(1)
-        # The maximum divider depends on the currently selected base rate
-        # so that ``base_rate / divider`` cannot drop below the firmware-
-        # specified ``LASER_OUTPUT_RATE_MIN_HZ`` (50 kHz, per QSG). The
-        # actual cap is recomputed every time the rate dropdown changes
-        # in ``_clamp_divider_to_min_output_rate``; this setMaximum is
-        # just the initial value so the spinbox is usable on first show.
-        self.laser_divition_factor.setMaximum(1_000_000)
+        # Manual p123: integer divider 1..10,000,000.
         self._clamp_divider_to_min_output_rate()
 
     def laser_enable_clicked(self):
@@ -1293,19 +1267,6 @@ class Ui_Laser_Control(object):
         """
         self.change_laser_divition_factor = True
 
-    def get_frequency(self, index):
-        """
-            Handle the close event of the changing of laser rate.
-
-        Args:
-            None
-
-        Return:
-            None
-        """
-        repetition_rates = {4: 400000, 5: 500000, 6: 579710, 7: 720720, 8: 800000, 9: 898876, 10: 1000000}
-        return repetition_rates.get(index, "Invalid index")
-
     def _poll_laser_status(self):
         """Main-thread QTimer slot that drives the laser status loop.
 
@@ -1320,234 +1281,54 @@ class Ui_Laser_Control(object):
         try:
             self.check_laser_status()
         except Exception as exc:
-            print(f"Laser status poll failed (non-fatal): {exc}")
+            self._invalidate_laser_readouts(exc)
+            self._apply_button_locks_for_status(None)
+            print(f"Laser status poll failed: {exc}")
         finally:
             self._laser_status_in_progress = False
 
     def check_laser_status(self):
-        if self.laser_device is not None:
-            databack = self.laser_device.StatusRead()
-            if self.listen_mode:
-                if databack.strip() != 'ly_oxp2_dev_status 9':
-                    self.laser_listen.setEnabled(False)
-                    databack = self.laser_device.Listen()
-                elif databack.strip() == 'ly_oxp2_dev_status 9':
-                    self.laser_device.AOM(0)
-                    self.led_laser_listen.setPixmap(self.led_green)
-                    self.led_laser_enable.setPixmap(self.led_red)
-                    self.led_laser_on.setPixmap(self.led_red)
-                    self.led_laser_laser_standby.setPixmap(self.led_red)
-                    self.laser_enable.setEnabled(False)
-                    self.laser_on.setEnabled(False)
-                    self.on_mode = False
-                    self.enable_ouput_mode = False
-                    self.standby_mode = False
-                    self.listen_mode = False
-                    self.laser_listen.setEnabled(True)
-                    self.laser_standby.setEnabled(True)
-                    self.laser_wavelegnth.setEnabled(True)
-
-            elif self.standby_mode:
-                if databack.strip() != 'ly_oxp2_dev_status 33':
-                    if self.laser_standby.isEnabled():
-                        self.laser_standby.setEnabled(False)
-                        self.laser_wavelegnth.setEnabled(True)
-                        self.laser_on.setEnabled(False)
-                        self.led_laser_listen.setPixmap(self.led_orange)
-                        self.led_laser_laser_standby.setPixmap(self.led_orange)
-                        self.laser_device.Standby()
-                    else:
-                        if self.led_laser_laser_standby.pixmap().toImage() == self.led_orange.toImage():
-                            self.led_laser_laser_standby.setPixmap(self.led_green)
-                        elif self.led_laser_laser_standby.pixmap().toImage() == self.led_green.toImage():
-                            self.led_laser_laser_standby.setPixmap(self.led_orange)
-                elif databack.strip() == 'ly_oxp2_dev_status 33':
-                    self.laser_device.AOM(0)
-                    self.laser_on.setEnabled(True)
-                    self.laser_standby.setEnabled(True)
-                    self.led_laser_on.setPixmap(self.led_red)
-                    self.led_laser_laser_standby.setPixmap(self.led_green)
-                    self.led_laser_enable.setPixmap(self.led_red)
-                    self.laser_enable.setEnabled(False)
-                    self.standby_mode = False
-            elif self.on_mode:
-                # State hierarchy (low -> high):
-                #   9 = Listen, 33 = Standby, 65 = Laser-on/output-off,
-                #   129 = output-enabled. The "Laser On" button steps
-                #   *up* from Standby (33 -> 65) and steps *down* from
-                #   output-enabled (129 -> 65). It always lands at 65
-                #   (AOM closed). The operator must press Output Enable
-                #   separately to allow light out at the sample.
-                if databack.strip() == 'ly_oxp2_dev_status 33':
-                    # Step up from Standby: start emission with AOM closed.
-                    self.led_laser_on.setPixmap(self.led_orange)
-                    self.led_laser_laser_standby.setPixmap(self.led_orange)
-                    self.laser_device.Enable()
-                elif databack.strip() == 'ly_oxp2_dev_status 129':
-                    # Pressing Laser On while output is enabled = step
-                    # DOWN to "laser on, output off". Force AOM closed so
-                    # the laser keeps emitting but no light reaches the
-                    # sample.
-                    self.laser_device.AOMDisable()
-                    self.laser_device.AOM(0)
-                    self.led_laser_on.setPixmap(self.led_green)
-                    self.led_laser_laser_standby.setPixmap(self.led_orange)
-                    self.led_laser_enable.setPixmap(self.led_red)
-                    self.on_mode = False
-                elif databack.strip() == 'ly_oxp2_dev_status 65':
-                    # Reached the target state, either from stepping up
-                    # (after Enable()) or stepping down (after AOM close).
-                    self.led_laser_on.setPixmap(self.led_green)
-                    self.led_laser_laser_standby.setPixmap(self.led_orange)
-                    self.led_laser_enable.setPixmap(self.led_red)
-                    self.on_mode = False
-                elif databack.strip() == 'ly_oxp2_dev_status 1':
-                    # transitioning - blink the LED for visual feedback
-                    if self.led_laser_on.pixmap().toImage() == self.led_orange.toImage():
-                        self.led_laser_on.setPixmap(self.led_green)
-                    elif self.led_laser_on.pixmap().toImage() == self.led_green.toImage():
-                        self.led_laser_on.setPixmap(self.led_orange)
-                else:
-                    self.on_mode = False
-            elif self.enable_ouput_mode:
-                if databack.strip() == 'ly_oxp2_dev_status 65':
-                    self.laser_device.AOMEnable()
-                    self.laser_device.AOM(AOM_FULL_OPEN)
-                    self.enable_ouput_mode = False
-                    self.led_laser_enable.setPixmap(self.led_green)
-                elif databack.strip() == 'ly_oxp2_dev_status 129':
-                    self.laser_device.AOMDisable()
-                    self.laser_device.AOM(0)
-                    self.enable_ouput_mode = False
-                    self.led_laser_enable.setPixmap(self.led_red)
-
-            # Final pass: enforce strict adjacent-state button locks
-            # regardless of which branch above ran. From any state only
-            # the buttons that step *up by one* or *down by one* are
-            # interactive; everything else is disabled to prevent the
-            # operator from accidentally skipping a stage of the laser
-            # state machine.
-            self._apply_button_locks_for_status(databack)
-            if self.change_laser_wavelegnth:
-                # Wavelength change is only safe when the laser is NOT
-                # emitting (state 129). The firmware would reject it but
-                # we surface a clear red message in the GUI rather than
-                # only a console print.
-                if databack.strip() != 'ly_oxp2_dev_status 129':
-                    self.laser_wavelegnth.setEnabled(False)
-                    text = self.laser_wavelegnth.currentText()
-                    if text == "IR":
-                        self.laser_device.wavelength_change(0)
-                    elif text == "Green":
-                        self.laser_device.wavelength_change(1)
-                    elif text == "DUV":
-                        self.laser_device.wavelength_change(3)
-                    self.laser_wavelegnth.setEnabled(True)
-                    # Pulse energy and average power can change after a
-                    # wavelength translation; recompute everything.
-                    self._sync_controls_from_device()
-                else:
-                    self.error_message("Cannot change wavelength while the laser is emitting. Press Standby first.")
-                self.change_laser_wavelegnth = False
-
-            if self.change_laser_power:
-                # Only adjusts the IR power setpoint. Per QSG: above 100 kHz
-                # base rate, per-pulse energy decreases linearly with rate,
-                # so changing the power is the only knob for pulse energy
-                # at a fixed repetition rate.
-                self.laser_power.setEnabled(False)
-                self.laser_device.Power(float(self.laser_power.value()))
-                if databack.strip() == 'ly_oxp2_dev_status 129':
-                    self.laser_device.AOM(AOM_FULL_OPEN)
-                else:
-                    self.laser_device.AOM(0)
-
-                # Read back the average power and recompute pulse energy
-                # *correctly* (P_avg / f_output). The previous code put the
-                # power *setpoint* into the pulse-energy display, which is
-                # off by a factor of ~10^4 and the wrong physical quantity.
-                avg = _parse_first_number(self.laser_device.read_average_power())
-                if avg is not None:
-                    self.variables.laser_average_power = avg
-                    # Variable stays in mW; LCD displays watts.
-                    self.laser_power_disp.display(avg / 1000.0)
-                self.variables.laser_power = float(self.laser_power.value())
-                self._recompute_derived_readouts()
-                self.laser_power.setEnabled(True)
-                self.change_laser_power = False
-
-            if self.change_laser_rate:
-                self.laser_rate.setEnabled(False)
-                self.laser_device.Freq(self.laser_rate.currentIndex() + 4)
-                # Read back the actual frequency index the laser accepted
-                # rather than trusting the dropdown blindly.
-                idx = _parse_first_number(self.laser_device.FreqRead())
-                if idx is not None:
-                    base_hz = self.get_frequency(int(idx))
-                    if isinstance(base_hz, int):
-                        self.variables.laser_freq = base_hz
-                    else:
-                        self.variables.laser_freq = 0
-                else:
-                    self.variables.laser_freq = 0
-                self._recompute_derived_readouts()
-                self.laser_rate.setEnabled(True)
-                self.change_laser_rate = False
-
-            if self.change_laser_divition_factor:
-                self.laser_divition_factor.setEnabled(False)
-                self.laser_device.Div(self.laser_divition_factor.value())
-                self.variables.laser_division_factor = self.laser_divition_factor.value()
-                self._recompute_derived_readouts()
-                self.laser_divition_factor.setEnabled(True)
-                self.change_laser_divition_factor = False
-
-            if self.index == 5:
-                # Slow-cadence refresh: re-read average power so the
-                # pulse-energy display tracks laser drift even when the
-                # user hasn't touched any control. Keeps the HDF5
-                # per-shot column meaningful too (variables.laser_pulse_energy).
-                try:
-                    avg = _parse_first_number(self.laser_device.read_average_power())
-                    if avg is not None:
-                        self.variables.laser_average_power = avg
-                        # Variable stays in mW; LCD displays watts.
-                        self.laser_power_disp.display(avg / 1000.0)
-                        self._recompute_derived_readouts()
-                except Exception as exc:
-                    print(f"Periodic laser refresh failed: {exc}")
-
-                res_error = self.laser_device.StatusMode()
-                if "Error" in res_error:
-                    self.listen_mode = True
-                    self.error_message("Error:" + res_error)
-
-                # Periodic diagnostic dump. Used to be unconditional
-                # ``print()`` calls on the terminal every 5 polls (~ every
-                # 2.5 s) which made the console unreadable. Now gated on
-                # config flag ``laser_debug_dump`` and routed through the
-                # logger so the messages still land in the GUI session
-                # log file (files/logs/gui/) when enabled.
-                if self.conf.get('laser_debug_dump'):
-                    laser_log = logging.getLogger("pyccapt.laser")
-                    try:
-                        laser_log.debug('--- laser diagnostic dump ---')
-                        laser_log.debug('dev_status: %s', databack.strip())
-                        laser_log.debug('status_mode: %s', res_error)
-                        laser_log.debug('mode: %s', self.laser_device.ModeRead())
-                        laser_log.debug('status_led: %s', self.laser_device.status_led())
-                        laser_log.debug('wavelength: %s', self.laser_device.wavelength_read())
-                        laser_log.debug('AOM_status: %s', self.laser_device.AOMState())
-                        laser_log.debug('IR_power_setpoint: %s', self.laser_device.PowerRead())
-                        laser_log.debug('avg_power: %s', self.laser_device.read_average_power())
-                        laser_log.debug('AOM_power: %s', self.laser_device.AOMRead())
-                        laser_log.debug('freq_index: %s', self.laser_device.FreqRead())
-                        laser_log.debug('div: %s', self.laser_device.DivRead())
-                    except Exception as exc:
-                        laser_log.debug('diagnostic dump failed: %s', exc)
-                self.index = 0
-            self.index += 1
-            time.sleep(0.5)
+        if self.laser_device is None:
+            return
+        status = self.laser_device.StatusRead()
+        code = readback.scalar(status)
+        if code not in (9, 33, 65, 129):
+            self._invalidate_laser_readouts(f'Laser status {code}: transitioning, warning or fault')
+        requested = False
+        # A later lower-state request must cancel any queued emission request.
+        listen, standby, on, output = self.listen_mode, self.standby_mode, self.on_mode, self.enable_ouput_mode
+        self.listen_mode = self.standby_mode = self.on_mode = self.enable_ouput_mode = False
+        if listen:
+            self.laser_device.Listen()
+            requested = True
+        elif standby:
+            self.laser_device.Standby()
+            requested = True
+        elif on:
+            if code == 33:
+                # Manual pp116-117 / QSG p8: this command OPENS output.
+                self.laser_device.Enable()
+                requested = True
+            elif code == 129:
+                self.laser_device.AOMDisable()
+                requested = True
+        elif output:
+            if code == 65:
+                self.laser_device.AOMEnable()
+                requested = True
+            elif code == 129:
+                self.laser_device.AOMDisable()
+                requested = True
+        changed = self._apply_laser_settings(code)
+        if requested or changed:
+            status = self.laser_device.StatusRead()
+        self._apply_button_locks_for_status(status)
+        if requested or changed or self.index >= 5:
+            self._sync_controls_from_device()
+            self.index = 0
+        self.index += 1
+        # Settings changes may reset e_power to zero. Only show readback;
+        # never silently restore full AOM output.
 
     def switch_to_nktpbus_mode(self):
         """Switch the laser from CLI -> NKTPBus mode.
@@ -1600,223 +1381,28 @@ class Ui_Laser_Control(object):
     # Derived / live read-outs
     # ------------------------------------------------------------------
 
-    def _sync_controls_from_device(self, *, initial=False):
-        """Read current settings from the laser and update GUI widgets.
-
-        Used on connect (to avoid overwriting the laser's saved values)
-        and as a periodic refresh from the status poll. Never touches the
-        underlying laser settings — strictly read-only.
-        """
-        if self.laser_device is None:
-            return
-
-        # Power setting (W). PowerRead -> 'ly_oxp2_power 4.65'
-        try:
-            value = _parse_first_number(self.laser_device.PowerRead())
-            if value is not None:
-                # Sync the spinbox without re-emitting valueChanged; otherwise
-                # we'd loop right back into laser_power_changed and immediately
-                # write the value we just read.
-                self.laser_power.blockSignals(True)
-                self.laser_power.setValue(value)
-                self.laser_power.blockSignals(False)
-                self.variables.laser_power = value
-        except Exception as exc:
-            print(f"Could not read laser power: {exc}")
-
-        # Base repetition rate index (4..10 maps to 400..1000 kHz)
-        try:
-            idx = _parse_first_number(self.laser_device.FreqRead())
-            if idx is not None:
-                base_hz = self.get_frequency(int(idx))
-                if isinstance(base_hz, int):
-                    self.variables.laser_freq = base_hz
-                    # Also reflect the matching dropdown entry without
-                    # re-triggering the change handler.
-                    combo_idx = max(0, int(idx) - 4)
-                    self.laser_rate.blockSignals(True)
-                    if 0 <= combo_idx < self.laser_rate.count():
-                        self.laser_rate.setCurrentIndex(combo_idx)
-                    self.laser_rate.blockSignals(False)
-        except Exception as exc:
-            print(f"Could not read laser frequency: {exc}")
-
-        # Division factor
-        try:
-            div = _parse_first_number(self.laser_device.DivRead())
-            if div is not None and div > 0:
-                self.laser_divition_factor.blockSignals(True)
-                self.laser_divition_factor.setValue(int(div))
-                self.laser_divition_factor.blockSignals(False)
-                self.variables.laser_division_factor = int(div)
-        except Exception as exc:
-            print(f"Could not read laser division factor: {exc}")
-
-        # Average power read-back -> mW (variable) and W (display).
-        try:
-            avg = _parse_first_number(self.laser_device.read_average_power())
-            if avg is not None:
-                self.variables.laser_average_power = avg
-                self.laser_power_disp.display(avg / 1000.0)
-        except Exception as exc:
-            if initial:
-                print(f"Could not read laser average power: {exc}")
-
-        # With the freshly synced values, recompute the derived read-outs.
-        self._recompute_derived_readouts()
-
-    def _recompute_derived_readouts(self):
-        """Compute output rep-rate and per-pulse energy from the current
-        base frequency, division factor, and average power; update both
-        displays and the shared variables that downstream HDF5 writers and
-        the email/parameters reports read from.
-        """
-        base_hz = float(getattr(self.variables, 'laser_freq', 0) or 0)
-        div = max(int(self.laser_divition_factor.value() or 1), 1)
-        out_rate_hz = base_hz / div if base_hz > 0 else 0.0
-        out_rate_khz = out_rate_hz / 1000.0
-
-        avg_power_mW = float(getattr(self.variables, 'laser_average_power', 0) or 0)
-        if out_rate_hz > 0 and avg_power_mW > 0:
-            # E [J] = P [W] / f [Hz];  P [W] = mW * 1e-3;  J -> nJ * 1e9
-            pulse_energy_nJ = (avg_power_mW * 1e-3) / out_rate_hz * 1e9
-        else:
-            pulse_energy_nJ = 0.0
-
-        self.laser_repetion_rate_disp.display(out_rate_khz)
-        # The shared variable stays in nJ for downstream consumers; the
-        # LCD shows microjoules so 12 570 nJ -> "12.570".
-        self.laser_pulse_energy_disp.display(pulse_energy_nJ / 1000.0)
-
-        # Shared experiment variables — these are what end up in the HDF5
-        # per-shot column (dld/laser_pulse), the parameters.txt summary,
-        # and the experiment-finished email.
-        self.variables.laser_pulse_energy = pulse_energy_nJ  # nJ
-        self.variables.laser_division_factor = div
-        # Keep laser_intensity in sync with pulse energy in nJ so the
-        # downstream parameters.txt / email don't print the literal 0.
-        self.variables.laser_intensity = pulse_energy_nJ
-
-        # Validate divider vs the firmware lower limit and warn loudly.
-        self._validate_division(out_rate_hz, base_hz, div)
-
-    def _validate_division(self, out_rate_hz, base_hz, div):
-        """Show a red warning if the requested output rate is out of spec."""
-        if base_hz <= 0:
-            return
-        if out_rate_hz < LASER_OUTPUT_RATE_MIN_HZ:
-            min_khz = LASER_OUTPUT_RATE_MIN_HZ / 1000
-            msg = (
-                f"Output rep-rate {out_rate_hz / 1000:.1f} kHz is below the "
-                f"specified minimum {min_khz:.0f} kHz. "
-                f"Reduce division factor (current {div}) or raise base rate."
-            )
-            self.error_message(msg)
-
-    def _clamp_divider_to_min_output_rate(self):
-        """Cap ``laser_divition_factor`` so that base/div >= 50 kHz.
-
-        Called on every base-rate change. With the rate dropdown at
-        400 kHz, the maximum allowed divider is 8 (-> 50 kHz output).
-        At 1 MHz, the maximum is 20. Below this floor the firmware
-        refuses the divider and the laser silently keeps the previous
-        value, which is confusing for the operator. Easier to make the
-        spinbox itself enforce the bound.
-        """
-        try:
-            base_hz_text = self.laser_rate.currentText()
-            base_hz = int(base_hz_text) if base_hz_text else 0
-        except (TypeError, ValueError):
-            base_hz = 0
-        if base_hz <= 0:
-            return
-        max_div = max(1, base_hz // LASER_OUTPUT_RATE_MIN_HZ)
-        # Use blockSignals so we don't trigger laser_divition_factor_changed
-        # just from changing the upper bound.
-        self.laser_divition_factor.blockSignals(True)
-        self.laser_divition_factor.setMaximum(max_div)
-        if self.laser_divition_factor.value() > max_div:
-            self.laser_divition_factor.setValue(max_div)
-        self.laser_divition_factor.blockSignals(False)
-
-    def _update_wavelength_nm_label(self):
-        """Refresh the (nnnn nm) label next to the IR/Green/DUV combo."""
-        text = self.laser_wavelegnth.currentText() if hasattr(self, 'laser_wavelegnth') else ''
-        nm = WAVELENGTH_NM.get(text)
-        if hasattr(self, 'laser_wavelegnth_nm_label'):
-            if nm is None:
-                self.laser_wavelegnth_nm_label.setText('')
-            else:
-                self.laser_wavelegnth_nm_label.setText(f'({nm:g} nm)')
-
     # ------------------------------------------------------------------
     # Strict adjacent-state button locks
     # ------------------------------------------------------------------
 
     def _apply_button_locks_for_status(self, status_text):
-        """Enable only the buttons that step the laser by exactly one stage.
-
-        State hierarchy (low -> high):
-            9   = Listen
-            33  = Standby
-            65  = Laser On  (emitting, AOM closed)
-            129 = Output Enabled (emitting, AOM open)
-
-        From any given state, only the buttons that step UP by one or
-        DOWN by one are enabled; the rest are disabled. Pressing Laser
-        On while in 129 is the way to "step down" out of output-enabled
-        (the on_mode handler closes the AOM). This prevents the operator
-        from skipping stages -- e.g. clicking Listen while the AOM is
-        open -- which is the kind of mistake that costs samples.
-
-        When the CLI session is closed (laser_device is None, e.g.
-        because we are in NKTPBus mode or the laser was never reached),
-        every state button is disabled so the operator cannot send
-        ASCII commands to a port the laser is no longer listening on.
-        """
-        # No CLI session -> disable everything. The user has to re-establish
-        # CLI via the "Switch to CLI" button (gated by Override Access)
-        # before any of the state buttons become usable again.
-        if self.laser_device is None:
-            self.laser_listen.setEnabled(False)
-            self.laser_standby.setEnabled(False)
-            self.laser_on.setEnabled(False)
-            self.laser_enable.setEnabled(False)
-            self.laser_wavelegnth.setEnabled(False)
-            return
-
-        if not status_text:
-            return
-        try:
-            code = status_text.strip().rsplit(' ', 1)[-1]
-        except Exception:
-            return
-        is_listen = code == '9'
-        is_standby = code == '33'
-        is_on = code == '65'
-        is_output = code == '129'
-        is_known = is_listen or is_standby or is_on or is_output
-        if not is_known:
-            # Transitioning (state 1) or unknown state -- leave whatever
-            # the in-flight state-machine branch has set, do not override.
-            return
-
-        # Listen button: only enabled to step DOWN from Standby.
-        self.laser_listen.setEnabled(is_standby)
-        # Standby button: enabled to step UP from Listen, or to step
-        # DOWN from Laser-On / output-off.
-        self.laser_standby.setEnabled(is_listen or is_on)
-        # Laser On button: enabled to step UP from Standby, or to step
-        # DOWN from Output-Enabled (closes the AOM).
-        self.laser_on.setEnabled(is_standby or is_output)
-        # Output Enable button: only meaningful at "laser on, output
-        # off" -- pressing it opens the AOM. Disabled in every other
-        # state so the operator can't toggle the AOM in Listen / Standby
-        # / already-open.
-        self.laser_enable.setEnabled(is_on)
-        # Wavelength dropdown: per QSG, wavelength can only be changed
-        # while not emitting.
-        self.laser_wavelegnth.setEnabled(is_listen or is_standby)
+        code = readback.scalar(status_text) if self.laser_device is not None else None
+        known = code in (9, 33, 65, 129)
+        idle = code in (9, 33)
+        running = bool(self.variables.start_flag)
+        self.laser_listen.setEnabled(known and code != 9)
+        self.laser_standby.setEnabled(known and code != 33)
+        self.laser_on.setEnabled(code in (33, 129))
+        self.laser_enable.setEnabled(code in (65, 129))
+        self.laser_wavelegnth.setEnabled(idle and not running)
+        self.laser_rate.setEnabled(idle and not running and bool(getattr(self, '_frequency_table', {})))
+        self.laser_divition_factor.setEnabled(known and not running)
+        self.laser_power.setEnabled(known and not self._laser_alignment_busy())
+        for widget, active in ((self.led_laser_listen, code == 9),
+                               (self.led_laser_laser_standby, code == 33),
+                               (self.led_laser_on, code in (65, 129)),
+                               (self.led_laser_enable, code == 129)):
+            widget.setPixmap(self.led_green if active else self.led_red)
 
     # ------------------------------------------------------------------
     # CLI session lifecycle
@@ -1839,6 +1425,7 @@ class Ui_Laser_Control(object):
             except Exception:
                 pass
             return
+        self._invalidate_laser_readouts(reason)
         self.laser_connection_banner.setText(f"⚠  LASER NOT CONNECTED — {reason}")
         self.laser_connection_banner.setStyleSheet(
             "QLabel{background: #fff0f0;color: #c00000;border: 1px solid #c00000;border-radius: 4px;padding: 4px;}"
@@ -1873,6 +1460,7 @@ class Ui_Laser_Control(object):
         # Always start from a known-good state -- close any previous
         # handle so reopening doesn't double-own the port.
         self._close_laser_device()
+        self._frequency_table = {}
 
         device = origamiClassCLI.origClass(com_port)
         try:
@@ -2093,6 +1681,10 @@ class Ui_Laser_Control(object):
         # Stop the laser-status QTimer (now a main-thread timer instead of
         # a Worker QThread; see _poll_laser_status). Stopping the timer is
         # synchronous so there's no thread to join.
+        self._cancel_laser_alignment()
+        alignment_timer = getattr(self, '_laser_alignment_timer', None)
+        if alignment_timer is not None:
+            alignment_timer.stop()
         status_timer = getattr(self, '_laser_status_timer', None)
         if status_timer is not None:
             try:
@@ -2189,7 +1781,9 @@ class Worker(QThread):
                 self.task_function()
             except Exception as exc:
                 # Don't let a transient error kill the polling loop.
-                print(f"Laser status poll failed (non-fatal): {exc}")
+                self._invalidate_laser_readouts(exc)
+            self._apply_button_locks_for_status(None)
+            print(f"Laser status poll failed: {exc}")
             self.msleep(1000)
 
 

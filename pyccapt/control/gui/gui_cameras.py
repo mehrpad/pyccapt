@@ -1,5 +1,6 @@
 import sys
 import math
+import time
 from pathlib import Path
 
 import numpy as np
@@ -68,6 +69,7 @@ class Ui_Cameras_Alignment(object):
         self.conf = conf
         self.emitter = SignalEmitter
         self.variables = variables
+        self.saved_sample_positions = dict(getattr(variables, "sample_rough_positions", {}))
 
     def setupUi(self, Cameras_Alignment):
         """
@@ -485,6 +487,58 @@ class Ui_Cameras_Alignment(object):
         self.camera_list_layout.addStretch(1)
         self.verticalLayout_2.addWidget(self.camera_list_box)
 
+        # The puck holds three samples. Capture their rough alignment
+        # positions from the specimen stage without moving the stage here.
+        self.sample_positions_box = QtWidgets.QGroupBox("Sample positions (mm)", parent=Cameras_Alignment)
+        self.sample_positions_box.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Maximum
+        )
+        sample_layout = QtWidgets.QGridLayout(self.sample_positions_box)
+        sample_layout.setContentsMargins(6, 5, 6, 5)
+        sample_layout.setHorizontalSpacing(5)
+        sample_layout.setVerticalSpacing(4)
+        for column, axis in enumerate("XYZ", start=1):
+            heading = QtWidgets.QLabel(axis, parent=self.sample_positions_box)
+            heading.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            sample_layout.addWidget(heading, 0, column)
+        self.sample_buttons = {}
+        self.sample_position_fields = {}
+        for sample_number in range(1, 4):
+            button = QtWidgets.QPushButton(f"Sample {sample_number}", parent=self.sample_positions_box)
+            button.setObjectName(f"sample_{sample_number}_button")
+            button.setCheckable(True)
+            button.setFixedWidth(85)
+            button.setMinimumHeight(25)
+            button.setStyleSheet("QPushButton { background: rgb(193, 193, 193); }"
+                                 "QPushButton:checked:enabled { background: rgb(0, 255, 26); }"
+                                 "QPushButton:disabled { background: #d0d0d0; color: #777; }")
+            button.setToolTip(
+                f"Save the current specimen-stage position for Sample {sample_number}; click again to clear it."
+            )
+            button.clicked.connect(
+                lambda _checked=False, number=sample_number: self._save_sample_position(number)
+            )
+            sample_layout.addWidget(button, sample_number, 0)
+            self.sample_buttons[sample_number] = button
+            fields = []
+            for column in range(1, 4):
+                field = QtWidgets.QLineEdit(parent=self.sample_positions_box)
+                field.setObjectName(f"sample_{sample_number}_{'xyz'[column - 1]}")
+                field.setReadOnly(True)
+                field.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
+                field.setFixedWidth(72)
+                field.setPlaceholderText("—")
+                sample_layout.addWidget(field, sample_number, column)
+                fields.append(field)
+            self.sample_position_fields[sample_number] = tuple(fields)
+        self.sample_position_status = QtWidgets.QLabel(parent=self.sample_positions_box)
+        self.sample_position_status.setWordWrap(True)
+        self.sample_position_status.setStyleSheet("color: rgb(140, 0, 0);")
+        sample_layout.addWidget(self.sample_position_status, 4, 0, 1, 4)
+        self.verticalLayout_2.addWidget(self.sample_positions_box)
+        self._show_saved_sample_positions()
+        self._refresh_sample_selection_lock()
+
         # Compact, display-only instrument monitor for alignment work. Values
         # come from the existing Manager namespace populated by the pumps and
         # vacuum process; the camera window never touches gauge hardware.
@@ -703,6 +757,74 @@ class Ui_Cameras_Alignment(object):
         self.instrument_monitor_timer.timeout.connect(self._refresh_instrument_monitor)
         self.instrument_monitor_timer.start(1000)
         self._refresh_instrument_monitor()
+
+        self.sample_selection_timer = QtCore.QTimer(self.Cameras_Alignment)
+        self.sample_selection_timer.timeout.connect(self._refresh_sample_selection_lock)
+        self.sample_selection_timer.start(200)
+
+    def _save_sample_position(self, sample_number):
+        """Toggle a rough sample position using a recent stage reading."""
+        button = self.sample_buttons[sample_number]
+        if (self.variables.sample_selection_locked or self.variables.start_flag
+                or self.variables.automatic_alignment_enabled):
+            button.setChecked(sample_number in self.saved_sample_positions)
+            self._refresh_sample_selection_lock()
+            return
+        if not button.isChecked():
+            self.saved_sample_positions.pop(sample_number, None)
+            positions = dict(self.variables.sample_rough_positions)
+            positions.pop(sample_number, None)
+            self.variables.sample_rough_positions = positions
+            for field in self.sample_position_fields[sample_number]:
+                field.clear()
+            self.sample_position_status.clear()
+            return
+        snapshot = getattr(self.variables, "stage_position_snapshot", None)
+        try:
+            x_m, y_m, z_m, updated_at = snapshot
+            coordinates = (float(x_m), float(y_m), float(z_m))
+            age = time.monotonic() - float(updated_at)
+            valid = all(math.isfinite(value) for value in coordinates) and 0 <= age <= 2.0
+        except (TypeError, ValueError):
+            valid = False
+        if not valid:
+            button.setChecked(sample_number in self.saved_sample_positions)
+            self.sample_position_status.setText(
+                "No recent stage position. Open Stage Control and wait for a position reading."
+            )
+            return
+        self.saved_sample_positions[sample_number] = coordinates
+        # Replace the whole mapping: Manager.Namespace does not propagate
+        # mutations inside a regular dict to other processes.
+        positions = dict(self.variables.sample_rough_positions)
+        positions[sample_number] = coordinates
+        self.variables.sample_rough_positions = positions
+        for field, value_m in zip(self.sample_position_fields[sample_number], coordinates):
+            field.setText(f"{value_m * 1000:.6f}")
+        button.setChecked(True)
+        self.sample_position_status.clear()
+
+    def _show_saved_sample_positions(self):
+        """Restore rough positions when the camera window is recreated."""
+        for sample_number, coordinates in self.saved_sample_positions.items():
+            if sample_number not in self.sample_buttons:
+                continue
+            try:
+                values = tuple(float(value) for value in coordinates)
+            except (TypeError, ValueError):
+                continue
+            if len(values) != 3 or not all(math.isfinite(value) for value in values):
+                continue
+            for field, value_m in zip(self.sample_position_fields[sample_number], values):
+                field.setText(f"{value_m * 1000:.6f}")
+            self.sample_buttons[sample_number].setChecked(True)
+
+    def _refresh_sample_selection_lock(self):
+        """Prevent sample changes while an experiment or run sequence is active."""
+        enabled = not (self.variables.sample_selection_locked or self.variables.start_flag
+                       or self.variables.automatic_alignment_enabled)
+        for button in self.sample_buttons.values():
+            button.setEnabled(enabled)
 
     def _refresh_instrument_monitor(self):
         """Refresh the compact vacuum and stage-temperature LCDs."""

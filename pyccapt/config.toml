@@ -30,6 +30,38 @@ min_vp = 328
 max_vp = 3281
 pulse_amp_per_supply_voltage = 21.875
 max_laser_power = 5.2
+# Legacy max_laser_power was ambiguous (W vs mW vs nJ); it is no longer used
+# for the laser GUI. Modern e_power is an AOM relative setting, not watts.
+laser_aom_max_percent = 100.0 # e_power 0..4000 displayed as 0..100% (manual p120)
+
+# Laser optics alignment. Values below are commissioning defaults, not calibrated
+# beam motion. Measure referenced stage bounds and allowable travel before enabling.
+laser_alignment_calibrated = false
+laser_alignment_bounds_mm = [] # [xmin,xmax,ymin,ymax,zmin,zmax], referenced laser stage
+laser_alignment_travel_um = [] # maximum +/- [x,y,z] from alignment starting position
+laser_alignment_coarse_range_um = 5.0
+laser_alignment_coarse_step_um = 2.5
+laser_alignment_fine_range_um = 1.0
+laser_alignment_fine_step_um = 0.5
+laser_alignment_focus_range_um = 1.0
+laser_alignment_focus_step_um = 0.5
+laser_alignment_xy_speed_um_s = 1.0
+laser_alignment_z_speed_um_s = 0.25
+laser_alignment_voltage_increment = 50.0 # editable in Laser GUI, after unsuccessful coarse scan
+laser_alignment_max_voltage = 6000.0 # also bounded by experiment/system maximum
+laser_alignment_ramp_v_s = 20.0
+laser_alignment_settle_s = 1.0
+laser_alignment_dwell_s = 1.5
+laser_alignment_min_rate_percent = 0.01 # absolute detection %, NOT fraction of target
+laser_alignment_background_rate_percent = 0.0 # measure detector dark-count rate before use
+laser_alignment_min_events = 30
+laser_alignment_max_rate_multiple = 2.0 # stop if rate exceeds this multiple of target while scanning
+laser_alignment_max_recoveries = 2 # each recovery follows three unsuccessful fine scans
+laser_alignment_max_duration_s = 1800.0 # per initial search / tracking recovery
+laser_alignment_tracking_interval_s = 60.0
+laser_alignment_tracking_step_um = 0.1
+laser_alignment_quality_peak_ns = [] # optional isolated TOF peak [low,high] for focus quality checks
+laser_alignment_quality_min_events = 200
 pulse_fraction_max = 20
 
 # Initial values populated into the main GUI's experiment-parameter fields
@@ -431,3 +463,47 @@ simulator_seed = 42
 simulator_batch_size = 128
 simulator_interval_s = 0.02
 simulator_fail_after_batches = 0
+
+# Automatic alignment. Fractions refer to the experiment target detection rate.
+alignment_start_voltage = 1500.0     # GUI default, V DC
+alignment_voltage_increment = 200.0 # GUI default, V per completed XY search
+alignment_max_voltage = 6000.0
+alignment_ramp_v_s = 100.0
+alignment_entry_fraction = 0.30
+alignment_finish_fraction = 0.80
+alignment_loss_fraction = 0.10
+alignment_stable_s = 3.0
+alignment_loss_s = 3.0
+alignment_dwell_s = 10.0
+alignment_timeout_s = 1800.0
+alignment_max_attempts = 5
+alignment_window_ions = 2000
+alignment_window_max_age_s = 10.0
+alignment_acquisition_guard_s = 0.5
+alignment_centre_tolerance = 0.02     # fraction of detector radius
+alignment_area_target = 0.90         # fraction of detector area
+
+# REQUIRED commissioning measurements. Empty bounds/calibration deliberately
+# block automatic movement. Do not infer clearance from the aperture diameter.
+# bounds_mm = [[xmin,xmax], [ymin,ymax], [zmin,zmax]] in referenced stage coordinates.
+# These are absolute travel bounds. Separately verify each sample's local
+# search/approach envelope and the transfer path through transfer_z_mm are clear.
+alignment_motion_calibrated = false
+alignment_bounds_mm = []
+alignment_xy_range_um = [50.0, 50.0] # +/- X and Y about each saved rough position
+alignment_fine_xy_range_um = 15.0   # +/- X and Y about the position where fine alignment starts
+alignment_xy_jacobian_mm_per_um = [] # [[d(detX)/dX,d(detX)/dY],[d(detY)/dX,d(detY)/dY]]
+alignment_z_direction = 0           # replace with +1 or -1 toward electrode
+alignment_transfer_z_mm = 0.0        # measured retract/clearance position
+alignment_approach_enabled = false
+alignment_z_max_advance_um = 0.0     # safe advance from each saved Z
+# Candidate commissioning settings; validate before enabling movement.
+alignment_xy_step_um = 1.0
+alignment_fine_xy_step_um = 0.1
+alignment_xy_speed_um_s = 1.0
+alignment_z_step_um = 0.05
+alignment_z_speed_um_s = 0.1
+alignment_transfer_speed_um_s = 10.0
+alignment_position_tolerance_um = 0.02
+alignment_settle_s = 0.5
+alignment_move_timeout_s = 120.0

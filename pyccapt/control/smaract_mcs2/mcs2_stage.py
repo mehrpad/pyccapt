@@ -281,6 +281,34 @@ class SmarActStage:
 
     # ------------------------------------------------------------------ state
 
+    def is_moving(self) -> bool:
+        """Read controller movement state; communication errors are not 'stopped'."""
+        try:
+            return any(
+                ctl.GetProperty_i32(self._handle, channel, ctl.Property.CHANNEL_STATE)
+                & ctl.ChannelState.ACTIVELY_MOVING
+                for channel in (AXIS_X, AXIS_Y, AXIS_Z)
+            )
+        except ctl.Error as exc:
+            raise _wrap_ctl('read movement state', exc)
+
+    def validate_alignment_state(self) -> None:
+        """Require referenced sensors and fault-free axes for automatic motion."""
+        required = ctl.ChannelState.IS_REFERENCED | ctl.ChannelState.SENSOR_PRESENT
+        forbidden = (ctl.ChannelState.CALIBRATING | ctl.ChannelState.REFERENCING
+                     | ctl.ChannelState.END_STOP_REACHED | ctl.ChannelState.RANGE_LIMIT_REACHED
+                     | ctl.ChannelState.FOLLOWING_LIMIT_REACHED | ctl.ChannelState.MOVEMENT_FAILED
+                     | ctl.ChannelState.POSITIONER_OVERLOAD | ctl.ChannelState.OVER_TEMPERATURE
+                     | ctl.ChannelState.POSITIONER_FAULT | ctl.ChannelState.IS_STREAMING)
+        try:
+            for channel in (AXIS_X, AXIS_Y, AXIS_Z):
+                state = ctl.GetProperty_i32(self._handle, channel, ctl.Property.CHANNEL_STATE)
+                if state & required != required or state & forbidden:
+                    raise SmarActStageError(f'Axis {channel} is not ready for automatic alignment '
+                                            f'(controller state 0x{state:x}).')
+        except ctl.Error as exc:
+            raise _wrap_ctl('validate automatic alignment state', exc)
+
     def get_position(self) -> dict:
         """Return current position of all three axes in meters.
 

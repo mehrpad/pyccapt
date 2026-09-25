@@ -659,7 +659,9 @@ class Ui_Visualization(object):
 
         # detector heatmep #####################
         self.scatter = pg.ScatterPlotItem(size=self.hitmap_plot_size.value(), brush='black')
-        self.detector_circle = QtWidgets.QGraphicsEllipseItem(-40, -40, 80, 80)  # x, y, width, height
+        detector_diameter = float(self.conf['detector_diameter'])
+        self.detector_circle = QtWidgets.QGraphicsEllipseItem(-detector_diameter/2, -detector_diameter/2,
+                                                              detector_diameter, detector_diameter)
         self.detector_circle.setPen(pg.mkPen(color=(255, 0, 0), width=2))
         self.detector_heatmap.addItem(self.detector_circle)
         self.detector_heatmap.setLabel("left", "X_det", units='mm', **self.styles)
@@ -667,7 +669,8 @@ class Ui_Visualization(object):
 
         # FDM panel - one detector circle per plot (Qt items can't be
         # shared between two PlotWidgets) plus matching axis labels.
-        self.detector_circle_fdm = QtWidgets.QGraphicsEllipseItem(-40, -40, 80, 80)
+        self.detector_circle_fdm = QtWidgets.QGraphicsEllipseItem(-detector_diameter/2, -detector_diameter/2,
+                                                                  detector_diameter, detector_diameter)
         self.detector_circle_fdm.setPen(pg.mkPen(color=(255, 0, 0), width=2))
         self.detector_fdm.addItem(self.detector_circle_fdm)
         self.detector_fdm.setLabel("left", "X_det", units='mm', **self.styles)
@@ -825,6 +828,26 @@ class Ui_Visualization(object):
         self.max_tof.setText(_translate("Visualization", "5000"))
         self.Error.setText(_translate("Visualization", "<html><head/><body><p><br/></p></body></html>"))
 
+    def _update_alignment_overlay(self):
+        locked = bool(self.variables.automatic_alignment_enabled)
+        self.dc_hold.setEnabled(not locked)
+        if locked:
+            self._set_dc_voltage_controls_enabled(False)
+        if not hasattr(self, 'alignment_circle'):
+            self.alignment_circle = QtWidgets.QGraphicsEllipseItem()
+            self.alignment_circle.setPen(pg.mkPen(color=(0, 170, 60), width=2))
+        if self.alignment_circle.scene() is None:
+            self.detector_heatmap.addItem(self.alignment_circle)
+        status = self.variables.alignment_status
+        fit = status.get('footprint', {})
+        visible = locked and bool(fit.get('valid', False))
+        self.alignment_circle.setVisible(visible)
+        if visible:
+            x, y = fit['centre_mm']
+            r = fit['radius_mm']
+            self.alignment_circle.setRect(x-r, y-r, 2*r, 2*r)
+            self.alignment_circle.setToolTip(f"Alignment: {status.get('phase', '')}, area {fit['area_fraction']:.1%}")
+
     def dc_hold_clicked(self):
         """
         Hold the DC voltage
@@ -835,6 +858,8 @@ class Ui_Visualization(object):
         Return:
             None
         """
+        if self.variables.automatic_alignment_enabled:
+            return
         if self.variables.start_flag or self.variables.last_screen_shot:
             if not self.variables.vdc_hold:
                 self.variables.vdc_hold = True
@@ -853,6 +878,7 @@ class Ui_Visualization(object):
 
     def _set_dc_voltage_controls_enabled(self, enabled):
         """Enable the Set-DC-voltage field + button only while DC is held."""
+        enabled = enabled and not self.variables.automatic_alignment_enabled
         self.set_dc_voltage_value.setEnabled(enabled)
         self.set_dc_voltage.setEnabled(enabled)
         if enabled:
@@ -884,6 +910,8 @@ class Ui_Visualization(object):
         same path the old main-GUI 'Set' button used, just with a
         user-entered value instead of the Min. Voltage field).
         """
+        if self.variables.automatic_alignment_enabled:
+            return
         if not self.variables.vdc_hold:
             self.error_message("Hold the DC voltage first")
             return
@@ -1279,6 +1307,7 @@ class Ui_Visualization(object):
         self.detector_heatmap.clear()
         self.detector_heatmap.addItem(self.scatter)
         self.detector_heatmap.addItem(self.detector_circle)
+        self._update_alignment_overlay()
 
     def _fdm_flat_bins(self, x, y):
         """Map detector coordinates to flat histogram bins; discard outliers."""
@@ -1551,6 +1580,7 @@ class Ui_Visualization(object):
         """
 
         self._update_experiment_status_indicator()
+        self._update_alignment_overlay()
 
         if self.variables.plot_clear_flag:
             self.x_vdc = [i * 0.5 for i in range(200)]  # 100 time points

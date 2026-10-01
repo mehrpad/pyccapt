@@ -198,6 +198,12 @@ standalone Pumps/Vacuum window opens at 840 × 720. Vacuum history, Gates contro
 load-lock temperature/baking controls and error messages remain available;
 smaller monitors scroll without hiding controls.
 
+Stage Control opens at 880 × 220 with compact 64 × 28 position readouts and
+speed-selector widths sized for the configured table. The nine mm/µm/nm readouts,
+three speed presets and jog-distance labels remain visible alongside all jog
+buttons, Home, Reference, STOP and Override Access. Header spacing, Z jog spacing
+and layout margins are tighter; long error messages still wrap.
+
 - Gates: ![Gates GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/gates_gui.png?raw=True)
 - Pumps/Vacuum: ![Pumps GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/pumps_gui.png?raw=True)
 - Cameras: ![Cameras GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/cameras_gui.png?raw=True)

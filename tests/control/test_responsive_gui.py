@@ -317,6 +317,41 @@ def test_pump_groups_keep_displays_and_controls_visible(instrument_window, tmp_p
     print(f'Pump GUI preview: {tmp_path}')
 
 
+@pytest.mark.parametrize('instrument_window', ['stage'], indirect=True)
+def test_stage_controls_fit_compact_window_and_keep_readable_values(instrument_window, tmp_path):
+    window, ui, app = instrument_window
+    window.show()
+    for _ in range(5):
+        app.processEvents()
+    assert window.width() <= 880
+    assert window.height() <= 220
+    for lcd in (ui.stage_x_mm, ui.stage_x_um, ui.stage_x_nm,
+                ui.stage_y_mm, ui.stage_y_um, ui.stage_y_nm,
+                ui.stage_z_mm, ui.stage_z_um, ui.stage_z_nm):
+        assert lcd.size() == QtCore.QSize(64, 28)
+        assert lcd.digitCount() == 5
+        assert lcd.isVisible()
+    for selector, label in ((ui.stage_speed_x, ui.stage_speed_x_label),
+                            (ui.stage_speed_y, ui.stage_speed_y_label),
+                            (ui.stage_speed_z, ui.stage_speed_z_label)):
+        for index in range(selector.count()):
+            selector.setCurrentIndex(index)
+            app.processEvents()
+            assert selector.width() >= selector.fontMetrics().horizontalAdvance(selector.currentText()) + 42
+            assert label.width() >= label.fontMetrics().horizontalAdvance(label.text())
+        selector.setValue(ui._speed_default)
+    viewport = window._responsive_window.scroll.viewport()
+    assert window._responsive_window.scroll.horizontalScrollBar().maximum() == 0
+    assert window._responsive_window.scroll.verticalScrollBar().maximum() == 0
+    for button in window.findChildren(QtWidgets.QPushButton):
+        assert button.isVisible()
+        assert viewport.rect().contains(QtCore.QRect(button.mapTo(viewport, QtCore.QPoint()), button.size()))
+    assert not ui.stage_reference.isEnabled()
+    assert ui.stage_stop.text() == 'STOP'
+    window.grab().save(str(tmp_path/'stage.png'))
+    print(f'Stage GUI preview: {tmp_path}')
+
+
 @pytest.mark.parametrize('instrument_window', [
     'main', 'stage', 'laser', 'cameras', 'visualization', 'baking',
     'vacuum', 'combined', 'gates', 'alignment',

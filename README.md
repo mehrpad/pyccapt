@@ -197,6 +197,10 @@ all six Buffer/LL/CLL chamber and pre-vacuum displays. The gauge displays keep
 their existing sizes and colours; the vacuum plots, Gates controls and load-lock
 temperature controls remain visible. Smaller monitors use scrolling as needed.
 
+Stage Control opens at 880 × 220. Its nine position readouts and speed selectors
+use compact widths, with less spacing around the headers and Z jog buttons.
+All axis controls, Home, Reference, STOP and Override Access remain visible.
+
 Vacuum logs are written under `pyccapt/files/logs/vacuum`, and baking logs are written under `pyccapt/files/logs/baking/<timestamp>`.
 
 ## Calibration Highlights

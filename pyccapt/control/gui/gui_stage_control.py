@@ -55,7 +55,7 @@ def _make_lcd(parent):
     lcd = QtWidgets.QLCDNumber(parent=parent)
     lcd.setDigitCount(5)
     lcd.setSegmentStyle(QtWidgets.QLCDNumber.SegmentStyle.Flat)
-    lcd.setMinimumSize(QtCore.QSize(60, 28))
+    lcd.setFixedSize(QtCore.QSize(64, 28))
     lcd.setStyleSheet(
         "QLCDNumber{background: rgb(220,235,245);color: rgb(0,30,80);border: 1px solid rgb(120,160,200);border-radius: 4px;}"
     )
@@ -109,12 +109,15 @@ class Ui_Stage_Control(object):
         self._alignment_timer.timeout.connect(self._alignment_tick)
         self._alignment_timer.start(100)
         Stage_Control.setObjectName("Stage_Control")
-        Stage_Control.resize(1020, 230)
+        Stage_Control.resize(880, 220)
         self.gridLayout_5 = QtWidgets.QGridLayout(Stage_Control)
+        self.gridLayout_5.setContentsMargins(8, 8, 8, 8)
         self.gridLayout_3 = QtWidgets.QGridLayout()
+        self.gridLayout_3.setSpacing(8)
 
         # --- Position panel: header + 3 axes x (label, mm, um, nm) ---------
         self.gridLayout_4 = QtWidgets.QGridLayout()
+        self.gridLayout_4.setSpacing(4)
         header_font = QtGui.QFont()
         header_font.setBold(True)
         header_font.setPointSize(8)
@@ -162,10 +165,12 @@ class Ui_Stage_Control(object):
             self.gridLayout_4.addWidget(mm, row, 1, 1, 1)
             self.gridLayout_4.addWidget(um, row, 2, 1, 1)
             self.gridLayout_4.addWidget(nm, row, 3, 1, 1)
-        self.gridLayout_3.addLayout(self.gridLayout_4, 0, 0, 1, 1)
+        self.gridLayout_3.addLayout(self.gridLayout_4, 0, 0, 1, 1,
+                                   alignment=QtCore.Qt.AlignmentFlag.AlignTop)
 
         # --- Per-axis exact speed presets (X, Y, Z) ------------------------
         self.gridLayout_2 = QtWidgets.QGridLayout()
+        self.gridLayout_2.setSpacing(4)
         header_label = QtWidgets.QLabel("Speed preset", parent=Stage_Control)
         header_label.setFont(bold)
         header_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
@@ -210,11 +215,14 @@ class Ui_Stage_Control(object):
         )
 
         self.stage_speed_x_label = QtWidgets.QLabel(parent=Stage_Control)
-        self.stage_speed_x_label.setMinimumWidth(85)
         self.stage_speed_y_label = QtWidgets.QLabel(parent=Stage_Control)
-        self.stage_speed_y_label.setMinimumWidth(85)
         self.stage_speed_z_label = QtWidgets.QLabel(parent=Stage_Control)
-        self.stage_speed_z_label.setMinimumWidth(85)
+        # Fit every configured preset instead of stretching the selectors to
+        # consume spare window width. Keep full values readable for custom tables.
+        for selector in (self.stage_speed_x, self.stage_speed_y, self.stage_speed_z):
+            widest_text = max(selector.fontMetrics().horizontalAdvance(selector.itemText(index))
+                              for index in range(selector.count()))
+            selector.setFixedWidth(max(132, widest_text + 42))
 
         for row, (lbl, sl, val) in enumerate(
             (
@@ -233,7 +241,8 @@ class Ui_Stage_Control(object):
         self.stage_speed_ud = self.stage_speed_y
         self.stage_speed_fb = self.stage_speed_z
 
-        self.gridLayout_3.addLayout(self.gridLayout_2, 0, 1, 1, 1)
+        self.gridLayout_3.addLayout(self.gridLayout_2, 0, 1, 1, 1,
+                                   alignment=QtCore.Qt.AlignmentFlag.AlignTop)
 
         # --- Standard three-axis jog controls ------------------------------
         # X/Y use the familiar D-pad convention; Z has a separate rocker so
@@ -268,16 +277,19 @@ class Ui_Stage_Control(object):
         self.z_jog_group.setStyleSheet(JOG_GROUP_STYLE)
         self.verticalLayout = QtWidgets.QVBoxLayout(self.z_jog_group)
         self.verticalLayout.setContentsMargins(7, 11, 7, 7)
-        self.verticalLayout.setSpacing(6)
+        self.verticalLayout.setSpacing(4)
+        self.verticalLayout.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
         self.stage_forward = make_jog_button(self.z_jog_group, "Z+\nForward", width=76)
         self.stage_backward = make_jog_button(self.z_jog_group, "Z−\nBackward", width=76)
         self.verticalLayout.addWidget(self.stage_forward)
-        self.verticalLayout.addStretch(1)
         self.verticalLayout.addWidget(self.stage_backward)
-        self.gridLayout_3.addWidget(self.z_jog_group, 0, 3, 1, 1)
+        self.gridLayout_3.addWidget(self.z_jog_group, 0, 3, 1, 1,
+                                   alignment=QtCore.Qt.AlignmentFlag.AlignTop)
 
         # --- Home / Reference / Stop / Override ----------------------------
         home_layout = QtWidgets.QVBoxLayout()
+        home_layout.setSpacing(4)
+        home_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
         self.stage_home = QtWidgets.QPushButton("Home", parent=Stage_Control)
         home_layout.addWidget(self.stage_home)
         self.stage_reference = QtWidgets.QPushButton("Reference", parent=Stage_Control)
@@ -293,7 +305,11 @@ class Ui_Stage_Control(object):
         self.superuser.setStyleSheet("QPushButton{background: rgb(193, 193, 193)}")
         self._original_superuser_style = self.superuser.styleSheet()
         home_layout.addWidget(self.superuser)
-        self.gridLayout_3.addLayout(home_layout, 0, 4, 1, 1)
+        for button in (self.stage_home, self.stage_reference, self.stage_stop, self.superuser):
+            button.setFixedWidth(max(105, button.fontMetrics().horizontalAdvance(button.text()) + 20))
+            button.setMinimumHeight(25)
+        self.gridLayout_3.addLayout(home_layout, 0, 4, 1, 1,
+                                   alignment=QtCore.Qt.AlignmentFlag.AlignTop)
 
         # --- Status / error label ------------------------------------------
         self.Error = QtWidgets.QLabel(parent=Stage_Control)

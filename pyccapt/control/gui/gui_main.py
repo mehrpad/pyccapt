@@ -1139,7 +1139,8 @@ class Ui_PyCCAPT(AlignmentGuiMixin, ExperimentPlanGuiMixin, MainLayoutMixin):
         PyCCAPT.setTabOrder(self.pulse_mode, self.pulse_fraction)
         PyCCAPT.setTabOrder(self.pulse_fraction, self.pulse_frequency)
         PyCCAPT.setTabOrder(self.pulse_frequency, self.detection_rate_init)
-        PyCCAPT.setTabOrder(self.detection_rate_init, self.superuser)
+        PyCCAPT.setTabOrder(self.detection_rate_init, self.advanced_settings_button)
+        PyCCAPT.setTabOrder(self.advanced_settings_button, self.superuser)
         for first, second in zip(
             (self.counter_source, self.control_algorithm, self.ex_freq, self.vp_min, self.vp_max, self.vdc_steps_up),
             (self.control_algorithm, self.ex_freq, self.vp_min, self.vp_max, self.vdc_steps_up, self.vdc_steps_down),
@@ -1150,12 +1151,11 @@ class Ui_PyCCAPT(AlignmentGuiMixin, ExperimentPlanGuiMixin, MainLayoutMixin):
         PyCCAPT.setTabOrder(self.total_ions, self.speciemen_voltage)
         PyCCAPT.setTabOrder(self.speciemen_voltage, self.pulse_voltage)
         PyCCAPT.setTabOrder(self.pulse_voltage, self.detection_rate)
-        PyCCAPT.setTabOrder(self.detection_rate, self.advanced_settings_button)
-        PyCCAPT.setTabOrder(self.advanced_settings_button, self.alignment_start_voltage)
-        PyCCAPT.setTabOrder(self.alignment_start_voltage, self.alignment_voltage_increment)
-        PyCCAPT.setTabOrder(self.alignment_voltage_increment, self.electrode_button)
+        PyCCAPT.setTabOrder(self.detection_rate, self.electrode_button)
         PyCCAPT.setTabOrder(self.electrode_button, self.flat_test_button)
-        PyCCAPT.setTabOrder(self.flat_test_button, self.automatic_alignment_button)
+        PyCCAPT.setTabOrder(self.flat_test_button, self.alignment_start_voltage)
+        PyCCAPT.setTabOrder(self.alignment_start_voltage, self.alignment_voltage_increment)
+        PyCCAPT.setTabOrder(self.alignment_voltage_increment, self.automatic_alignment_button)
         PyCCAPT.setTabOrder(self.automatic_alignment_button, self.start_button)
         PyCCAPT.setTabOrder(self.start_button, self.stop_button)
 

@@ -25,12 +25,12 @@ The main GUI opens at 760 × 640 and shows the queue when TOML Plan is selected.
 TextBox provides the single-run form. In TextBox mode, **Advanced settings…**
 opens detection mode, control algorithm, refresh frequency, pulse-voltage limits
 and K_p controls together. These are the same controls used by the main form:
-edits apply immediately and existing run locks remain in effect. Below the
-Detection Rate statistic, the Advanced settings label and button occupy the first
-row, followed by alignment start voltage and voltage increment. Electrode sits
-beside Flat Test, then Automatic Alignment beside Start. Stop is below Start.
-One full-width separator
-remains below the parameter/statistics area.
+edits apply immediately and existing run locks remain in effect. The Advanced
+settings label and button sit below the target Detection Rate input on the left.
+A separator below the Run Statistics detection rate precedes Electrode and
+Flat Test. Alignment start voltage and voltage increment follow, then Automatic
+Alignment sits beside Start. Stop is below Start. One full-width separator remains
+below the parameter/statistics area.
 
 Laser command units, readback semantics and recording corrections are documented
 in [LASER_MANUAL_AUDIT.md](LASER_MANUAL_AUDIT.md).

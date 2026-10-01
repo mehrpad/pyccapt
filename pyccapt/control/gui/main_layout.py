@@ -27,6 +27,11 @@ class MainLayoutMixin:
         self.advanced_settings_button = QtWidgets.QPushButton('Advanced settings…', self.centralwidget)
         self.advanced_settings_button.setObjectName('advanced_settings_button')
         self.advanced_settings_button.clicked.connect(self._show_advanced_settings)
+        self.advanced_settings_label = QtWidgets.QLabel('Advanced settings', self.centralwidget)
+        self.advanced_settings_label.setObjectName('advanced_settings_label')
+        self.gridLayout_2.addWidget(self.advanced_settings_label, 4, 0)
+        self.gridLayout_2.addWidget(self.advanced_settings_button, 4, 1)
+        self._plan_form_widgets.extend((self.advanced_settings_label, self.advanced_settings_button))
         # Replace the two separators below the target rate with one full-width
         # separator below the parameters and statistics.
         for line in (self.line_3, self.line_4):
@@ -51,10 +56,6 @@ class MainLayoutMixin:
         controls.setContentsMargins(0, 0, 0, 0)
         controls.setVerticalSpacing(4)
         controls.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop | QtCore.Qt.AlignmentFlag.AlignLeft)
-        self.advanced_settings_label = QtWidgets.QLabel('Advanced settings', self.run_controls_panel)
-        self.advanced_settings_label.setObjectName('advanced_settings_label')
-        controls.addWidget(self.advanced_settings_label, 0, 0)
-        controls.addWidget(self.advanced_settings_button, 0, 1, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
         for row, (label, widget) in enumerate(
             ((self.alignment_start_voltage_label, self.alignment_start_voltage),
              (self.alignment_voltage_increment_label, self.alignment_voltage_increment)), start=1
@@ -65,13 +66,17 @@ class MainLayoutMixin:
             widget.setFixedWidth(100)
             controls.addWidget(label, row, 0)
             controls.addWidget(widget, row, 1, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
-        self.advanced_settings_button.setFixedWidth(self.flat_test_button.width())
         for widget, row, column in (
-            (self.electrode_button, 3, 0), (self.flat_test_button, 3, 1),
-            (self.automatic_alignment_button, 4, 0),
-            (self.start_button, 4, 1), (self.stop_button, 5, 1),
+            (self.electrode_button, 0, 0), (self.flat_test_button, 0, 1),
+            (self.automatic_alignment_button, 3, 0),
+            (self.start_button, 3, 1), (self.stop_button, 4, 1),
         ):
             controls.addWidget(widget, row, column, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
+        self.statistics_separator = QtWidgets.QFrame(self.centralwidget)
+        self.statistics_separator.setObjectName('statistics_separator')
+        self.statistics_separator.setFrameShape(QtWidgets.QFrame.Shape.HLine)
+        self.statistics_separator.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
+        self.verticalLayout_2.addWidget(self.statistics_separator)
         self.verticalLayout_2.addWidget(self.run_controls_panel, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
         self.gridLayout_5.setVerticalSpacing(4)
         self.Error.setMinimumWidth(0)

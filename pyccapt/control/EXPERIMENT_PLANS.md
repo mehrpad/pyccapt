@@ -9,11 +9,11 @@ under **Advanced settings…**: detection mode, control algorithm, refresh frequ
 pulse-voltage limits and K_p up/down. Edits apply as each field is changed; the
 normal experiment locks still apply. For TOML plans, use the queue's **Edit**
 button to change those settings for a specific experiment. The Advanced settings
-label and button sit directly below the Detection Rate statistic, followed by
-alignment start voltage and increment. Electrode sits beside Flat Test;
-Automatic Alignment sits beside Start on the next row, with Stop below Start.
-A single full-width separator remains below
-the parameters and statistics.
+label and button sit directly below the target Detection Rate input on the left
+in TextBox mode. A separator below the Run Statistics detection rate precedes
+Electrode and Flat Test. Alignment start voltage and increment follow, then
+Automatic Alignment sits beside Start, with Stop below Start. A full-width
+separator remains below the parameters and statistics.
 
 ## Load and run the example
 

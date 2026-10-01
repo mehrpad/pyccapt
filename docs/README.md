@@ -2,6 +2,11 @@
 
 PyCCAPT documentation is built with Sphinx.
 
+The user guide for TOML experiment queues is in
+[Experiment Plans](experiment_plans.rst), sourced from
+`pyccapt/control/EXPERIMENT_PLANS.md`. Its downloadable example is
+[`experiment_plan.example.toml`](../pyccapt/files/experiment_plan.example.toml).
+
 ## Prerequisites
 
 From the repository root, install documentation dependencies:

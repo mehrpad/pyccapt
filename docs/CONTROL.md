@@ -16,6 +16,11 @@ The control module is responsible for:
 
 Calibration and reconstruction are implemented in `pyccapt.calibration`.
 
+Select **Setup Parameters → TOML Plan** to load and edit a reusable experiment
+queue. The compact table replaces the always-visible TextLine editor, and the
+main window opens at a smaller height. See [Experiment Plans](experiment_plans.rst)
+for file format, units, sample-position mapping and step-by-step instructions.
+
 ## Runtime Architecture
 
 The application runs as multiple processes, typically including:

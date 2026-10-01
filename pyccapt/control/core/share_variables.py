@@ -221,6 +221,7 @@ class Variables:
         "flag_pump_cryo_load_lock_led": ("pump", ("main",)),
         "flag_vent_cryo_load_lock_partial": ("main", ("main",)),
         # --- Path / metadata fields --------------------------------------
+        "experiment_plan_snapshot": ("main", ("main", "exp")),
         "path": ("exp", ("exp", "viz", "main")),
         "path_meta": ("exp", ("exp", "viz", "main")),
         "log_path": ("main", ("exp",)),
@@ -435,6 +436,7 @@ class Variables:
         "camera_1_ExposureTime": 2000,
         "path": "",
         "path_meta": "",
+        "experiment_plan_snapshot": {},
         "index_save_image": 0,
         "index_plot": 0,
         "index_wait_on_plot_start": 0,

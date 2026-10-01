@@ -91,6 +91,10 @@ class AlignmentGuiMixin:
     def _start_alignment_batch(self, samples):
         """Validate every sample and parameter set before the first move."""
         try:
+            if self.parameters_source.currentText() == 'TOML Plan':
+                from pyccapt.control.core.experiment_plan import alignment_samples
+                if alignment_samples(self.result_list, self.variables.sample_rough_positions) != tuple(samples):
+                    raise ValueError('Sample sequence must match the experiment plan sample IDs and order.')
             cfg = AlignmentConfig.from_mapping(self.conf, self.alignment_start_voltage.value(),
                                                self.alignment_voltage_increment.value())
             if self.variables.laser_alignment_enabled:
@@ -113,7 +117,7 @@ class AlignmentGuiMixin:
                 raise ValueError('Output shutdown must finish before positioning a sample.')
             batch = []
             for index, sample in enumerate(samples):
-                if self.parameters_source.currentText() == 'TextLine':
+                if self.parameters_source.currentText() in ('TextLine', 'TOML Plan'):
                     temp = SimpleNamespace(pulse_amp_per_supply_voltage=self.variables.pulse_amp_per_supply_voltage)
                     errors = []
                     main_parameters.apply_textline_item(temp, self.conf, self.result_list[index], errors.append)
@@ -122,6 +126,10 @@ class AlignmentGuiMixin:
                 else:
                     temp = self.variables
                 values = {field: getattr(temp, field) for field in _RUN_FIELDS}
+                values['experiment_plan_snapshot'] = (
+                    {'source': self._plan_path, 'queue_index': index+1,
+                     'experiment': dict(self.result_list[index])}
+                    if self.parameters_source.currentText() == 'TOML Plan' else {})
                 main_parameters.validate_run_parameters(SimpleNamespace(**values), self.conf)
                 if (values['counter_source'] != 'TDC' or values['pulse_mode'] not in ('Voltage', 'Laser')
                         or str(self.conf.get('tdc', 'off')) != 'on'
@@ -249,6 +257,8 @@ class AlignmentGuiMixin:
             # No outputs are enabled until all three moves are acknowledged.
             for name, value in transfer['values'].items():
                 setattr(self.variables, name, value)
+            if self.parameters_source.currentText() == 'TOML Plan':
+                self.plan_table.selectRow(self._alignment_batch_index)
             self.variables.alignment_move_request = {}
             self.variables.alignment_move_status = {}
             self.variables.alignment_events = {}
@@ -289,6 +299,7 @@ class AlignmentGuiMixin:
             stage.alignment_service.cancel('Automatic sequence finished')
         self._alignment_batch = []
         self._alignment_transfer = None
+        self._batch_items = None
         self._alignment_waiting_cleanup = False
         self.variables.automatic_alignment_enabled = False
         self.variables.automatic_alignment_samples = ()

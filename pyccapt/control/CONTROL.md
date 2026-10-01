@@ -16,6 +16,14 @@ This module is responsible for:
 
 Calibration and reconstruction are implemented in `pyccapt.calibration`.
 
+Reusable TOML experiment queues, compact queue editing, explicit sample mapping,
+legacy TextLine import and recorded starting settings are described in
+[EXPERIMENT_PLANS.md](EXPERIMENT_PLANS.md). Copy
+[experiment_plan.example.toml](../files/experiment_plan.example.toml), select
+**Setup Parameters → TOML Plan → Load TOML**, and review all rows before Start.
+The main GUI opens at a smaller height and shows the queue or legacy text editor
+only when its parameter source is selected.
+
 Laser command units, readback semantics and recording corrections are documented
 in [LASER_MANUAL_AUDIT.md](LASER_MANUAL_AUDIT.md).
 

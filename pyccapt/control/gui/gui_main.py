@@ -16,6 +16,7 @@ from pyccapt.control.core import device_checks, loggi, runtime
 from pyccapt.control.core.contracts import CommandKind, ControlCommand
 from pyccapt.control.devices import camera as camera_device
 from pyccapt.control.gui.alignment_gui import AlignmentGuiMixin
+from pyccapt.control.gui.experiment_plan_gui import ExperimentPlanGuiMixin
 from pyccapt.control.nkt_photonics.readback import fresh_snapshot
 from pyccapt.control.gui import (
     app_icon,
@@ -31,7 +32,7 @@ from pyccapt.control.gui import (
 
 
 
-class Ui_PyCCAPT(AlignmentGuiMixin):
+class Ui_PyCCAPT(AlignmentGuiMixin, ExperimentPlanGuiMixin):
     def __init__(self, variables, conf, x_plot, y_plot, t_plot, main_v_dc_plot):
         """
         Constructor for the PyCCAPT UI class.
@@ -80,7 +81,7 @@ class Ui_PyCCAPT(AlignmentGuiMixin):
 
     def setupUi(self, PyCCAPT):
         PyCCAPT.setObjectName("PyCCAPT")
-        PyCCAPT.resize(901, 800)
+        PyCCAPT.resize(901, 620)
         self.centralwidget = QtWidgets.QWidget(parent=PyCCAPT)
         self.centralwidget.setObjectName("centralwidget")
         self.gridLayout_7 = QtWidgets.QGridLayout(self.centralwidget)
@@ -1029,8 +1030,7 @@ class Ui_PyCCAPT(AlignmentGuiMixin):
         self.electrode_controls.addSpacing(12)
         self.electrode_controls.addWidget(self.automatic_alignment_button)
         self._setup_alignment_fields()
-        # Qt layout distances are in pixels; convert 5 cm at this screen's DPI.
-        self.electrode_controls.addSpacing(round(5 / 2.54 * self.centralwidget.logicalDpiY()))
+        self.electrode_controls.addSpacing(12)
         self.gridLayout_6.addLayout(self.electrode_controls, 1, 2, 1, 1)
         self.gridLayout_7.addLayout(self.gridLayout_6, 0, 0, 1, 1)
         PyCCAPT.setCentralWidget(self.centralwidget)
@@ -1125,6 +1125,7 @@ class Ui_PyCCAPT(AlignmentGuiMixin):
         self.menubar.addAction(self.menuHelp.menuAction())
 
         self.retranslateUi(PyCCAPT)
+        self._setup_experiment_plan()
         QtCore.QMetaObject.connectSlotsByName(PyCCAPT)
         make_window_responsive(PyCCAPT)
         tooltips.apply_tooltips(self, tooltips.MAIN_TOOLTIPS)
@@ -1268,8 +1269,6 @@ class Ui_PyCCAPT(AlignmentGuiMixin):
         self.emitter.speciemen_voltage.connect(self.update_speciemen_voltage)
         self.emitter.pulse_voltage.connect(self.update_pulse_voltage)
         self.emitter.detection_rate.connect(self.update_detection_rate)
-
-        self.result_list = []
 
         self.camera_close_check_timer.start(500)  # check every 500 ms
         self.statistics_timer.start(333)  # check every 333 ms
@@ -1589,7 +1588,12 @@ class Ui_PyCCAPT(AlignmentGuiMixin):
         Return:
                 None
         """
-        self.result_list = main_parameters.parse_textline_experiments(self.text_line.toPlainText())
+        if self._batch_items is not None:
+            self.result_list = self._batch_items
+        elif self.parameters_source.currentText() == 'TOML Plan':
+            self.result_list = self._validate_plan_items(self.plan_items)
+        else:
+            self.result_list = main_parameters.parse_textline_experiments(self.text_line.toPlainText())
         self.variables.number_of_experiment_in_text_line = len(self.result_list)
         if self.variables.index_experiment_in_text_line < len(self.result_list):
             index_line = self.variables.index_experiment_in_text_line
@@ -1599,12 +1603,20 @@ class Ui_PyCCAPT(AlignmentGuiMixin):
                 self.result_list[index_line],
                 self.error_message,
             )
+            self._publish_plan_row(index_line)
 
     def _update_parameter_editor_mode(self):
         """Enable only the editor selected by Setup Parameters."""
         use_text_line = self.parameters_source.currentText() == "TextLine"
-        alignment_locked = bool(getattr(self, '_alignment_batch', []))
+        use_plan = self.parameters_source.currentText() == 'TOML Plan'
+        alignment_locked = self._plan_locked()
+        self.text_line.setVisible(use_text_line)
+        self.plan_panel.setVisible(use_plan)
+        for widget in self._plan_form_widgets:
+            widget.setVisible(not use_plan)
         self.text_line.setEnabled(use_text_line and not alignment_locked)
+        for button in self.plan_buttons.values():
+            button.setEnabled(not alignment_locked)
         textbox_widgets = (
             self.ex_user, self.ex_name, self.email, self.electrode,
             self.ex_time, self.max_ions, self.ex_freq,
@@ -1616,7 +1628,7 @@ class Ui_PyCCAPT(AlignmentGuiMixin):
             self.criteria_email, self.email_interval,
         )
         for widget in textbox_widgets:
-            widget.setEnabled(not use_text_line and not alignment_locked)
+            widget.setEnabled(not (use_text_line or use_plan) and not alignment_locked)
 
     def setup_parameters_changes(self):
         """
@@ -1629,9 +1641,17 @@ class Ui_PyCCAPT(AlignmentGuiMixin):
             None
         """
         try:
-            if self.parameters_source.currentText() == 'TextLine':
+            if self.parameters_source.currentText() in ('TextLine', 'TOML Plan'):
+                if self._plan_locked():
+                    return
+                self._batch_items = None
+                if self.parameters_source.currentText() == 'TOML Plan' and not self.plan_items:
+                    return
                 self.read_text_lines()
                 return
+
+            self._batch_items = None
+            self.variables.experiment_plan_snapshot = {}
 
             values = main_parameters.FormValues(
                 user_name=self.ex_user.text(),
@@ -1691,15 +1711,20 @@ class Ui_PyCCAPT(AlignmentGuiMixin):
             return
         self.variables.automatic_alignment_enabled = False
         self.variables.automatic_alignment_samples = ()
+        try:
+            self._freeze_experiment_queue()
+        except ValueError as exc:
+            self.error_message(f'Check the experiment queue: {exc}')
+            return
         selected_samples = self._alignment_start_samples()
         if selected_samples is None:
             return
-        if self.parameters_source.currentText() == "TextLine":
+        if self.parameters_source.currentText() in ('TextLine', 'TOML Plan'):
             try:
                 self.variables.index_experiment_in_text_line = 0
                 self.read_text_lines()
             except (ValueError, main_parameters.ParameterError) as exc:
-                self.error_message(f"Check the TextLine setup parameters: {exc}")
+                self.error_message(f"Check the experiment queue: {exc}")
                 return
         if not self.variables.flag_main_gate or self.flag_super_user:
             if not self._confirm_start_parameter_warnings():
@@ -1727,6 +1752,13 @@ class Ui_PyCCAPT(AlignmentGuiMixin):
         ):
             return None
         positions = self.variables.sample_rough_positions
+        if self.parameters_source.currentText() == 'TOML Plan':
+            from pyccapt.control.core.experiment_plan import alignment_samples
+            try:
+                return alignment_samples(self.result_list, positions)
+            except ValueError as exc:
+                self.error_message(str(exc))
+                return None
         samples = tuple(sorted(number for number in positions if number in (1, 2, 3)))
         if not samples:
             QtWidgets.QMessageBox.information(
@@ -2235,6 +2267,8 @@ class Ui_PyCCAPT(AlignmentGuiMixin):
         self.pulse_mode.setEnabled(False)
         self.parameters_source.setEnabled(False)
         self.text_line.setEnabled(False)
+        for button in self.plan_buttons.values():
+            button.setEnabled(False)
         self.pulse_fraction.setEnabled(False)
         self.ex_freq.setEnabled(False)
         self.ex_name.setEnabled(False)
@@ -2512,7 +2546,7 @@ class Ui_PyCCAPT(AlignmentGuiMixin):
             # with self.variables.lock_statistics:
             next_index = self.variables.index_experiment_in_text_line + 1
             continue_textline = (
-                self.parameters_source.currentText() == 'TextLine'
+                self.parameters_source.currentText() in ('TextLine', 'TOML Plan')
                 and next_index < len(self.result_list)
                 and not self._operator_stopped
                 and not run_error
@@ -2524,20 +2558,23 @@ class Ui_PyCCAPT(AlignmentGuiMixin):
                     self.read_text_lines()
                     next_started = self.start_experiment_worker()
                 except (ValueError, main_parameters.ParameterError) as exc:
-                    self.error_message(f"Check the next TextLine setup parameters: {exc}")
+                    self.error_message(f"Check the next experiment parameters: {exc}")
                     next_started = False
                 if not next_started:
+                    self._batch_items = None
                     self.variables.automatic_alignment_enabled = False
                     self.variables.automatic_alignment_samples = ()
                     self.variables.index_experiment_in_text_line = 0
                     self.variables.sample_selection_locked = False
             else:
+                self._batch_items = None
                 self.variables.index_line = 0
                 self.variables.index_experiment_in_text_line = 0
                 self.variables.automatic_alignment_enabled = False
                 self.variables.automatic_alignment_samples = ()
                 self.variables.sample_selection_locked = False
 
+            self._update_parameter_editor_mode()
             self._update_alignment_fields()
             self._sync_electrode_controls()
 

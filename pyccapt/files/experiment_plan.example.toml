@@ -1,0 +1,59 @@
+# Copy this file, edit the settings, then choose TOML Plan > Load TOML.
+# Hardware configuration remains in pyccapt/config.toml.
+schema_version = 1
+
+[defaults]
+pulse_mode = "Voltage"
+counter_source = "TDC"
+pulse_frequency = 200 # kHz (ex_freq below is control-loop Hz)
+email = ""
+criteria_ions = false
+criteria_email = false
+email_interval_events = 1000000 # ions between progress emails
+ex_time = 90 # seconds
+max_ions = 2000
+ex_freq = 10 # control-loop Hz
+vdc_min = 1640 # V
+vdc_max = 4000 # V
+vdc_steps_up = 1.0 # V per control update
+vdc_steps_down = 1.0 # V per control update
+control_algorithm = "PID"
+vp_min = 328 # V
+vp_max = 3281 # V
+pulse_fraction = 20 # percent
+detection_rate_init = 1.0 # percent
+hit_displayed = 20000
+criteria_time = true
+criteria_vdc = false
+
+[[experiments]]
+# With Automatic Alignment enabled, save sample 1's coarse position in Cameras.
+# Without Automatic Alignment, sample_id is informational and no stage transfer occurs.
+sample_id = 1
+ex_user = "user1"
+ex_name = "test1"
+electrode = "NiC1"
+
+[[experiments]]
+sample_id = 2
+ex_user = "user2"
+ex_name = "test2"
+electrode = "NiC2"
+ex_time = 100
+max_ions = 3000
+ex_freq = 5
+vdc_min = 2700
+vdc_max = 3000
+vdc_steps_up = 0.5
+vdc_steps_down = 0.5
+control_algorithm = "Proportional"
+vp_min = 400
+vp_max = 2000
+pulse_fraction = 15
+detection_rate_init = 2.0
+hit_displayed = 40000
+criteria_time = false
+criteria_vdc = true
+
+# For this two-sample alignment example, set Alignment start voltage to 2700 V:
+# it must lie within every experiment's DC range. Calibrate motion limits first.

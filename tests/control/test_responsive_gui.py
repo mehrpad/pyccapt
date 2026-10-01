@@ -181,6 +181,33 @@ def instrument_window(request, app, monkeypatch, tmp_path):
     app.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
 
 
+@pytest.mark.parametrize('instrument_window', ['main'], indirect=True)
+def test_main_plan_layout_is_compact_and_queue_fits(instrument_window, tmp_path):
+    from pathlib import Path
+    window, ui, app = instrument_window
+    window.show()
+    for _ in range(5):
+        app.processEvents()
+    assert window.height() == 620
+    assert ui.text_line.isHidden()
+    assert ui.plan_panel.isHidden()
+    assert window._responsive_window.scroll.verticalScrollBar().maximum() == 0
+    window.grab().save(str(tmp_path/'single-form.png'))
+    ui.load_experiment_plan(Path(__file__).resolve().parents[2] /
+                            'pyccapt/files/experiment_plan.example.toml')
+    for _ in range(5):
+        app.processEvents()
+    assert ui.text_line.isHidden()
+    assert ui.plan_panel.isVisible()
+    assert window._responsive_window.scroll.horizontalScrollBar().maximum() == 0
+    assert window._responsive_window.scroll.verticalScrollBar().maximum() == 0
+    assert window._responsive_window.scroll.viewport().rect().contains(
+        QtCore.QRect(ui.plan_panel.mapTo(window._responsive_window.scroll.viewport(), QtCore.QPoint()),
+                     ui.plan_panel.size()))
+    window.grab().save(str(tmp_path/'plan-queue.png'))
+    print(f'GUI previews: {tmp_path}')
+
+
 @pytest.mark.parametrize('instrument_window', [
     'main', 'stage', 'laser', 'cameras', 'visualization', 'baking',
     'vacuum', 'combined', 'gates', 'alignment',

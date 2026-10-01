@@ -257,6 +257,194 @@ def test_textline_parameters_map_to_saved_samples(gui):
     assert v.vdc_max == 3000
 
 
+def test_toml_plan_maps_reordered_samples_and_publishes_each_row(gui):
+    from pyccapt.control.core import experiment_plan
+    ui, v, motor, tick = gui
+    rows = experiment_plan.load_plan(Path(__file__).resolve().parents[2] /
+                                    'pyccapt/files/experiment_plan.example.toml')
+    ui.plan_items = rows[::-1]
+    ui._refresh_plan_table()
+    ui.parameters_source.setCurrentText('TOML Plan')
+    ui._freeze_experiment_queue()
+    ui.alignment_start_voltage.setValue(2700)
+    ui._start_alignment_batch((2, 1))
+    assert not ui.errors
+    assert not ui.plan_buttons['Load TOML'].isEnabled()
+    assert not ui.plan_buttons['Edit'].isEnabled()
+    for _ in range(30):
+        tick()
+        if ui.started:
+            break
+    assert ui.started[0][0] == 2
+    assert ui.started[0][2] == 'test2'
+    assert v.experiment_plan_snapshot['experiment']['sample_id'] == 2
+    v.start_flag = False
+    v.alignment_outcome = 'aligned'
+    v.hardware_safe = True
+    ui._alignment_sample_finished('')
+    for _ in range(30):
+        tick()
+        if len(ui.started) == 2:
+            break
+    assert ui.started[1][0] == 1
+    assert v.experiment_plan_snapshot['queue_index'] == 2
+    assert v.experiment_plan_snapshot['experiment']['sample_id'] == 1
+
+
+def test_plan_load_failure_preserves_queue_and_plan_is_frozen_at_start(gui, tmp_path):
+    ui, v, motor, tick = gui
+    path = Path(__file__).resolve().parents[2] / 'pyccapt/files/experiment_plan.example.toml'
+    ui.load_experiment_plan(path)
+    assert ui.parameters_source.currentText() == 'TOML Plan'
+    assert ui.plan_table.rowCount() == 2
+    assert ui.text_line.isHidden()
+    invalid = tmp_path/'invalid.toml'
+    invalid.write_text('schema_version = 2')
+    with pytest.raises(ValueError):
+        ui.load_experiment_plan(invalid)
+    assert ui.plan_items[0]['ex_name'] == 'test1'
+    ui._freeze_experiment_queue()
+    ui.plan_items[1]['ex_name'] = 'changed after start'
+    v.index_experiment_in_text_line = 1
+    ui.read_text_lines()
+    assert v.ex_name == 'test2'
+    assert v.experiment_plan_snapshot['queue_index'] == 2
+    v.start_flag = True
+    with pytest.raises(ValueError, match='Wait'):
+        ui.load_experiment_plan(path)
+
+
+def test_queue_edit_duplicate_reorder_remove_and_save(gui, monkeypatch, tmp_path):
+    from pyccapt.control.core import experiment_plan
+    ui, v, motor, tick = gui
+    path = Path(__file__).resolve().parents[2] / 'pyccapt/files/experiment_plan.example.toml'
+    ui.load_experiment_plan(path)
+    edited = dict(ui.plan_items[0], ex_name='edited')
+    monkeypatch.setattr(ui, '_edit_plan_item', lambda item: edited)
+    ui._edit_plan_row()
+    ui._duplicate_plan_row()
+    assert [row['ex_name'] for row in ui.plan_items] == ['edited', 'edited', 'test2']
+    ui._move_plan_row(1)
+    assert [row['ex_name'] for row in ui.plan_items] == ['edited', 'test2', 'edited']
+    ui._remove_plan_row()
+    target = tmp_path/'saved.toml'
+    monkeypatch.setattr(QtWidgets.QFileDialog, 'getSaveFileName', lambda *args: (str(target), ''))
+    ui._save_plan_dialog()
+    assert experiment_plan.load_plan(target) == ui.plan_items
+    ui._add_plan_row()
+    assert len(ui.plan_items) == 3
+    assert ui.plan_items[-1]['ex_name'] == 'edited'
+
+
+def test_plan_missing_position_or_invalid_second_row_blocks_before_launch(gui, monkeypatch):
+    ui, v, motor, tick = gui
+    ui.load_experiment_plan(Path(__file__).resolve().parents[2] /
+                            'pyccapt/files/experiment_plan.example.toml')
+    monkeypatch.setattr(ui, '_confirm_warning_dialog', lambda *args: True)
+    v.sample_rough_positions = {1: (0., 0., 0.)}
+    ui.start_experiment_clicked()
+    assert 'saved Cameras' in ui.errors[-1]
+    assert not motor.moves and not ui.started
+    ui.plan_items[1]['vdc_max'] = ui.conf['max_vdc']+1
+    ui.start_experiment_clicked()
+    assert 'Experiment 2' in ui.errors[-1]
+    assert not motor.moves and not ui.started
+
+
+def test_plan_runs_without_stage_mapping_when_alignment_disabled(gui, monkeypatch):
+    from pyccapt.control.core import experiment_plan
+    ui, v, motor, tick = gui
+    ui.automatic_alignment_button.setChecked(False)
+    ui.plan_items = experiment_plan.load_plan(Path(__file__).resolve().parents[2] /
+                                             'pyccapt/files/experiment_plan.example.toml')
+    del ui.plan_items[0]['sample_id']
+    del ui.plan_items[1]['sample_id']
+    ui._refresh_plan_table()
+    ui.parameters_source.setCurrentText('TOML Plan')
+    monkeypatch.setattr(ui, '_confirm_start_parameter_warnings', lambda: True)
+    ui.start_experiment_clicked()
+    assert ui.started[0][2] == 'test1'
+    assert not motor.moves
+    assert v.experiment_plan_snapshot['experiment']['ex_name'] == 'test1'
+
+
+def test_experiment_editor_preserves_types_and_units(gui):
+    from pyccapt.control.core import experiment_plan
+    from pyccapt.control.gui.experiment_plan_gui import ExperimentEditor
+    ui, v, motor, tick = gui
+    item = experiment_plan.load_plan(Path(__file__).resolve().parents[2] /
+                                     'pyccapt/files/experiment_plan.example.toml')[0]
+    editor = ExperimentEditor(item, ui.centralwidget)
+    assert editor.item() == item
+    editor.fields['sample_id'].setCurrentIndex(0)
+    editor.fields['criteria_time'].setChecked(False)
+    editor.fields['criteria_ions'].setChecked(True)
+    editor.fields['vdc_steps_up'].setText('0.25')
+    edited = editor.item()
+    assert 'sample_id' not in edited
+    assert edited['vdc_steps_up'] == .25
+    assert edited['criteria_ions'] is True
+    editor.close()
+
+
+@pytest.mark.parametrize('outcome', ['clean', 'stop', 'failed', 'unsafe'])
+def test_plan_queue_continues_only_after_clean_worker_exit(gui, tmp_path, outcome):
+    from unittest.mock import Mock
+    ui, v, motor, tick = gui
+    ui.automatic_alignment_button.setChecked(False)
+    ui.load_experiment_plan(Path(__file__).resolve().parents[2] /
+                            'pyccapt/files/experiment_plan.example.toml')
+    ui._freeze_experiment_queue()
+    v.index_experiment_in_text_line = 0
+    ui.read_text_lines()
+    ui.start_experiment_worker()
+    v.sample_selection_locked = True
+    v.flag_end_experiment = True
+    v.hardware_safe = outcome != 'unsafe'
+    v.experiment_error = 'worker failed' if outcome == 'failed' else ''
+    ui._operator_stopped = outcome == 'stop'
+    v.path = str(tmp_path)
+    ui.experiment_process = Mock()
+    ui.experiment_process.is_alive.return_value = True
+    ui.on_stop_experiment_worker()
+    assert len(ui.started) == 1
+    assert v.flag_end_experiment
+    ui.experiment_process.is_alive.return_value = False
+    ui.on_stop_experiment_worker()
+    if outcome == 'clean':
+        assert len(ui.started) == 2
+        assert ui.started[-1][2] == 'test2'
+        assert v.experiment_plan_snapshot['queue_index'] == 2
+        # The second experiment finishes the queue without a third launch.
+        v.flag_end_experiment = True
+        ui.on_stop_experiment_worker()
+        assert len(ui.started) == 2
+    else:
+        assert len(ui.started) == 1
+    assert ui._batch_items is None
+    assert v.index_experiment_in_text_line == 0
+    assert ui.plan_buttons['Load TOML'].isEnabled()
+    assert ui.plan_buttons['Edit'].isEnabled()
+    assert not motor.moves
+
+
+def test_single_run_form_unlocks_after_worker_finishes(gui, tmp_path):
+    from unittest.mock import Mock
+    ui, v, motor, tick = gui
+    ui.automatic_alignment_button.setChecked(False)
+    ui.start_experiment_worker()
+    v.sample_selection_locked = True
+    v.flag_end_experiment = True
+    v.hardware_safe = True
+    v.path = str(tmp_path)
+    ui.experiment_process = Mock()
+    ui.experiment_process.is_alive.return_value = False
+    ui.on_stop_experiment_worker()
+    assert not v.sample_selection_locked
+    assert ui.vdc_max.isEnabled()
+    assert ui.parameters_source.isEnabled()
+
+
 def test_completion_handler_waits_for_worker_exit_before_advancing(gui, tmp_path):
     from unittest.mock import Mock
     ui, v, motor, tick = gui

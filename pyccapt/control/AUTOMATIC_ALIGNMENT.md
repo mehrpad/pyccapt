@@ -136,8 +136,11 @@ and Reference are blocked throughout a sequence; Stage Stop cancels the sequence
 ## Sequence
 
 1. Validate all selected sample positions and all run parameter sets up front.
-   TextBox parameters are copied for each selected sample; TextLine blocks map
-   to selected samples in sample-number order. Voltage or Laser mode with an
+   [TOML plans](EXPERIMENT_PLANS.md) map each row's explicit `sample_id` to its
+   saved Cameras position and run in queue order. IDs may repeat; saved samples
+   omitted from the plan are not visited. TextBox parameters are copied for each
+   selected sample; legacy TextLine blocks map to samples in sample-number order.
+   Voltage or Laser mode with an
    enabled DC supply and Surface Concept or RoentDek position-resolving TDC is
    required. For combined sample-stage and laser alignment, select Laser mode
    and enable **Align when experiment starts** in Laser Control. Validate laser

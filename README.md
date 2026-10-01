@@ -155,6 +155,17 @@ Then open notebooks under `pyccapt/calibration/tutorials`.
 
 Control runtime configuration is stored in `pyccapt/config.toml`.
 
+Reusable experiment queues are separate TOML files. Select **Setup Parameters →
+TOML Plan → Load TOML** in the main GUI, review the compact queue, then start it.
+Use **Add / Edit / Duplicate / Save As** to prepare plans without typing parameter
+blocks. Automatic Alignment maps each experiment's explicit `sample_id` to its
+saved Cameras position; without alignment the queue uses the current stage position.
+
+Copy [experiment_plan.example.toml](pyccapt/files/experiment_plan.example.toml) and
+follow the [experiment-plan instructions](pyccapt/control/EXPERIMENT_PLANS.md).
+The main window now hides the legacy TextLine editor unless selected and opens
+at a smaller height while retaining monitor-aware scrolling.
+
 Control GUI electrode labels are stored in `pyccapt/control/electrode.toml`:
 
 ```toml

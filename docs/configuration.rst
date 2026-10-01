@@ -11,6 +11,11 @@ Runtime loading follows this order:
 1. Explicit config path (if provided by the caller)
 2. ``config.toml`` in the detected project root
 
+Experiment plans are separate TOML files loaded through **Setup Parameters →
+TOML Plan → Load TOML**. They define shared defaults and queued experiments,
+including explicit sample IDs for automatic alignment. See
+:doc:`experiment_plans` for instructions and a downloadable example.
+
 Electrode List Configuration
 ----------------------------
 

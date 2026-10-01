@@ -7,11 +7,13 @@ import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from pyccapt.control.apt.detector_models import normalize_counter_source
 from pyccapt.control.core.contracts import RunConfig
 from pyccapt.control.core import read_files
+from pyccapt.control.core import experiment_plan
 
 
 class ParameterError(ValueError):
@@ -242,6 +244,8 @@ def parse_textline_experiments(lines: str) -> list[dict[str, Any]]:
             if "=" not in element:
                 raise ParameterError(f"Invalid key/value pair: {element!r}")
             key, value = element.split("=", 1)
+            if key.strip() in item:
+                raise ParameterError(f'Duplicate TextLine key: {key.strip()}')
             item[key.strip()] = _convert_value(value)
 
         missing = [key for key in TEXTLINE_REQUIRED_KEYS if key not in item]
@@ -279,6 +283,25 @@ def apply_textline_item(
     )
     variables.hit_display = int(item["hit_displayed"])
     validate_run_parameters(variables, conf)
+
+
+def validate_experiment_queue(items, conf, pulse_amp_per_supply_voltage=1.0):
+    """Validate all rows in isolation; reject settings that would be clamped."""
+    if not items:
+        raise ParameterError('Load or add at least one experiment to the plan')
+    validated = []
+    for index, item in enumerate(items, 1):
+        try:
+            resolved = experiment_plan.validate_item(item, f'Experiment {index}')
+            temp = SimpleNamespace(pulse_amp_per_supply_voltage=pulse_amp_per_supply_voltage)
+            errors = []
+            apply_textline_item(temp, conf, resolved, errors.append)
+            if errors:
+                raise ParameterError('; '.join(errors))
+            validated.append(resolved)
+        except (ValueError, TypeError, OverflowError) as exc:
+            raise ParameterError(f'Experiment {index}: {exc}') from exc
+    return validated
 
 
 def _bounded_pulse_frequency(value: int, pulse_mode: str, conf: Mapping[str, Any]) -> tuple[int, str | None]:

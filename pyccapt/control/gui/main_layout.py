@@ -27,10 +27,8 @@ class MainLayoutMixin:
         self.advanced_settings_button = QtWidgets.QPushButton('Advanced settings…', self.centralwidget)
         self.advanced_settings_button.setObjectName('advanced_settings_button')
         self.advanced_settings_button.clicked.connect(self._show_advanced_settings)
-        self.verticalLayout_2.addWidget(self.advanced_settings_button, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
-
         # Replace the two separators below the target rate with one full-width
-        # separator between parameters/statistics and the operating controls.
+        # separator below the parameters and statistics.
         for line in (self.line_3, self.line_4):
             self.verticalLayout.removeWidget(line)
             line.hide()
@@ -41,7 +39,7 @@ class MainLayoutMixin:
         self.run_controls_separator.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
         self.gridLayout_6.addWidget(self.run_controls_separator, 2, 0, 1, 2)
 
-        # Remove the third column and place every run control below the line.
+        # Remove the third column and group operating controls below statistics.
         self.gridLayout_6.removeItem(self.electrode_controls)
         while self.electrode_controls.count():
             self.electrode_controls.takeAt(0)
@@ -50,27 +48,29 @@ class MainLayoutMixin:
         self.gridLayout_6.addWidget(self.plan_panel, 3, 0, 1, 2)
         self.gridLayout_6.addWidget(self.text_line, 3, 0, 1, 2)
         self.run_controls_panel = QtWidgets.QWidget(self.centralwidget)
-        controls = QtWidgets.QVBoxLayout(self.run_controls_panel)
+        controls = QtWidgets.QGridLayout(self.run_controls_panel)
         controls.setContentsMargins(0, 0, 0, 0)
-        buttons = QtWidgets.QHBoxLayout()
-        for button in (self.electrode_button, self.flat_test_button, self.automatic_alignment_button,
-                       self.start_button, self.stop_button):
-            buttons.addWidget(button)
-        buttons.addStretch()
-        controls.addLayout(buttons)
-        alignment = QtWidgets.QHBoxLayout()
-        for label, widget in ((self.alignment_start_voltage_label, self.alignment_start_voltage),
-                              (self.alignment_voltage_increment_label, self.alignment_voltage_increment)):
+        controls.setVerticalSpacing(4)
+        controls.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop | QtCore.Qt.AlignmentFlag.AlignLeft)
+        for row, (label, widget) in enumerate(
+            ((self.alignment_start_voltage_label, self.alignment_start_voltage),
+             (self.alignment_voltage_increment_label, self.alignment_voltage_increment))
+        ):
             label.setMinimumWidth(0)
             label.setMaximumWidth(16777215)
             label.setWordWrap(False)
             widget.setFixedWidth(100)
-            alignment.addWidget(label)
-            alignment.addWidget(widget)
-            alignment.addSpacing(12)
-        alignment.addStretch()
-        controls.addLayout(alignment)
-        self.gridLayout_6.addWidget(self.run_controls_panel, 4, 0, 1, 2)
+            controls.addWidget(label, row, 0)
+            controls.addWidget(widget, row, 1, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
+        self.advanced_settings_button.setFixedWidth(self.flat_test_button.width())
+        for widget, row, column in (
+            (self.electrode_button, 2, 0), (self.advanced_settings_button, 2, 1),
+            (self.automatic_alignment_button, 3, 0), (self.flat_test_button, 3, 1),
+            (self.start_button, 4, 1), (self.stop_button, 5, 1),
+        ):
+            controls.addWidget(widget, row, column, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
+        self.verticalLayout_2.addWidget(self.run_controls_panel, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
+        self.gridLayout_5.setVerticalSpacing(4)
         self.Error.setMinimumWidth(0)
         self.gridLayout_6.addWidget(self.Error, 5, 0, 1, 2)
 

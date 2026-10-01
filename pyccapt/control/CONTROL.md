@@ -25,9 +25,11 @@ The main GUI opens at 760 × 640 and shows the queue or legacy text editor only
 when its parameter source is selected. In TextBox mode, **Advanced settings…**
 opens detection mode, control algorithm, refresh frequency, pulse-voltage limits
 and K_p controls together. These are the same controls used by the main form:
-edits apply immediately and existing run locks remain in effect. The electrode,
-flat-test, alignment and Start/Stop buttons sit side by side below one full-width
-separator, followed by the alignment voltage settings.
+edits apply immediately and existing run locks remain in effect. Below the
+statistics, alignment start voltage and voltage increment occupy the first two
+rows. Electrode sits beside Advanced settings, then Automatic Alignment beside
+Flat Test. Start and Stop are stacked below Flat Test. One full-width separator
+remains below the parameter/statistics area.
 
 Laser command units, readback semantics and recording corrections are documented
 in [LASER_MANUAL_AUDIT.md](LASER_MANUAL_AUDIT.md).

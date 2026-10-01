@@ -226,11 +226,17 @@ def test_main_advanced_dialog_and_run_controls_layout(instrument_window, tmp_pat
     assert all(widget.window() is ui.advanced_settings_dialog for widget in advanced)
     assert not ui.advanced_settings_dialog.isVisible()
     assert ui.line_3.isHidden() and ui.line_4.isHidden()
-    buttons = (ui.electrode_button, ui.flat_test_button, ui.automatic_alignment_button,
-               ui.start_button, ui.stop_button)
-    separator_y = ui.run_controls_separator.mapTo(ui.centralwidget, QtCore.QPoint()).y()
-    assert len({button.mapTo(ui.centralwidget, QtCore.QPoint()).y() for button in buttons}) == 1
-    assert all(button.mapTo(ui.centralwidget, QtCore.QPoint()).y() > separator_y for button in buttons)
+    def position(widget):
+        return widget.mapTo(ui.centralwidget, QtCore.QPoint())
+    assert position(ui.electrode_button).x() < position(ui.advanced_settings_button).x()
+    assert position(ui.electrode_button).y() == position(ui.advanced_settings_button).y()
+    assert position(ui.automatic_alignment_button).y() == position(ui.flat_test_button).y()
+    assert position(ui.automatic_alignment_button).x() < position(ui.flat_test_button).x()
+    assert position(ui.alignment_start_voltage).y() < position(ui.alignment_voltage_increment).y()
+    assert position(ui.alignment_voltage_increment).y() < position(ui.electrode_button).y()
+    assert position(ui.electrode_button).y() < position(ui.automatic_alignment_button).y()
+    assert position(ui.flat_test_button).y() < position(ui.start_button).y() < position(ui.stop_button).y()
+    assert position(ui.flat_test_button).x() == position(ui.start_button).x() == position(ui.stop_button).x()
     ui.advanced_settings_button.click()
     for _ in range(3):
         app.processEvents()

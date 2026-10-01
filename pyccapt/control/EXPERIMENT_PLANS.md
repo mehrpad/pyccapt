@@ -9,9 +9,11 @@ The narrower main window groups the less frequently changed TextBox parameters
 under **Advanced settings…**: detection mode, control algorithm, refresh frequency,
 pulse-voltage limits and K_p up/down. Edits apply as each field is changed; the
 normal experiment locks still apply. For TOML plans, use the queue's **Edit**
-button to change those settings for a specific experiment. Electrode, Flat Test,
-Automatic Alignment, Start and Stop share a row below a single full-width line,
-with the alignment start voltage and increment on the next row.
+button to change those settings for a specific experiment. Under the statistics,
+alignment start voltage and increment occupy two rows above Electrode and Advanced
+settings. Automatic Alignment sits beside Flat Test on the next row, with Start
+and Stop stacked below Flat Test. A single full-width separator remains below
+the parameters and statistics.
 
 ## Load and run the example
 

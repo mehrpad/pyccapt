@@ -110,6 +110,12 @@ def test_requested_stage_ranges_accept_full_coarse_grid():
     cfg = AlignmentConfig.from_mapping(conf)
     assert cfg.xy_range_um == (50., 50.)
     assert cfg.fine_xy_range_um == 15.
+    assert cfg.motion_calibrated
+    assert cfg.z_direction == 1
+    assert cfg.transfer_z_mm == -4.
+    assert cfg.xy_speed_um_s == 100.
+    assert cfg.fine_xy_speed_um_s == 16.
+    cfg.validate_motion([(0., 0., -3e-3)])
     calibrated = settings(xy_range_um=cfg.xy_range_um, fine_xy_range_um=cfg.fine_xy_range_um)
     calibrated.validate_motion([(0., 0., 0.)])
     assert len(list(coarse_positions((0., 0., 0.), calibrated))) == 10201
@@ -124,7 +130,7 @@ def test_fine_range_is_relative_to_coarse_result():
 
 
 def test_fine_range_limit_recovers_before_excess_move(tmp_path):
-    rig = Rig(tmp_path, settings(xy_range_um=(50., 50.), fine_xy_range_um=.15),
+    rig = Rig(tmp_path, settings(xy_range_um=(50., 50.), fine_xy_range_um=.15, fine_probe_step_um=.1),
               Footprint(True, 'signal', centre_mm=(5., 0.), radius_mm=10.))
     rig.until(lambda: rig.engine.attempts == 1, rate=.4)
     centre = rig.engine.fine_origin
@@ -168,6 +174,60 @@ def test_stable_centred_signal_locks_stage_at_80_percent(tmp_path):
     assert rig.v.alignment_outcome == 'aligned'
 
 
+def test_initial_ramp_holds_at_target_rate_and_enters_fine_at_that_voltage(tmp_path):
+    fit = Footprint(True, 'sample', (2., 0.), 10., .06, .9, .01, 1.)
+    rig = Rig(tmp_path, footprint=fit)
+    rig.v.specimen_voltage = 1000.
+    rig.step(rate=1.)
+    assert rig.engine.phase == 'confirming'
+    assert rig.engine.target_voltage == 1000.
+    assert rig.v.specimen_voltage == 1000.
+    assert rig.engine.voltage_step(1000., .2) == 0.
+    rig.until(lambda: rig.engine.phase == 'fine', rate=1.)
+    assert rig.v.specimen_voltage == 1000.
+    assert rig.engine.target_voltage == 1000.
+    assert rig.engine.attempts == 1
+    assert not rig.moves  # No coarse scan before the successful early entry.
+    records = [json.loads(line) for line in (tmp_path/'alignment.jsonl').read_text().splitlines()]
+    assert any(r['event'] == 'initial_ramp_target_reached' and r['voltage'] == 1000.
+               and r['configured_start_voltage'] == 1500. for r in records)
+    assert any(r['event'] == 'fine_started' and r['source'] == 'initial_ramp' for r in records)
+
+
+def test_initial_ramp_does_not_stop_at_a_fraction_of_target_rate(tmp_path):
+    rig = Rig(tmp_path, footprint=Footprint(True, 'sample', (0., 0.), 10.))
+    rig.v.specimen_voltage = 1000.
+    for _ in range(4):
+        rig.step(rate=.8)
+    assert rig.engine.phase == 'ramp'
+    assert rig.v.specimen_voltage == 1200.
+
+
+def test_unconfirmed_target_rate_resumes_initial_ramp_without_fine_motion(tmp_path):
+    rig = Rig(tmp_path)  # Background hits cannot authorize fine movement.
+    rig.v.specimen_voltage = 1000.
+    rig.step(rate=1.)
+    assert rig.engine.phase == 'confirming'
+    rig.until(lambda: rig.engine.phase == 'ramp', rate=1.)
+    assert rig.engine.target_voltage == 1500.
+    assert not rig.moves
+    assert rig.engine.attempts == 0
+    rig.step(rate=1.)
+    assert rig.engine.phase == 'ramp'  # Do not repeatedly hold on the same invalid signal.
+
+
+def test_early_fine_entry_requires_fresh_independent_event_windows(tmp_path):
+    rig = Rig(tmp_path, footprint=Footprint(True, 'sample', (0., 0.), 10.))
+    rig.v.specimen_voltage = 1000.
+    rig.step(rate=1.)
+    rig.step(rate=1.)
+    for _ in range(8):
+        rig.step(rate=1., fresh=False)
+    assert rig.engine.phase == 'confirming'
+    assert rig.engine.attempts == 0
+    assert rig.v.specimen_voltage == 1000.
+
+
 def test_replayed_event_window_cannot_establish_stability(tmp_path):
     rig = Rig(tmp_path, footprint=Footprint(True, 'sample', (0., 0.), 10., .06, .9, .01, 1.))
     rig.until(lambda: rig.engine.phase == 'coarse')
@@ -196,6 +256,33 @@ def test_fine_correction_uses_calibration_and_bounded_step(tmp_path):
     assert request['target_m'] == pytest.approx((-0.1e-6, 0.1e-6, 0.))
 
 
+def test_detector_feedback_fine_alignment_works_without_fixed_jacobian(tmp_path):
+    cfg = settings(xy_jacobian_mm_per_um=(), xy_range_um=(50., 50.))
+    rig = Rig(tmp_path, cfg)
+    def live_fit(*_):
+        x, y, _z = rig.v.stage_position_snapshot[:3]
+        return Footprint(True, 'sample', (2.-x*1e6, -2.+y*1e6), 10., .06, .9, .01, 1.)
+    rig.engine.analyser = live_fit
+    rig.until(lambda: rig.engine.phase == 'fine', rate=.4)
+    rig.until(lambda: abs(rig.v.stage_position_snapshot[0]-2e-6) < 1e-9
+              and abs(rig.v.stage_position_snapshot[1]-2e-6) < 1e-9, rate=.4)
+    fine_moves = [move for move in rig.moves if 'fine_origin_m' in move]
+    assert fine_moves
+    assert all(move['speed_um_s'] == cfg.fine_xy_speed_um_s for move in fine_moves)
+    assert all(abs(move['target_m'][axis]-rig.engine.fine_origin[axis])*1e6 <= 15
+               for move in fine_moves for axis in (0, 1))
+    assert any(json.loads(line)['event'] == 'fine_probe_accepted'
+               for line in (tmp_path/'alignment.jsonl').read_text().splitlines())
+
+
+def test_transfer_z_must_retract_from_saved_sample():
+    cfg = settings(xy_jacobian_mm_per_um=(), transfer_z_mm=-4.,
+                   bounds_mm=((-2., 6.), (-3., 7.), (-10., 7.)))
+    cfg.validate_motion([(0., 0., -3e-3)])
+    with pytest.raises(ValueError, match='retract'):
+        cfg.validate_motion([(0., 0., -5e-3)])
+
+
 def test_loss_after_approach_retracts_before_xy_search(tmp_path):
     rig = Rig(tmp_path, settings(approach_enabled=True, z_max_advance_um=1),
               footprint=Footprint(True, 'sample', (0., 0.), 10., .06, .9, .01, 1.))
@@ -222,6 +309,43 @@ def test_stale_stage_position_aborts_without_motion(tmp_path):
     rig.engine.tick(1500, .4, now=3)
     assert rig.engine.outcome == 'fault'
     assert not rig.v.alignment_move_request
+
+
+@pytest.mark.parametrize('updated_field', ['stage_position_snapshot', 'alignment_stage_heartbeat'])
+def test_live_alignment_accepts_updates_published_after_tick_started(tmp_path, monkeypatch, updated_field):
+    clock = [10.]
+    class UpdatingState(SimpleNamespace):
+        def __getattribute__(self, name):
+            if name == updated_field:
+                clock[0] += .005  # GUI update arrives during the Manager read.
+                return ((0., 0., 0., clock[0]) if name == 'stage_position_snapshot' else clock[0])
+            return super().__getattribute__(name)
+    cfg = settings()
+    v = UpdatingState(**vars(state(cfg, tmp_path)))
+    v.stage_position_snapshot = (0., 0., 0., 10.)
+    v.alignment_stage_heartbeat = 10.
+    engine = AutomaticAlignment(v, {'max_vdc': 10000}, now=0)
+    monkeypatch.setattr('time.monotonic', lambda: clock[0])
+    engine.tick(1500., 0.)
+    assert engine.phase == 'moving'
+    v.alignment_move_status = {'id': v.alignment_move_request['id'], 'state': 'done'}
+    clock[0] += .5
+    engine.tick(1500., 0.)
+    assert engine.phase == 'coarse'
+    clock[0] += .5
+    engine.tick(1500., 0.)
+    assert engine.phase == 'coarse'
+    assert engine.outcome == ''
+
+
+def test_future_stage_timestamp_still_faults_and_records_age(tmp_path):
+    rig = Rig(tmp_path)
+    rig.v.stage_position_snapshot = (0., 0., 0., 11.)
+    rig.engine.tick(1500., .4, now=10.)
+    assert rig.engine.outcome == 'fault'
+    assert 'age -1.000 s' in rig.engine.reason
+    records = [json.loads(line) for line in (tmp_path/'alignment.jsonl').read_text().splitlines()]
+    assert any(r['event'] == 'position_timestamp_fault' and r['age_s'] == -1. for r in records)
 
 
 def disk(rng, n, radius, centre=(0., 0.)):
@@ -262,7 +386,8 @@ def test_clipped_footprint_cannot_authorize_approach():
 
 
 @pytest.mark.parametrize('events_seen,phase,expected', [(False, 'ramp', 1500), (True, 'coarse', 1500),
-                                                      (True, 'moving', 1500), (True, 'ramp', 1510)])
+                                                      (True, 'moving', 1500), (True, 'confirming', 1500),
+                                                      (True, 'ramp', 1510)])
 def test_experiment_voltage_controller_obeys_alignment_and_first_event_gate(events_seen, phase, expected, monkeypatch):
     from unittest.mock import Mock
     from pyccapt.control.apt import apt_exp_control
@@ -328,7 +453,7 @@ class Motor:
 
 @pytest.mark.parametrize('target,speed,kind', [((0., 0., 2e-3), 1, 'alignment'),
                                               ((1e-6, 0., 1e-6), 1, 'alignment'),
-                                              ((1e-6, 0., 0.), 50, 'alignment'),
+                                              ((1e-6, 0., 0.), 150, 'alignment'),
                                               ((1e-6, 0., 0.), 1, 'transfer')])
 def test_stage_service_rejects_unsafe_requests(tmp_path, target, speed, kind):
     v = state(settings(), tmp_path)
@@ -350,6 +475,51 @@ def test_stage_service_rejects_fine_motion_beyond_15_um(tmp_path):
     AlignmentStageService(v, lambda: motor).tick(now=0.)
     assert v.alignment_move_status['state'] == 'error'
     assert not motor.moves
+
+
+def test_stage_service_rejects_fine_speed_above_limit(tmp_path):
+    v = state(settings(xy_range_um=(50., 50.)), tmp_path)
+    v.alignment_move_request = dict(id='fast-fine', target_m=(1e-6, 0., 0.),
+                                    fine_origin_m=(0., 0., 0.), speed_um_s=17.,
+                                    kind='alignment', issued=0.)
+    motor = Motor()
+    AlignmentStageService(v, lambda: motor).tick(now=0.)
+    assert v.alignment_move_status['state'] == 'error'
+    assert not motor.moves
+
+
+def test_stage_service_keeps_stationary_alignment_position_fresh(tmp_path):
+    v = state(settings(), tmp_path)
+    motor = Motor()
+    service = AlignmentStageService(v, lambda: motor)
+    service.tick(now=0.)
+    assert v.stage_position_snapshot == (0., 0., 0., 0.)
+    motor.position['z'] = 1e-6
+    service.tick(now=.25)
+    assert v.stage_position_snapshot[3] == 0.
+    service.tick(now=.5)
+    assert v.stage_position_snapshot == (0., 0., 1e-6, .5)
+    service.tick(now=1.)
+    assert v.stage_position_snapshot[3] == 1.
+
+
+def test_stage_request_published_during_read_is_not_expired(tmp_path, monkeypatch):
+    clock = [10.]
+    class UpdatingState(SimpleNamespace):
+        def __getattribute__(self, name):
+            if name == 'alignment_move_request':
+                clock[0] += .005
+                return dict(id='new-request', target_m=(1e-6, 0., 0.),
+                            speed_um_s=1., kind='alignment', issued=clock[0])
+            return super().__getattribute__(name)
+    v = UpdatingState(**vars(state(settings(), tmp_path)))
+    motor = Motor()
+    service = AlignmentStageService(v, lambda: motor)
+    monkeypatch.setattr('time.monotonic', lambda: clock[0])
+    service.tick()
+    assert v.alignment_move_status['state'] == 'moving'
+    assert len(motor.moves) == 1
+    assert not v.alignment_cancel_motion
 
 
 def test_transfer_retracts_traverses_then_approaches_saved_position():

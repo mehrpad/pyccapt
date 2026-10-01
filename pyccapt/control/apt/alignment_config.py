@@ -30,7 +30,9 @@ class AlignmentConfig:
     fine_xy_range_um: float = 15.0
     xy_step_um: float = 1.0
     fine_xy_step_um: float = 0.1
-    xy_speed_um_s: float = 1.0
+    fine_probe_step_um: float = 1.0
+    xy_speed_um_s: float = 100.0
+    fine_xy_speed_um_s: float = 16.0
     z_step_um: float = 0.05
     z_speed_um_s: float = 0.1
     z_direction: int = 0
@@ -71,7 +73,8 @@ class AlignmentConfig:
                 raise ValueError(f'Alignment {key} must be finite.')
         positive = ('start_voltage', 'voltage_increment', 'max_voltage', 'ramp_v_s',
                     'stable_s', 'loss_s', 'dwell_s', 'timeout_s', 'window_max_age_s',
-                    'detector_radius_mm', 'xy_step_um', 'fine_xy_step_um', 'fine_xy_range_um', 'xy_speed_um_s',
+                    'detector_radius_mm', 'xy_step_um', 'fine_xy_step_um', 'fine_probe_step_um',
+                    'fine_xy_range_um', 'xy_speed_um_s', 'fine_xy_speed_um_s',
                     'z_step_um', 'z_speed_um_s', 'transfer_speed_um_s',
                     'position_tolerance_um', 'settle_s', 'move_timeout_s')
         if any(getattr(self, name) <= 0 for name in positive):
@@ -84,6 +87,8 @@ class AlignmentConfig:
             raise ValueError('Alignment start voltage or observation duration is invalid.')
         if self.z_max_advance_um < 0 or self.position_tolerance_um >= self.fine_xy_step_um:
             raise ValueError('Alignment position tolerance must be smaller than the fine XY step.')
+        if self.fine_probe_step_um > self.fine_xy_range_um:
+            raise ValueError('Fine probe step must fit inside the fine XY range.')
         if self.approach_enabled and self.position_tolerance_um >= self.z_step_um:
             raise ValueError('Alignment position tolerance must be smaller than the approach step.')
         if int(self.window_ions) != self.window_ions or self.window_ions < 200:
@@ -94,15 +99,15 @@ class AlignmentConfig:
     def validate_motion(self, positions):
         if not self.motion_calibrated:
             raise ValueError('Automatic alignment is not calibrated. Set measured XYZ bounds, XY search ranges, '
-                             'XY detector mapping, approach direction and transfer Z in config.toml; '
+                             'approach direction and transfer Z in config.toml; '
                              'then set alignment_motion_calibrated = true. See control/AUTOMATIC_ALIGNMENT.md.')
         bounds = np.asarray(self.bounds_mm, dtype=float)
         jac = np.asarray(self.xy_jacobian_mm_per_um, dtype=float)
         ranges = np.asarray(self.xy_range_um, dtype=float)
         if bounds.shape != (3, 2) or not np.isfinite(bounds).all() or np.any(bounds[:, 0] >= bounds[:, 1]):
             raise ValueError('Configure alignment_bounds_mm as three calibrated [minimum, maximum] pairs.')
-        if jac.shape != (2, 2) or not np.isfinite(jac).all() or np.linalg.cond(jac) > 100:
-            raise ValueError('Configure a calibrated, invertible alignment_xy_jacobian_mm_per_um.')
+        if jac.size and (jac.shape != (2, 2) or not np.isfinite(jac).all() or np.linalg.cond(jac) > 100):
+            raise ValueError('Alignment XY Jacobian must be an invertible measured 2 by 2 matrix or empty for detector feedback.')
         if ranges.shape != (2,) or not np.isfinite(ranges).all() or np.any(ranges <= 0):
             raise ValueError('Configure positive calibrated alignment_xy_range_um values for X and Y.')
         # +/-50 um at the existing 1 um spacing contains 101 x 101 positions.

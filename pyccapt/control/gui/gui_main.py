@@ -74,6 +74,7 @@ class Ui_PyCCAPT(AlignmentGuiMixin):
         self._cleanup_started = False
         self._reported_experiment_exit = False
         self._flat_test_running = False
+        self._flat_test_previous_pulse_fraction = None
         self._operator_stopped = False
 
     def setupUi(self, PyCCAPT):
@@ -1824,6 +1825,7 @@ class Ui_PyCCAPT(AlignmentGuiMixin):
                 f"at or above the {pulse_max:g} V pulse maximum."
             )
             return
+        self._flat_test_previous_pulse_fraction = (self.pulse_fraction.text(), self.variables.pulse_fraction)
         self.parameters_source.setCurrentText("TextBox")
         self.ex_name.setText("flat test")
         self.pulse_mode.setCurrentText("Voltage")
@@ -1843,10 +1845,23 @@ class Ui_PyCCAPT(AlignmentGuiMixin):
         self.variables.flat_test_reached_max = False
         self.variables.flat_test_active = True
         self._flat_test_running = True
-        self.start_experiment_worker()
-        if self.start_button.isEnabled():
-            self.variables.flat_test_active = False
-            self._flat_test_running = False
+        started = False
+        try:
+            started = self.start_experiment_worker()
+        finally:
+            if not started and not self.variables.start_flag:
+                self.variables.flat_test_active = False
+                self._flat_test_running = False
+                self._restore_flat_test_pulse_fraction()
+
+    def _restore_flat_test_pulse_fraction(self):
+        """Restore only after failed startup or after the experiment worker exits."""
+        previous = self._flat_test_previous_pulse_fraction
+        if previous is not None:
+            text, value = previous
+            self.pulse_fraction.setText(text)
+            self.variables.pulse_fraction = value
+            self._flat_test_previous_pulse_fraction = None
 
     def _confirm_start_parameter_warnings(self):
         """Warn about risky start parameters and let the operator confirm.
@@ -2436,6 +2451,8 @@ class Ui_PyCCAPT(AlignmentGuiMixin):
                 return
             self.variables.start_flag = False
             self.statistics_timer.stop()
+            if self._flat_test_running:
+                self._restore_flat_test_pulse_fraction()
             self.start_button.setEnabled(not self.variables.electrode_out)
             self.stop_button.setEnabled(not self.variables.electrode_out)
             self.electrode_button.setEnabled(True)

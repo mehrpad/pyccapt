@@ -23,6 +23,13 @@ class AutomaticAlignment:
         self.cfg.validate()
         self.origin = tuple(variables.alignment_sample_position)
         self.fine_origin = None
+        self.probe_baseline = None
+        self.probe_origin = None
+        self.probe_candidates = []
+        self.probe_target = None
+        self.probe_state = 'baseline'
+        self.probe_stable_since = None
+        self.probe_stable_sequence = None
         self.cfg.validate_motion([self.origin])
         self.limit = min(self.cfg.max_voltage, float(variables.vdc_max), float(conf['max_vdc']))
         if not float(variables.vdc_min) <= self.cfg.start_voltage <= self.limit:
@@ -32,9 +39,13 @@ class AutomaticAlignment:
             raise ValueError('Automatic alignment requires a positive target detection rate.')
         self.started = time.monotonic() if now is None else now
         self.now = self.started
+        self._live_clock = now is None
         self.target_voltage = self.cfg.start_voltage
         self.phase = 'ramp'
         self.ramp_destination = 'coarse'
+        self.initial_ramp = True
+        self.early_hold_armed = True
+        self.ramp_resume_voltage = self.target_voltage
         self.attempts = 0
         self.outcome = ''
         self.reason = ''
@@ -82,12 +93,25 @@ class AutomaticAlignment:
 
     def _position(self):
         snapshot = self.v.stage_position_snapshot
-        if (len(snapshot) != 4 or not np.isfinite(float(snapshot[3]))
-                or self.now-float(snapshot[3]) > 2 or self.now < float(snapshot[3])):
-            raise ValueError('Stage position is stale; automatic alignment stopped.')
+        # Manager reads can return a GUI update made after the tick began.
+        # Compare against the clock after receiving that update, rather than
+        # treating a newer timestamp as stale. Explicit clocks support replay.
+        checked_at = self._read_time()
+        if len(snapshot) != 4:
+            raise ValueError('Invalid stage position snapshot; automatic alignment stopped.')
+        timestamp = float(snapshot[3])
+        age = checked_at-timestamp
+        if not np.isfinite(timestamp) or not 0 <= age <= 2:
+            self._event('position_timestamp_fault', checked_at=checked_at,
+                        snapshot_time=timestamp if np.isfinite(timestamp) else None,
+                        age_s=age if np.isfinite(age) else None)
+            raise ValueError(f'Stage position is stale (age {age:.3f} s); automatic alignment stopped.')
         position = tuple(float(x) for x in snapshot[:3])
         self.cfg.check_position(position)
         return position
+
+    def _read_time(self):
+        return time.monotonic() if self._live_clock else self.now
 
     def _move(self, target, after, *, z=False):
         self.cfg.check_position(target)
@@ -95,27 +119,42 @@ class AutomaticAlignment:
         self.pending = (identifier, self.now, after)
         self.phase = 'moving'
         request = {'id': identifier, 'target_m': tuple(target), 'kind': 'alignment',
-                   'speed_um_s': self.cfg.z_speed_um_s if z else self.cfg.xy_speed_um_s,
+                   'speed_um_s': (self.cfg.z_speed_um_s if z else self.cfg.fine_xy_speed_um_s
+                                  if after in ('observe_fine', 'probe_return') else self.cfg.xy_speed_um_s),
                    'issued': self.now}
-        if after == 'observe_fine':
+        if after in ('observe_fine', 'probe_return'):
             self.cfg.check_fine_position(target, self.fine_origin)
             request['fine_origin_m'] = self.fine_origin
         self.v.alignment_move_request = request
         self._event('move_requested', **request)
         self._publish()
 
-    def _observe(self, fine=False):
-        self.phase = 'fine' if fine else 'coarse'
+    def _observe(self, fine=False, phase=None):
+        self.phase = phase or ('fine' if fine else 'coarse')
         self.observation_start = self.now
         self.v.alignment_window_epoch = uuid.uuid4().hex
         self.last_seq = -1
         self.fit = Footprint(False, 'Collecting events after settling')
         self.stable_since = self.stable_sequence = self.loss_since = None
+        self.probe_stable_since = self.probe_stable_sequence = None
         self._publish()
 
     def _start_coarse(self):
+        self.initial_ramp = False
         self.grid = iter(coarse_positions(self.origin, self.cfg))
         self._next_coarse()
+
+    def _start_fine(self, source='coarse'):
+        self.initial_ramp = False
+        self.attempts += 1
+        self.fine_origin = self._position()
+        self.probe_baseline = None
+        self.probe_candidates = []
+        self.probe_state = 'baseline'
+        self._event('fine_started', centre_m=self.fine_origin,
+                    range_um=self.cfg.fine_xy_range_um, source=source,
+                    voltage=self.target_voltage)
+        self._observe(True)
 
     def _next_coarse(self):
         target = next(self.grid, None)
@@ -127,7 +166,7 @@ class AutomaticAlignment:
     def _after_move(self, action):
         if action == 'observe_coarse':
             self._observe()
-        elif action == 'observe_fine':
+        elif action in ('observe_fine', 'probe_return'):
             self._observe(True)
         elif action == 'increase_voltage':
             if self.target_voltage >= self.limit:
@@ -155,10 +194,11 @@ class AutomaticAlignment:
 
     def _fresh_fit(self):
         data = self.v.alignment_events
+        checked_at = self._read_time()
         if (not data or data.get('epoch') != self.v.alignment_window_epoch
-                or not 0 <= self.now-data['time'] <= 1.0
+                or not 0 <= checked_at-data['time'] <= 1.0
                 or data['first_time'] < self.observation_start
-                or self.now-data['first_time'] > self.cfg.window_max_age_s):
+                or checked_at-data['first_time'] > self.cfg.window_max_age_s):
             return Footprint(False, 'Waiting for fresh event window'), -1
         sequence = data['sequence']
         if sequence != self.last_seq:
@@ -180,6 +220,7 @@ class AutomaticAlignment:
                 and sequence-self.stable_sequence >= self.cfg.window_ions)
 
     def tick(self, voltage, rate, now=None):
+        self._live_clock = now is None
         self.now = time.monotonic() if now is None else now
         self._publish_plot(voltage, rate)
         if not self.active:
@@ -198,7 +239,8 @@ class AutomaticAlignment:
                     self.finish('cancelled', 'Alignment cancelled.')
                 return
             self._position()
-            if not 0 <= self.now-self.v.alignment_stage_heartbeat <= 2:
+            heartbeat = self.v.alignment_stage_heartbeat
+            if not 0 <= self._read_time()-heartbeat <= 2:
                 raise ValueError('Stage controller heartbeat lost.')
             if self.now-self.started > self.cfg.timeout_s:
                 self.finish('timeout', 'Maximum automatic alignment duration reached.')
@@ -216,6 +258,21 @@ class AutomaticAlignment:
                         self._after_move(after)
                 return
             if self.phase == 'ramp':
+                if self.initial_ramp:
+                    if rate < self.target_rate:
+                        self.early_hold_armed = True
+                    elif self.early_hold_armed and voltage <= self.cfg.start_voltage:
+                        # Freeze DC immediately at the first target-rate crossing.
+                        # Only fresh events collected at this held voltage may
+                        # authorize fine movement; a transient resumes the ramp.
+                        self.early_hold_armed = False
+                        self.ramp_resume_voltage = self.target_voltage
+                        self.target_voltage = float(voltage)
+                        self._observe(phase='confirming')
+                        self._event('initial_ramp_target_reached', voltage=self.target_voltage,
+                                    detection_rate=rate, target_rate=self.target_rate,
+                                    configured_start_voltage=self.cfg.start_voltage)
+                        return
                 if abs(voltage-self.target_voltage) <= 0.5:
                     if self.ramp_destination == 'coarse':
                         self._start_coarse()
@@ -224,13 +281,21 @@ class AutomaticAlignment:
                 return
             fit, sequence = self._fresh_fit()
             fraction = rate/self.target_rate
+            if self.phase == 'confirming':
+                if self._stable(fit.valid and fraction >= 1., sequence):
+                    self._start_fine(source='initial_ramp')
+                elif self.now-self.observation_start >= self.cfg.dwell_s:
+                    held_voltage = self.target_voltage
+                    self.target_voltage = self.ramp_resume_voltage
+                    self.phase = 'ramp'
+                    self._event('initial_ramp_resumed', held_voltage=held_voltage,
+                                target_voltage=self.target_voltage,
+                                reason='Target-rate sample signal was not confirmed at the held voltage.')
+                    self._publish()
+                return
             if self.phase == 'coarse':
                 if self._stable(fit.valid and fraction >= self.cfg.entry_fraction, sequence):
-                    self.attempts += 1
-                    self.fine_origin = self._position()
-                    self._event('fine_started', centre_m=self.fine_origin,
-                                range_um=self.cfg.fine_xy_range_um)
-                    self._observe(True)
+                    self._start_fine()
                 elif (self.now-self.observation_start >= self.cfg.dwell_s
                       and self.stable_since is None):
                     self._next_coarse()
@@ -256,20 +321,23 @@ class AutomaticAlignment:
                     return  # Wait for independent windows; never creep forward.
                 position = np.asarray(self._position())
                 if not centred:
-                    correction = -np.linalg.solve(np.asarray(self.cfg.xy_jacobian_mm_per_um), fit.centre_mm)
-                    correction = np.clip(correction, -self.cfg.fine_xy_step_um, self.cfg.fine_xy_step_um)
-                    target = position.copy()
-                    target[:2] += correction*1e-6
-                    if np.any(np.abs((target[:2]-np.asarray(self.origin[:2]))*1e6) > np.asarray(self.cfg.xy_range_um)+1e-8):
-                        self._recover()
-                        return
-                    try:
-                        self.cfg.check_fine_position(target, self.fine_origin)
-                    except ValueError:
-                        self._event('fine_range_reached', centre_m=self.fine_origin)
-                        self._recover()
-                        return
-                    self._move(tuple(target), 'observe_fine')
+                    if not self.cfg.xy_jacobian_mm_per_um:
+                        self._feedback_fine(fit, sequence, position)
+                    else:
+                        correction = -np.linalg.solve(np.asarray(self.cfg.xy_jacobian_mm_per_um), fit.centre_mm)
+                        correction = np.clip(correction, -self.cfg.fine_xy_step_um, self.cfg.fine_xy_step_um)
+                        target = position.copy()
+                        target[:2] += correction*1e-6
+                        if np.any(np.abs((target[:2]-np.asarray(self.origin[:2]))*1e6) > np.asarray(self.cfg.xy_range_um)+1e-8):
+                            self._recover()
+                            return
+                        try:
+                            self.cfg.check_fine_position(target, self.fine_origin)
+                        except ValueError:
+                            self._event('fine_range_reached', centre_m=self.fine_origin)
+                            self._recover()
+                            return
+                        self._move(tuple(target), 'observe_fine')
                 elif (((fit.radius_mm+fit.radius_uncertainty_mm)/self.cfg.detector_radius_mm)**2
                       < self.cfg.area_target and self.cfg.approach_enabled
                       and fraction < self.cfg.finish_fraction):
@@ -287,6 +355,64 @@ class AutomaticAlignment:
                     self.finish('voltage_limit', 'Target rate not reached at alignment voltage limit; skipping sample.')
         except (ValueError, TypeError, KeyError) as exc:
             self.finish('fault', str(exc))
+
+    def _feedback_fine(self, fit, sequence, position):
+        """Use independent detector windows to accept only centring improvements."""
+        if self.probe_stable_since is None:
+            self.probe_stable_since, self.probe_stable_sequence = self.now, sequence
+        if (self.now-self.probe_stable_since < self.cfg.stable_s
+                or sequence-self.probe_stable_sequence < self.cfg.window_ions):
+            return
+        distance = float(np.linalg.norm(fit.centre_mm))
+        if self.probe_state == 'trial':
+            improvement = self.probe_baseline-distance
+            threshold = max(0.1, 0.03*self.probe_baseline)
+            if improvement >= threshold:
+                self._event('fine_probe_accepted', position_m=tuple(position),
+                            centre_mm=fit.centre_mm, improvement_mm=improvement)
+                self.probe_baseline = distance
+                self.probe_candidates = []
+                self.probe_state = 'baseline'
+            else:
+                self._event('fine_probe_rejected', position_m=tuple(position),
+                            centre_mm=fit.centre_mm, improvement_mm=improvement)
+                self.probe_state = 'return'
+                self._move(self.probe_origin, 'probe_return')
+                return
+        elif self.probe_state == 'return':
+            self.probe_state = 'baseline'
+            self.probe_baseline = distance
+        else:
+            self.probe_baseline = distance
+        if not self.probe_candidates:
+            # Direction signs only prioritize probes; the detector measurement
+            # decides whether a move is retained. Repeat at the new position.
+            preferred = (1 if fit.centre_mm[0] > 0 else -1,
+                         -1 if fit.centre_mm[1] > 0 else 1)
+            self.probe_candidates = [(0, preferred[0]), (1, preferred[1]),
+                                     (0, -preferred[0]), (1, -preferred[1])]
+            self.probe_origin = tuple(position)
+        while self.probe_candidates:
+            axis, sign = self.probe_candidates.pop(0)
+            target = position.copy()
+            target[axis] += sign*self.cfg.fine_probe_step_um*1e-6
+            try:
+                self.cfg.check_position(target)
+                self.cfg.check_fine_position(target, self.fine_origin)
+            except ValueError:
+                continue
+            if np.any(np.abs((target[:2]-np.asarray(self.origin[:2]))*1e6)
+                      > np.asarray(self.cfg.xy_range_um)+1e-8):
+                continue
+            self.probe_state = 'trial'
+            self.probe_target = tuple(target)
+            self._event('fine_probe', axis='XY'[axis], direction=sign,
+                        baseline_centre_mm=fit.centre_mm, target_m=self.probe_target)
+            self._move(self.probe_target, 'observe_fine')
+            return
+        self._event('fine_range_reached', centre_m=self.fine_origin,
+                    reason='No tested XY direction improved centring')
+        self._recover()
 
     def _publish_plot(self, voltage, rate):
         """Small independent monitor snapshot; never consume detector/viz rings."""

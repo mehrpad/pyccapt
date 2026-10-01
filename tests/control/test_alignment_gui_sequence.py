@@ -109,6 +109,26 @@ def test_editable_voltage_fields_and_positioning_precede_launch(gui):
     assert len(v.alignment_transfer_log) == 3
 
 
+def test_single_start_completes_retract_xy_and_saved_z_before_experiment(gui):
+    ui, v, motor, tick = gui
+    motor.position.update(x=0., y=0., z=.0008)
+    v.sample_rough_positions = {1: (.0002, .0001, .0006)}
+    ui._start_alignment_batch((1,))
+    for _ in range(30):
+        tick()
+        if ui.started:
+            break
+    assert not ui.errors
+    assert len(ui.started) == 1
+    assert len(motor.moves) == 3
+    assert motor.moves[0]['z_m'] == -.0005
+    assert motor.moves[1]['x_m'] == .0002
+    assert motor.moves[1]['y_m'] == .0001
+    assert motor.moves[1]['z_m'] is None
+    assert motor.moves[2]['z_m'] == .0006
+    assert ui.started[0][1] == dict(x=.0002, y=.0001, z=.0006)
+
+
 def test_second_sample_waits_for_full_visualization_cleanup(gui):
     ui, v, motor, tick = gui
     ui._start_alignment_batch((1, 2))
@@ -272,6 +292,23 @@ def test_alignment_plot_lifetime_and_sample_switch(gui):
     assert set(window.history.samples) == {1, 2}
     assert window.sample_selector.currentData() == 2
     assert window.history.coordinates(2)[0][0].tolist() == [1., 2., .3]
+    v.alignment_window_epoch = 'position-one'
+    v.alignment_events = {'epoch': 'position-one', 'sequence': 2,
+                          'points_mm': [[1., 2.], [3., 4.]]}
+    window.refresh()
+    assert window.hitmap_count.text() == '2'
+    assert window.detector_hitmap is not None
+    window.hitmap_reset.click()
+    assert window.hitmap_count.text() == '0'
+    window.refresh()
+    assert window.hitmap_count.text() == '0'
+    v.alignment_events = {'epoch': 'position-one', 'sequence': 3,
+                          'points_mm': [[1., 2.], [3., 4.], [5., 6.]]}
+    window.refresh()
+    assert window.hitmap_count.text() == '1'
+    v.alignment_window_epoch = 'position-two'
+    window.refresh()
+    assert window.hitmap_count.text() == '0'
     v.start_flag = v.automatic_alignment_enabled = False
     window.refresh()
     assert window.monitoring  # Remain open after experiment shutdown.
@@ -299,3 +336,62 @@ def test_camera_sample_buttons_lock_and_handler_rejects_changes(gui, flag):
     setattr(v, flag, False)
     camera._refresh_sample_selection_lock()
     assert all(button.isEnabled() for button in camera.sample_buttons.values())
+
+
+def _prepare_flat_test(ui, variables, fraction):
+    ui.automatic_alignment_button.setChecked(False)
+    ui.start_button.setEnabled(True)
+    variables.flag_main_gate = False
+    variables.stage_pos_updated_at = 0.0  # Fixture's monotonic clock starts at zero.
+    for axis in 'xyz':
+        setattr(variables, 'stage_pos_'+axis, float(ui.conf.get('stage_home_'+axis+'_mm', 0))*1e-3)
+    ui.pulse_fraction.setText(str(fraction))
+    variables.pulse_fraction = fraction
+
+
+@pytest.mark.parametrize('outcome', ['success', 'stopped', 'error'])
+def test_flat_test_restores_previous_fraction_after_worker_exit(gui, monkeypatch, tmp_path, outcome):
+    from unittest.mock import Mock
+    ui, v, motor, tick = gui
+    _prepare_flat_test(ui, v, 23)
+    ui.start_flat_test()
+    assert ui._flat_test_running and v.flat_test_active
+    assert ui.pulse_fraction.text() == '5' and v.pulse_fraction == 5
+    ui.experiment_process = Mock()
+    ui.experiment_process.is_alive.return_value = True
+    v.flag_end_experiment = True
+    ui.on_stop_experiment_worker()
+    assert v.pulse_fraction == 5  # Do not change the setting while acquisition/finalization is alive.
+    ui.experiment_process.is_alive.return_value = False
+    v.path = str(tmp_path)
+    v.flat_test_reached_max = outcome == 'success'
+    v.flat_test_peak_rate = .1
+    v.experiment_error = 'Detector failed' if outcome == 'error' else ''
+    ui.success_message = Mock()
+    monkeypatch.setattr(QtWidgets.QApplication, 'primaryScreen', lambda: Mock())
+    ui.on_stop_experiment_worker()
+    assert ui.pulse_fraction.text() == '23' and v.pulse_fraction == 23
+    assert not ui._flat_test_running and not v.flat_test_active
+    assert ui._flat_test_previous_pulse_fraction is None
+    # A subsequent test must remember the new setting, not a previous test's snapshot.
+    _prepare_flat_test(ui, v, 18)
+    ui.start_flat_test()
+    assert ui._flat_test_previous_pulse_fraction == ('18', 18)
+
+
+@pytest.mark.parametrize('raises', [False, True])
+def test_flat_test_restores_fraction_if_launch_fails(gui, raises):
+    ui, v, motor, tick = gui
+    _prepare_flat_test(ui, v, 17)
+    def failed_start():
+        if raises:
+            raise RuntimeError('Launch failed')
+        return False
+    ui.start_experiment_worker = failed_start
+    if raises:
+        with pytest.raises(RuntimeError, match='Launch failed'):
+            ui.start_flat_test()
+    else:
+        ui.start_flat_test()
+    assert ui.pulse_fraction.text() == '17' and v.pulse_fraction == 17
+    assert not ui._flat_test_running and not v.flat_test_active

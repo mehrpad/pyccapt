@@ -15,9 +15,20 @@ class AlignmentStageService:
         self.active = None
         self.last_id = None
         self.settled_since = None
+        self.last_snapshot_at = float('-inf')
 
     def _reply(self, state, error=''):
         self.v.alignment_move_status = {'id': self.last_id, 'state': state, 'error': error}
+
+    def _publish_position(self, position_map, now):
+        position = tuple(float(position_map[axis]) for axis in 'xyz')
+        cfg = AlignmentConfig(**dict(self.v.alignment_settings))
+        cfg.check_position(position)
+        self.v.stage_position_snapshot = (*position, now)
+        self.v.stage_pos_x, self.v.stage_pos_y, self.v.stage_pos_z = position
+        self.v.stage_pos_updated_at = now
+        self.last_snapshot_at = now
+        return position
 
     def cancel(self, reason='Automatic movement cancelled'):
         device = self.device_getter()
@@ -29,6 +40,7 @@ class AlignmentStageService:
         self.settled_since = None
 
     def tick(self, now=None):
+        live_clock = now is None
         now = time.monotonic() if now is None else now
         self.v.alignment_stage_heartbeat = now
         if not self.v.automatic_alignment_enabled:
@@ -51,7 +63,8 @@ class AlignmentStageService:
                 device.validate_alignment_state()
                 cfg = AlignmentConfig(**dict(self.v.alignment_settings))
                 cfg.validate_motion([self.v.alignment_sample_position])
-                if not 0 <= now-float(request['issued']) <= 2:
+                checked_at = time.monotonic() if live_clock else now
+                if not 0 <= checked_at-float(request['issued']) <= 2:
                     raise ValueError('Expired automatic stage command.')
                 if request['kind'] == 'transfer' and not self.v.hardware_safe:
                     raise ValueError('Sample transfer requires completed output shutdown.')
@@ -88,7 +101,9 @@ class AlignmentStageService:
                         raise ValueError('Automatic approach is disabled.')
                 speed = float(request['speed_um_s'])
                 ceiling = (cfg.transfer_speed_um_s if request['kind'] == 'transfer'
-                           else cfg.z_speed_um_s if changed[2] else cfg.xy_speed_um_s)
+                           else cfg.z_speed_um_s if changed[2]
+                           else cfg.fine_xy_speed_um_s if 'fine_origin_m' in request
+                           else cfg.xy_speed_um_s)
                 if not np.isfinite(speed) or not 0 < speed <= ceiling:
                     raise ValueError('Automatic stage velocity exceeds calibrated limit.')
                 if device.is_moving():
@@ -100,6 +115,13 @@ class AlignmentStageService:
                                         for axis, value, change in zip('xyz', target, changed)},
                                      velocity_m_s=speed*1e-6, wait=False)
             if self.active is None:
+                # The experiment needs a fresh position even while voltage is
+                # ramping or the detector is observing a stationary stage.
+                # Do not depend on the Stage window's separate display timer.
+                if now-self.last_snapshot_at >= 0.5:
+                    if device is None:
+                        raise ValueError('Sample stage disconnected during automatic alignment.')
+                    self._publish_position(device.get_position(), time.monotonic() if live_clock else now)
                 return
             target, started, cfg = self.active
             if request['kind'] == 'transfer' and not self.v.hardware_safe:
@@ -107,12 +129,7 @@ class AlignmentStageService:
             device.validate_alignment_state()
             if now-started > cfg.move_timeout_s:
                 raise ValueError('Automatic stage movement timed out.')
-            position_map = device.get_position()
-            position = tuple(float(position_map[axis]) for axis in 'xyz')
-            cfg.check_position(position)
-            self.v.stage_position_snapshot = (*position, now)
-            self.v.stage_pos_x, self.v.stage_pos_y, self.v.stage_pos_z = position
-            self.v.stage_pos_updated_at = now
+            position = self._publish_position(device.get_position(), time.monotonic() if live_clock else now)
             reached = not device.is_moving() and np.all(np.abs(np.asarray(position)-target) <= cfg.position_tolerance_um*1e-6)
             if not reached:
                 self.settled_since = None

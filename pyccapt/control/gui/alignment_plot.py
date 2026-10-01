@@ -9,6 +9,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 PHASE_COLOURS = {
     'ramp': (.7, .5, 1., 1.), 'moving': (.6, .65, .7, 1.),
+    'confirming': (.7, .5, 1., 1.),
     'coarse': (.2, .7, 1., 1.), 'fine': (1., .7, .15, 1.),
     'aligned': (.2, .9, .4, 1.),
 }
@@ -55,15 +56,65 @@ class AlignmentPlotHistory:
         return np.column_stack((xy, [r['rate_percent'] for r in records])), records
 
 
+class AlignmentHitmapHistory:
+    """Retain only new, paired detector hits from the alignment event window."""
+    def __init__(self, capacity=2000):
+        self.points = deque(maxlen=capacity)
+        self.epoch = None
+        self.sequence = None
+
+    def reset(self):
+        self.points.clear()
+
+    def prepare_epoch(self, epoch):
+        if epoch != self.epoch:
+            self.epoch = epoch
+            self.sequence = None
+            self.points.clear()
+            return True
+        return False
+
+    def append(self, window):
+        try:
+            epoch = window['epoch']
+            sequence = int(window['sequence'])
+            points = np.asarray(window['points_mm'], dtype=float)
+            if (not epoch or sequence < 0 or points.ndim != 2 or points.shape[1] != 2
+                    or not np.isfinite(points).all()):
+                return False
+            points = points[-self.points.maxlen:]
+        except (KeyError, TypeError, ValueError):
+            return False
+        if epoch != self.epoch or self.sequence is None or sequence < self.sequence:
+            self.epoch = epoch
+            self.sequence = sequence
+            self.points.clear()
+            self.points.extend(map(tuple, points))
+            return True
+        if sequence == self.sequence:
+            return False
+        count = min(sequence-self.sequence, len(points))
+        self.sequence = sequence
+        self.points.extend(map(tuple, points[-count:]))
+        return True
+
+    def coordinates(self):
+        return np.asarray(self.points, dtype=float).reshape(-1, 2)
+
+
 class AlignmentPlotWindow(QtWidgets.QWidget):
-    def __init__(self, variables, parent=None):
+    def __init__(self, variables, parent=None, detector_radius_mm=None):
         super().__init__(parent, QtCore.Qt.WindowType.Window)
         self.variables = variables
         self.history = AlignmentPlotHistory()
+        self.hitmap_history = AlignmentHitmapHistory()
         self.monitoring = False
         self.current_sample = None
+        self.detector_radius_mm = (float(detector_radius_mm) if detector_radius_mm is not None
+                                   else float(getattr(self.variables, 'alignment_settings', {}).get(
+                                       'detector_radius_mm', 40.)))
         self.setWindowTitle('Automatic Alignment — live stage / detection rate')
-        self.resize(960, 700)
+        self.resize(660, 350)
         layout = QtWidgets.QVBoxLayout(self)
         controls = QtWidgets.QHBoxLayout()
         controls.addWidget(QtWidgets.QLabel('Sample'))
@@ -76,6 +127,8 @@ class AlignmentPlotWindow(QtWidgets.QWidget):
         self.status = QtWidgets.QLabel('Waiting for an automatic alignment experiment.')
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
+        plots = QtWidgets.QHBoxLayout()
+        layout.addLayout(plots, 1)
         self.view = None
         try:
             import pyqtgraph.opengl as gl
@@ -85,11 +138,11 @@ class AlignmentPlotWindow(QtWidgets.QWidget):
                 'python -m pip install PyOpenGL\nThen restart PyCCAPT.')
             message.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
             message.setWordWrap(True)
-            layout.addWidget(message)
+            plots.addWidget(message, 3)
         else:
             self.view = gl.GLViewWidget()
             self.view.setBackgroundColor('#17212b')
-            layout.addWidget(self.view, 1)
+            plots.addWidget(self.view, 3)
             grid = gl.GLGridItem()
             grid.setSize(20, 20)
             grid.setSpacing(2, 2)
@@ -108,15 +161,88 @@ class AlignmentPlotWindow(QtWidgets.QWidget):
             for label in self.labels:
                 self.view.addItem(label)
             self.reset_view()
-        layout.addWidget(QtWidgets.QLabel(
-            'X / Y: offset from saved sample position (µm). Vertical: detection rate (%), not stage Z.\n'
-            'Blue: coarse • amber: fine • green: aligned • purple: ramp • grey: moving • white: latest\n'
-            'Drag to rotate; wheel to zoom. Last 10,000 display readings per sample; updates up to 5 Hz.'))
+        self._setup_hitmap(plots)
+        help_label = QtWidgets.QLabel(
+            '3D: X/Y offset (µm), height = detection rate (%). Drag to rotate; wheel to zoom.\n'
+            'Detector: last 2000 hits. Reset clears this display only.')
+        help_label.setWordWrap(True)
+        help_label.setToolTip(
+            'Blue: coarse; amber: fine; green: aligned; purple: ramp/confirming; grey: moving; white: latest.\n'
+            'The 3D view retains 10,000 readings per sample and updates up to 5 Hz.\n'
+            'Detector hits come from the current alignment observation.')
+        layout.addWidget(help_label)
         self.sample_selector.currentIndexChanged.connect(self.redraw)
         reset.clicked.connect(self.reset_view)
         self.timer = QtCore.QTimer(self)
         self.timer.setInterval(200)
         self.timer.timeout.connect(self.refresh)
+
+    def _setup_hitmap(self, plots):
+        import pyqtgraph as pg
+        panel = QtWidgets.QWidget(self)
+        column = QtWidgets.QVBoxLayout(panel)
+        column.setContentsMargins(0, 0, 0, 0)
+        header = QtWidgets.QHBoxLayout()
+        header.addWidget(QtWidgets.QLabel('Detector'))
+        self.hitmap_count = QtWidgets.QLineEdit('0')
+        self.hitmap_count.setReadOnly(True)
+        self.hitmap_count.setFixedWidth(90)
+        header.addWidget(self.hitmap_count)
+        header.addStretch()
+        column.addLayout(header)
+        self.detector_hitmap = pg.PlotWidget()
+        self.detector_hitmap.setBackground('w')
+        self.detector_hitmap.setLabel('left', 'X_det', units='mm', color='r')
+        self.detector_hitmap.setLabel('bottom', 'Y_det', units='mm', color='r')
+        radius = self.detector_radius_mm
+        self.detector_hitmap.setXRange(-radius*1.08, radius*1.08, padding=0)
+        self.detector_hitmap.setYRange(-radius*1.08, radius*1.08, padding=0)
+        self.detector_hitmap.getViewBox().setAspectLocked(True)
+        self.detector_scatter = pg.ScatterPlotItem(size=1., brush='black', pen=None)
+        self.detector_hitmap.addItem(self.detector_scatter)
+        self.detector_circle = QtWidgets.QGraphicsEllipseItem(-radius, -radius, 2*radius, 2*radius)
+        self.detector_circle.setPen(pg.mkPen(color=(255, 0, 0), width=2))
+        self.detector_hitmap.addItem(self.detector_circle)
+        self.footprint_circle = QtWidgets.QGraphicsEllipseItem()
+        self.footprint_circle.setPen(pg.mkPen(color=(0, 170, 60), width=2))
+        self.footprint_circle.setVisible(False)
+        self.detector_hitmap.addItem(self.footprint_circle)
+        column.addWidget(self.detector_hitmap, 1)
+        controls = QtWidgets.QHBoxLayout()
+        self.hitmap_reset = QtWidgets.QPushButton('Reset')
+        self.hitmap_reset.clicked.connect(self.reset_hitmap)
+        controls.addWidget(self.hitmap_reset)
+        self.hitmap_point_size = QtWidgets.QDoubleSpinBox()
+        self.hitmap_point_size.setRange(.1, 10.)
+        self.hitmap_point_size.setSingleStep(.1)
+        self.hitmap_point_size.setValue(1.)
+        self.hitmap_point_size.valueChanged.connect(self.redraw_hitmap)
+        controls.addWidget(self.hitmap_point_size)
+        self.hitmap_limit = QtWidgets.QLineEdit('2000')
+        self.hitmap_limit.setReadOnly(True)
+        self.hitmap_limit.setFixedWidth(70)
+        controls.addWidget(self.hitmap_limit)
+        controls.addStretch()
+        column.addLayout(controls)
+        plots.addWidget(panel, 2)
+
+    def reset_hitmap(self):
+        self.hitmap_history.reset()
+        self.redraw_hitmap()
+
+    def redraw_hitmap(self):
+        points = self.hitmap_history.coordinates()
+        self.detector_scatter.setSize(self.hitmap_point_size.value())
+        self.detector_scatter.setData(x=points[:, 0], y=points[:, 1])
+        self.hitmap_count.setText(str(len(points)))
+        fit = getattr(self.variables, 'alignment_status', {}).get('footprint', {})
+        visible = bool(getattr(self.variables, 'automatic_alignment_enabled', False)
+                       and fit.get('valid', False))
+        self.footprint_circle.setVisible(visible)
+        if visible:
+            x, y = fit['centre_mm']
+            radius = fit['radius_mm']
+            self.footprint_circle.setRect(x-radius, y-radius, 2*radius, 2*radius)
 
     def reset_view(self):
         if self.view is not None:
@@ -145,6 +271,11 @@ class AlignmentPlotWindow(QtWidgets.QWidget):
                 or not snapshot or not 0 <= time.monotonic()-snapshot.get('time', -math.inf) <= 2):
             self.status.setText('Waiting / experiment stopped — previous measured points retained.')
             return
+        epoch = self.variables.alignment_window_epoch
+        cleared = self.hitmap_history.prepare_epoch(epoch)
+        window = self.variables.alignment_events
+        if (window and window.get('epoch') == epoch and self.hitmap_history.append(window)) or cleared:
+            self.redraw_hitmap()
         sequence_changed = snapshot.get('sequence_id') != self.history.sequence_id
         if not self.history.append(snapshot):
             return

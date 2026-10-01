@@ -483,27 +483,33 @@ alignment_acquisition_guard_s = 0.5
 alignment_centre_tolerance = 0.02     # fraction of detector radius
 alignment_area_target = 0.90         # fraction of detector area
 
-# REQUIRED commissioning measurements. Empty bounds/calibration deliberately
-# block automatic movement. Do not infer clearance from the aperture diameter.
+# Operator-provided limits and transfer position. Do not infer electrode clearance
+# from detector events or the aperture diameter.
 # bounds_mm = [[xmin,xmax], [ymin,ymax], [zmin,zmax]] in referenced stage coordinates.
 # These are absolute travel bounds. Separately verify each sample's local
 # search/approach envelope and the transfer path through transfer_z_mm are clear.
-alignment_motion_calibrated = false
-alignment_bounds_mm = []
+# Operator-provided bounds: X [-2, +6], Y [-3, +7], Z [-10, +7] mm.
+# Stage +X shifts the footprint left; +Y shifts it up. Fine XY movement is
+# evaluated from fresh detector events at each position; no fixed scale is used.
+# Increasing Z approaches the electrode; -4 mm is the transfer position.
+alignment_motion_calibrated = true
+alignment_bounds_mm = [[-2.0, 6.0], [-3.0, 7.0], [-10.0, 7.0]]
 alignment_xy_range_um = [50.0, 50.0] # +/- X and Y about each saved rough position
 alignment_fine_xy_range_um = 15.0   # +/- X and Y about the position where fine alignment starts
 alignment_xy_jacobian_mm_per_um = [] # [[d(detX)/dX,d(detX)/dY],[d(detY)/dX,d(detY)/dY]]
-alignment_z_direction = 0           # replace with +1 or -1 toward electrode
-alignment_transfer_z_mm = 0.0        # measured retract/clearance position
+alignment_z_direction = 1           # increasing Z moves toward the electrode
+alignment_transfer_z_mm = -4.0       # retract before sideways movement between samples
 alignment_approach_enabled = false
 alignment_z_max_advance_um = 0.0     # safe advance from each saved Z
 # Candidate commissioning settings; validate before enabling movement.
 alignment_xy_step_um = 1.0
 alignment_fine_xy_step_um = 0.1
-alignment_xy_speed_um_s = 1.0
+alignment_fine_probe_step_um = 1.0
+alignment_xy_speed_um_s = 100.0     # coarse XY: 0.1 mm/s
+alignment_fine_xy_speed_um_s = 16.0 # fine XY: 0.016 mm/s
 alignment_z_step_um = 0.05
 alignment_z_speed_um_s = 0.1
-alignment_transfer_speed_um_s = 10.0
+alignment_transfer_speed_um_s = 100.0
 alignment_position_tolerance_um = 0.02
 alignment_settle_s = 0.5
-alignment_move_timeout_s = 120.0
+alignment_move_timeout_s = 180.0

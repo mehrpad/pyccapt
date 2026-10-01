@@ -1,6 +1,7 @@
 """Main-GUI automatic sample sequence and pre-experiment positioning."""
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from types import SimpleNamespace
@@ -62,7 +63,9 @@ class AlignmentGuiMixin:
         if selected:
             if self._alignment_plot_window is None:
                 from pyccapt.control.gui.alignment_plot import AlignmentPlotWindow
-                self._alignment_plot_window = AlignmentPlotWindow(self.variables, self.centralwidget)
+                self._alignment_plot_window = AlignmentPlotWindow(
+                    self.variables, self.centralwidget,
+                    detector_radius_mm=float(self.conf['detector_diameter'])/2)
             self._alignment_plot_window.set_monitoring(True)
         elif self._alignment_plot_window is not None:
             self._alignment_plot_window.set_monitoring(False)
@@ -155,8 +158,9 @@ class AlignmentGuiMixin:
         self.variables.alignment_cancel_motion = False
         self.variables.stop_flag = False
         self.variables.alignment_transfer_log = []
-        self._alignment_transfer = {'waypoints': waypoints, 'pending': None, 'cfg': cfg, 'values': values}
-        self.statusbar.showMessage(f'Positioning Sample {sample} before experiment startup')
+        self._alignment_transfer = {'waypoints': waypoints, 'pending': None, 'cfg': cfg,
+                                    'values': values, 'sample': sample, 'step': 0, 'label': ''}
+        self.statusbar.showMessage(f'Sample {sample}: preparing stage transfer')
 
     def _alignment_batch_tick(self):
         if not getattr(self, '_alignment_batch', []):
@@ -179,8 +183,11 @@ class AlignmentGuiMixin:
             if transfer is None:
                 state = self.variables.alignment_status
                 if state:
-                    self.statusbar.showMessage(f"Sample {state['sample']}: {state['phase']} | "
-                                               f"fine attempt {state['attempt']} | {state['target_voltage']:g} V")
+                    message = (f"Sample {state['sample']}: {state['phase']} | "
+                               f"fine attempt {state['attempt']} | {state['target_voltage']:g} V")
+                    if state.get('reason'):
+                        message += f" | {state['reason']}"
+                    self.statusbar.showMessage(message)
                 return
             if self._operator_stopped or self.variables.alignment_cancel_motion or self.variables.stop_flag:
                 raise ValueError('Sample positioning stopped.')
@@ -196,17 +203,36 @@ class AlignmentGuiMixin:
                 if status.get('state') == 'error':
                     raise ValueError(status.get('error', 'Sample positioning failed.'))
                 if status.get('state') != 'done':
+                    position = self.variables.stage_position_snapshot[:3]
+                    remaining_mm = max(abs(a-b) for a, b in zip(position, pending['target_m']))*1000
+                    self.statusbar.showMessage(
+                        f"Sample {transfer['sample']}: {transfer['label']} "
+                        f"({transfer['step']}/3), {remaining_mm:.3f} mm remaining")
                     return
                 records = list(self.variables.alignment_transfer_log)
                 records.append({**pending, 'completed_monotonic': time.monotonic(),
                                 'position_m': self.variables.stage_position_snapshot[:3]})
                 self.variables.alignment_transfer_log = records
+                logging.getLogger('pyccapt.gui').info(
+                    'Sample %s transfer step %s/3 complete at XYZ %s m',
+                    transfer['sample'], transfer['step'], records[-1]['position_m'])
                 transfer['pending'] = None
             if transfer['waypoints']:
+                transfer['step'] += 1
+                step = transfer['step']
+                label = ('retracting Z to transfer height', 'moving XY to saved position',
+                         'moving Z to saved position')[step-1]
+                transfer['label'] = label
+                self.statusbar.showMessage(f"Sample {transfer['sample']}: {label} "
+                                           f'({step}/3)')
                 request = {'id': uuid.uuid4().hex, 'kind': 'transfer',
                            'target_m': transfer['waypoints'].pop(0),
                            'speed_um_s': transfer['cfg'].transfer_speed_um_s, 'issued': time.monotonic()}
                 transfer['pending'] = request
+                logging.getLogger('pyccapt.gui').info(
+                    'Sample %s transfer step %s/3: %s, target XYZ %s m, speed %.3f mm/s',
+                    transfer['sample'], step, label, request['target_m'],
+                    request['speed_um_s']*1e-3)
                 self.variables.alignment_move_request = request
                 return
             # No outputs are enabled until all three moves are acknowledged.
@@ -219,6 +245,7 @@ class AlignmentGuiMixin:
             self.variables.alignment_status = {}
             self.variables.alignment_window_epoch = uuid.uuid4().hex
             self._alignment_transfer = None
+            self.statusbar.showMessage(f"Sample {transfer['sample']}: stage positioned; starting experiment")
             if not self.start_experiment_worker():
                 self._end_alignment_batch('Automatic sequence stopped because experiment startup failed.')
         except Exception as exc:

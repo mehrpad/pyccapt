@@ -11,17 +11,19 @@ saved rough position. Fine alignment is limited to **±15 µm per X/Y axis** aro
 the position where stable coarse signal is found. Fine moves must also remain
 inside the original ±50 µm envelope and the calibrated absolute stage bounds.
 Reaching the fine range limit returns to coarse recovery. These are ranges,
-not individual movement steps; existing step sizes and speeds are unchanged.
+not individual movement steps. Coarse XY uses 0.1 mm/s; fine XY uses 0.016 mm/s
+and evaluates detector events after each 1 µm probe.
 The coarse-grid guard allows up to 20,000 positions (the 1 µm grid at ±50 µm has
 10,201). The experiment/alignment timeouts still apply, so a full grid is not
 guaranteed to finish before the configured search deadline.
 
 ## Commissioning before physical movement
 
-The delivered config deliberately has `alignment_motion_calibrated = false`.
-Starting automatic alignment therefore gives a configuration error before any
-stage movement or experiment startup. The software cannot determine tip/electrode
-clearance from detector events or a nominal 50 micrometre aperture.
+The configured bounds are X [-2, 6], Y [-3, 7] and Z [-10, 7] mm. Increasing
+Z approaches the electrode; sample transfers retract to -4 mm before XY travel.
+Every saved working sample Z must be greater than -4 mm. The startup validator
+checks that and the XY envelope. Detector events cannot establish electrode
+clearance or verify an unobstructed transfer path.
 
 Measure and enter these values in `pyccapt/config.toml`:
 
@@ -33,10 +35,9 @@ Measure and enter these values in `pyccapt/config.toml`:
   permitted Z advance, including intermediate positions.
 - `alignment_fine_xy_range_um`: the permitted +/- X/Y travel from each fine
   alignment starting position, currently 15 µm; it does not enlarge the coarse envelope.
-- `alignment_xy_jacobian_mm_per_um`: the measured 2 by 2 mapping from stage X/Y
-  displacement in micrometres to detector centre displacement in millimetres.
-  Determine it with small supervised moves at fixed voltage; verify axis signs
-  and cross-coupling. A singular or poorly conditioned mapping is rejected.
+- `alignment_xy_jacobian_mm_per_um`: optional measured 2 by 2 mapping. Empty
+  selects detector feedback: fine alignment probes one axis at a time, waits for
+  independent detector windows and retains only centring improvements.
 - `alignment_z_direction`: +1 or -1, toward the electrode.
 - `alignment_transfer_z_mm`: a calibrated clearance Z reachable by retracting
   from every saved position. Transfers retract Z, traverse XY, then move Z to
@@ -50,28 +51,27 @@ Measure and enter these values in `pyccapt/config.toml`:
 Keep `alignment_approach_enabled = false` until the approach limits and the
 relationship between Z and footprint size have been verified. With approach
 disabled the controller can centre laterally and raise voltage while stationary,
-but cannot approach the electrode. Enable `alignment_motion_calibrated` only
-after the full transfer/search envelope and XY mapping have been validated.
+but cannot approach the electrode. The enabled XY/transfer configuration is not
+proof of physical clearance; verify the path on the actual instrument.
 Re-save sample positions after changing the holder or stage coordinate reference.
 
 ### Resolving “Automatic alignment is not calibrated”
 
-This message is expected with the supplied empty calibration. Edit the existing
-alignment entries in `pyccapt/config.toml`, then restart PyCCAPT so it reloads
-the file. Setting the flag alone will not supply the missing measurements.
+This message is expected if the motion flag is disabled. Edit the alignment
+entries in `pyccapt/config.toml`, then restart PyCCAPT so it reloads the file.
 
 | Config key | Value to enter |
 | --- | --- |
 | `alignment_bounds_mm` | `[[Xmin, Xmax], [Ymin, Ymax], [Zmin, Zmax]]`, measured permissible absolute stage coordinates in **mm** |
 | `alignment_xy_range_um` | `[Rx, Ry]`, permissible **±µm** about each saved sample position |
-| `alignment_xy_jacobian_mm_per_um` | `[[a, b], [c, d]]`, measured detector displacement in mm per µm of stage displacement |
+| `alignment_xy_jacobian_mm_per_um` | `[]` for live detector feedback, or a measured `[[a, b], [c, d]]` detector displacement in mm per µm of stage displacement |
 | `alignment_z_direction` | `1` if increasing stage Z moves toward the electrode; otherwise `-1` |
 | `alignment_transfer_z_mm` | Absolute referenced Z in **mm** where XY travel between all samples has verified clearance |
 | `alignment_motion_calibrated` | `true` only once the above measurements, paths, speeds and local envelopes are verified |
 
 The letters in this table are placeholders, **not literal TOML values**. Read
 absolute coordinates from Stage Control; camera saved positions also display mm.
-For the detector mapping, at fixed voltage record a footprint centre `(u0,v0)`,
+For an optional fixed detector mapping, at fixed voltage record a footprint centre `(u0,v0)`,
 make a small verified +X displacement `dx` µm and measure `(ux,vx)` in detector mm.
 Return to the original position, then measure `(uy,vy)` after +Y displacement
 `dy` µm. Enter `a=(ux-u0)/dx`, `c=(vx-v0)/dx`, `b=(uy-u0)/dy`, `d=(vy-v0)/dy`.
@@ -88,6 +88,12 @@ Selecting Automatic Alignment opens a separate PyQtGraph/OpenGL window. It stays
 available through sample changes and experiment shutdown; deselecting Automatic
 Alignment hides it and stops its timer. Its close button minimizes it while the
 mode is selected. The window is read-only and cannot command any movement.
+Beside the 3D plot, a detector hitmap shows up to 2000 recent paired hits from
+the current alignment observation. It uses the same detector diameter, red
+boundary and millimetre coordinates as the visualization hitmap. The green
+circle shows a valid fitted sample footprint. Reset clears only this display;
+it does not clear the detector stream or interrupt alignment. Hits from the
+previous stage position are cleared when the alignment observation changes.
 
 - Horizontal axes: measured stage X/Y **offset from the sample's saved position**,
   in µm. The readout also shows absolute measured XYZ in mm.
@@ -122,9 +128,16 @@ and Reference are blocked throughout a sequence; Stage Stop cancels the sequence
    supply and Surface Concept or RoentDek position-resolving TDC is required.
 2. With outputs shut down, move through the transfer path to the saved position.
    Wait for every movement/settling acknowledgement before normal experiment
-   startup. A positioning failure never starts the experiment.
+   startup. The main status bar shows each of the three moves and remaining
+   distance: retract Z to -4 mm, traverse XY, then move Z to the saved sample
+   position. A positioning failure never starts the experiment.
 3. Ramp DC to the entered alignment start voltage, retaining the first-event
-   gate. DC regulation is **held**, including the PID integrator, throughout XY
+   gate. If the measured detection rate reaches the full experiment target
+   during this initial ramp, immediately hold the current voltage and collect
+   fresh detector windows there. A valid footprint and stable target rate enter
+   fine alignment directly at that voltage. If the signal cannot be confirmed
+   within the configured observation duration, resume the initial ramp.
+   DC regulation is **held**, including the PID integrator, throughout XY
    moves and observation periods. The experiment's ordinary Kp values are not
    modified. Upward voltage changes are only allowed during stationary ramps.
 4. Search a bounded square-spiral XY grid at the saved Z. Each position receives
@@ -135,7 +148,8 @@ and Reference are blocked throughout a sequence; Stage Stop cancels the sequence
    then increment voltage and repeat. The effective cap is the minimum of the
    alignment maximum (6000 V), experiment maximum and hardware maximum. The
    final increment is shortened to the cap (5900 -> 6000 for the defaults).
-6. Fine alignment centres the footprint with bounded calibrated XY corrections,
+6. Fine alignment centres the footprint with bounded XY detector-feedback probes
+   (or a measured XY mapping when supplied),
    then takes small Z steps if enabled. Each step settles before using fresh
    events. Centre + stable 80% target rate freezes all alignment movement for
    the remainder of the experiment. The 90% detector-area approach limit includes

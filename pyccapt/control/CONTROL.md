@@ -21,16 +21,16 @@ and recorded starting settings are described in
 [EXPERIMENT_PLANS.md](EXPERIMENT_PLANS.md). Copy
 [experiment_plan.example.toml](../files/experiment_plan.example.toml), select
 **Setup Parameters → TOML Plan → Load TOML**, and review all rows before Start.
-The main GUI opens at 760 × 640 and shows the queue when TOML Plan is selected.
+The main GUI opens at 760 × 670 and shows the queue when TOML Plan is selected.
 TextBox provides the single-run form. In TextBox mode, **Advanced settings…**
 opens detection mode, control algorithm, refresh frequency, pulse-voltage limits
 and K_p controls together. These are the same controls used by the main form:
 edits apply immediately and existing run locks remain in effect. The Advanced
 settings label and button sit below the target Detection Rate input on the left.
 A separator below the Run Statistics detection rate precedes Electrode and
-Flat Test. A second line separates these buttons from the bordered Alignment box
+Flat Test. A second line separates these buttons from the bordered Auto Alignment box
 containing alignment start voltage, voltage increment and Automatic Alignment.
-Start and Stop sit side by side in a separate row just above the bottom full-width
+Start sits above Stop in a separate group just above the bottom full-width
 separator.
 
 Laser command units, readback semantics and recording corrections are documented

@@ -189,7 +189,7 @@ def test_main_plan_layout_is_compact_and_queue_fits(instrument_window, tmp_path)
     for _ in range(5):
         app.processEvents()
     assert window.width() == 760
-    assert window.height() == 640
+    assert window.height() == 670
     assert [ui.parameters_source.itemText(index) for index in
             range(ui.parameters_source.count())] == ['TextBox', 'TOML Plan']
     assert ui.plan_panel.isHidden()
@@ -247,7 +247,7 @@ def test_main_advanced_dialog_and_run_controls_layout(instrument_window, tmp_pat
     assert ui.electrode_separator.frameShape() == QtWidgets.QFrame.Shape.HLine
     assert position(ui.electrode_button).y() + ui.electrode_button.height() <= position(ui.electrode_separator).y()
     assert position(ui.electrode_separator).y() < position(ui.alignment_group).y()
-    assert ui.alignment_group.title() == 'Alignment'
+    assert ui.alignment_group.title() == 'Auto Alignment'
     for widget in (ui.alignment_start_voltage_label, ui.alignment_start_voltage,
                    ui.alignment_voltage_increment_label, ui.alignment_voltage_increment,
                    ui.automatic_alignment_button):
@@ -255,8 +255,8 @@ def test_main_advanced_dialog_and_run_controls_layout(instrument_window, tmp_pat
     assert position(ui.alignment_start_voltage).y() < position(ui.alignment_voltage_increment).y()
     assert position(ui.electrode_button).y() < position(ui.alignment_start_voltage).y()
     assert position(ui.alignment_voltage_increment).y() < position(ui.automatic_alignment_button).y()
-    assert position(ui.start_button).y() == position(ui.stop_button).y()
-    assert position(ui.start_button).x() < position(ui.stop_button).x()
+    assert position(ui.start_button).y() + ui.start_button.height() < position(ui.stop_button).y()
+    assert position(ui.start_button).x() == position(ui.stop_button).x()
     assert position(ui.start_button).y() >= position(ui.alignment_group).y() + ui.alignment_group.height() + 8
     assert position(ui.start_button).y() > position(ui.advanced_settings_button).y()
     assert position(ui.stop_button).y() + ui.stop_button.height() < position(ui.run_controls_separator).y()

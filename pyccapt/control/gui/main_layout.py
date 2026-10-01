@@ -63,7 +63,7 @@ class MainLayoutMixin:
         self.electrode_separator.setFrameShape(QtWidgets.QFrame.Shape.HLine)
         self.electrode_separator.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
         controls.addWidget(self.electrode_separator, 1, 0, 1, 2)
-        self.alignment_group = QtWidgets.QGroupBox('Alignment', self.run_controls_panel)
+        self.alignment_group = QtWidgets.QGroupBox('Auto Alignment', self.run_controls_panel)
         self.alignment_group.setObjectName('alignment_group')
         self.alignment_group.setStyleSheet(
             'QGroupBox { font-weight: bold; border: 1px solid gray; border-radius: 5px; margin-top: 8px; } '
@@ -92,11 +92,10 @@ class MainLayoutMixin:
         self.verticalLayout_2.addWidget(self.run_controls_panel, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
         self.experiment_actions_panel = QtWidgets.QWidget(self.centralwidget)
         self.experiment_actions_panel.setObjectName('experiment_actions_panel')
-        actions = QtWidgets.QHBoxLayout(self.experiment_actions_panel)
+        actions = QtWidgets.QVBoxLayout(self.experiment_actions_panel)
         actions.setContentsMargins(0, 8, 0, 0)
-        actions.addStretch()
-        actions.addWidget(self.start_button)
-        actions.addWidget(self.stop_button)
+        actions.addWidget(self.start_button, alignment=QtCore.Qt.AlignmentFlag.AlignRight)
+        actions.addWidget(self.stop_button, alignment=QtCore.Qt.AlignmentFlag.AlignRight)
         self.gridLayout_6.addWidget(self.experiment_actions_panel, 2, 0, 1, 2)
         self.gridLayout_5.setVerticalSpacing(3)
         self.Error.setMinimumWidth(0)

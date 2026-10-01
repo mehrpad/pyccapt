@@ -163,14 +163,14 @@ saved Cameras position; without alignment the queue uses the current stage posit
 
 Copy [experiment_plan.example.toml](pyccapt/files/experiment_plan.example.toml) and
 follow the [experiment-plan instructions](pyccapt/control/EXPERIMENT_PLANS.md).
-The main window opens at 760 × 640 with monitor-aware scrolling. **Advanced
+The main window opens at 760 × 670 with monitor-aware scrolling. **Advanced
 settings…** groups detection mode, control algorithm, refresh frequency,
 pulse-voltage limits and K_p settings in a separate dialog. The Advanced settings
 label and button sit directly below the target Detection Rate input on the left.
 A separator below the Run Statistics detection rate precedes Electrode and
-Flat Test. A second line separates these buttons from the bordered Alignment
-box containing both voltage fields and Automatic Alignment. Start and Stop sit
-side by side in a separate row just above the bottom full-width separator.
+Flat Test. A second line separates these buttons from the bordered Auto Alignment
+box containing both voltage fields and Automatic Alignment. Start sits above Stop
+in a separate group just above the bottom full-width separator.
 The parameter sources are TextBox for a single run and TOML Plan for a queue.
 
 Control GUI electrode labels are stored in `pyccapt/control/electrode.toml`:

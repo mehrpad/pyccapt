@@ -82,7 +82,7 @@ class Ui_PyCCAPT(AlignmentGuiMixin, ExperimentPlanGuiMixin, MainLayoutMixin):
 
     def setupUi(self, PyCCAPT):
         PyCCAPT.setObjectName("PyCCAPT")
-        PyCCAPT.resize(760, 640)
+        PyCCAPT.resize(760, 670)
         self.centralwidget = QtWidgets.QWidget(parent=PyCCAPT)
         self.centralwidget.setObjectName("centralwidget")
         self.gridLayout_7 = QtWidgets.QGridLayout(self.centralwidget)

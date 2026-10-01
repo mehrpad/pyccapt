@@ -12,8 +12,8 @@ button to change those settings for a specific experiment. The Advanced settings
 label and button sit directly below the target Detection Rate input on the left
 in TextBox mode. A separator below the Run Statistics detection rate precedes
 Electrode and Flat Test. A second line separates these buttons from the bordered
-Alignment box containing alignment start voltage, voltage increment and Automatic
-Alignment. Start and Stop sit side by side in a separate row just above the bottom
+Auto Alignment box containing alignment start voltage, voltage increment and Automatic
+Alignment. Start sits above Stop in a separate group just above the bottom
 full-width separator and experiment queue.
 
 ## Load and run the example

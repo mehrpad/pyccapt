@@ -17,13 +17,13 @@ The control module is responsible for:
 Calibration and reconstruction are implemented in `pyccapt.calibration`.
 
 Select **Setup Parameters → TOML Plan** to load and edit a reusable experiment
-queue, or use **TextBox** for a single run. The main window opens at 760 × 640.
+queue, or use **TextBox** for a single run. The main window opens at 760 × 670.
 The **Advanced settings** label and button sit below the target Detection Rate
 input on the left and open the detection/control settings and pulse-voltage
 limits in one dialog. A separator below the Run Statistics detection rate
 precedes Electrode and Flat Test. A second line separates these buttons from the
-bordered Alignment box containing both voltage fields and Automatic Alignment.
-Start and Stop sit side by side in a separate row immediately above the bottom
+bordered Auto Alignment box containing both voltage fields and Automatic Alignment.
+Start sits above Stop in a separate group immediately above the bottom
 full-width separator.
 See [Experiment Plans](experiment_plans.rst)
 for file format, units, sample-position mapping and step-by-step instructions.

@@ -139,7 +139,7 @@ and Reference are blocked throughout a sequence; Stage Stop cancels the sequence
    [TOML plans](EXPERIMENT_PLANS.md) map each row's explicit `sample_id` to its
    saved Cameras position and run in queue order. IDs may repeat; saved samples
    omitted from the plan are not visited. TextBox parameters are copied for each
-   selected sample; legacy TextLine blocks map to samples in sample-number order.
+   selected sample.
    Voltage or Laser mode with an
    enabled DC supply and Surface Concept or RoentDek position-resolving TDC is
    required. For combined sample-stage and laser alignment, select Laser mode

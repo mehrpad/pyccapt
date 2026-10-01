@@ -933,28 +933,6 @@ class Ui_PyCCAPT(AlignmentGuiMixin, ExperimentPlanGuiMixin, MainLayoutMixin):
         self.detection_rate.setObjectName("detection_rate")
         self.gridLayout_5.addWidget(self.detection_rate, 5, 1, 1, 1)
         self.verticalLayout_2.addLayout(self.gridLayout_5)
-        spacerItem = QtWidgets.QSpacerItem(
-            20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding
-        )
-        self.verticalLayout_2.addItem(spacerItem)
-        self.text_line = QtWidgets.QTextEdit(parent=self.centralwidget)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
-        sizePolicy.setHorizontalStretch(0)
-        sizePolicy.setVerticalStretch(0)
-        sizePolicy.setHeightForWidth(self.text_line.sizePolicy().hasHeightForWidth())
-        self.text_line.setSizePolicy(sizePolicy)
-        self.text_line.setMinimumSize(QtCore.QSize(0, 280))
-        self.text_line.setStyleSheet(
-            "QWidget{\n"
-            "                                        border: 2px solid gray;\n"
-            "                                        border-radius: 10px;\n"
-            "                                        padding: 0 8px;\n"
-            "                                        background: rgb(223,223,233)\n"
-            "                                        }\n"
-            "                                    "
-        )
-        self.text_line.setObjectName("text_line")
-        self.verticalLayout_2.addWidget(self.text_line)
         self.gridLayout_6.addLayout(self.verticalLayout_2, 1, 1, 1, 1)
         self.start_button = QtWidgets.QPushButton(parent=self.centralwidget)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Fixed)
@@ -1172,14 +1150,13 @@ class Ui_PyCCAPT(AlignmentGuiMixin, ExperimentPlanGuiMixin, MainLayoutMixin):
         PyCCAPT.setTabOrder(self.total_ions, self.speciemen_voltage)
         PyCCAPT.setTabOrder(self.speciemen_voltage, self.pulse_voltage)
         PyCCAPT.setTabOrder(self.pulse_voltage, self.detection_rate)
-        PyCCAPT.setTabOrder(self.detection_rate, self.alignment_start_voltage)
+        PyCCAPT.setTabOrder(self.detection_rate, self.advanced_settings_button)
+        PyCCAPT.setTabOrder(self.advanced_settings_button, self.alignment_start_voltage)
         PyCCAPT.setTabOrder(self.alignment_start_voltage, self.alignment_voltage_increment)
         PyCCAPT.setTabOrder(self.alignment_voltage_increment, self.electrode_button)
-        PyCCAPT.setTabOrder(self.electrode_button, self.advanced_settings_button)
-        PyCCAPT.setTabOrder(self.advanced_settings_button, self.automatic_alignment_button)
-        PyCCAPT.setTabOrder(self.automatic_alignment_button, self.flat_test_button)
-        PyCCAPT.setTabOrder(self.flat_test_button, self.text_line)
-        PyCCAPT.setTabOrder(self.text_line, self.start_button)
+        PyCCAPT.setTabOrder(self.electrode_button, self.flat_test_button)
+        PyCCAPT.setTabOrder(self.flat_test_button, self.automatic_alignment_button)
+        PyCCAPT.setTabOrder(self.automatic_alignment_button, self.start_button)
         PyCCAPT.setTabOrder(self.start_button, self.stop_button)
 
         ###
@@ -1323,7 +1300,7 @@ class Ui_PyCCAPT(AlignmentGuiMixin, ExperimentPlanGuiMixin, MainLayoutMixin):
         self.baking.setText(_translate("PyCCAPT", "Baking"))
         self.label_173.setText(_translate("PyCCAPT", "Setup Parameters"))
         self.parameters_source.setItemText(0, _translate("PyCCAPT", "TextBox"))
-        self.parameters_source.setItemText(1, _translate("PyCCAPT", "TextLine"))
+        self.parameters_source.setItemText(1, _translate("PyCCAPT", "TOML Plan"))
         self.label_183.setText(_translate("PyCCAPT", "Experiment Number"))
         self.ex_number.setText(_translate("PyCCAPT", "1"))
         self.label_174.setText(_translate("PyCCAPT", "Experiment User"))
@@ -1381,7 +1358,6 @@ class Ui_PyCCAPT(AlignmentGuiMixin, ExperimentPlanGuiMixin, MainLayoutMixin):
         self.label_196.setText(_translate("PyCCAPT", "DC Voltage (V)"))
         self.label_197.setText(_translate("PyCCAPT", "Pulse Voltage (V)"))
         self.label_198.setText(_translate("PyCCAPT", "Detection Rate (%)"))
-        self.text_line.setPlainText(main_parameters.DEFAULT_TEXTLINE_EXAMPLE)
         self.start_button.setText(_translate("PyCCAPT", "Start"))
         self.Error.setText(_translate("PyCCAPT", "<html><head/><body><p><br/></p></body></html>"))
         self.stop_button.setText(_translate("PyCCAPT", "Stop"))
@@ -1582,49 +1558,28 @@ class Ui_PyCCAPT(AlignmentGuiMixin, ExperimentPlanGuiMixin, MainLayoutMixin):
         """
         self.detection_rate.setText(str("{:.3f}".format(value)))
 
-    def read_text_lines(
-        self,
-    ):
-        """
-        Read the text lines and convert them to a dictionary
-
-        Args:
-                None
-
-        Return:
-                None
-        """
-        if self._batch_items is not None:
-            self.result_list = self._batch_items
-        elif self.parameters_source.currentText() == 'TOML Plan':
-            self.result_list = self._validate_plan_items(self.plan_items)
-        else:
-            self.result_list = main_parameters.parse_textline_experiments(self.text_line.toPlainText())
-        self.variables.number_of_experiment_in_text_line = len(self.result_list)
-        if self.variables.index_experiment_in_text_line < len(self.result_list):
-            index_line = self.variables.index_experiment_in_text_line
-            main_parameters.apply_textline_item(
-                self.variables,
-                self.conf,
-                self.result_list[index_line],
-                self.error_message,
-            )
-            self._publish_plan_row(index_line)
+    def apply_current_plan_experiment(self):
+        """Apply the selected row from the frozen or editable TOML queue."""
+        self.result_list = (self._batch_items if self._batch_items is not None
+                           else self._validate_plan_items(self.plan_items))
+        self.variables.experiment_plan_count = len(self.result_list)
+        index = self.variables.experiment_plan_index
+        if index < len(self.result_list):
+            main_parameters.apply_experiment_item(
+                self.variables, self.conf, self.result_list[index], self.error_message)
+            self._publish_plan_row(index)
 
     def _update_parameter_editor_mode(self):
         """Enable only the editor selected by Setup Parameters."""
-        use_text_line = self.parameters_source.currentText() == "TextLine"
         use_plan = self.parameters_source.currentText() == 'TOML Plan'
         alignment_locked = self._plan_locked()
-        self.text_line.setVisible(use_text_line)
         self.plan_panel.setVisible(use_plan)
         for widget in self._plan_form_widgets:
             widget.setVisible(not use_plan)
-        self.advanced_settings_button.setEnabled(not (use_plan or use_text_line) and
+        self.advanced_settings_button.setEnabled(not use_plan and
                                                  not bool(getattr(self, '_alignment_batch', [])))
-        if use_plan or use_text_line:
+        if use_plan:
             self.advanced_settings_dialog.hide()
-        self.text_line.setEnabled(use_text_line and not alignment_locked)
         for button in self.plan_buttons.values():
             button.setEnabled(not alignment_locked)
         textbox_widgets = (
@@ -1638,7 +1593,7 @@ class Ui_PyCCAPT(AlignmentGuiMixin, ExperimentPlanGuiMixin, MainLayoutMixin):
             self.criteria_email, self.email_interval,
         )
         for widget in textbox_widgets:
-            widget.setEnabled(not (use_text_line or use_plan) and not alignment_locked)
+            widget.setEnabled(not use_plan and not alignment_locked)
 
     def setup_parameters_changes(self):
         """
@@ -1651,13 +1606,13 @@ class Ui_PyCCAPT(AlignmentGuiMixin, ExperimentPlanGuiMixin, MainLayoutMixin):
             None
         """
         try:
-            if self.parameters_source.currentText() in ('TextLine', 'TOML Plan'):
+            if self.parameters_source.currentText() == 'TOML Plan':
                 if self._plan_locked():
                     return
                 self._batch_items = None
-                if self.parameters_source.currentText() == 'TOML Plan' and not self.plan_items:
+                if not self.plan_items:
                     return
-                self.read_text_lines()
+                self.apply_current_plan_experiment()
                 return
 
             self._batch_items = None
@@ -1729,10 +1684,10 @@ class Ui_PyCCAPT(AlignmentGuiMixin, ExperimentPlanGuiMixin, MainLayoutMixin):
         selected_samples = self._alignment_start_samples()
         if selected_samples is None:
             return
-        if self.parameters_source.currentText() in ('TextLine', 'TOML Plan'):
+        if self.parameters_source.currentText() == 'TOML Plan':
             try:
-                self.variables.index_experiment_in_text_line = 0
-                self.read_text_lines()
+                self.variables.experiment_plan_index = 0
+                self.apply_current_plan_experiment()
             except (ValueError, main_parameters.ParameterError) as exc:
                 self.error_message(f"Check the experiment queue: {exc}")
                 return
@@ -1778,23 +1733,7 @@ class Ui_PyCCAPT(AlignmentGuiMixin, ExperimentPlanGuiMixin, MainLayoutMixin):
                 "in the Cameras GUI.",
             )
             return None
-        if self.parameters_source.currentText() == "TextLine":
-            try:
-                self.result_list = main_parameters.parse_textline_experiments(self.text_line.toPlainText())
-            except main_parameters.ParameterError as exc:
-                QtWidgets.QMessageBox.information(
-                    self.centralwidget, "Automatic Alignment", f"Check the TextLine setup parameters: {exc}"
-                )
-                return None
-            if len(self.result_list) != len(samples):
-                QtWidgets.QMessageBox.information(
-                    self.centralwidget,
-                    "Automatic Alignment",
-                    "The number of saved coarse-position samples does not match the number of "
-                    "TextLine setup-parameter blocks. Match them and start again.",
-                )
-                return None
-        elif len(samples) > 1 and not self._confirm_warning_dialog(
+        if len(samples) > 1 and not self._confirm_warning_dialog(
             "Automatic Alignment",
             "All selected samples will use the same setup parameters.",
             "Do you agree to use the TextBox parameters for every selected sample?",
@@ -2276,7 +2215,6 @@ class Ui_PyCCAPT(AlignmentGuiMixin, ExperimentPlanGuiMixin, MainLayoutMixin):
         self.counter_source.setEnabled(False)
         self.pulse_mode.setEnabled(False)
         self.parameters_source.setEnabled(False)
-        self.text_line.setEnabled(False)
         for button in self.plan_buttons.values():
             button.setEnabled(False)
         self.pulse_fraction.setEnabled(False)
@@ -2507,7 +2445,6 @@ class Ui_PyCCAPT(AlignmentGuiMixin, ExperimentPlanGuiMixin, MainLayoutMixin):
             self.counter_source.setEnabled(True)  # Enable the counter source
             self.pulse_mode.setEnabled(True)  # Enable the pulse mode
             self.parameters_source.setEnabled(True)  # Enable the parameters source
-            self.text_line.setEnabled(True)
             self.pulse_fraction.setEnabled(True)  # Enable the pulse fraction
             self.ex_freq.setEnabled(True)
             self.ex_name.setEnabled(True)
@@ -2554,18 +2491,18 @@ class Ui_PyCCAPT(AlignmentGuiMixin, ExperimentPlanGuiMixin, MainLayoutMixin):
                 return
 
             # with self.variables.lock_statistics:
-            next_index = self.variables.index_experiment_in_text_line + 1
-            continue_textline = (
-                self.parameters_source.currentText() in ('TextLine', 'TOML Plan')
+            next_index = self.variables.experiment_plan_index + 1
+            continue_plan = (
+                self.parameters_source.currentText() == 'TOML Plan'
                 and next_index < len(self.result_list)
                 and not self._operator_stopped
                 and not run_error
                 and self.variables.hardware_safe
             )
-            if continue_textline:
-                self.variables.index_experiment_in_text_line = next_index
+            if continue_plan:
+                self.variables.experiment_plan_index = next_index
                 try:
-                    self.read_text_lines()
+                    self.apply_current_plan_experiment()
                     next_started = self.start_experiment_worker()
                 except (ValueError, main_parameters.ParameterError) as exc:
                     self.error_message(f"Check the next experiment parameters: {exc}")
@@ -2574,12 +2511,11 @@ class Ui_PyCCAPT(AlignmentGuiMixin, ExperimentPlanGuiMixin, MainLayoutMixin):
                     self._batch_items = None
                     self.variables.automatic_alignment_enabled = False
                     self.variables.automatic_alignment_samples = ()
-                    self.variables.index_experiment_in_text_line = 0
+                    self.variables.experiment_plan_index = 0
                     self.variables.sample_selection_locked = False
             else:
                 self._batch_items = None
-                self.variables.index_line = 0
-                self.variables.index_experiment_in_text_line = 0
+                self.variables.experiment_plan_index = 0
                 self.variables.automatic_alignment_enabled = False
                 self.variables.automatic_alignment_samples = ()
                 self.variables.sample_selection_locked = False

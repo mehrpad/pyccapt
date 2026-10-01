@@ -90,7 +90,6 @@ class ExperimentPlanGuiMixin:
             ('Add', self._add_plan_row), ('Edit', self._edit_plan_row),
             ('Duplicate', self._duplicate_plan_row), ('Remove', self._remove_plan_row),
             ('↑', lambda: self._move_plan_row(-1)), ('↓', lambda: self._move_plan_row(1)),
-            ('Import TextLine', self._import_textline_dialog),
         ):
             button = QtWidgets.QPushButton(label)
             button.setFixedWidth(max(28, button.fontMetrics().horizontalAdvance(label)+20))
@@ -117,7 +116,6 @@ class ExperimentPlanGuiMixin:
         for index in reversed(range(self.verticalLayout_2.count())):
             if self.verticalLayout_2.itemAt(index).spacerItem() is not None:
                 self.verticalLayout_2.takeAt(index)
-        self.verticalLayout_2.removeWidget(self.text_line)
         keep = {self.parameters_source, self.label_173, self.ex_number, self.label_183}
         self._plan_form_widgets = [grid.itemAt(i).widget()
                                    for grid in (self.gridLayout_4, self.gridLayout_3,
@@ -134,14 +132,9 @@ class ExperimentPlanGuiMixin:
         self.gridLayout_4.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
         self.gridLayout_5.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
         self.gridLayout_6.addWidget(self.plan_panel, 2, 0, 1, 2)
-        self.gridLayout_6.addWidget(self.text_line, 2, 0, 1, 2)
         self.gridLayout_6.removeWidget(self.start_button)
         self.gridLayout_6.addWidget(self.start_button, 3, 2, 1, 1)
         self.plan_panel.hide()
-        self.text_line.setMinimumHeight(100)
-        self.text_line.setMaximumHeight(140)
-        self.text_line.hide()
-        self.parameters_source.addItem('TOML Plan')
 
     def _plan_locked(self):
         return bool(self.variables.start_flag or self.variables.sample_selection_locked or
@@ -283,27 +276,10 @@ class ExperimentPlanGuiMixin:
         self._plan_path = ''
         self._refresh_plan_table(other)
 
-    def _import_textline_dialog(self):
-        if self._plan_locked():
-            return
-        text, accepted = QtWidgets.QInputDialog.getMultiLineText(
-            self.centralwidget, 'Import TextLine', 'Paste legacy parameter blocks:', self.text_line.toPlainText())
-        if accepted:
-            try:
-                items = main_parameters.parse_textline_experiments(text)
-                self.plan_items = self._validate_plan_items(items)
-                self._plan_path = ''
-                self._refresh_plan_table()
-            except ValueError as exc:
-                self.error_message(str(exc))
-
     def _freeze_experiment_queue(self):
         """Resolve every row once before starting; never reread a file mid-batch."""
         if self.parameters_source.currentText() == 'TOML Plan':
             self._batch_items = self._validate_plan_items(self.plan_items)
-        elif self.parameters_source.currentText() == 'TextLine':
-            self._batch_items = self._validate_plan_items(
-                main_parameters.parse_textline_experiments(self.text_line.toPlainText()))
         else:
             self._batch_items = None
         if self._batch_items is not None:

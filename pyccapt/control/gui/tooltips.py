@@ -117,10 +117,9 @@ MAIN_TOOLTIPS = {
     "vdc_steps_up": "K_p gain for upward DC steps (controller's proportional gain when raising voltage).",
     "vdc_steps_down": "K_p gain for downward DC steps (proportional gain when lowering voltage).",
     "counter_source": "Where ion counts are read from (TDC, DRS, Counter, etc.).",
-    "parameters_source": "Choose TextBox for a single run, TOML Plan for a reusable experiment queue, or TextLine for legacy pasted blocks.",
+    "parameters_source": "Choose TextBox for a single run or TOML Plan for a reusable experiment queue.",
     "advanced_settings_button": "Open detection mode, control algorithm, refresh frequency, pulse-voltage limits and K_p settings in one dialog. Changes apply as you edit; use the plan row editor for TOML experiments.",
     "plan_table": "Experiments run from top to bottom. Double-click a row to inspect or edit its settings; sample IDs map to saved Cameras positions when Automatic Alignment is enabled.",
-    "text_line": "Legacy semicolon-separated experiment blocks. Use TOML Plan → Import TextLine, assign sample IDs if needed, then Save As to keep a reusable TOML plan.",
     # --- Live experiment statistics --------------------------------------
     "elapsed_time": "Live elapsed seconds since the experiment started.",
     "total_ions": "Live cumulative detected-ion count.",

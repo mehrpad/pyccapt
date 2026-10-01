@@ -85,7 +85,7 @@ class AlignmentGuiMixin:
         self.start_button.setEnabled(False)
         self.stop_button.setEnabled(True)
         for widget in (self.electrode_button, self.flat_test_button, self.automatic_alignment_button,
-                       self.parameters_source, self.text_line):
+                       self.parameters_source):
             widget.setEnabled(False)
         self.variables.sample_selection_locked = True
         self._update_parameter_editor_mode()
@@ -120,10 +120,10 @@ class AlignmentGuiMixin:
                 raise ValueError('Output shutdown must finish before positioning a sample.')
             batch = []
             for index, sample in enumerate(samples):
-                if self.parameters_source.currentText() in ('TextLine', 'TOML Plan'):
+                if self.parameters_source.currentText() == 'TOML Plan':
                     temp = SimpleNamespace(pulse_amp_per_supply_voltage=self.variables.pulse_amp_per_supply_voltage)
                     errors = []
-                    main_parameters.apply_textline_item(temp, self.conf, self.result_list[index], errors.append)
+                    main_parameters.apply_experiment_item(temp, self.conf, self.result_list[index], errors.append)
                     if errors:
                         raise ValueError('; '.join(errors))
                 else:
@@ -307,7 +307,7 @@ class AlignmentGuiMixin:
         self.variables.automatic_alignment_enabled = False
         self.variables.automatic_alignment_samples = ()
         self.variables.sample_selection_locked = False
-        self.variables.index_experiment_in_text_line = 0
+        self.variables.experiment_plan_index = 0
         self.parameters_source.setEnabled(True)
         self.electrode_button.setEnabled(True)
         self.automatic_alignment_button.setEnabled(True)

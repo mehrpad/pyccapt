@@ -43,18 +43,21 @@ class MainLayoutMixin:
         self.gridLayout_6.removeItem(self.electrode_controls)
         while self.electrode_controls.count():
             self.electrode_controls.takeAt(0)
-        for widget in (self.start_button, self.stop_button, self.Error, self.plan_panel, self.text_line):
+        for widget in (self.start_button, self.stop_button, self.Error, self.plan_panel):
             self.gridLayout_6.removeWidget(widget)
         self.gridLayout_6.addWidget(self.plan_panel, 3, 0, 1, 2)
-        self.gridLayout_6.addWidget(self.text_line, 3, 0, 1, 2)
         self.run_controls_panel = QtWidgets.QWidget(self.centralwidget)
         controls = QtWidgets.QGridLayout(self.run_controls_panel)
         controls.setContentsMargins(0, 0, 0, 0)
         controls.setVerticalSpacing(4)
         controls.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop | QtCore.Qt.AlignmentFlag.AlignLeft)
+        self.advanced_settings_label = QtWidgets.QLabel('Advanced settings', self.run_controls_panel)
+        self.advanced_settings_label.setObjectName('advanced_settings_label')
+        controls.addWidget(self.advanced_settings_label, 0, 0)
+        controls.addWidget(self.advanced_settings_button, 0, 1, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
         for row, (label, widget) in enumerate(
             ((self.alignment_start_voltage_label, self.alignment_start_voltage),
-             (self.alignment_voltage_increment_label, self.alignment_voltage_increment))
+             (self.alignment_voltage_increment_label, self.alignment_voltage_increment)), start=1
         ):
             label.setMinimumWidth(0)
             label.setMaximumWidth(16777215)
@@ -64,8 +67,8 @@ class MainLayoutMixin:
             controls.addWidget(widget, row, 1, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
         self.advanced_settings_button.setFixedWidth(self.flat_test_button.width())
         for widget, row, column in (
-            (self.electrode_button, 2, 0), (self.advanced_settings_button, 2, 1),
-            (self.automatic_alignment_button, 3, 0), (self.flat_test_button, 3, 1),
+            (self.electrode_button, 3, 0), (self.flat_test_button, 3, 1),
+            (self.automatic_alignment_button, 4, 0),
             (self.start_button, 4, 1), (self.stop_button, 5, 1),
         ):
             controls.addWidget(widget, row, column, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)

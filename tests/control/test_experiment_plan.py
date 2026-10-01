@@ -67,13 +67,11 @@ def test_rejects_invalid_plan_structure(data):
         plan.resolve_plan(data)
 
 
-def test_duplicate_toml_and_textline_keys_rejected(tmp_path):
+def test_duplicate_toml_keys_rejected(tmp_path):
     path = tmp_path/'duplicate.toml'
     path.write_text('schema_version = 1\nschema_version = 1\n')
     with pytest.raises(plan.PlanError):
         plan.load_plan(path)
-    with pytest.raises(main_parameters.ParameterError, match='Duplicate'):
-        main_parameters.parse_textline_experiments('{ex_user=a;ex_user=b}')
 
 
 def test_hardware_limits_in_later_row_reject_whole_queue():

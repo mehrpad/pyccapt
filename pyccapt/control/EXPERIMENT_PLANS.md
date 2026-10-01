@@ -1,24 +1,24 @@
 # Experiment plans
 
 Use **Setup Parameters → TOML Plan** to prepare, reuse and run a queue of
-experiments. The main window shows a compact queue instead of the large pasted
-TextLine editor. **TextBox** remains the single-experiment form; **TextLine** is
-available for older parameter blocks and is shown only when selected.
+experiments. The main window shows a compact queue. **TextBox** provides the
+single-experiment form; **TOML Plan** provides the reusable queue.
 
 The narrower main window groups the less frequently changed TextBox parameters
 under **Advanced settings…**: detection mode, control algorithm, refresh frequency,
 pulse-voltage limits and K_p up/down. Edits apply as each field is changed; the
 normal experiment locks still apply. For TOML plans, use the queue's **Edit**
-button to change those settings for a specific experiment. Under the statistics,
-alignment start voltage and increment occupy two rows above Electrode and Advanced
-settings. Automatic Alignment sits beside Flat Test on the next row, with Start
-and Stop stacked below Flat Test. A single full-width separator remains below
+button to change those settings for a specific experiment. The Advanced settings
+label and button sit directly below the Detection Rate statistic, followed by
+alignment start voltage and increment. Electrode sits beside Flat Test;
+Automatic Alignment sits beside Start on the next row, with Stop below Start.
+A single full-width separator remains below
 the parameters and statistics.
 
 ## Load and run the example
 
 1. Copy `pyccapt/files/experiment_plan.example.toml` to a working file such as
-   `my_experiments.toml`. The example reproduces the two legacy `test1` and
+   `my_experiments.toml`. The example contains the two `test1` and
    `test2` experiments. Edit it for your instrument and samples.
 2. Start PyCCAPT and select **TOML Plan** in **Setup Parameters**.
 3. Click **Load TOML** and select your file. Loading resolves shared defaults
@@ -66,9 +66,6 @@ does not replace instrument configuration or store stage coordinates.
 - **Save As** writes a reusable `.toml` file. Common values are stored under
   `[defaults]`; each experiment contains its differences. Export regenerates
   the file and does not preserve comments from an imported file.
-- **Import TextLine** accepts existing `{key=value;...}` blocks and converts them
-  into queue rows. Assign sample IDs using **Edit** before automatic alignment,
-  then use **Save As** to migrate the queue to TOML.
 
 Loading and editing affect the in-memory queue. Editing the source file on disk
 does not change it until you load that file again. At Start the resolved queue

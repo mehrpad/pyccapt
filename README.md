@@ -165,10 +165,11 @@ Copy [experiment_plan.example.toml](pyccapt/files/experiment_plan.example.toml) 
 follow the [experiment-plan instructions](pyccapt/control/EXPERIMENT_PLANS.md).
 The main window opens at 760 × 640 with monitor-aware scrolling. **Advanced
 settings…** groups detection mode, control algorithm, refresh frequency,
-pulse-voltage limits and K_p settings in a separate dialog. Below the statistics,
-the alignment voltage fields sit above Electrode and Advanced settings. Automatic
-Alignment and Flat Test share the next row; Start and Stop stack below Flat Test.
-The legacy TextLine editor is hidden unless selected.
+pulse-voltage limits and K_p settings in a separate dialog. The Advanced settings
+label and button sit directly below Detection Rate in the statistics column,
+followed by the alignment voltage fields. Electrode and Flat Test share a row;
+Automatic Alignment and Start share the next row, with Stop below Start.
+The parameter sources are TextBox for a single run and TOML Plan for a queue.
 
 Control GUI electrode labels are stored in `pyccapt/control/electrode.toml`:
 

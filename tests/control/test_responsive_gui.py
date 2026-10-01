@@ -190,7 +190,8 @@ def test_main_plan_layout_is_compact_and_queue_fits(instrument_window, tmp_path)
         app.processEvents()
     assert window.width() == 760
     assert window.height() == 640
-    assert ui.text_line.isHidden()
+    assert [ui.parameters_source.itemText(index) for index in
+            range(ui.parameters_source.count())] == ['TextBox', 'TOML Plan']
     assert ui.plan_panel.isHidden()
     assert window._responsive_window.scroll.verticalScrollBar().maximum() == 0
     window.grab().save(str(tmp_path/'single-form.png'))
@@ -198,7 +199,6 @@ def test_main_plan_layout_is_compact_and_queue_fits(instrument_window, tmp_path)
                             'pyccapt/files/experiment_plan.example.toml')
     for _ in range(5):
         app.processEvents()
-    assert ui.text_line.isHidden()
     assert ui.plan_panel.isVisible()
     assert ui.run_controls_panel.isVisible()
     assert ui.electrode_button.isVisible()
@@ -228,10 +228,15 @@ def test_main_advanced_dialog_and_run_controls_layout(instrument_window, tmp_pat
     assert ui.line_3.isHidden() and ui.line_4.isHidden()
     def position(widget):
         return widget.mapTo(ui.centralwidget, QtCore.QPoint())
-    assert position(ui.electrode_button).x() < position(ui.advanced_settings_button).x()
-    assert position(ui.electrode_button).y() == position(ui.advanced_settings_button).y()
-    assert position(ui.automatic_alignment_button).y() == position(ui.flat_test_button).y()
-    assert position(ui.automatic_alignment_button).x() < position(ui.flat_test_button).x()
+    assert ui.advanced_settings_label.text() == 'Advanced settings'
+    assert position(ui.detection_rate).y() < position(ui.advanced_settings_label).y()
+    assert position(ui.advanced_settings_label).x() < position(ui.advanced_settings_button).x()
+    assert position(ui.advanced_settings_label).y() == position(ui.advanced_settings_button).y()
+    assert position(ui.advanced_settings_button).y() < position(ui.alignment_start_voltage).y()
+    assert position(ui.electrode_button).x() < position(ui.flat_test_button).x()
+    assert position(ui.electrode_button).y() == position(ui.flat_test_button).y()
+    assert position(ui.automatic_alignment_button).y() == position(ui.start_button).y()
+    assert position(ui.automatic_alignment_button).x() < position(ui.start_button).x()
     assert position(ui.alignment_start_voltage).y() < position(ui.alignment_voltage_increment).y()
     assert position(ui.alignment_voltage_increment).y() < position(ui.electrode_button).y()
     assert position(ui.electrode_button).y() < position(ui.automatic_alignment_button).y()

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,50 +16,7 @@ from pyccapt.control.core import experiment_plan
 
 
 class ParameterError(ValueError):
-    """Raised when GUI parameter blocks cannot be parsed or validated."""
-
-
-DEFAULT_TEXTLINE_EXAMPLE = """\
-{ex_user=user1;ex_name=test1;electrode=NiC1;pulse_mode=Voltage;
-ex_time=90;max_ions=2000;ex_freq=10;vdc_min=1640;vdc_max=4000;
-vdc_steps_up=1;vdc_steps_down=1;control_algorithm=PID;vp_min=328;vp_max=3281;
-pulse_fraction=20;pulse_frequency=200;detection_rate_init=1;
-hit_displayed=20000;email=;counter_source=TDC;
-criteria_time=True;criteria_ions=False;criteria_vdc=False}
-{ex_user=user2;ex_name=test2;electrode=NiC2;pulse_mode=Voltage;
-ex_time=100;max_ions=3000;ex_freq=5;vdc_min=2700;vdc_max=3000;
-vdc_steps_up=0.5;vdc_steps_down=0.5;control_algorithm=Proportional;
-vp_min=400;vp_max=2000;pulse_fraction=15;pulse_frequency=200;
-detection_rate_init=2;hit_displayed=40000;email=;counter_source=TDC;
-criteria_time=False;criteria_ions=False;criteria_vdc=True}
-"""
-
-
-TEXTLINE_REQUIRED_KEYS = (
-    "ex_user",
-    "ex_name",
-    "electrode",
-    "ex_time",
-    "max_ions",
-    "ex_freq",
-    "vdc_min",
-    "vdc_max",
-    "vdc_steps_up",
-    "vdc_steps_down",
-    "control_algorithm",
-    "pulse_mode",
-    "vp_min",
-    "vp_max",
-    "pulse_fraction",
-    "pulse_frequency",
-    "detection_rate_init",
-    "hit_displayed",
-    "email",
-    "counter_source",
-    "criteria_time",
-    "criteria_ions",
-    "criteria_vdc",
-)
+    """Raised when experiment parameters cannot be parsed or validated."""
 
 
 @dataclass
@@ -87,7 +43,7 @@ class FormValues:
     criteria_time: bool
     criteria_ions: bool
     criteria_vdc: bool
-    # Optional so older callers / TextLine blocks that don't supply it
+    # Optional so callers that do not supply progress-email settings
     # still construct a valid FormValues.
     criteria_email: bool = False
     email_interval_events: str = "1000000"
@@ -209,60 +165,13 @@ def load_electrode_items(file_path: str) -> list[str]:
     )
 
 
-def _convert_value(raw_value: str) -> Any:
-    value = raw_value.strip()
-    lowered = value.lower()
-    if lowered == "true":
-        return True
-    if lowered == "false":
-        return False
-
-    try:
-        return int(value)
-    except ValueError:
-        pass
-
-    try:
-        return float(value)
-    except ValueError:
-        return value
-
-
-def parse_textline_experiments(lines: str) -> list[dict[str, Any]]:
-    """Parse text-line experiment blocks from GUI text input."""
-    matches = re.findall(r"{(.*?)}", lines, re.DOTALL)
-    if not matches:
-        raise ParameterError("No parameter blocks found in TextLine input.")
-
-    parsed_items: list[dict[str, Any]] = []
-    for block in matches:
-        item: dict[str, Any] = {}
-        for element in block.split(";"):
-            element = element.strip()
-            if not element:
-                continue
-            if "=" not in element:
-                raise ParameterError(f"Invalid key/value pair: {element!r}")
-            key, value = element.split("=", 1)
-            if key.strip() in item:
-                raise ParameterError(f'Duplicate TextLine key: {key.strip()}')
-            item[key.strip()] = _convert_value(value)
-
-        missing = [key for key in TEXTLINE_REQUIRED_KEYS if key not in item]
-        if missing:
-            raise ParameterError(f"Missing keys in dictionary: {missing}")
-        parsed_items.append(item)
-
-    return parsed_items
-
-
-def apply_textline_item(
+def apply_experiment_item(
     variables: Any,
     conf: Mapping[str, Any],
     item: Mapping[str, Any],
     emit_error: Callable[[str], None],
 ) -> None:
-    """Apply one parsed text-line experiment definition to shared variables."""
+    """Apply one resolved TOML experiment definition to shared variables."""
     apply_form_values(
         variables,
         conf,
@@ -295,7 +204,7 @@ def validate_experiment_queue(items, conf, pulse_amp_per_supply_voltage=1.0):
             resolved = experiment_plan.validate_item(item, f'Experiment {index}')
             temp = SimpleNamespace(pulse_amp_per_supply_voltage=pulse_amp_per_supply_voltage)
             errors = []
-            apply_textline_item(temp, conf, resolved, errors.append)
+            apply_experiment_item(temp, conf, resolved, errors.append)
             if errors:
                 raise ParameterError('; '.join(errors))
             validated.append(resolved)

@@ -235,9 +235,8 @@ class Variables:
         "index_wait_on_plot_start": ("viz", ("viz",)),
         "clear_index_save_image": ("main", ("viz",)),
         "index_warning_message": ("main", ("main",)),
-        "index_line": ("main", ("main",)),
-        "number_of_experiment_in_text_line": ("main", ("main",)),
-        "index_experiment_in_text_line": ("main", ("main",)),
+        "experiment_plan_count": ("main", ("main",)),
+        "experiment_plan_index": ("main", ("main",)),
         # --- TDC list-typed fields (TDC writes per-event, exp/viz drain) -
         # Where readership is unclear the entry is "?" - please audit
         # before adding new dependencies.
@@ -492,7 +491,6 @@ class Variables:
         "count_temp": 0,
         "avg_n_count": 0,
         "index_warning_message": 0,
-        "index_line": 0,
         "stop_flag": False,
         "end_experiment": False,
         "start_flag": False,
@@ -502,8 +500,8 @@ class Variables:
         "detector_error": "",
         "plot_clear_flag": False,
         "clear_index_save_image": False,
-        "number_of_experiment_in_text_line": 0,
-        "index_experiment_in_text_line": 0,
+        "experiment_plan_count": 0,
+        "experiment_plan_index": 0,
         "flag_cameras_take_screenshot": False,
         "access_override_enabled": False,
         "temperature": 0,

@@ -233,9 +233,10 @@ def test_missing_calibration_blocks_before_any_move(gui):
     assert not ui.started
 
 
-def test_textline_parameters_map_to_saved_samples(gui):
+def test_plan_parameters_map_to_saved_samples(gui):
     ui, v, motor, tick = gui
-    ui.parameters_source.setCurrentText('TextLine')
+    ui.load_experiment_plan(Path(__file__).resolve().parents[2] /
+                            'pyccapt/files/experiment_plan.example.toml')
     ui.alignment_start_voltage.setValue(2700)
     ui._start_alignment_batch((1, 2))
     assert not ui.errors
@@ -297,7 +298,6 @@ def test_plan_load_failure_preserves_queue_and_plan_is_frozen_at_start(gui, tmp_
     ui.load_experiment_plan(path)
     assert ui.parameters_source.currentText() == 'TOML Plan'
     assert ui.plan_table.rowCount() == 2
-    assert ui.text_line.isHidden()
     invalid = tmp_path/'invalid.toml'
     invalid.write_text('schema_version = 2')
     with pytest.raises(ValueError):
@@ -305,8 +305,8 @@ def test_plan_load_failure_preserves_queue_and_plan_is_frozen_at_start(gui, tmp_
     assert ui.plan_items[0]['ex_name'] == 'test1'
     ui._freeze_experiment_queue()
     ui.plan_items[1]['ex_name'] = 'changed after start'
-    v.index_experiment_in_text_line = 1
-    ui.read_text_lines()
+    v.experiment_plan_index = 1
+    ui.apply_current_plan_experiment()
     assert v.ex_name == 'test2'
     assert v.experiment_plan_snapshot['queue_index'] == 2
     v.start_flag = True
@@ -395,8 +395,8 @@ def test_plan_queue_continues_only_after_clean_worker_exit(gui, tmp_path, outcom
     ui.load_experiment_plan(Path(__file__).resolve().parents[2] /
                             'pyccapt/files/experiment_plan.example.toml')
     ui._freeze_experiment_queue()
-    v.index_experiment_in_text_line = 0
-    ui.read_text_lines()
+    v.experiment_plan_index = 0
+    ui.apply_current_plan_experiment()
     ui.start_experiment_worker()
     v.sample_selection_locked = True
     v.flag_end_experiment = True
@@ -422,7 +422,7 @@ def test_plan_queue_continues_only_after_clean_worker_exit(gui, tmp_path, outcom
     else:
         assert len(ui.started) == 1
     assert ui._batch_items is None
-    assert v.index_experiment_in_text_line == 0
+    assert v.experiment_plan_index == 0
     assert ui.plan_buttons['Load TOML'].isEnabled()
     assert ui.plan_buttons['Edit'].isEnabled()
     assert not motor.moves

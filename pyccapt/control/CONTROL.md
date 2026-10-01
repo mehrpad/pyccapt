@@ -16,19 +16,20 @@ This module is responsible for:
 
 Calibration and reconstruction are implemented in `pyccapt.calibration`.
 
-Reusable TOML experiment queues, compact queue editing, explicit sample mapping,
-legacy TextLine import and recorded starting settings are described in
+Reusable TOML experiment queues, compact queue editing, explicit sample mapping
+and recorded starting settings are described in
 [EXPERIMENT_PLANS.md](EXPERIMENT_PLANS.md). Copy
 [experiment_plan.example.toml](../files/experiment_plan.example.toml), select
 **Setup Parameters → TOML Plan → Load TOML**, and review all rows before Start.
-The main GUI opens at 760 × 640 and shows the queue or legacy text editor only
-when its parameter source is selected. In TextBox mode, **Advanced settings…**
+The main GUI opens at 760 × 640 and shows the queue when TOML Plan is selected.
+TextBox provides the single-run form. In TextBox mode, **Advanced settings…**
 opens detection mode, control algorithm, refresh frequency, pulse-voltage limits
 and K_p controls together. These are the same controls used by the main form:
 edits apply immediately and existing run locks remain in effect. Below the
-statistics, alignment start voltage and voltage increment occupy the first two
-rows. Electrode sits beside Advanced settings, then Automatic Alignment beside
-Flat Test. Start and Stop are stacked below Flat Test. One full-width separator
+Detection Rate statistic, the Advanced settings label and button occupy the first
+row, followed by alignment start voltage and voltage increment. Electrode sits
+beside Flat Test, then Automatic Alignment beside Start. Stop is below Start.
+One full-width separator
 remains below the parameter/statistics area.
 
 Laser command units, readback semantics and recording corrections are documented

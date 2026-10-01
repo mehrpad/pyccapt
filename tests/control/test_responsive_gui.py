@@ -25,6 +25,7 @@ def app(monkeypatch):
         from pathlib import Path
         fonts = Path(os.environ['WINDIR']) / 'Fonts'
         QtGui.QFontDatabase.addApplicationFont(str(fonts / 'segoeui.ttf'))
+        QtGui.QFontDatabase.addApplicationFont(str(fonts / 'seguisym.ttf'))
         QtGui.QFontDatabase.addApplicationFont(str(fonts / 'arial.ttf'))
         app.setFont(QtGui.QFont('Segoe UI', 9))
     app.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
@@ -350,6 +351,138 @@ def test_stage_controls_fit_compact_window_and_keep_readable_values(instrument_w
     assert ui.stage_stop.text() == 'STOP'
     window.grab().save(str(tmp_path/'stage.png'))
     print(f'Stage GUI preview: {tmp_path}')
+
+
+@pytest.mark.parametrize('instrument_window', ['cameras'], indirect=True)
+@pytest.mark.parametrize('detected', [False, True])
+def test_camera_compact_layout_preserves_views_and_all_controls(instrument_window, tmp_path, detected):
+    window, ui, app = instrument_window
+    if detected:
+        ui.camera_list_empty_label.hide()
+        for slot in range(3):
+            entry = ui._make_camera_row({'model': 'a2A1920-160uc', 'serial': f'1234567{slot}',
+                                         'slot': slot, 'attached': True, 'user_disabled': False})
+            ui._camera_row_widgets[str(slot)] = entry
+    window.show()
+    for _ in range(8):
+        app.processEvents()
+    assert window.width() <= 900
+    assert window.height() <= 750
+    for view in (ui.cam_s_o, ui.cam_s_d, ui.cam_b_o, ui.cam_b_d, ui.cam_angle_o, ui.cam_angle_d):
+        assert view.isVisible()
+        assert view.width() >= view.minimumWidth()
+        assert view.height() >= 160
+    fields = (ui.exposure_time_cam_1, ui.exposure_time_cam_2, ui.exposure_time_cam_3)
+    for field, slider in zip(fields, ui.exposure_sliders):
+        assert field.size() == QtCore.QSize(90, 25)
+        assert field.isVisible() and slider.isVisible()
+        assert not field.isEnabled() and not slider.isEnabled()
+    ui.emitter.cams_exposure_time_current.emit([2_000_000, 1_000_000, 500_000])
+    assert [field.text() for field in fields] == ['2000000', '1000000', '500000']
+    viewport = window._responsive_window.scroll.viewport()
+    assert window._responsive_window.scroll.horizontalScrollBar().maximum() == 0
+    assert window._responsive_window.scroll.verticalScrollBar().maximum() == 0
+    controls = [ui.superuser, ui.light, ui.illumination_percent, ui.auto_exposure_time,
+                ui.default_exposure_time, *fields, *ui.exposure_sliders,
+                *ui.sample_buttons.values(), *ui.camera_monitor_lcds.values()]
+    controls.extend(field for row in ui.sample_position_fields.values() for field in row)
+    controls.extend(button for entry in ui._camera_row_widgets.values()
+                    for button in (entry['connect_btn'], entry['disconnect_btn']))
+    for widget in controls:
+        assert widget.isVisible()
+        assert viewport.rect().contains(QtCore.QRect(widget.mapTo(viewport, QtCore.QPoint()), widget.size()))
+    for entry in ui._camera_row_widgets.values():
+        label = entry['label']
+        assert label.height() >= label.heightForWidth(label.width())
+    window.grab().save(str(tmp_path/'cameras.png'))
+    print(f'Camera GUI preview: {tmp_path}')
+
+
+@pytest.mark.parametrize('instrument_window', ['laser'], indirect=True)
+def test_laser_compact_layout_preserves_controls_and_readouts(instrument_window, tmp_path):
+    window, ui, app = instrument_window
+    # Exercise the persistent banner as well as the wrapped alignment status.
+    ui.laser_connection_banner.setText('Laser unavailable: reconnect the configured CLI port.')
+    ui.laser_connection_banner.show()
+    if ui.alignment_plot.view is not None:
+        ui.alignment_plot.tabs.setCurrentIndex(1)
+    window.show()
+    for _ in range(8):
+        app.processEvents()
+    print(f'Laser GUI size: {window.size()}, preview: {tmp_path}')
+    assert window.width() <= 1000
+    assert window.height() <= 700
+    viewport = window._responsive_window.scroll.viewport()
+    assert window._responsive_window.scroll.horizontalScrollBar().maximum() == 0
+    assert window._responsive_window.scroll.verticalScrollBar().maximum() == 0
+    controls = [ui.laser_wavelegnth, ui.laser_wavelegnth_nm_label, ui.laser_power,
+                ui.laser_rate, ui.laser_divition_factor, ui.laser_enable, ui.laser_on,
+                ui.laser_standby, ui.laser_listen, ui.laser_auto_alignment, ui.laser_tracking,
+                *ui.laser_alignment_fields.values(), *ui.laser_alignment_buttons,
+                ui.laser_alignment_stop, ui.laser_alignment_label, ui.alignment_plot,
+                ui.laser_home, ui.laser_stage_reference, ui.laser_stage_stop, ui.laser_stage_superuser,
+                ui.switch_to_cli_button, ui.nktpbus_mode_switch, ui.laser_connection_banner,
+                ui.laser_up, ui.laser_down, ui.laser_left, ui.laser_right,
+                ui.laser_forward, ui.laser_backward, ui.laser_power_disp,
+                ui.laser_pulse_energy_disp, ui.laser_repetion_rate_disp]
+    for axis in ('x', 'y', 'z'):
+        controls.extend(getattr(ui, f'laser_{axis}_{unit}') for unit in ('mm', 'um', 'nm'))
+        selector = getattr(ui, f'laser_speed_{axis}')
+        label = getattr(ui, f'laser_speed_{axis}_label')
+        controls.extend((selector, label))
+        for index in range(selector.count()):
+            selector.setCurrentIndex(index)
+            app.processEvents()
+            assert selector.width() >= selector.fontMetrics().horizontalAdvance(selector.currentText()) + 42
+            assert label.width() >= label.fontMetrics().horizontalAdvance(label.text())
+        selector.setValue(ui._speed_default)
+    for widget in controls:
+        assert widget.isVisible()
+        assert viewport.rect().contains(QtCore.QRect(widget.mapTo(viewport, QtCore.QPoint()), widget.size()))
+    for field in ui.laser_alignment_fields.values():
+        field.setValue(field.maximum())
+        assert field.width() >= field.fontMetrics().horizontalAdvance(field.text()) + 30
+    assert not ui.laser_stage_reference.isEnabled()
+    assert not ui.switch_to_cli_button.isEnabled()
+    assert ui.label_9.text() == 'Selected output (W)'
+    assert ui.label_10.text() == 'Pulse energy (µJ)'
+    window.grab().save(str(tmp_path/'laser.png'))
+
+
+@pytest.mark.parametrize('instrument_window', ['visualization'], indirect=True)
+def test_visualization_compact_controls_and_equal_plot_dimensions(instrument_window, tmp_path):
+    window, ui, app = instrument_window
+    window.show()
+    for _ in range(8):
+        app.processEvents()
+    print(f'Visualization GUI size: {window.size()}, preview: {tmp_path}')
+    assert window.width() <= 1000
+    assert window.height() <= 620
+    viewport = window._responsive_window.scroll.viewport()
+    assert window._responsive_window.scroll.horizontalScrollBar().maximum() == 0
+    assert window._responsive_window.scroll.verticalScrollBar().maximum() == 0
+    for widget in (ui.voltage, ui.detection_rate, ui.hitmap_count, ui.fdm_count, ui.dc_hold,
+                   ui.set_dc_voltage, ui.set_dc_voltage_value, ui.detection_rate_range_switch,
+                   ui.reset_heatmap_v, ui.hitmap_plot_size, ui.hit_displayed,
+                   ui.fdm_last_events_switch, ui.fdm_max_ions, ui.experiment_status_led,
+                   ui.experiment_status_text, ui.histogram, ui.btn_view_mc_cal, ui.btn_view_mc,
+                   ui.btn_view_tof_cal, ui.btn_view_tof, ui.calib_status_label,
+                   ui.spectrum_last_events_switch, ui.num_last_events, ui.max_mc, ui.max_tof):
+        assert widget.isVisible()
+        assert viewport.rect().contains(QtCore.QRect(widget.mapTo(viewport, QtCore.QPoint()), widget.size()))
+    plots = (ui.vdc_time, ui.detection_rate_viz, ui.detector_heatmap, ui.detector_fdm)
+    assert ui.data_line_vdc in ui.vdc_time.listDataItems()
+    assert ui.data_line_dtec in ui.detection_rate_viz.listDataItems()
+    window.grab().save(str(tmp_path/'visualization.png'))
+    for width, height in ((981, 620), (1283, 720), (1601, 900), (800, 480), (980, 620)):
+        window.resize(width, height)
+        for _ in range(5):
+            app.processEvents()
+        assert len({(plot.width(), plot.height()) for plot in plots}) == 1
+        assert all(plot.isVisible() and plot.width() >= 220 and plot.height() >= 220 for plot in plots)
+        assert len({plot.y() for plot in plots}) == 1
+        for left, right in zip(plots, plots[1:]):
+            assert left.geometry().right() < right.geometry().left()
 
 
 @pytest.mark.parametrize('instrument_window', [

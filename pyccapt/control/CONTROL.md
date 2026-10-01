@@ -204,6 +204,25 @@ three speed presets and jog-distance labels remain visible alongside all jog
 buttons, Home, Reference, STOP and Override Access. Header spacing, Z jog spacing
 and layout margins are tighter; long error messages still wrap.
 
+Cameras defaults to 900 × 700 with smaller margins and one row per exposure
+slider and value. All six overview/detail views, three camera connections,
+sample-position controls and five instrument monitors remain visible. The
+window grows if detected-camera descriptions require more height.
+
+Laser Control opens at 980 × 680. Settings and three optical readouts sit above
+the alignment controls beside the response plot; stage position readouts, speed
+presets, jog buttons, Home, Reference, STOP and Override Access occupy the row
+below. Both plot tabs, alignment settings and CLI/NKTPBus controls remain
+available. Fields accommodate their maximum values and speed presets, and
+connection and alignment messages still wrap.
+
+Visualization opens at 980 × 620. The four upper rectangular panels have
+identical pixel dimensions at every window size. Compact voltage controls and
+two rows of spectrum controls reduce the width needed without removing any
+plot, calibration view, status indicator or input. Smaller screens use scrolling.
+The following Cameras, Laser and Visualization screenshots show layouts without
+connected hardware or acquired data.
+
 - Gates: ![Gates GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/gates_gui.png?raw=True)
 - Pumps/Vacuum: ![Pumps GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/pumps_gui.png?raw=True)
 - Cameras: ![Cameras GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/cameras_gui.png?raw=True)

@@ -21,6 +21,7 @@ from pyccapt.control.gui.stage_control_widgets import (
 from pyccapt.control.nkt_photonics import nktpbus_switch, origamiClassCLI, readback
 from pyccapt.control.gui.laser_readouts import LaserReadoutMixin
 from pyccapt.control.gui.laser_alignment_gui import LaserAlignmentGuiMixin
+from pyccapt.control.gui.laser_layout import LaserLayoutMixin
 from pyccapt.control.smaract_mcs2 import mcs2_stage
 
 
@@ -65,7 +66,7 @@ def _available_serial_ports_text():
 _parse_first_number = readback.scalar
 
 
-class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin):
+class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMixin):
     def __init__(self, variables, conf):
         """
         Initialize the Ui_Laser_Control class.
@@ -98,7 +99,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin):
             None
         """
         Laser_Control.setObjectName("Laser_Control")
-        Laser_Control.resize(1003, 345)
+        Laser_Control.resize(980, 680)
         self.gridLayout_6 = QtWidgets.QGridLayout(Laser_Control)
         self.gridLayout_6.setObjectName("gridLayout_6")
         self.gridLayout_5 = QtWidgets.QGridLayout()
@@ -626,7 +627,6 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin):
 
         self.retranslateUi(Laser_Control)
         QtCore.QMetaObject.connectSlotsByName(Laser_Control)
-        make_window_responsive(Laser_Control)
         tooltips.apply_tooltips(self, tooltips.LASER_TOOLTIPS)
         Laser_Control.setTabOrder(self.laser_wavelegnth, self.laser_rate)
         Laser_Control.setTabOrder(self.laser_rate, self.laser_enable)
@@ -756,6 +756,8 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin):
             self._update_stage_speed_label(selector)
         self._connect_stage_device()
         self._setup_laser_alignment(Laser_Control)
+        self._setup_compact_laser_layout(Laser_Control)
+        make_window_responsive(Laser_Control)
 
     # ------------------------------------------------------------------
     # SmarAct laser focusing stage

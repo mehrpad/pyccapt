@@ -10,12 +10,13 @@ from PyQt6.QtCore import QTimer
 
 # Local module and scripts
 from pyccapt.control.gui.responsive import make_window_responsive
+from pyccapt.control.gui.visualization_layout import VisualizationLayoutMixin
 from pyccapt.control.core import live_calibration, runtime, tof2mc_simple
 from pyccapt.control.devices import initialize_devices
 from pyccapt.control.gui import tooltips
 
 
-class Ui_Visualization(object):
+class Ui_Visualization(VisualizationLayoutMixin):
     def __init__(self, variables, conf, x_plot, y_plot, t_plot, main_v_dc_plot):
         """
         Constructor for the Visualization UI class.
@@ -144,7 +145,7 @@ class Ui_Visualization(object):
         None
         """
         Visualization.setObjectName("Visualization")
-        Visualization.resize(822, 647)
+        Visualization.resize(980, 620)
         self.gridLayout_6 = QtWidgets.QGridLayout(Visualization)
         self.gridLayout_6.setObjectName("gridLayout_6")
         self.gridLayout_5 = QtWidgets.QGridLayout()
@@ -593,6 +594,7 @@ class Ui_Visualization(object):
         self.gridLayout_6.addLayout(self.gridLayout_5, 0, 0, 1, 1)
 
         self.retranslateUi(Visualization)
+        self._setup_compact_visualization_layout(Visualization)
         QtCore.QMetaObject.connectSlotsByName(Visualization)
         make_window_responsive(Visualization)
         tooltips.apply_tooltips(self, tooltips.VISUALIZATION_TOOLTIPS)

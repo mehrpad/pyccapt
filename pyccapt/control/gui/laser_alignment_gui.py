@@ -22,6 +22,7 @@ class LaserAlignmentGuiMixin:
         self.gridLayout_5.removeWidget(self.start_scanning)
         self.start_scanning.hide()
         panel = QtWidgets.QGroupBox('Laser alignment', parent)
+        self.laser_alignment_panel = panel
         layout = QtWidgets.QGridLayout(panel)
         self.laser_auto_alignment = QtWidgets.QCheckBox('Align when experiment starts')
         self.laser_tracking = QtWidgets.QCheckBox('Track during experiment')

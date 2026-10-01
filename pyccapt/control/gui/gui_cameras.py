@@ -14,6 +14,7 @@ from pyccapt.control.gui.responsive import make_window_responsive
 from pyccapt.control.core import runtime
 from pyccapt.control.devices import arduino_illumination, camera
 from pyccapt.control.gui import tooltips
+from pyccapt.control.gui.camera_layout import CameraLayoutMixin
 
 
 ILLUMINATION_RGB = {
@@ -44,7 +45,7 @@ def exposure_slider_to_us(position):
     return round(10 ** (low + fraction * span))
 
 
-class Ui_Cameras_Alignment(object):
+class Ui_Cameras_Alignment(CameraLayoutMixin):
     def __init__(self, variables, conf, SignalEmitter):
         """
         Initialize the UiCamerasAlignment class.
@@ -83,9 +84,7 @@ class Ui_Cameras_Alignment(object):
         None
         """
         Cameras_Alignment.setObjectName("Cameras_Alignment")
-        # Keep the current opening size; image minimums allow a smaller viewport
-        # while retaining the overview/detail arrangement and readable controls.
-        Cameras_Alignment.resize(970, 750)
+        Cameras_Alignment.resize(900, 700)
         self.gridLayout_5 = QtWidgets.QGridLayout(Cameras_Alignment)
         self.gridLayout_5.setObjectName("gridLayout_5")
         self.gridLayout_4 = QtWidgets.QGridLayout()
@@ -604,6 +603,7 @@ class Ui_Cameras_Alignment(object):
         self.gridLayout_5.addWidget(self.camera_status_label, 1, 0, 1, 1)
 
         self.retranslateUi(Cameras_Alignment)
+        self._setup_compact_camera_layout()
         QtCore.QMetaObject.connectSlotsByName(Cameras_Alignment)
         make_window_responsive(Cameras_Alignment)
         tooltips.apply_tooltips(self, tooltips.CAMERAS_TOOLTIPS)
@@ -734,13 +734,13 @@ class Ui_Cameras_Alignment(object):
         self.led_light.setText("")
         self.light.setText(_translate("Cameras_Alignment", "Light On / Off"))
         self.illumination_percent_label.setText(_translate("Cameras_Alignment", "Dimming"))
-        self.led_light_2.setText(_translate("Cameras_Alignment", "Exposure Time Side (us)"))
+        self.led_light_2.setText(_translate("Cameras_Alignment", "Side exposure (µs)"))
         self.exposure_time_cam_1.setText(_translate("Cameras_Alignment", "2000000"))
         self.exposure_time_cam_2.setText(_translate("Cameras_Alignment", "1000000"))
         self.exposure_time_cam_3.setText(_translate("Cameras_Alignment", "2000000"))
-        self.led_light_3.setText(_translate("Cameras_Alignment", "Exposure Time Top (us)"))
+        self.led_light_3.setText(_translate("Cameras_Alignment", "Top exposure (µs)"))
         self.default_exposure_time.setText(_translate("Cameras_Alignment", "Manual Exposure Time"))
-        self.led_light_4.setText(_translate("Cameras_Alignment", "Exposure Time Angle (us)"))
+        self.led_light_4.setText(_translate("Cameras_Alignment", "Angle exposure (µs)"))
 
         ###
         self.timer = QtCore.QTimer()
@@ -1296,6 +1296,7 @@ class Ui_Cameras_Alignment(object):
         layout.setSpacing(6)
         label = QtWidgets.QLabel(parent=row)
         label.setMinimumWidth(130)
+        label.setWordWrap(True)
         label.setStyleSheet("font-size: 9px;")
         layout.addWidget(label, 1)
         connect_btn = QtWidgets.QPushButton("Connect", parent=row)

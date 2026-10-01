@@ -201,6 +201,15 @@ Stage Control opens at 880 × 220. Its nine position readouts and speed selector
 use compact widths, with less spacing around the headers and Z jog buttons.
 All axis controls, Home, Reference, STOP and Override Access remain visible.
 
+Cameras uses a narrower 900 × 700 default window, with each exposure slider and
+value on one row. All six camera views, camera connections, sample positions
+and instrument monitors remain available. Laser Control opens at 980 × 680:
+laser settings, readouts and alignment controls sit beside the response plot,
+with all stage controls below. Visualization opens at 980 × 620, with compact
+fields and two rows of spectrum controls. Its four upper rectangular panels
+always have identical widths and heights, including during window resizing.
+These windows scroll on smaller screens so controls remain accessible.
+
 Vacuum logs are written under `pyccapt/files/logs/vacuum`, and baking logs are written under `pyccapt/files/logs/baking/<timestamp>`.
 
 ## Calibration Highlights

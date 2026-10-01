@@ -190,6 +190,14 @@ The automatic stage alignment monitor still opens at 660 × 350 logical pixels.
 
 Detailed sub-GUI snapshots:
 
+Pumps/Vacuum groups cryo temperatures and their target control, the three venting
+buttons, and the six Buffer/LL/CLL chamber/pre-vacuum LCDs in bordered boxes.
+The six LCDs occupy two rows of three, retaining their 150 × 50 sizes and warning
+colours. The combined Pumps/Vacuum and Gates window opens at 1280 × 640, and the
+standalone Pumps/Vacuum window opens at 840 × 720. Vacuum history, Gates controls,
+load-lock temperature/baking controls and error messages remain available;
+smaller monitors scroll without hiding controls.
+
 - Gates: ![Gates GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/gates_gui.png?raw=True)
 - Pumps/Vacuum: ![Pumps GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/pumps_gui.png?raw=True)
 - Cameras: ![Cameras GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/cameras_gui.png?raw=True)

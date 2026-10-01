@@ -2616,7 +2616,7 @@ class Ui_PyCCAPT(AlignmentGuiMixin, ExperimentPlanGuiMixin, MainLayoutMixin):
         self.gui_pumps_vacuum.gridLayout_9.addWidget(self.Gates, 0, 1, 1, 1)
         # Fit the unified tool around its controls and compact error rows;
         # avoid forcing a large unused area below the Gates/Pumps content.
-        self.Pumps_vacuum.resize(1480, 650)
+        self.Pumps_vacuum.resize(1280, 640)
         self.Pumps_vacuum.setWindowTitle("PyCCAPT Pumps, Vacuum and Gates Control")
         self.Pumps_vacuum.closed.connect(self._combined_vacuum_gates_closed)
         self.variables.flag_pumps_vacuum_start = True

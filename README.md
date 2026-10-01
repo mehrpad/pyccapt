@@ -191,6 +191,12 @@ For device toggles, prefer `enabled` and `disabled`. Legacy `on` and `off` value
 
 The control stack includes the main acquisition GUI together with dedicated windows for gates, pumps and vacuum, cameras, laser, stage control, visualization, and baking. Startup reports unavailable configured ports clearly, GUI error boxes wrap long messages, and `Access Override` now asks for confirmation before allowing a run to proceed with missing enabled devices.
 
+The combined Pumps/Vacuum and Gates window opens at 1280 × 640. Bordered boxes
+group cryo temperatures and their target control, the three venting buttons, and
+all six Buffer/LL/CLL chamber and pre-vacuum displays. The gauge displays keep
+their existing sizes and colours; the vacuum plots, Gates controls and load-lock
+temperature controls remain visible. Smaller monitors use scrolling as needed.
+
 Vacuum logs are written under `pyccapt/files/logs/vacuum`, and baking logs are written under `pyccapt/files/logs/baking/<timestamp>`.
 
 ## Calibration Highlights

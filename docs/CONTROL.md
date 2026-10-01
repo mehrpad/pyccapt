@@ -194,6 +194,13 @@ The main window is the experiment entry point. Long error messages now use a sma
 
 Sub-GUI views:
 
+Pumps/Vacuum uses bordered Cryo temperature, Venting and Buffer/LL/CLL vacuum
+groups. The six chamber/pre-vacuum LCDs are arranged in two rows of three and
+retain their 150 × 50 sizes and warning colours. The combined Pumps/Vacuum and
+Gates window opens at 1280 × 640; standalone Pumps/Vacuum opens at 840 × 720.
+The vacuum history plots, Gates controls, load-lock temperature controls and
+error messages remain available, with scrolling on smaller monitors.
+
 - Gates: ![Gates GUI](../pyccapt/files/readme_images/gates_gui.png)
 - Pumps/Vacuum: ![Pumps GUI](../pyccapt/files/readme_images/pumps_gui.png)
 - Cameras: ![Cameras GUI](../pyccapt/files/readme_images/cameras_gui.png)

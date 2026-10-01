@@ -29,6 +29,7 @@ from pyccapt.control.core import runtime
 from pyccapt.control.devices import initialize_devices
 from pyccapt.control.gui import tooltips
 from pyccapt.control.gui.vacuum_history import VACUUM_CHANNELS, VacuumHistory
+from pyccapt.control.gui.pump_layout import PumpLayoutMixin
 
 
 VACUUM_WINDOWS = {
@@ -42,7 +43,7 @@ VACUUM_WINDOWS = {
 }
 
 
-class Ui_Pumps_Vacuum(object):
+class Ui_Pumps_Vacuum(PumpLayoutMixin):
     def __init__(self, variables, conf, SignalEmitter, parent=None):
         """
         Constructor for the Pumps and Vacuum UI class.
@@ -92,7 +93,7 @@ class Ui_Pumps_Vacuum(object):
                 None
         """
         Pumps_Vacuum.setObjectName("Pumps_Vacuum")
-        Pumps_Vacuum.resize(1100, 700)
+        Pumps_Vacuum.resize(840, 720)
         self.gridLayout_9 = QtWidgets.QGridLayout(Pumps_Vacuum)
         self.gridLayout_9.setObjectName("gridLayout_9")
         self.verticalLayout = QtWidgets.QVBoxLayout()
@@ -534,6 +535,7 @@ class Ui_Pumps_Vacuum(object):
         self.verticalLayout.addLayout(self.gridLayout_8)
         self.gridLayout_9.addLayout(self.verticalLayout, 0, 0, 1, 1)
 
+        self._setup_compact_pump_layout(Pumps_Vacuum)
         self.retranslateUi(Pumps_Vacuum)
         QtCore.QMetaObject.connectSlotsByName(Pumps_Vacuum)
         make_window_responsive(Pumps_Vacuum)

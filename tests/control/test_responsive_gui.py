@@ -158,7 +158,7 @@ def instrument_window(request, app, monkeypatch, tmp_path):
         gates_ui.setupUi(gates)
         gates_ui.attach_load_lock_temperature_controls(ui)
         ui.gridLayout_9.addWidget(gates, 0, 1)
-        window.resize(1480, 650)
+        window.resize(1280, 640)
         gates_ui.diagram_timer.stop()
     for timer in window.findChildren(QtCore.QTimer):
         timer.stop()
@@ -278,6 +278,43 @@ def test_main_advanced_dialog_and_run_controls_layout(instrument_window, tmp_pat
     ui.parameters_source.setCurrentText('TextBox')
     assert ui.advanced_settings_button.isEnabled()
     print(f'Advanced dialog preview: {tmp_path}')
+
+
+@pytest.mark.parametrize('instrument_window', ['vacuum', 'combined'], indirect=True)
+def test_pump_groups_keep_displays_and_controls_visible(instrument_window, tmp_path):
+    window, ui, app = instrument_window
+    window.show()
+    for _ in range(5):
+        app.processEvents()
+    combined = isinstance(ui.temp_ll.parentWidget(), QtWidgets.QGroupBox)
+    assert window.width() <= (1280 if combined else 840)
+    assert window.height() <= (640 if combined else 720)
+    gauges = (ui.vacuum_buffer, ui.vacuum_buffer_back, ui.vacuum_load_lock,
+              ui.vacuum_load_lock_back, ui.vacuum_cryo_load_lock, ui.vacuum_cryo_load_lock_back)
+    for lcd in gauges:
+        assert ui.vacuum_gauges_group.isAncestorOf(lcd)
+        assert lcd.size() == QtCore.QSize(150, 50)
+    for widget in (ui.temp_stage, ui.temp_cryo_head, ui.temp_cryo_head_inside,
+                   ui.set_temperature_cryo, ui.target_tempreature_cryo):
+        assert ui.cryo_temperature_group.isAncestorOf(widget)
+    for button in (ui.pump_cryo_load_lock_switch, ui.vent_cryo_load_lock_partial_switch,
+                   ui.pump_load_lock_switch):
+        assert ui.venting_group.isAncestorOf(button)
+    ui.emitter.temp_stage.emit(42.5)
+    ui.emitter.temp_cryo_head.emit(50.25)
+    ui.emitter.temp_cryo_head_inside.emit(49.75)
+    assert ui.temp_stage.value() == 42.5
+    assert ui.temp_cryo_head.value() == 50.25
+    assert ui.temp_cryo_head_inside.value() == 49.75
+    assert not ui.pump_cryo_load_lock_switch.isEnabled()
+    viewport = window._responsive_window.scroll.viewport()
+    assert window._responsive_window.scroll.horizontalScrollBar().maximum() == 0
+    assert window._responsive_window.scroll.verticalScrollBar().maximum() == 0
+    for widget in window.findChildren((QtWidgets.QLCDNumber, QtWidgets.QPushButton, QtWidgets.QSpinBox)):
+        assert widget.isVisible()
+        assert viewport.rect().contains(QtCore.QRect(widget.mapTo(viewport, QtCore.QPoint()), widget.size()))
+    window.grab().save(str(tmp_path/'pumps.png'))
+    print(f'Pump GUI preview: {tmp_path}')
 
 
 @pytest.mark.parametrize('instrument_window', [

@@ -39,6 +39,22 @@ class AlignmentStageService:
         self.active = None
         self.settled_since = None
 
+    def _check_interlocks(self, kind, now):
+        if not self.v.physical_estop_ok:
+            raise ValueError('Physical interlock opened during automatic stage movement.')
+        if kind == 'transfer':
+            if not self.v.hardware_safe:
+                raise ValueError('Sample transfer requires completed output shutdown.')
+        elif kind == 'alignment':
+            if not self.v.start_flag or self.v.experiment_state != 'running':
+                raise ValueError('Alignment movement requested outside a running experiment.')
+            if self.v.electrode_out or self.v.flag_tdc_failure:
+                raise ValueError('Electrode / detector interlock lost during sample alignment.')
+            if not -0.1 <= now-float(self.v.experiment_heartbeat_monotonic) <= 3:
+                raise ValueError('Experiment heartbeat lost; stopping sample stage movement.')
+        else:
+            raise ValueError('Unknown automatic stage movement kind.')
+
     def tick(self, now=None):
         live_clock = now is None
         now = time.monotonic() if now is None else now
@@ -66,10 +82,7 @@ class AlignmentStageService:
                 checked_at = time.monotonic() if live_clock else now
                 if not 0 <= checked_at-float(request['issued']) <= 2:
                     raise ValueError('Expired automatic stage command.')
-                if request['kind'] == 'transfer' and not self.v.hardware_safe:
-                    raise ValueError('Sample transfer requires completed output shutdown.')
-                if request['kind'] == 'alignment' and not self.v.start_flag:
-                    raise ValueError('Alignment movement requested outside an experiment.')
+                self._check_interlocks(request['kind'], checked_at)
                 target = np.asarray(request['target_m'], dtype=float)
                 cfg.check_position(target)
                 current = device.get_position()
@@ -108,7 +121,7 @@ class AlignmentStageService:
                     raise ValueError('Automatic stage velocity exceeds calibrated limit.')
                 if device.is_moving():
                     raise ValueError('Stage is already moving before an automatic command.')
-                self.active = (target, now, cfg)
+                self.active = (target, now, cfg, request['kind'])
                 self.settled_since = None
                 self._reply('moving')
                 device.move_absolute(**{axis+'_m': float(value) if change else None
@@ -123,9 +136,8 @@ class AlignmentStageService:
                         raise ValueError('Sample stage disconnected during automatic alignment.')
                     self._publish_position(device.get_position(), time.monotonic() if live_clock else now)
                 return
-            target, started, cfg = self.active
-            if request['kind'] == 'transfer' and not self.v.hardware_safe:
-                raise ValueError('Output shutdown was lost during sample transfer.')
+            target, started, cfg, kind = self.active
+            self._check_interlocks(kind, time.monotonic() if live_clock else now)
             device.validate_alignment_state()
             if now-started > cfg.move_timeout_s:
                 raise ValueError('Automatic stage movement timed out.')
@@ -140,7 +152,10 @@ class AlignmentStageService:
                 self.active = None
         except Exception as exc:
             if device is not None:
-                device.stop()
+                try:
+                    device.stop()
+                except Exception:
+                    pass  # Publish the fault even if controller communication failed.
             self._reply('error', str(exc))
             self.active = None
             self.v.alignment_cancel_motion = True

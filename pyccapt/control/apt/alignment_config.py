@@ -28,7 +28,7 @@ class AlignmentConfig:
     area_target: float = 0.90
     xy_range_um: tuple = (50.0, 50.0)
     fine_xy_range_um: float = 15.0
-    xy_step_um: float = 1.0
+    xy_step_um: float = 10.0
     fine_xy_step_um: float = 0.1
     fine_probe_step_um: float = 1.0
     xy_speed_um_s: float = 100.0
@@ -39,7 +39,7 @@ class AlignmentConfig:
     z_max_advance_um: float = 0.0
     approach_enabled: bool = False
     transfer_z_mm: float = 0.0
-    transfer_speed_um_s: float = 10.0
+    transfer_speed_um_s: float = 300.0
     position_tolerance_um: float = 0.02
     settle_s: float = 0.5
     move_timeout_s: float = 120.0
@@ -110,9 +110,11 @@ class AlignmentConfig:
             raise ValueError('Alignment XY Jacobian must be an invertible measured 2 by 2 matrix or empty for detector feedback.')
         if ranges.shape != (2,) or not np.isfinite(ranges).all() or np.any(ranges <= 0):
             raise ValueError('Configure positive calibrated alignment_xy_range_um values for X and Y.')
-        # +/-50 um at the existing 1 um spacing contains 101 x 101 positions.
         if np.prod(2 * np.ceil(ranges / self.xy_step_um) + 1) > 20000:
             raise ValueError('Alignment search grid exceeds 20000 positions.')
+        if self.coarse_scan_duration_s() >= self.timeout_s:
+            raise ValueError('A complete coarse alignment sweep and voltage retry exceed the alignment timeout. '
+                             'Increase XY step or timeout, or reduce XY range / dwell.')
         if self.z_direction not in (-1, 1):
             raise ValueError('Set alignment_z_direction to +1 or -1, toward the electrode.')
         if self.approach_enabled and self.z_max_advance_um <= 0:
@@ -138,6 +140,18 @@ class AlignmentConfig:
 
     def snapshot(self):
         return asdict(self)
+
+    def coarse_scan_duration_s(self):
+        """Nominal full sweep, origin return and one DC increment, including polling allowance."""
+        previous = np.zeros(3)
+        duration = self.voltage_increment/self.ramp_v_s
+        for point in coarse_positions((0., 0., 0.), self):
+            point = np.asarray(point)
+            duration += (self.dwell_s + self.settle_s + 0.5
+                         + np.max(np.abs(point-previous))*1e6/self.xy_speed_um_s)
+            previous = point
+        return float(duration + self.settle_s + 0.5
+                     + np.max(np.abs(previous))*1e6/self.xy_speed_um_s)
 
     def check_fine_position(self, target, centre):
         target = np.asarray(target, dtype=float)

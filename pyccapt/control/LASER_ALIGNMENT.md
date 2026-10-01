@@ -11,7 +11,9 @@ bounded to 5,000 measurements and updates at most five times per second.
 
 - **Align when experiment starts**: start the full sequence in a Laser-mode
   experiment. If specimen alignment is also selected, finish specimen alignment
-  first. Each new experiment/sample starts a separate laser alignment session.
+  first in that same Laser-mode experiment, then hand voltage control to the
+  laser search. Both searches use the lower specimen/laser alignment DC ceiling.
+  Each new experiment/sample starts a separate laser alignment session.
 - **Coarse Alignment**: start coarse XY, fine XY, focus Z, then final fine XY
   during an existing Laser-mode experiment.
 - **Fine Alignment**: enter at fine XY, then focus Z and final fine XY.
@@ -36,7 +38,10 @@ Laser pulse mode with a Surface Concept or RoentDek TDC, not Voltage + Laser/DRS
 
 1. Hold DC and laser settings during each scan; suspend PID evaluation to avoid
    accumulating integral corrections. Use a serpentine XY raster, then successively
-   smaller fine scans. Z moves and XY moves are separate.
+   smaller fine scans. Scan axes are clipped to the intersection of absolute
+   calibrated limits and the session's permitted travel. An optimum at a boundary
+   receives an inward scan, including centre baselines, without enlarging either
+   limit. Z moves and XY moves are separate.
 2. Wait for acknowledged stage position and a configured settling interval.
 3. Request a new detector epoch. Discard its first packet because it may contain
    pre-settle events, then collect an independent count/TOF window. Visualization
@@ -47,7 +52,10 @@ Laser pulse mode with a Surface Concept or RoentDek TDC, not Voltage + Laser/DRS
    a claimed improvement must exceed statistical and fractional thresholds.
 5. Revisit and measure the selected candidate before accepting it. A flat or
    statistically inconclusive improvement retains the original centre when that
-   centre already has valid signal.
+   centre already has valid signal. A displaced candidate's verification must
+   preserve a statistically and fractionally significant improvement over the
+   higher of the initial and repeated centre responses. Repeatability relative
+   to the candidate alone cannot authorize a move with a worse verified response.
 6. After three failed fine/focus attempts, return to coarse search. The total
    recovery count and search duration are bounded. Failure requests the normal
    experiment shutdown, with an error visible in the main GUI and laser status.

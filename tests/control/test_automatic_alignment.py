@@ -14,7 +14,7 @@ from pyccapt.control.devices.alignment_stage import AlignmentStageService, trans
 
 def settings(**changes):
     cfg = AlignmentConfig(motion_calibrated=True, bounds_mm=((-1, 1), (-1, 1), (-1, 1)),
-                          xy_range_um=(1., 1.), xy_jacobian_mm_per_um=((1., 0.), (0., 1.)),
+                          xy_range_um=(1., 1.), xy_step_um=1., xy_jacobian_mm_per_um=((1., 0.), (0., 1.)),
                           z_direction=1, transfer_z_mm=-0.5)
     return replace(cfg, **changes)
 
@@ -45,7 +45,9 @@ def state(cfg, tmp_path):
                            alignment_cancel_motion=False, automatic_alignment_enabled=True,
                            alignment_stage_heartbeat=0., stage_position_snapshot=(0., 0., 0., 0.),
                            alignment_events={}, alignment_window_epoch='', alignment_outcome='',
-                           alignment_move_request={}, alignment_move_status={}, hardware_safe=False)
+                           alignment_move_request={}, alignment_move_status={}, hardware_safe=False,
+                           physical_estop_ok=True, experiment_state='running',
+                           experiment_heartbeat_monotonic=0., electrode_out=False, flag_tdc_failure=False)
 
 
 class Rig:
@@ -113,16 +115,19 @@ def test_requested_stage_ranges_accept_full_coarse_grid():
     assert cfg.motion_calibrated
     assert cfg.z_direction == 1
     assert cfg.transfer_z_mm == -4.
+    assert cfg.transfer_speed_um_s == 300.
     assert cfg.xy_speed_um_s == 100.
     assert cfg.fine_xy_speed_um_s == 16.
+    assert cfg.xy_step_um == 10.
     cfg.validate_motion([(0., 0., -3e-3)])
-    calibrated = settings(xy_range_um=cfg.xy_range_um, fine_xy_range_um=cfg.fine_xy_range_um)
+    calibrated = settings(xy_range_um=cfg.xy_range_um, fine_xy_range_um=cfg.fine_xy_range_um,
+                          xy_step_um=cfg.xy_step_um)
     calibrated.validate_motion([(0., 0., 0.)])
-    assert len(list(coarse_positions((0., 0., 0.), calibrated))) == 10201
+    assert len(list(coarse_positions((0., 0., 0.), calibrated))) == 121
 
 
 def test_fine_range_is_relative_to_coarse_result():
-    cfg = settings(xy_range_um=(50., 50.))
+    cfg = settings(xy_range_um=(50., 50.), xy_step_um=10.)
     centre = (20e-6, -10e-6, 0.)
     cfg.check_fine_position((35e-6, 5e-6, 0.), centre)
     with pytest.raises(ValueError, match='fine|Fine'):
@@ -130,7 +135,7 @@ def test_fine_range_is_relative_to_coarse_result():
 
 
 def test_fine_range_limit_recovers_before_excess_move(tmp_path):
-    rig = Rig(tmp_path, settings(xy_range_um=(50., 50.), fine_xy_range_um=.15, fine_probe_step_um=.1),
+    rig = Rig(tmp_path, settings(xy_range_um=(50., 50.), xy_step_um=10., fine_xy_range_um=.15, fine_probe_step_um=.1),
               Footprint(True, 'signal', centre_mm=(5., 0.), radius_mm=10.))
     rig.until(lambda: rig.engine.attempts == 1, rate=.4)
     centre = rig.engine.fine_origin
@@ -257,7 +262,7 @@ def test_fine_correction_uses_calibration_and_bounded_step(tmp_path):
 
 
 def test_detector_feedback_fine_alignment_works_without_fixed_jacobian(tmp_path):
-    cfg = settings(xy_jacobian_mm_per_um=(), xy_range_um=(50., 50.))
+    cfg = settings(xy_jacobian_mm_per_um=(), xy_range_um=(50., 50.), xy_step_um=10.)
     rig = Rig(tmp_path, cfg)
     def live_fit(*_):
         x, y, _z = rig.v.stage_position_snapshot[:3]
@@ -467,7 +472,7 @@ def test_stage_service_rejects_unsafe_requests(tmp_path, target, speed, kind):
 
 
 def test_stage_service_rejects_fine_motion_beyond_15_um(tmp_path):
-    v = state(settings(xy_range_um=(50., 50.)), tmp_path)
+    v = state(settings(xy_range_um=(50., 50.), xy_step_um=10.), tmp_path)
     v.alignment_move_request = dict(id='fine', target_m=(16e-6, 0., 0.),
                                    fine_origin_m=(0., 0., 0.), speed_um_s=1.,
                                    kind='alignment', issued=0.)
@@ -478,7 +483,7 @@ def test_stage_service_rejects_fine_motion_beyond_15_um(tmp_path):
 
 
 def test_stage_service_rejects_fine_speed_above_limit(tmp_path):
-    v = state(settings(xy_range_um=(50., 50.)), tmp_path)
+    v = state(settings(xy_range_um=(50., 50.), xy_step_um=10.), tmp_path)
     v.alignment_move_request = dict(id='fast-fine', target_m=(1e-6, 0., 0.),
                                     fine_origin_m=(0., 0., 0.), speed_um_s=17.,
                                     kind='alignment', issued=0.)
@@ -513,6 +518,7 @@ def test_stage_request_published_during_read_is_not_expired(tmp_path, monkeypatc
                             speed_um_s=1., kind='alignment', issued=clock[0])
             return super().__getattribute__(name)
     v = UpdatingState(**vars(state(settings(), tmp_path)))
+    v.experiment_heartbeat_monotonic = clock[0]
     motor = Motor()
     service = AlignmentStageService(v, lambda: motor)
     monkeypatch.setattr('time.monotonic', lambda: clock[0])
@@ -526,3 +532,85 @@ def test_transfer_retracts_traverses_then_approaches_saved_position():
     target = (2e-4, 3e-4, .1e-3)
     points = transfer_waypoints((0, 0, 0), target, settings())
     assert points == [(0, 0, -.5e-3), (target[0], target[1], -.5e-3), target]
+
+
+def test_all_rejected_feedback_directions_recover_instead_of_repeating(tmp_path):
+    rig = Rig(tmp_path, settings(xy_jacobian_mm_per_um=()),
+              Footprint(True, 'unchanged centre', (2., 2.), 10.))
+    rig.until(lambda: rig.engine.phase == 'fine', rate=.4)
+    rig.until(lambda: rig.engine.pending and rig.engine.pending[2] == 'recover_xy', rate=.4)
+    events = [json.loads(line) for line in (tmp_path/'alignment.jsonl').read_text().splitlines()]
+    probes = [event for event in events if event['event'] == 'fine_probe']
+    assert len(probes) == 4
+    assert sum(event['event'] == 'fine_probe_rejected' for event in events) == 4
+    assert rig.engine.attempts == 1
+    rig.until(lambda: rig.engine.phase == 'coarse', rate=0.)
+
+
+@pytest.mark.parametrize('field,value', [
+    ('physical_estop_ok', False), ('experiment_state', 'failed'),
+    ('experiment_heartbeat_monotonic', -10.), ('electrode_out', True),
+    ('flag_tdc_failure', True), ('start_flag', False),
+])
+@pytest.mark.parametrize('during_move', [False, True])
+def test_stage_interlocks_prevent_or_stop_motion(tmp_path, field, value, during_move):
+    v = state(settings(), tmp_path)
+    v.alignment_move_request = dict(id='guarded', target_m=(1e-6, 0., 0.),
+                                   speed_um_s=1., kind='alignment', issued=0.)
+    motor = Motor()
+    service = AlignmentStageService(v, lambda: motor)
+    if during_move:
+        service.tick(now=0.)
+        assert service.active is not None
+    setattr(v, field, value)
+    service.tick(now=.1)
+    assert v.alignment_cancel_motion and motor.stopped
+    assert v.alignment_move_status['id'] == 'guarded'
+    assert v.alignment_move_status['state'] == 'error'
+    assert len(motor.moves) == int(during_move)
+
+
+def test_transfer_does_not_require_live_experiment_but_checks_physical_interlock(tmp_path):
+    v = state(settings(), tmp_path)
+    v.start_flag = False
+    v.experiment_state = 'complete'
+    v.experiment_heartbeat_monotonic = -100.
+    v.hardware_safe = True
+    v.alignment_move_request = dict(id='transfer', target_m=(0., 0., -.5e-3),
+                                   speed_um_s=1., kind='transfer', issued=0.)
+    motor = Motor()
+    service = AlignmentStageService(v, lambda: motor)
+    service.tick(now=0.)
+    assert motor.moves and service.active is not None
+    v.physical_estop_ok = False
+    service.tick(now=.1)
+    assert v.alignment_cancel_motion and motor.stopped
+
+
+def test_motion_fault_is_reported_even_when_stop_raises(tmp_path):
+    v = state(settings(), tmp_path)
+    v.alignment_move_request = dict(id='broken', target_m=(1e-6, 0., 0.),
+                                   speed_um_s=1., kind='alignment', issued=0.)
+    motor = Motor()
+    motor.stop = lambda: (_ for _ in ()).throw(OSError('controller disconnected'))
+    v.physical_estop_ok = False
+    AlignmentStageService(v, lambda: motor).tick(now=0.)
+    assert v.alignment_move_status['state'] == 'error' and v.alignment_cancel_motion
+
+
+def test_impossible_sweep_budget_is_rejected_before_movement():
+    cfg = settings(xy_range_um=(50., 50.))
+    with pytest.raises(ValueError, match='sweep.*timeout'):
+        cfg.validate_motion([(0., 0., 0.)])
+    cfg = replace(cfg, timeout_s=120000.)
+    cfg.validate_motion([(0., 0., 0.)])
+
+
+def test_default_full_sweep_reaches_voltage_retry_before_timeout(tmp_path):
+    cfg = settings(xy_range_um=(50., 50.), xy_step_um=10.)
+    rig = Rig(tmp_path, cfg)
+    rig.until(lambda: rig.engine.target_voltage > cfg.start_voltage, limit=4000)
+    assert rig.engine.phase == 'ramp'
+    assert rig.time < cfg.timeout_s
+    assert rig.v.stage_position_snapshot[:3] == rig.engine.origin
+    assert cfg.coarse_scan_duration_s() < cfg.timeout_s

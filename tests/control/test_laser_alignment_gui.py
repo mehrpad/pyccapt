@@ -75,3 +75,20 @@ def test_plot_history_resets_between_alignment_sessions(gui):
     ui.alignment_plot.append({**base, 'time': 2, 'session': 'two'})
     assert len(ui.alignment_plot.records) == 1
     assert ui.alignment_plot.session == 'two'
+
+
+@pytest.mark.parametrize('first_poll_fails', [False, True])
+def test_legacy_status_worker_survives_success_and_transient_failure(monkeypatch, caplog, first_poll_fails):
+    from pyccapt.control.gui.gui_laser_control import Worker
+    calls = []
+    def poll():
+        calls.append(True)
+        if len(calls) == 2:
+            worker.stop()
+        elif first_poll_fails:
+            raise OSError('serial timeout')
+    worker = Worker(poll)
+    monkeypatch.setattr(worker, 'msleep', lambda *_: None)
+    worker.run()
+    assert len(calls) == 2
+    assert ('Laser status poll failed' in caplog.text) == first_poll_fails

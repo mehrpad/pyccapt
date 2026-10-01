@@ -105,8 +105,46 @@ def test_editable_voltage_fields_and_positioning_precede_launch(gui):
             break
     assert ui.started == [(1, dict(x=0., y=0., z=0.), 'test')]
     assert len(motor.moves) == 3
+    assert all(move['velocity_m_s'] == pytest.approx(300e-6) for move in motor.moves)
     assert v.alignment_settings['voltage_increment'] == 125
     assert len(v.alignment_transfer_log) == 3
+    assert all(move['speed_um_s'] == 300. for move in v.alignment_transfer_log)
+
+
+def test_combined_alignment_launches_in_laser_mode_with_shared_voltage_ceiling(gui):
+    ui, v, motor, tick = gui
+    ui.conf.update(laser_alignment_calibrated=True, laser_alignment_bounds_mm=[-1., 1.]*3,
+                   laser_alignment_travel_um=[30., 30., 10.], laser_alignment_max_voltage=3000.)
+    v.laser_stage_snapshot = (0., 0., 0., 0.)
+    v.laser_alignment_enabled = True
+    v.pulse_mode = 'Laser'
+    ui._start_alignment_batch((1,))
+    assert not ui.errors
+    assert v.alignment_settings['max_voltage'] == 3000.
+    for _ in range(30):
+        tick()
+        if ui.started:
+            break
+    assert ui.started and v.pulse_mode == 'Laser'
+    assert v.automatic_alignment_enabled
+
+
+@pytest.mark.parametrize('invalid', ['Voltage mode', 'uncalibrated laser', 'start voltage above laser ceiling'])
+def test_combined_alignment_validates_laser_before_sample_transfer(gui, invalid):
+    ui, v, motor, tick = gui
+    ui.conf.update(laser_alignment_calibrated=True, laser_alignment_bounds_mm=[-1., 1.]*3,
+                   laser_alignment_travel_um=[30., 30., 10.])
+    v.laser_stage_snapshot = (0., 0., 0., 0.)
+    v.laser_alignment_enabled = True
+    v.pulse_mode = 'Laser'
+    if invalid == 'Voltage mode':
+        v.pulse_mode = 'Voltage'
+    elif invalid == 'uncalibrated laser':
+        ui.conf['laser_alignment_calibrated'] = False
+    else:
+        ui.conf['laser_alignment_max_voltage'] = 1000.
+    ui._start_alignment_batch((1,))
+    assert ui.errors and not motor.moves and not ui.started
 
 
 def test_single_start_completes_retract_xy_and_saved_z_before_experiment(gui):

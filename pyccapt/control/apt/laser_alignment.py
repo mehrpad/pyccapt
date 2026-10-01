@@ -118,23 +118,35 @@ class LaserAlignment:
     def _begin_scan(self, kind, centre, radius=None):
         self.kind = kind
         self.centre = tuple(centre)
+        self.cfg.check_position(self.centre, self.origin)
         self.records = []
+        lower = [max(self.cfg.bounds_mm[2*i]*1e-3,
+                     self.origin[i]-self.cfg.travel_um[i]*1e-6) for i in range(3)]
+        upper = [min(self.cfg.bounds_mm[2*i+1]*1e-3,
+                     self.origin[i]+self.cfg.travel_um[i]*1e-6) for i in range(3)]
         if kind == 'tracking':
             radius = self.cfg.tracking_step_um
             offsets = [(0, 0), (-radius, 0), (radius, 0), (0, -radius), (0, radius), (0, 0)]
-            points = [(centre[0]+x*1e-6, centre[1]+y*1e-6, centre[2]) for x, y in offsets]
+            points = [(float(np.clip(centre[0]+x*1e-6, lower[0], upper[0])),
+                       float(np.clip(centre[1]+y*1e-6, lower[1], upper[1])), centre[2])
+                      for x, y in offsets]
         else:
             radius = radius or getattr(self.cfg, kind+'_range_um')
             step = getattr(self.cfg, kind+'_step_um')
-            axis = np.linspace(-radius, radius, min(21, int(math.ceil(2*radius/step))+1))
+            def axis(i):
+                lo = max(lower[i], centre[i]-radius*1e-6)
+                hi = min(upper[i], centre[i]+radius*1e-6)
+                return np.linspace(lo, hi, min(21, int(math.ceil((hi-lo)*1e6/step-1e-9))+1))
             points = [tuple(centre)]
             if kind == 'focus':
-                points.extend((centre[0], centre[1], centre[2]+float(z)*1e-6) for z in axis)
+                points.extend((centre[0], centre[1], float(z)) for z in axis(2))
             else:
-                for row, y in enumerate(axis):
-                    points.extend((centre[0]+float(x)*1e-6, centre[1]+float(y)*1e-6, centre[2])
-                                  for x in (axis if row % 2 == 0 else axis[::-1]))
+                xs = axis(0)
+                for row, y in enumerate(axis(1)):
+                    points.extend((float(x), float(y), centre[2])
+                                  for x in (xs if row % 2 == 0 else xs[::-1]))
             points.append(tuple(centre))  # repeated baseline detects time drift
+        points = list(dict.fromkeys(points[:-1])) + [self.centre]
         # Validate the whole path before issuing its first command.
         for point in points:
             self.cfg.check_position(point, self.origin)
@@ -199,9 +211,10 @@ class LaserAlignment:
             return
         best = max(candidates, key=lambda r: r['rate_percent'])
         # A small apparent increase or a drifted baseline is not evidence for a move.
-        reference = max(self.records[0]['rate_percent'], self.records[-1]['rate_percent'])
+        self.reference = max((self.records[0], self.records[-1]), key=lambda r: r['rate_percent'])
+        reference = self.reference['rate_percent']
         threshold = max(reference*self.cfg.improvement_fraction,
-                        3*math.hypot(best['error_percent'], baseline['error_percent']))
+                        3*math.hypot(best['error_percent'], self.reference['error_percent']))
         if self._signal(baseline) and best['rate_percent']-reference <= threshold:
             best = baseline
         self.candidate = best
@@ -218,6 +231,16 @@ class LaserAlignment:
         if discrepancy > tolerance:
             self._move(self.centre, 'retry')
             return
+        displaced = any(abs(self.candidate['position_m'][i]-self.centre[i]) >
+                        self.cfg.tolerance_um*1e-6 for i in range(3))
+        if displaced and self._signal(self.reference):
+            threshold = max(self.reference['rate_percent']*self.cfg.improvement_fraction,
+                            3*math.hypot(measurement['error_percent'], self.reference['error_percent']))
+            if (measurement['rate_percent']-self.reference['rate_percent'] <= threshold
+                    or not self._quality_ok(measurement, self.records[0])):
+                self._event('verification_rejected', reason='Verified improvement over the scan centre was insufficient')
+                self._move(self.centre, 'retry')
+                return
         self.best_position = measurement['position_m']
         self._event('accepted', measurement=measurement)
         self.fine_failures = 0

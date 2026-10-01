@@ -13,14 +13,22 @@ inside the original ±50 µm envelope and the calibrated absolute stage bounds.
 Reaching the fine range limit returns to coarse recovery. These are ranges,
 not individual movement steps. Coarse XY uses 0.1 mm/s; fine XY uses 0.016 mm/s
 and evaluates detector events after each 1 µm probe.
-The coarse-grid guard allows up to 20,000 positions (the 1 µm grid at ±50 µm has
-10,201). The experiment/alignment timeouts still apply, so a full grid is not
-guaranteed to finish before the configured search deadline.
+The default coarse spacing is 10 µm, producing 121 positions across the ±50 µm
+envelope. A nominal complete sweep, origin return and voltage increment fit within
+the 30-minute alignment timeout. Fine detector-feedback probes remain 1 µm.
+Startup rejects settings whose estimated complete coarse sweep and first voltage
+retry exceed the alignment timeout. The estimate includes dwell, settling,
+configured travel speed and a polling allowance; hardware delays and time spent
+in fine alignment can still exhaust the overall deadline. A 1 µm coarse grid has
+10,201 positions and needs a longer explicitly configured timeout.
 
 ## Commissioning before physical movement
 
 The configured bounds are X [-2, 6], Y [-3, 7] and Z [-10, 7] mm. Increasing
 Z approaches the electrode; sample transfers retract to -4 mm before XY travel.
+All three positioning moves (Z retraction, XY transfer and return to saved Z)
+use `alignment_transfer_speed_um_s = 300`, or 0.3 mm/s, three times the previous
+0.1 mm/s transfer speed. Coarse and fine alignment speeds are configured separately.
 Every saved working sample Z must be greater than -4 mm. The startup validator
 checks that and the XY envelope. Detector events cannot establish electrode
 clearance or verify an unobstructed transfer path.
@@ -117,15 +125,24 @@ required for rendering; hardware-free tests validate data and lifecycle separate
 
 The service also checks the MCS2 referenced/sensor flags, controller fault bits,
 position bounds, velocity limits, motion completion and settling. A GUI heartbeat
-or position older than two seconds stops automatic alignment. Manual jog, Home
+or position older than two seconds stops automatic alignment. Alignment motion
+also requires a running experiment, an experiment heartbeat no older than three
+seconds, the electrode in, a healthy detector and a closed physical interlock.
+These checks apply before and throughout motion. Transfers require completed
+output shutdown and a closed physical interlock, without requiring a running
+experiment. Manual jog, Home
 and Reference are blocked throughout a sequence; Stage Stop cancels the sequence.
 
 ## Sequence
 
 1. Validate all selected sample positions and all run parameter sets up front.
    TextBox parameters are copied for each selected sample; TextLine blocks map
-   to selected samples in sample-number order. Voltage mode with an enabled DC
-   supply and Surface Concept or RoentDek position-resolving TDC is required.
+   to selected samples in sample-number order. Voltage or Laser mode with an
+   enabled DC supply and Surface Concept or RoentDek position-resolving TDC is
+   required. For combined sample-stage and laser alignment, select Laser mode
+   and enable **Align when experiment starts** in Laser Control. Validate laser
+   calibration up front; both searches share the lower sample/laser DC ceiling.
+   The sample stage aligns first, then the laser scan starts in the same run.
 2. With outputs shut down, move through the transfer path to the saved position.
    Wait for every movement/settling acknowledgement before normal experiment
    startup. The main status bar shows each of the three moves and remaining
@@ -155,6 +172,8 @@ and Reference are blocked throughout a sequence; Stage Stop cancels the sequence
    the remainder of the experiment. The 90% detector-area approach limit includes
    a conservative radius uncertainty; reaching it prevents additional approach.
    Voltage can still rise while the stage is stationary, within the alignment cap.
+   If all four permitted XY directions fail to improve centring, recover to the
+   saved position and restart coarse search instead of repeating the same probes.
 7. Sustained loss of sample signal during fine alignment triggers recovery:
    retract to the saved Z first, return to saved XY, then restart the XY search.
    The five-attempt limit counts fine-alignment entries, not voltage search steps.
@@ -180,6 +199,8 @@ and a short acquisition guard period; it does not reuse the previous footprint.
 Only complete windows with bounded age authorize movement. Backlog behaviour
 and acquisition timing must be verified in recorded-data/live-observation tests
 on the installed detector before enabling physical motion.
+Surface Concept and RoentDek detection rates use their actual monotonic elapsed
+measurement interval; a delayed update does not assume it still represents 0.5 s.
 
 The estimator uses 2000 events by default, masks the detector area, clips hot
 pixels, estimates background, smooths the density, extracts a half-contrast

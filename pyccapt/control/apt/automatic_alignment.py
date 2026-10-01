@@ -150,6 +150,7 @@ class AutomaticAlignment:
         self.fine_origin = self._position()
         self.probe_baseline = None
         self.probe_candidates = []
+        self.probe_origin = None
         self.probe_state = 'baseline'
         self._event('fine_started', centre_m=self.fine_origin,
                     range_um=self.cfg.fine_xy_range_um, source=source,
@@ -372,6 +373,7 @@ class AutomaticAlignment:
                             centre_mm=fit.centre_mm, improvement_mm=improvement)
                 self.probe_baseline = distance
                 self.probe_candidates = []
+                self.probe_origin = None
                 self.probe_state = 'baseline'
             else:
                 self._event('fine_probe_rejected', position_m=tuple(position),
@@ -385,6 +387,11 @@ class AutomaticAlignment:
         else:
             self.probe_baseline = distance
         if not self.probe_candidates:
+            if self.probe_origin is not None:
+                self._event('fine_range_reached', centre_m=self.fine_origin,
+                            reason='No tested XY direction improved centring')
+                self._recover()
+                return
             # Direction signs only prioritize probes; the detector measurement
             # decides whether a move is retained. Repeat at the new position.
             preferred = (1 if fit.centre_mm[0] > 0 else -1,

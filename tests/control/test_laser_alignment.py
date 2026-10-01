@@ -312,3 +312,63 @@ def test_metadata_failure_finishes_and_cancels_motion(tmp_path):
     e.finish('stop')
     assert v.laser_alignment_cancel and e.finished
     assert e.phase == 'failed' and 'disk full' in e.reason
+
+
+@pytest.mark.parametrize('verified_rate,retained', [(.86, False), (1.04, False), (1.08, True)])
+def test_tracking_verification_must_preserve_baseline_improvement(tmp_path, verified_rate, retained):
+    v, conf, now = rig(tmp_path)
+    e = LaserAlignment(v, conf, now=now)
+    e.pending = None
+    e.kind = 'tracking'
+    baseline = e._record(1., .003, 100000, {})
+    candidate = e._record(1.06, .003, 106000, {})
+    candidate['position_m'] = (1e-6, 0., 0.)
+    e.records = [baseline, candidate, baseline.copy()]
+    e._complete_scan()
+    v.laser_stage_snapshot = (1e-6, 0., 0., now)
+    e.pending = None
+    e._accepted(e._record(verified_rate, .003, int(verified_rate*100000), {}))
+    if retained:
+        assert e.phase == 'tracking_wait' and e.best_position == (1e-6, 0., 0.)
+    else:
+        assert e.pending[2] == 'retry'
+        assert v.laser_alignment_move_request['target_m'] == e.centre
+
+
+@pytest.mark.parametrize('kind,axis', [('fine', 0), ('fine', 1), ('focus', 2), ('tracking', 0)])
+@pytest.mark.parametrize('sign', [-1, 1])
+@pytest.mark.parametrize('absolute_bound', [False, True])
+def test_scans_clip_to_absolute_and_session_travel_boundaries(tmp_path, kind, axis, sign, absolute_bound):
+    v, conf, now = rig(tmp_path)
+    conf['laser_alignment_travel_um'] = [1., 1., 1.]
+    if absolute_bound:
+        conf['laser_alignment_bounds_mm'] = [-.001, .001]*3
+    e = LaserAlignment(v, conf, now=now)
+    centre = [0., 0., 0.]
+    centre[axis] = sign*1e-6
+    v.laser_stage_snapshot = (*centre, now)
+    e._begin_scan(kind, tuple(centre))
+    points = [v.laser_alignment_move_request['target_m'], *e.points]
+    assert points[0] == points[-1] == tuple(centre)
+    assert any(point[axis] != centre[axis] for point in points)
+    for point in points:
+        e.cfg.check_position(point, e.origin)
+        assert all(-1e-6 <= coordinate <= 1e-6 for coordinate in point)
+
+
+def test_auto_laser_waits_for_stage_alignment_then_takes_voltage_ownership(tmp_path):
+    from pyccapt.control.apt.laser_alignment_runtime import LaserAlignmentRuntime
+    v, conf, now = rig(tmp_path)
+    v.automatic_alignment_enabled = True
+    v.alignment_status = {'phase': 'coarse'}
+    v.laser_alignment_enabled = True
+    owner = SimpleNamespace(variables=v, conf=conf, log_apt=Mock(), _switch_control_algorithm=Mock())
+    runtime = LaserAlignmentRuntime(owner)
+    assert runtime.tick() and runtime.engine is None
+    assert runtime.voltage_step(1500., .1) is None
+    assert not v.laser_alignment_move_request
+    v.alignment_status = {'phase': 'aligned'}
+    assert runtime.tick()
+    assert runtime.engine is not None and runtime.engine.owns_voltage
+    assert runtime.voltage_step(1500., .1) == 0.
+    assert v.laser_alignment_move_request

@@ -114,7 +114,7 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
     events_detected = 0
     raw_signal_detected = 0
     events_detected_tmp = 0
-    start_time = time.time()
+    start_time = time.monotonic()
     pulse_frequency = max(experiment_frequency_hz(variables), 1.0)
     _last_buf_error = None  # dedup transient SDK read errors
 
@@ -187,8 +187,9 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
         variables.extend_to('main_l_p_tdc', laser_data.tolist())
         variables.extend_to('main_p_tdc_roentdek', pulse_data.tolist())
 
-        current_time = time.time()
-        if current_time - start_time >= 0.5:
+        current_time = time.monotonic()
+        elapsed_s = current_time - start_time
+        if elapsed_s >= 0.5:
             # Re-read pulse_frequency every interval - if the user
             # changes it mid-run the rate calc otherwise stays wrong.
             try:
@@ -196,9 +197,9 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
                 pulse_frequency = live_pulse_frequency
             except Exception:
                 pass
-            detection_rate = events_detected_tmp * 100 / pulse_frequency
-            variables.detection_rate_current = detection_rate * 2
-            variables.detection_rate_current_plot = detection_rate * 2
+            detection_rate = events_detected_tmp * 100 / (pulse_frequency * elapsed_s)
+            variables.detection_rate_current = detection_rate
+            variables.detection_rate_current_plot = detection_rate
             variables.total_ions = events_detected
             variables.total_raw_signals = raw_signal_detected
             events_detected_tmp = 0

@@ -301,7 +301,7 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
     events_detected = 0
     events_detected_tmp = 0
     raw_signal_detected = 0
-    start_time = time.time()
+    start_time = time.monotonic()
     pulse_frequency = experiment_frequency_hz(variables)
     loop_counter = 0
     loop_delay_counter = 0
@@ -428,8 +428,9 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
                 break
 
         # Calculate the detection rate
-        current_time = time.time()
-        if current_time - start_time >= 0.5:
+        current_time = time.monotonic()
+        elapsed_s = current_time - start_time
+        if elapsed_s >= 0.5:
             # Re-read pulse_frequency every interval so the rate calc
             # stays correct if the user changes it mid-run.  Guard
             # against zero (would divide by zero on first chunk after a
@@ -439,9 +440,9 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
             except Exception:
                 live_pulse_frequency = pulse_frequency
             pulse_frequency = live_pulse_frequency
-            detection_rate = events_detected_tmp * 100 / pulse_frequency
-            variables.detection_rate_current = detection_rate * 2  # rate per second
-            variables.detection_rate_current_plot = detection_rate * 2
+            detection_rate = events_detected_tmp * 100 / (pulse_frequency * elapsed_s)
+            variables.detection_rate_current = detection_rate
+            variables.detection_rate_current_plot = detection_rate
             variables.total_ions = events_detected
             variables.total_raw_signals = raw_signal_detected
             events_detected_tmp = 0

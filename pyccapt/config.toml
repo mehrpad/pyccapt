@@ -502,14 +502,14 @@ alignment_transfer_z_mm = -4.0       # retract before sideways movement between 
 alignment_approach_enabled = false
 alignment_z_max_advance_um = 0.0     # safe advance from each saved Z
 # Candidate commissioning settings; validate before enabling movement.
-alignment_xy_step_um = 1.0
+alignment_xy_step_um = 10.0 # 11x11 coarse sweep fits the 30-minute timeout; fine probes use 1 um
 alignment_fine_xy_step_um = 0.1
 alignment_fine_probe_step_um = 1.0
 alignment_xy_speed_um_s = 100.0     # coarse XY: 0.1 mm/s
 alignment_fine_xy_speed_um_s = 16.0 # fine XY: 0.016 mm/s
 alignment_z_step_um = 0.05
 alignment_z_speed_um_s = 0.1
-alignment_transfer_speed_um_s = 100.0
+alignment_transfer_speed_um_s = 300.0 # 0.3 mm/s for retract, XY transfer and saved-Z positioning
 alignment_position_tolerance_um = 0.02
 alignment_settle_s = 0.5
 alignment_move_timeout_s = 180.0

@@ -1781,11 +1781,9 @@ class Worker(QThread):
         while not self._stop_flag:
             try:
                 self.task_function()
-            except Exception as exc:
+            except Exception:
                 # Don't let a transient error kill the polling loop.
-                self._invalidate_laser_readouts(exc)
-            self._apply_button_locks_for_status(None)
-            print(f"Laser status poll failed: {exc}")
+                logging.getLogger(__name__).exception('Laser status poll failed')
             self.msleep(1000)
 
 

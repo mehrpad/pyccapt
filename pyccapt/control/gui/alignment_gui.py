@@ -4,12 +4,15 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from dataclasses import replace
 from types import SimpleNamespace
 
 from PyQt6 import QtCore, QtWidgets
 
 from pyccapt.control.apt.alignment_config import AlignmentConfig
 from pyccapt.control.apt.detector_models import normalize_tdc_model
+from pyccapt.control.apt.laser_alignment_config import LaserAlignmentConfig
+from pyccapt.control.apt.laser_alignment_runtime import validate_laser_alignment
 from pyccapt.control.devices.alignment_stage import transfer_waypoints
 from pyccapt.control.gui import main_parameters
 
@@ -90,6 +93,10 @@ class AlignmentGuiMixin:
         try:
             cfg = AlignmentConfig.from_mapping(self.conf, self.alignment_start_voltage.value(),
                                                self.alignment_voltage_increment.value())
+            if self.variables.laser_alignment_enabled:
+                laser_cfg = LaserAlignmentConfig.from_config(self.conf, self.variables.laser_alignment_settings)
+                cfg = replace(cfg, max_voltage=min(cfg.max_voltage, laser_cfg.max_voltage))
+                cfg.validate()
             if normalize_tdc_model(self.conf.get('tdc_model')) not in ('Surface_Concept', 'RoentDek'):
                 raise ValueError('Automatic alignment requires a Surface Concept or RoentDek position-resolving detector.')
             positions = {number: tuple(self.variables.sample_rough_positions[number]) for number in samples}
@@ -116,10 +123,14 @@ class AlignmentGuiMixin:
                     temp = self.variables
                 values = {field: getattr(temp, field) for field in _RUN_FIELDS}
                 main_parameters.validate_run_parameters(SimpleNamespace(**values), self.conf)
-                if (values['counter_source'] != 'TDC' or values['pulse_mode'] != 'Voltage'
+                if (values['counter_source'] != 'TDC' or values['pulse_mode'] not in ('Voltage', 'Laser')
                         or str(self.conf.get('tdc', 'off')) != 'on'
                         or str(self.conf.get('v_dc', 'off')) != 'on'):
-                    raise ValueError('Automatic alignment requires a position-resolving TDC and enabled DC voltage in Voltage mode.')
+                    raise ValueError('Automatic alignment requires a position-resolving TDC and enabled DC voltage in Voltage or Laser mode.')
+                if self.variables.laser_alignment_enabled:
+                    validate_laser_alignment(SimpleNamespace(**values,
+                        flat_test_active=False, laser_alignment_settings=self.variables.laser_alignment_settings,
+                        laser_stage_snapshot=self.variables.laser_stage_snapshot), self.conf)
                 if values['detection_rate'] <= 0:
                     raise ValueError('Automatic alignment requires a positive target detection rate.')
                 if not values['vdc_min'] <= cfg.start_voltage <= min(cfg.max_voltage, values['vdc_max']):

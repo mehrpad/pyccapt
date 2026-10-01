@@ -28,9 +28,10 @@ and K_p controls together. These are the same controls used by the main form:
 edits apply immediately and existing run locks remain in effect. The Advanced
 settings label and button sit below the target Detection Rate input on the left.
 A separator below the Run Statistics detection rate precedes Electrode and
-Flat Test. Alignment start voltage and voltage increment follow, then Automatic
-Alignment sits beside Start. Stop is below Start. One full-width separator remains
-below the parameter/statistics area.
+Flat Test. A second line separates these buttons from the bordered Alignment box
+containing alignment start voltage, voltage increment and Automatic Alignment.
+Start and Stop sit side by side in a separate row just above the bottom full-width
+separator.
 
 Laser command units, readback semantics and recording corrections are documented
 in [LASER_MANUAL_AUDIT.md](LASER_MANUAL_AUDIT.md).

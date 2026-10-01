@@ -168,8 +168,9 @@ settings…** groups detection mode, control algorithm, refresh frequency,
 pulse-voltage limits and K_p settings in a separate dialog. The Advanced settings
 label and button sit directly below the target Detection Rate input on the left.
 A separator below the Run Statistics detection rate precedes Electrode and
-Flat Test. The alignment voltage fields follow, then Automatic Alignment and
-Start share a row, with Stop below Start.
+Flat Test. A second line separates these buttons from the bordered Alignment
+box containing both voltage fields and Automatic Alignment. Start and Stop sit
+side by side in a separate row just above the bottom full-width separator.
 The parameter sources are TextBox for a single run and TOML Plan for a queue.
 
 Control GUI electrode labels are stored in `pyccapt/control/electrode.toml`:

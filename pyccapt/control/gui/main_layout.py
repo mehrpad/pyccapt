@@ -42,7 +42,7 @@ class MainLayoutMixin:
         self.run_controls_separator.setObjectName('run_controls_separator')
         self.run_controls_separator.setFrameShape(QtWidgets.QFrame.Shape.HLine)
         self.run_controls_separator.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
-        self.gridLayout_6.addWidget(self.run_controls_separator, 2, 0, 1, 2)
+        self.gridLayout_6.addWidget(self.run_controls_separator, 3, 0, 1, 2)
 
         # Remove the third column and group operating controls below statistics.
         self.gridLayout_6.removeItem(self.electrode_controls)
@@ -50,37 +50,57 @@ class MainLayoutMixin:
             self.electrode_controls.takeAt(0)
         for widget in (self.start_button, self.stop_button, self.Error, self.plan_panel):
             self.gridLayout_6.removeWidget(widget)
-        self.gridLayout_6.addWidget(self.plan_panel, 3, 0, 1, 2)
+        self.gridLayout_6.addWidget(self.plan_panel, 4, 0, 1, 2)
         self.run_controls_panel = QtWidgets.QWidget(self.centralwidget)
         controls = QtWidgets.QGridLayout(self.run_controls_panel)
         controls.setContentsMargins(0, 0, 0, 0)
-        controls.setVerticalSpacing(4)
+        controls.setVerticalSpacing(2)
         controls.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop | QtCore.Qt.AlignmentFlag.AlignLeft)
+        controls.addWidget(self.electrode_button, 0, 0, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
+        controls.addWidget(self.flat_test_button, 0, 1, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
+        self.electrode_separator = QtWidgets.QFrame(self.run_controls_panel)
+        self.electrode_separator.setObjectName('electrode_separator')
+        self.electrode_separator.setFrameShape(QtWidgets.QFrame.Shape.HLine)
+        self.electrode_separator.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
+        controls.addWidget(self.electrode_separator, 1, 0, 1, 2)
+        self.alignment_group = QtWidgets.QGroupBox('Alignment', self.run_controls_panel)
+        self.alignment_group.setObjectName('alignment_group')
+        self.alignment_group.setStyleSheet(
+            'QGroupBox { font-weight: bold; border: 1px solid gray; border-radius: 5px; margin-top: 8px; } '
+            'QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }')
+        alignment_controls = QtWidgets.QGridLayout(self.alignment_group)
+        alignment_controls.setContentsMargins(10, 12, 10, 8)
+        alignment_controls.setVerticalSpacing(4)
         for row, (label, widget) in enumerate(
             ((self.alignment_start_voltage_label, self.alignment_start_voltage),
-             (self.alignment_voltage_increment_label, self.alignment_voltage_increment)), start=1
+             (self.alignment_voltage_increment_label, self.alignment_voltage_increment))
         ):
             label.setMinimumWidth(0)
             label.setMaximumWidth(16777215)
             label.setWordWrap(False)
             widget.setFixedWidth(100)
-            controls.addWidget(label, row, 0)
-            controls.addWidget(widget, row, 1, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
-        for widget, row, column in (
-            (self.electrode_button, 0, 0), (self.flat_test_button, 0, 1),
-            (self.automatic_alignment_button, 3, 0),
-            (self.start_button, 3, 1), (self.stop_button, 4, 1),
-        ):
-            controls.addWidget(widget, row, column, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
+            alignment_controls.addWidget(label, row, 0)
+            alignment_controls.addWidget(widget, row, 1, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
+        alignment_controls.addWidget(self.automatic_alignment_button, 2, 0, 1, 2,
+                                     alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
+        controls.addWidget(self.alignment_group, 2, 0, 1, 2)
         self.statistics_separator = QtWidgets.QFrame(self.centralwidget)
         self.statistics_separator.setObjectName('statistics_separator')
         self.statistics_separator.setFrameShape(QtWidgets.QFrame.Shape.HLine)
         self.statistics_separator.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
         self.verticalLayout_2.addWidget(self.statistics_separator)
         self.verticalLayout_2.addWidget(self.run_controls_panel, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
-        self.gridLayout_5.setVerticalSpacing(4)
+        self.experiment_actions_panel = QtWidgets.QWidget(self.centralwidget)
+        self.experiment_actions_panel.setObjectName('experiment_actions_panel')
+        actions = QtWidgets.QHBoxLayout(self.experiment_actions_panel)
+        actions.setContentsMargins(0, 8, 0, 0)
+        actions.addStretch()
+        actions.addWidget(self.start_button)
+        actions.addWidget(self.stop_button)
+        self.gridLayout_6.addWidget(self.experiment_actions_panel, 2, 0, 1, 2)
+        self.gridLayout_5.setVerticalSpacing(3)
         self.Error.setMinimumWidth(0)
-        self.gridLayout_6.addWidget(self.Error, 5, 0, 1, 2)
+        self.gridLayout_6.addWidget(self.Error, 6, 0, 1, 2)
 
     def _show_advanced_settings(self):
         self.advanced_settings_dialog.show()

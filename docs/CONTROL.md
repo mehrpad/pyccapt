@@ -21,9 +21,10 @@ queue, or use **TextBox** for a single run. The main window opens at 760 × 640.
 The **Advanced settings** label and button sit below the target Detection Rate
 input on the left and open the detection/control settings and pulse-voltage
 limits in one dialog. A separator below the Run Statistics detection rate
-precedes Electrode and Flat Test. Alignment voltage fields follow, then Automatic
-Alignment sits beside Start, with Stop below Start. A full-width separator remains below
-the parameters and statistics.
+precedes Electrode and Flat Test. A second line separates these buttons from the
+bordered Alignment box containing both voltage fields and Automatic Alignment.
+Start and Stop sit side by side in a separate row immediately above the bottom
+full-width separator.
 See [Experiment Plans](experiment_plans.rst)
 for file format, units, sample-position mapping and step-by-step instructions.
 

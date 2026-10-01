@@ -11,9 +11,10 @@ normal experiment locks still apply. For TOML plans, use the queue's **Edit**
 button to change those settings for a specific experiment. The Advanced settings
 label and button sit directly below the target Detection Rate input on the left
 in TextBox mode. A separator below the Run Statistics detection rate precedes
-Electrode and Flat Test. Alignment start voltage and increment follow, then
-Automatic Alignment sits beside Start, with Stop below Start. A full-width
-separator remains below the parameters and statistics.
+Electrode and Flat Test. A second line separates these buttons from the bordered
+Alignment box containing alignment start voltage, voltage increment and Automatic
+Alignment. Start and Stop sit side by side in a separate row just above the bottom
+full-width separator and experiment queue.
 
 ## Load and run the example
 

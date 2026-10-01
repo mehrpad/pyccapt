@@ -203,6 +203,7 @@ def test_main_plan_layout_is_compact_and_queue_fits(instrument_window, tmp_path)
     assert ui.advanced_settings_label.isHidden()
     assert ui.advanced_settings_button.isHidden()
     assert ui.run_controls_panel.isVisible()
+    assert ui.experiment_actions_panel.isVisible()
     assert ui.electrode_button.isVisible()
     assert ui.stop_button.isVisible()
     assert window._responsive_window.scroll.viewport().rect().contains(
@@ -242,13 +243,23 @@ def test_main_advanced_dialog_and_run_controls_layout(instrument_window, tmp_pat
     assert position(ui.statistics_separator).y() < position(ui.electrode_button).y()
     assert position(ui.electrode_button).x() < position(ui.flat_test_button).x()
     assert position(ui.electrode_button).y() == position(ui.flat_test_button).y()
-    assert position(ui.automatic_alignment_button).y() == position(ui.start_button).y()
-    assert position(ui.automatic_alignment_button).x() < position(ui.start_button).x()
+    assert ui.electrode_separator.isVisible()
+    assert ui.electrode_separator.frameShape() == QtWidgets.QFrame.Shape.HLine
+    assert position(ui.electrode_button).y() + ui.electrode_button.height() <= position(ui.electrode_separator).y()
+    assert position(ui.electrode_separator).y() < position(ui.alignment_group).y()
+    assert ui.alignment_group.title() == 'Alignment'
+    for widget in (ui.alignment_start_voltage_label, ui.alignment_start_voltage,
+                   ui.alignment_voltage_increment_label, ui.alignment_voltage_increment,
+                   ui.automatic_alignment_button):
+        assert ui.alignment_group.isAncestorOf(widget)
     assert position(ui.alignment_start_voltage).y() < position(ui.alignment_voltage_increment).y()
     assert position(ui.electrode_button).y() < position(ui.alignment_start_voltage).y()
     assert position(ui.alignment_voltage_increment).y() < position(ui.automatic_alignment_button).y()
-    assert position(ui.flat_test_button).y() < position(ui.start_button).y() < position(ui.stop_button).y()
-    assert position(ui.flat_test_button).x() == position(ui.start_button).x() == position(ui.stop_button).x()
+    assert position(ui.start_button).y() == position(ui.stop_button).y()
+    assert position(ui.start_button).x() < position(ui.stop_button).x()
+    assert position(ui.start_button).y() >= position(ui.alignment_group).y() + ui.alignment_group.height() + 8
+    assert position(ui.start_button).y() > position(ui.advanced_settings_button).y()
+    assert position(ui.stop_button).y() + ui.stop_button.height() < position(ui.run_controls_separator).y()
     ui.advanced_settings_button.click()
     for _ in range(3):
         app.processEvents()

@@ -18,7 +18,10 @@ Calibration and reconstruction are implemented in `pyccapt.calibration`.
 
 Select **Setup Parameters → TOML Plan** to load and edit a reusable experiment
 queue. The compact table replaces the always-visible TextLine editor, and the
-main window opens at a smaller height. See [Experiment Plans](experiment_plans.rst)
+main window opens at 760 × 640. **Advanced settings…** opens the detection/control
+settings and pulse-voltage limits in one dialog. The electrode, flat-test,
+alignment and Start/Stop buttons are grouped below one full-width separator.
+See [Experiment Plans](experiment_plans.rst)
 for file format, units, sample-position mapping and step-by-step instructions.
 
 ## Runtime Architecture

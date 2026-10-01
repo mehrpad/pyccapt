@@ -5,6 +5,14 @@ experiments. The main window shows a compact queue instead of the large pasted
 TextLine editor. **TextBox** remains the single-experiment form; **TextLine** is
 available for older parameter blocks and is shown only when selected.
 
+The narrower main window groups the less frequently changed TextBox parameters
+under **Advanced settings…**: detection mode, control algorithm, refresh frequency,
+pulse-voltage limits and K_p up/down. Edits apply as each field is changed; the
+normal experiment locks still apply. For TOML plans, use the queue's **Edit**
+button to change those settings for a specific experiment. Electrode, Flat Test,
+Automatic Alignment, Start and Stop share a row below a single full-width line,
+with the alignment start voltage and increment on the next row.
+
 ## Load and run the example
 
 1. Copy `pyccapt/files/experiment_plan.example.toml` to a working file such as

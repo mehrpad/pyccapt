@@ -17,6 +17,7 @@ from pyccapt.control.core.contracts import CommandKind, ControlCommand
 from pyccapt.control.devices import camera as camera_device
 from pyccapt.control.gui.alignment_gui import AlignmentGuiMixin
 from pyccapt.control.gui.experiment_plan_gui import ExperimentPlanGuiMixin
+from pyccapt.control.gui.main_layout import MainLayoutMixin
 from pyccapt.control.nkt_photonics.readback import fresh_snapshot
 from pyccapt.control.gui import (
     app_icon,
@@ -32,7 +33,7 @@ from pyccapt.control.gui import (
 
 
 
-class Ui_PyCCAPT(AlignmentGuiMixin, ExperimentPlanGuiMixin):
+class Ui_PyCCAPT(AlignmentGuiMixin, ExperimentPlanGuiMixin, MainLayoutMixin):
     def __init__(self, variables, conf, x_plot, y_plot, t_plot, main_v_dc_plot):
         """
         Constructor for the PyCCAPT UI class.
@@ -81,7 +82,7 @@ class Ui_PyCCAPT(AlignmentGuiMixin, ExperimentPlanGuiMixin):
 
     def setupUi(self, PyCCAPT):
         PyCCAPT.setObjectName("PyCCAPT")
-        PyCCAPT.resize(901, 620)
+        PyCCAPT.resize(760, 640)
         self.centralwidget = QtWidgets.QWidget(parent=PyCCAPT)
         self.centralwidget.setObjectName("centralwidget")
         self.gridLayout_7 = QtWidgets.QGridLayout(self.centralwidget)
@@ -1126,6 +1127,7 @@ class Ui_PyCCAPT(AlignmentGuiMixin, ExperimentPlanGuiMixin):
 
         self.retranslateUi(PyCCAPT)
         self._setup_experiment_plan()
+        self._setup_compact_main_layout(PyCCAPT)
         QtCore.QMetaObject.connectSlotsByName(PyCCAPT)
         make_window_responsive(PyCCAPT)
         tooltips.apply_tooltips(self, tooltips.MAIN_TOOLTIPS)
@@ -1159,20 +1161,22 @@ class Ui_PyCCAPT(AlignmentGuiMixin, ExperimentPlanGuiMixin):
         PyCCAPT.setTabOrder(self.pulse_mode, self.pulse_fraction)
         PyCCAPT.setTabOrder(self.pulse_fraction, self.pulse_frequency)
         PyCCAPT.setTabOrder(self.pulse_frequency, self.detection_rate_init)
-        PyCCAPT.setTabOrder(self.detection_rate_init, self.counter_source)
-        PyCCAPT.setTabOrder(self.counter_source, self.control_algorithm)
-        PyCCAPT.setTabOrder(self.control_algorithm, self.ex_freq)
-        PyCCAPT.setTabOrder(self.ex_freq, self.vp_min)
-        PyCCAPT.setTabOrder(self.vp_min, self.vp_max)
-        PyCCAPT.setTabOrder(self.vp_max, self.vdc_steps_up)
-        PyCCAPT.setTabOrder(self.vdc_steps_up, self.vdc_steps_down)
-        PyCCAPT.setTabOrder(self.vdc_steps_down, self.superuser)
+        PyCCAPT.setTabOrder(self.detection_rate_init, self.superuser)
+        for first, second in zip(
+            (self.counter_source, self.control_algorithm, self.ex_freq, self.vp_min, self.vp_max, self.vdc_steps_up),
+            (self.control_algorithm, self.ex_freq, self.vp_min, self.vp_max, self.vdc_steps_up, self.vdc_steps_down),
+        ):
+            QtWidgets.QWidget.setTabOrder(first, second)
         PyCCAPT.setTabOrder(self.superuser, self.elapsed_time)
         PyCCAPT.setTabOrder(self.elapsed_time, self.total_ions)
         PyCCAPT.setTabOrder(self.total_ions, self.speciemen_voltage)
         PyCCAPT.setTabOrder(self.speciemen_voltage, self.pulse_voltage)
         PyCCAPT.setTabOrder(self.pulse_voltage, self.detection_rate)
-        PyCCAPT.setTabOrder(self.detection_rate, self.text_line)
+        PyCCAPT.setTabOrder(self.detection_rate, self.advanced_settings_button)
+        PyCCAPT.setTabOrder(self.advanced_settings_button, self.electrode_button)
+        PyCCAPT.setTabOrder(self.electrode_button, self.flat_test_button)
+        PyCCAPT.setTabOrder(self.flat_test_button, self.automatic_alignment_button)
+        PyCCAPT.setTabOrder(self.automatic_alignment_button, self.text_line)
         PyCCAPT.setTabOrder(self.text_line, self.start_button)
         PyCCAPT.setTabOrder(self.start_button, self.stop_button)
 
@@ -1614,6 +1618,10 @@ class Ui_PyCCAPT(AlignmentGuiMixin, ExperimentPlanGuiMixin):
         self.plan_panel.setVisible(use_plan)
         for widget in self._plan_form_widgets:
             widget.setVisible(not use_plan)
+        self.advanced_settings_button.setEnabled(not (use_plan or use_text_line) and
+                                                 not bool(getattr(self, '_alignment_batch', [])))
+        if use_plan or use_text_line:
+            self.advanced_settings_dialog.hide()
         self.text_line.setEnabled(use_text_line and not alignment_locked)
         for button in self.plan_buttons.values():
             button.setEnabled(not alignment_locked)

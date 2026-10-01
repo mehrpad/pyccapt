@@ -188,7 +188,8 @@ def test_main_plan_layout_is_compact_and_queue_fits(instrument_window, tmp_path)
     window.show()
     for _ in range(5):
         app.processEvents()
-    assert window.height() == 620
+    assert window.width() == 760
+    assert window.height() == 640
     assert ui.text_line.isHidden()
     assert ui.plan_panel.isHidden()
     assert window._responsive_window.scroll.verticalScrollBar().maximum() == 0
@@ -199,6 +200,12 @@ def test_main_plan_layout_is_compact_and_queue_fits(instrument_window, tmp_path)
         app.processEvents()
     assert ui.text_line.isHidden()
     assert ui.plan_panel.isVisible()
+    assert ui.run_controls_panel.isVisible()
+    assert ui.electrode_button.isVisible()
+    assert ui.stop_button.isVisible()
+    assert window._responsive_window.scroll.viewport().rect().contains(
+        QtCore.QRect(ui.run_controls_panel.mapTo(window._responsive_window.scroll.viewport(), QtCore.QPoint()),
+                     ui.run_controls_panel.size()))
     assert window._responsive_window.scroll.horizontalScrollBar().maximum() == 0
     assert window._responsive_window.scroll.verticalScrollBar().maximum() == 0
     assert window._responsive_window.scroll.viewport().rect().contains(
@@ -206,6 +213,42 @@ def test_main_plan_layout_is_compact_and_queue_fits(instrument_window, tmp_path)
                      ui.plan_panel.size()))
     window.grab().save(str(tmp_path/'plan-queue.png'))
     print(f'GUI previews: {tmp_path}')
+
+
+@pytest.mark.parametrize('instrument_window', ['main'], indirect=True)
+def test_main_advanced_dialog_and_run_controls_layout(instrument_window, tmp_path):
+    window, ui, app = instrument_window
+    window.show()
+    for _ in range(5):
+        app.processEvents()
+    advanced = (ui.counter_source, ui.control_algorithm, ui.ex_freq, ui.vp_min,
+                ui.vp_max, ui.vdc_steps_up, ui.vdc_steps_down)
+    assert all(widget.window() is ui.advanced_settings_dialog for widget in advanced)
+    assert not ui.advanced_settings_dialog.isVisible()
+    assert ui.line_3.isHidden() and ui.line_4.isHidden()
+    buttons = (ui.electrode_button, ui.flat_test_button, ui.automatic_alignment_button,
+               ui.start_button, ui.stop_button)
+    separator_y = ui.run_controls_separator.mapTo(ui.centralwidget, QtCore.QPoint()).y()
+    assert len({button.mapTo(ui.centralwidget, QtCore.QPoint()).y() for button in buttons}) == 1
+    assert all(button.mapTo(ui.centralwidget, QtCore.QPoint()).y() > separator_y for button in buttons)
+    ui.advanced_settings_button.click()
+    for _ in range(3):
+        app.processEvents()
+    assert ui.advanced_settings_dialog.isVisible()
+    assert all(widget.isVisible() for widget in advanced)
+    ui.vdc_steps_up.setText('0.25')
+    ui.vdc_steps_up.editingFinished.emit()
+    assert ui.variables.vdc_step_up == .25
+    ui.advanced_settings_dialog.grab().save(str(tmp_path/'advanced-settings.png'))
+    ui.advanced_settings_dialog.close()
+    ui.advanced_settings_button.click()
+    assert ui.vdc_steps_up.text() == '0.25'
+    ui.parameters_source.setCurrentText('TOML Plan')
+    assert not ui.advanced_settings_dialog.isVisible()
+    assert not ui.advanced_settings_button.isEnabled()
+    ui.parameters_source.setCurrentText('TextBox')
+    assert ui.advanced_settings_button.isEnabled()
+    print(f'Advanced dialog preview: {tmp_path}')
 
 
 @pytest.mark.parametrize('instrument_window', [

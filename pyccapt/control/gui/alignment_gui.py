@@ -48,9 +48,12 @@ class AlignmentGuiMixin:
         self.alignment_voltage_increment.setObjectName('alignment_voltage_increment')
         self.alignment_start_voltage.setToolTip('DC voltage for the first XY alignment search (default 1500 V).')
         self.alignment_voltage_increment.setToolTip('Voltage increase after a failed XY search and return to its origin (default 200 V).')
-        for text, widget in (('Alignment start voltage', self.alignment_start_voltage),
-                             ('Alignment voltage increment', self.alignment_voltage_increment)):
+        for text, widget, name in (
+            ('Alignment start voltage', self.alignment_start_voltage, 'alignment_start_voltage_label'),
+            ('Alignment voltage increment', self.alignment_voltage_increment, 'alignment_voltage_increment_label'),
+        ):
             label = QtWidgets.QLabel(text, self.centralwidget)
+            setattr(self, name, label)
             label.setWordWrap(True)
             label.setFixedWidth(self.automatic_alignment_button.width())
             self.electrode_controls.addWidget(label)

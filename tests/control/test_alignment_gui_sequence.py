@@ -494,6 +494,12 @@ def test_new_worker_does_not_inherit_previous_stop_or_status(gui, monkeypatch):
     assert ui.latest_completion_ack is None
     assert ui.latest_experiment_status is None
     assert v.sample_selection_locked
+    ui.advanced_settings_button.click()
+    assert ui.advanced_settings_dialog.isVisible()
+    assert not ui.counter_source.isEnabled()
+    assert not ui.ex_freq.isEnabled()
+    assert ui.control_algorithm.isEnabled()
+    ui.advanced_settings_dialog.close()
     for button in (ui.start_button, ui.electrode_button, ui.flat_test_button, ui.automatic_alignment_button):
         assert not button.isEnabled()
     # Refreshing electrode display must not unlock a running experiment.

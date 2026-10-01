@@ -21,6 +21,7 @@ except Exception as e:
     print(e)
 
 # Local module and scripts
+from pyccapt.control.gui.responsive import make_window_responsive
 from pyccapt.control.core import runtime
 from pyccapt.control.gui import gui_pumps_vacuum, tooltips
 from pyccapt.control.devices import initialize_devices
@@ -91,7 +92,7 @@ class Ui_Baking(object):
         self.gridLayout.setObjectName("gridLayout")
         # self.tempretures = QtWidgets.QGraphicsView(parent=Baking)
         self.tempretures = pg.PlotWidget(parent=Baking)
-        self.tempretures.setMinimumSize(QtCore.QSize(800, 500))
+        self.tempretures.setMinimumSize(QtCore.QSize(600, 320))
         self.tempretures.setObjectName("tempretures")
         self.gridLayout.addWidget(self.tempretures, 0, 0, 1, 1)
         self.save_data = QtWidgets.QPushButton(parent=Baking)
@@ -101,13 +102,14 @@ class Ui_Baking(object):
         self.gridLayout.addWidget(self.save_data, 2, 0, 1, 1)
         # self.presures = QtWidgets.QGraphicsView(parent=Baking)
         self.presures = pg.PlotWidget(parent=Baking)
-        self.presures.setMinimumSize(QtCore.QSize(800, 200))
+        self.presures.setMinimumSize(QtCore.QSize(600, 160))
         self.presures.setObjectName("presures")
         self.gridLayout.addWidget(self.presures, 1, 0, 1, 1)
         self.gridLayout_2.addLayout(self.gridLayout, 0, 0, 1, 1)
 
         self.retranslateUi(Baking)
         QtCore.QMetaObject.connectSlotsByName(Baking)
+        make_window_responsive(Baking)
         tooltips.apply_tooltips(self, tooltips.BAKING_TOOLTIPS)
         ###
         # daemon=True via constructor; setDaemon(True) was deprecated in

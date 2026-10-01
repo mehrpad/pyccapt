@@ -10,6 +10,7 @@ from PyQt6.QtCore import QThread
 from PyQt6.QtGui import QPixmap
 
 # Local module and scripts
+from pyccapt.control.gui.responsive import make_window_responsive
 from pyccapt.control.core import runtime
 from pyccapt.control.gui import tooltips
 from pyccapt.control.gui.stage_control_widgets import (
@@ -625,6 +626,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin):
 
         self.retranslateUi(Laser_Control)
         QtCore.QMetaObject.connectSlotsByName(Laser_Control)
+        make_window_responsive(Laser_Control)
         tooltips.apply_tooltips(self, tooltips.LASER_TOOLTIPS)
         Laser_Control.setTabOrder(self.laser_wavelegnth, self.laser_rate)
         Laser_Control.setTabOrder(self.laser_rate, self.laser_enable)

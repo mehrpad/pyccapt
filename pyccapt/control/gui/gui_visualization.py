@@ -9,6 +9,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import QTimer
 
 # Local module and scripts
+from pyccapt.control.gui.responsive import make_window_responsive
 from pyccapt.control.core import live_calibration, runtime, tof2mc_simple
 from pyccapt.control.devices import initialize_devices
 from pyccapt.control.gui import tooltips
@@ -185,7 +186,7 @@ class Ui_Visualization(object):
         sizePolicy.setVerticalStretch(1)
         sizePolicy.setHeightForWidth(self.vdc_time.sizePolicy().hasHeightForWidth())
         self.vdc_time.setSizePolicy(sizePolicy)
-        self.vdc_time.setMinimumSize(QtCore.QSize(250, 250))
+        self.vdc_time.setMinimumSize(QtCore.QSize(220, 220))
         self.vdc_time.setStyleSheet(
             "QWidget{\n"
             "                                                    border: 0.5px solid gray;\n"
@@ -258,7 +259,7 @@ class Ui_Visualization(object):
         sizePolicy.setVerticalStretch(1)
         sizePolicy.setHeightForWidth(self.detection_rate_viz.sizePolicy().hasHeightForWidth())
         self.detection_rate_viz.setSizePolicy(sizePolicy)
-        self.detection_rate_viz.setMinimumSize(QtCore.QSize(250, 250))
+        self.detection_rate_viz.setMinimumSize(QtCore.QSize(220, 220))
         self.detection_rate_viz.setStyleSheet(
             "QWidget{\n"
             "                                            border: 0.5px solid gray;\n"
@@ -310,7 +311,7 @@ class Ui_Visualization(object):
         sizePolicy.setVerticalStretch(1)
         sizePolicy.setHeightForWidth(self.detector_heatmap.sizePolicy().hasHeightForWidth())
         self.detector_heatmap.setSizePolicy(sizePolicy)
-        self.detector_heatmap.setMinimumSize(QtCore.QSize(250, 250))
+        self.detector_heatmap.setMinimumSize(QtCore.QSize(220, 220))
         self.detector_heatmap.setStyleSheet(
             "QWidget{\n"
             "                                            border: 0.5px solid gray;\n"
@@ -416,7 +417,7 @@ class Ui_Visualization(object):
         sp.setHorizontalStretch(1)
         sp.setVerticalStretch(1)
         self.detector_fdm.setSizePolicy(sp)
-        self.detector_fdm.setMinimumSize(QtCore.QSize(250, 250))
+        self.detector_fdm.setMinimumSize(QtCore.QSize(220, 220))
         self.detector_fdm.setStyleSheet("QWidget{border: 0.5px solid gray;}")
         self.detector_fdm.setObjectName("detector_fdm")
         self.gridLayout_3b.addWidget(self.detector_fdm, 1, 0, 1, 4)
@@ -461,7 +462,7 @@ class Ui_Visualization(object):
         sizePolicy.setVerticalStretch(1)
         sizePolicy.setHeightForWidth(self.histogram.sizePolicy().hasHeightForWidth())
         self.histogram.setSizePolicy(sizePolicy)
-        self.histogram.setMinimumSize(QtCore.QSize(750, 150))
+        self.histogram.setMinimumSize(QtCore.QSize(640, 150))
         self.histogram.setStyleSheet(
             "QWidget{\n"
             "                                            border: 0.5px solid gray;\n"
@@ -593,6 +594,7 @@ class Ui_Visualization(object):
 
         self.retranslateUi(Visualization)
         QtCore.QMetaObject.connectSlotsByName(Visualization)
+        make_window_responsive(Visualization)
         tooltips.apply_tooltips(self, tooltips.VISUALIZATION_TOOLTIPS)
         Visualization.setTabOrder(self.voltage, self.detection_rate)
         Visualization.setTabOrder(self.detection_rate, self.hitmap_count)

@@ -6,6 +6,8 @@ import time
 import numpy as np
 from PyQt6 import QtCore, QtGui, QtWidgets
 
+from pyccapt.control.gui.responsive import make_window_responsive
+
 
 PHASE_COLOURS = {
     'ramp': (.7, .5, 1., 1.), 'moving': (.6, .65, .7, 1.),
@@ -138,9 +140,11 @@ class AlignmentPlotWindow(QtWidgets.QWidget):
                 'python -m pip install PyOpenGL\nThen restart PyCCAPT.')
             message.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
             message.setWordWrap(True)
+            message.setMinimumSize(240, 120)
             plots.addWidget(message, 3)
         else:
             self.view = gl.GLViewWidget()
+            self.view.setMinimumSize(240, 120)
             self.view.setBackgroundColor('#17212b')
             plots.addWidget(self.view, 3)
             grid = gl.GLGridItem()
@@ -176,6 +180,7 @@ class AlignmentPlotWindow(QtWidgets.QWidget):
         self.timer = QtCore.QTimer(self)
         self.timer.setInterval(200)
         self.timer.timeout.connect(self.refresh)
+        make_window_responsive(self)
 
     def _setup_hitmap(self, plots):
         import pyqtgraph as pg
@@ -191,6 +196,7 @@ class AlignmentPlotWindow(QtWidgets.QWidget):
         header.addStretch()
         column.addLayout(header)
         self.detector_hitmap = pg.PlotWidget()
+        self.detector_hitmap.setMinimumSize(220, 120)
         self.detector_hitmap.setBackground('w')
         self.detector_hitmap.setLabel('left', 'X_det', units='mm', color='r')
         self.detector_hitmap.setLabel('bottom', 'Y_det', units='mm', color='r')

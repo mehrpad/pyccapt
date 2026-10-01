@@ -10,6 +10,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import Qt
 
 # Local module and scripts
+from pyccapt.control.gui.responsive import make_window_responsive
 from pyccapt.control.apt.experiment_state import ExperimentState, set_experiment_state
 from pyccapt.control.core import device_checks, loggi, runtime
 from pyccapt.control.core.contracts import CommandKind, ControlCommand
@@ -940,7 +941,7 @@ class Ui_PyCCAPT(AlignmentGuiMixin):
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.text_line.sizePolicy().hasHeightForWidth())
         self.text_line.setSizePolicy(sizePolicy)
-        self.text_line.setMinimumSize(QtCore.QSize(0, 400))
+        self.text_line.setMinimumSize(QtCore.QSize(0, 280))
         self.text_line.setStyleSheet(
             "QWidget{\n"
             "                                        border: 2px solid gray;\n"
@@ -1125,6 +1126,7 @@ class Ui_PyCCAPT(AlignmentGuiMixin):
 
         self.retranslateUi(PyCCAPT)
         QtCore.QMetaObject.connectSlotsByName(PyCCAPT)
+        make_window_responsive(PyCCAPT)
         tooltips.apply_tooltips(self, tooltips.MAIN_TOOLTIPS)
         # Override the literal defaults baked into retranslateUi with the
         # values from config.toml so that editing config.toml is the single

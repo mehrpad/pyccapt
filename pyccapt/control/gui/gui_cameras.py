@@ -10,6 +10,7 @@ from PyQt6.QtCore import pyqtSignal, QObject, QThread
 from PyQt6.QtGui import QPixmap
 
 # Local module and scripts
+from pyccapt.control.gui.responsive import make_window_responsive
 from pyccapt.control.core import runtime
 from pyccapt.control.devices import arduino_illumination, camera
 from pyccapt.control.gui import tooltips
@@ -82,8 +83,8 @@ class Ui_Cameras_Alignment(object):
         None
         """
         Cameras_Alignment.setObjectName("Cameras_Alignment")
-        # Keep the camera tool window practical on smaller displays. The
-        # original 1210x938 footprint and image minimums are reduced by ~20%.
+        # Keep the current opening size; image minimums allow a smaller viewport
+        # while retaining the overview/detail arrangement and readable controls.
         Cameras_Alignment.resize(970, 750)
         self.gridLayout_5 = QtWidgets.QGridLayout(Cameras_Alignment)
         self.gridLayout_5.setObjectName("gridLayout_5")
@@ -113,7 +114,7 @@ class Ui_Cameras_Alignment(object):
         sizePolicy.setVerticalStretch(1)
         sizePolicy.setHeightForWidth(self.cam_s_d.sizePolicy().hasHeightForWidth())
         self.cam_s_d.setSizePolicy(sizePolicy)
-        self.cam_s_d.setMinimumSize(QtCore.QSize(480, 200))
+        self.cam_s_d.setMinimumSize(QtCore.QSize(320, 160))
         self.cam_s_d.setMaximumSize(QtCore.QSize(16777215, 16777215))
         self.cam_s_d.setStyleSheet(
             "QWidget{\n"
@@ -143,7 +144,7 @@ class Ui_Cameras_Alignment(object):
         sizePolicy.setVerticalStretch(1)
         sizePolicy.setHeightForWidth(self.cam_b_d.sizePolicy().hasHeightForWidth())
         self.cam_b_d.setSizePolicy(sizePolicy)
-        self.cam_b_d.setMinimumSize(QtCore.QSize(480, 200))
+        self.cam_b_d.setMinimumSize(QtCore.QSize(320, 160))
         self.cam_b_d.setMaximumSize(QtCore.QSize(16777215, 16777215))
         self.cam_b_d.setStyleSheet(
             "QWidget{\n"
@@ -174,7 +175,7 @@ class Ui_Cameras_Alignment(object):
         sizePolicy.setVerticalStretch(1)
         sizePolicy.setHeightForWidth(self.cam_s_o.sizePolicy().hasHeightForWidth())
         self.cam_s_o.setSizePolicy(sizePolicy)
-        self.cam_s_o.setMinimumSize(QtCore.QSize(200, 200))
+        self.cam_s_o.setMinimumSize(QtCore.QSize(160, 160))
         self.cam_s_o.setStyleSheet(
             "QWidget{\n"
             "                                            border: 2px solid gray;\n"
@@ -204,7 +205,7 @@ class Ui_Cameras_Alignment(object):
         sizePolicy.setVerticalStretch(1)
         sizePolicy.setHeightForWidth(self.cam_b_o.sizePolicy().hasHeightForWidth())
         self.cam_b_o.setSizePolicy(sizePolicy)
-        self.cam_b_o.setMinimumSize(QtCore.QSize(200, 200))
+        self.cam_b_o.setMinimumSize(QtCore.QSize(160, 160))
         self.cam_b_o.setMaximumSize(QtCore.QSize(16777215, 16777215))
         self.cam_b_o.setStyleSheet(
             "QWidget{\n"
@@ -252,7 +253,7 @@ class Ui_Cameras_Alignment(object):
         sizePolicy.setVerticalStretch(1)
         sizePolicy.setHeightForWidth(self.cam_angle_o.sizePolicy().hasHeightForWidth())
         self.cam_angle_o.setSizePolicy(sizePolicy)
-        self.cam_angle_o.setMinimumSize(QtCore.QSize(200, 200))
+        self.cam_angle_o.setMinimumSize(QtCore.QSize(160, 160))
         self.cam_angle_o.setMaximumSize(QtCore.QSize(16777215, 16777215))
         self.cam_angle_o.setStyleSheet(
             "QWidget{\n"
@@ -277,7 +278,7 @@ class Ui_Cameras_Alignment(object):
         sizePolicy.setVerticalStretch(1)
         sizePolicy.setHeightForWidth(self.cam_angle_d.sizePolicy().hasHeightForWidth())
         self.cam_angle_d.setSizePolicy(sizePolicy)
-        self.cam_angle_d.setMinimumSize(QtCore.QSize(480, 200))
+        self.cam_angle_d.setMinimumSize(QtCore.QSize(320, 160))
         self.cam_angle_d.setMaximumSize(QtCore.QSize(16777215, 16777215))
         self.cam_angle_d.setStyleSheet(
             "QWidget{\n"
@@ -604,6 +605,7 @@ class Ui_Cameras_Alignment(object):
 
         self.retranslateUi(Cameras_Alignment)
         QtCore.QMetaObject.connectSlotsByName(Cameras_Alignment)
+        make_window_responsive(Cameras_Alignment)
         tooltips.apply_tooltips(self, tooltips.CAMERAS_TOOLTIPS)
         Cameras_Alignment.setTabOrder(self.superuser, self.light)
         Cameras_Alignment.setTabOrder(self.light, self.illumination_percent)

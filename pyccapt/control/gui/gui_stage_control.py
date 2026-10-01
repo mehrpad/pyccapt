@@ -5,6 +5,7 @@ import time
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
+from pyccapt.control.gui.responsive import make_window_responsive
 from pyccapt.control.core import runtime
 from pyccapt.control.gui import tooltips
 from pyccapt.control.gui.stage_control_widgets import (
@@ -309,6 +310,7 @@ class Ui_Stage_Control(object):
 
         self.retranslateUi(Stage_Control)
         QtCore.QMetaObject.connectSlotsByName(Stage_Control)
+        make_window_responsive(Stage_Control)
         tooltips.apply_tooltips(self, tooltips.STAGE_TOOLTIPS)
 
         self._connect_signals()

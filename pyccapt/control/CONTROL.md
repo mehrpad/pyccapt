@@ -160,6 +160,15 @@ quarantines inconsistent evidence instead of deleting it, and writes the destina
 
 ## GUI Overview
 
+All control windows use `gui/responsive.py` to fit their frame inside the current
+monitor's available desktop area, including taskbar space. Existing opening sizes,
+layout order, fonts, button sizes and colours are retained when they fit. Plot and
+camera panels can contract to readable minimum sizes or expand with the window.
+Below the layout's minimum size, scrollbars provide access to the complete layout
+rather than scaling down controls. Monitor changes and work-area changes trigger
+another fit; ordinary resizing retains the operator's chosen window size.
+The automatic stage alignment monitor still opens at 660 × 350 logical pixels.
+
 ![Main GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/main_gui.png?raw=True)
 
 Detailed sub-GUI snapshots:

@@ -24,6 +24,7 @@ else:
     WEBENGINE_IMPORT_ERROR = None
 
 # Local module and scripts
+from pyccapt.control.gui.responsive import make_window_responsive
 from pyccapt.control.core import runtime
 from pyccapt.control.devices import initialize_devices
 from pyccapt.control.gui import tooltips
@@ -535,6 +536,7 @@ class Ui_Pumps_Vacuum(object):
 
         self.retranslateUi(Pumps_Vacuum)
         QtCore.QMetaObject.connectSlotsByName(Pumps_Vacuum)
+        make_window_responsive(Pumps_Vacuum)
         tooltips.apply_tooltips(self, tooltips.PUMPS_TOOLTIPS)
         Pumps_Vacuum.setTabOrder(self.set_temperature_cryo, self.target_tempreature_cryo)
         Pumps_Vacuum.setTabOrder(self.target_tempreature_cryo, self.set_temperature_ll)
@@ -641,7 +643,7 @@ class Ui_Pumps_Vacuum(object):
         """Add the compact Plotly panel between vacuum and temperature LCDs."""
         panel = QtWidgets.QFrame(parent=parent)
         panel.setObjectName("vacuum_history_frame")
-        panel.setMinimumWidth(900)
+        panel.setMinimumWidth(800)
         panel.setStyleSheet(
             "QFrame#vacuum_history_frame{border: 0.5px solid gray;}"
         )
@@ -677,7 +679,7 @@ class Ui_Pumps_Vacuum(object):
             layout.addWidget(self.vacuum_plot)
         else:
             self.vacuum_plot = QWebEngineView(parent=panel)
-            self.vacuum_plot.setMinimumSize(QtCore.QSize(880, 290))
+            self.vacuum_plot.setMinimumSize(QtCore.QSize(780, 250))
             self.vacuum_plot.setMaximumHeight(320)
             colors = ("#2ca02c", "#8c564b", "#1f77b4", "#d627a8")
             names = ("Main", "Buffer", "LL", "CLL")

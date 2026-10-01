@@ -6,6 +6,7 @@ from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QPixmap
 
 # Local module and scripts
+from pyccapt.control.gui.responsive import make_window_responsive
 from pyccapt.control.core import runtime
 from pyccapt.control.gui import tooltips
 
@@ -158,6 +159,7 @@ class Ui_Gates(object):
 
         self.retranslateUi(Gates)
         QtCore.QMetaObject.connectSlotsByName(Gates)
+        make_window_responsive(Gates)
         tooltips.apply_tooltips(self, tooltips.GATES_TOOLTIPS)
 
         # Four pressure backgrounds x eight gate combinations cover all 32

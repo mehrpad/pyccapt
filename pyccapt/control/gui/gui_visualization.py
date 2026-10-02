@@ -145,7 +145,7 @@ class Ui_Visualization(VisualizationLayoutMixin):
         None
         """
         Visualization.setObjectName("Visualization")
-        Visualization.resize(980, 620)
+        Visualization.resize(980, 570)
         self.gridLayout_6 = QtWidgets.QGridLayout(Visualization)
         self.gridLayout_6.setObjectName("gridLayout_6")
         self.gridLayout_5 = QtWidgets.QGridLayout()
@@ -805,8 +805,8 @@ class Ui_Visualization(VisualizationLayoutMixin):
         ###
         self.label_200.setText(_translate("Visualization", "Voltage"))
         self.voltage.setText(_translate("Visualization", "0"))
-        self.dc_hold.setText(_translate("Visualization", "Hold DC Voltage"))
-        self.set_dc_voltage.setText(_translate("Visualization", "Set DC Voltage"))
+        self.dc_hold.setText(_translate("Visualization", "Hold DC"))
+        self.set_dc_voltage.setText(_translate("Visualization", "Set DC"))
         self.set_dc_voltage_value.setText(_translate("Visualization", str(int(self.conf.get('default_vdc_min', 500)))))
         self.label_201.setText(_translate("Visualization", "Detection Rate"))
         self.detection_rate.setText(_translate("Visualization", "0"))

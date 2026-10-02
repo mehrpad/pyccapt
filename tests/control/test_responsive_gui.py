@@ -499,7 +499,7 @@ def test_visualization_compact_controls_and_equal_plot_dimensions(instrument_win
         app.processEvents()
     print(f'Visualization GUI size: {window.size()}, preview: {tmp_path}')
     assert window.width() <= 1000
-    assert window.height() <= 620
+    assert window.height() <= 570
     viewport = window._responsive_window.scroll.viewport()
     assert window._responsive_window.scroll.horizontalScrollBar().maximum() == 0
     assert window._responsive_window.scroll.verticalScrollBar().maximum() == 0
@@ -513,6 +513,29 @@ def test_visualization_compact_controls_and_equal_plot_dimensions(instrument_win
         assert widget.isVisible()
         assert viewport.rect().contains(QtCore.QRect(widget.mapTo(viewport, QtCore.QPoint()), widget.size()))
     plots = (ui.vdc_time, ui.detection_rate_viz, ui.detector_heatmap, ui.detector_fdm)
+    voltage_controls = (ui.dc_hold, ui.set_dc_voltage, ui.set_dc_voltage_value)
+    assert len({control.mapTo(viewport, QtCore.QPoint()).y() for control in voltage_controls}) == 1
+    for left, right in zip(voltage_controls, voltage_controls[1:]):
+        assert left.mapTo(viewport, left.rect().topRight()).x() < right.mapTo(viewport, QtCore.QPoint()).x()
+    assert ui.experiment_status_text.mapTo(viewport, QtCore.QPoint()).y() < ui.top_plot_row.y()
+    assert ui.experiment_status_text.mapTo(viewport, ui.experiment_status_text.rect().topRight()).x() >= viewport.width()-12
+    assert ui.experiment_status_led.mapTo(viewport, QtCore.QPoint()).y() < ui.top_plot_row.y()
+    assert not ui.set_dc_voltage.isEnabled()
+    ui.variables.start_flag = True
+    ui._update_experiment_status_indicator()
+    assert ui.experiment_status_text.text() == 'Running'
+    assert '#22a447' in ui.experiment_status_led.styleSheet()
+    ui.dc_hold.click()
+    assert ui.variables.vdc_hold and ui.set_dc_voltage.isEnabled()
+    ui.set_dc_voltage_value.setText('2000')
+    ui.set_dc_voltage.click()
+    assert ui.variables.vdc_min == 2000 and ui.variables.flag_new_min_voltage
+    ui.dc_hold.click()
+    assert not ui.variables.vdc_hold and not ui.set_dc_voltage.isEnabled()
+    ui.variables.start_flag = False
+    ui._update_experiment_status_indicator()
+    assert ui.experiment_status_text.text() == 'Stopped'
+    assert '#d32f2f' in ui.experiment_status_led.styleSheet()
     assert ui.data_line_vdc in ui.vdc_time.listDataItems()
     assert ui.data_line_dtec in ui.detection_rate_viz.listDataItems()
     window.grab().save(str(tmp_path/'visualization.png'))

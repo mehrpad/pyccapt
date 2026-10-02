@@ -210,8 +210,9 @@ laser settings, readouts and alignment controls sit beside the response plot,
 with all stage controls below. Its messages share a two-line area; scroll or
 hover to read longer messages. Alignment fields have space between rows and
 columns, and the window grows to fit readable controls when needed.
-Visualization opens at 980 × 620, with compact
-fields and two rows of spectrum controls. Its four upper rectangular panels
+Visualization opens at 980 × 570, with Hold DC, Set DC and the target voltage
+field on one row, and the running/stopped indicator in the top-right corner.
+It has two rows of spectrum controls. Its four upper rectangular panels
 always have identical widths and heights, including during window resizing.
 These windows scroll on smaller screens so controls remain accessible.
 

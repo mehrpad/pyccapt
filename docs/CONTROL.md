@@ -224,7 +224,9 @@ between rows and wider column gaps so they cannot overlap. Connection warnings
 and temporary errors share a two-line message area; scroll or hover to read
 longer messages. The window grows to fit the controls when fonts require it.
 
-Visualization opens at 980 × 620. The four upper rectangular panels have
+Visualization opens at 980 × 570. Hold DC, Set DC and the target voltage field
+share one row, and the LED with Running/Stopped text sits in the top-right
+corner alongside the FDM count. The four upper rectangular panels have
 identical pixel dimensions at every window size. Compact voltage controls and
 two rows of spectrum controls reduce the width needed without removing any
 plot, calibration view, status indicator or input. Smaller screens use scrolling.

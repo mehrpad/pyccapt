@@ -167,7 +167,7 @@ class AlignmentGuiMixin:
             self._end_alignment_batch()
             return
         sample, target, values = self._alignment_batch[self._alignment_batch_index]
-        cfg = AlignmentConfig(**dict(self.variables.alignment_settings))
+        cfg = AlignmentConfig.from_snapshot(self.variables.alignment_settings)
         stage = self.gui_stage_control.stage_device
         position = stage.get_position()
         current = tuple(float(position[axis]) for axis in 'xyz')

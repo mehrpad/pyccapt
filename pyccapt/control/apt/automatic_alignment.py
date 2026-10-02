@@ -20,8 +20,7 @@ from pyccapt.control.apt.alignment_vision import Footprint, estimate_dense_regio
 class AutomaticAlignment:
     def __init__(self, variables, conf, now=None, analyser=estimate_footprint):
         self.v = variables
-        self.cfg = AlignmentConfig(**dict(variables.alignment_settings))
-        self.cfg.validate()
+        self.cfg = AlignmentConfig.from_snapshot(variables.alignment_settings)
         self.origin = tuple(variables.alignment_sample_position)
         self.fine_origin = None
         self.probe_baseline = None

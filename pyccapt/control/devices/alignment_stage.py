@@ -26,7 +26,7 @@ class AlignmentStageService:
 
     def _publish_position(self, position_map, now):
         position = tuple(float(position_map[axis]) for axis in 'xyz')
-        cfg = AlignmentConfig(**dict(self.v.alignment_settings))
+        cfg = AlignmentConfig.from_snapshot(self.v.alignment_settings)
         cfg.check_position(position)
         request = self.v.alignment_move_request
         if request and request.get('kind') == 'alignment' and self.v.start_flag:
@@ -102,7 +102,7 @@ class AlignmentStageService:
                 if device is None:
                     raise ValueError('Sample stage is not connected.')
                 device.validate_alignment_state()
-                cfg = AlignmentConfig(**dict(self.v.alignment_settings))
+                cfg = AlignmentConfig.from_snapshot(self.v.alignment_settings)
                 cfg.validate_motion([self.v.alignment_sample_position])
                 checked_at = time.monotonic() if live_clock else now
                 if not 0 <= checked_at-float(request['issued']) <= 2:

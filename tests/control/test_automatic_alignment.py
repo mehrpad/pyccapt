@@ -20,6 +20,40 @@ def settings(**changes):
     return replace(cfg, **changes)
 
 
+def legacy_snapshot(cfg):
+    """Settings published by a GUI started before the relative-search update."""
+    values = cfg.snapshot()
+    for name in ('coarse_dwell_s', 'coarse_max_dwell_s', 'search_min_events',
+                 'jump_ratio', 'jump_sigma', 'fine_loss_ratio', 'fine_probe_step_um'):
+        values.pop(name)
+    values.update(entry_fraction=.3, loss_fraction=.1)
+    return values
+
+
+def test_legacy_settings_start_engine_and_preserve_explicit_limits(tmp_path):
+    cfg = settings(voltage_increment=200., max_voltage=3000.)
+    v = state(cfg, tmp_path)
+    v.alignment_settings = legacy_snapshot(cfg)
+    engine = AutomaticAlignment(v, {'max_vdc': 10000}, now=0)
+    assert engine.cfg == cfg
+    assert 'entry_fraction' not in engine.cfg.snapshot()
+    assert 'loss_fraction' not in engine.cfg.snapshot()
+    # Parsing must not mutate the settings shared with the running GUI.
+    assert v.alignment_settings['entry_fraction'] == .3
+
+
+@pytest.mark.parametrize('changes, error, message', [
+    ({'z_max_advance_um': -1.}, ValueError, 'tolerance'),
+    ({'approach_enabled': 'false'}, ValueError, 'booleans'),
+    ({'z_max_advnce_um': 20.}, TypeError, 'z_max_advnce_um'),
+])
+def test_legacy_settings_still_reject_invalid_and_unknown_values(tmp_path, changes, error, message):
+    v = state(settings(), tmp_path)
+    v.alignment_settings = {**legacy_snapshot(settings()), **changes}
+    with pytest.raises(error, match=message):
+        AutomaticAlignment(v, {'max_vdc': 10000}, now=0)
+
+
 def test_plot_publisher_is_throttled_and_keeps_percent_units(tmp_path):
     cfg = settings()
     v = state(cfg, tmp_path)
@@ -513,9 +547,12 @@ def test_stage_service_keeps_stationary_alignment_position_fresh(tmp_path):
     assert v.stage_position_snapshot[3] == 1.
 
 
-def test_z_transfer_ignores_held_xy_drift_but_requires_z_target_and_settling(tmp_path):
+@pytest.mark.parametrize('legacy', [False, True])
+def test_z_transfer_ignores_held_xy_drift_but_requires_z_target_and_settling(tmp_path, legacy):
     cfg = settings()
     v = state(cfg, tmp_path)
+    if legacy:
+        v.alignment_settings = legacy_snapshot(cfg)
     v.hardware_safe = True
     v.alignment_move_request = dict(id='retract', target_m=(0., 0., -.5e-3),
                                    speed_um_s=1., kind='transfer', issued=0.)

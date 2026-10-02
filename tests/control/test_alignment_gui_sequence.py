@@ -95,8 +95,16 @@ def gui(monkeypatch, tmp_path):
         q.close()
 
 
-def test_editable_voltage_fields_and_positioning_precede_launch(gui):
+@pytest.mark.parametrize('legacy', [False, True])
+def test_editable_voltage_fields_and_positioning_precede_launch(gui, monkeypatch, legacy):
     ui, v, motor, tick = gui
+    if legacy:
+        position_sample = ui._position_alignment_sample
+        def publish_old_settings_then_position():
+            # Reproduce the snapshot held by a GUI started before the update.
+            v.alignment_settings = {**v.alignment_settings, 'entry_fraction': .3, 'loss_fraction': .1}
+            position_sample()
+        monkeypatch.setattr(ui, '_position_alignment_sample', publish_old_settings_then_position)
     assert ui.alignment_start_voltage.value() == 1500
     assert ui.alignment_voltage_increment.value() == 100
     ui.alignment_voltage_increment.setValue(125)

@@ -52,6 +52,20 @@ class AlignmentConfig:
     motion_calibrated: bool = False
 
     @classmethod
+    def from_snapshot(cls, snapshot):
+        """Read cross-process settings, including snapshots from older running GUIs.
+
+        Only the retired absolute-rate thresholds are discarded. Unknown keys
+        still fail construction, and explicit motion limits remain unchanged.
+        """
+        values = dict(snapshot)
+        values.pop('entry_fraction', None)
+        values.pop('loss_fraction', None)
+        result = cls(**values)
+        result.validate()
+        return result
+
+    @classmethod
     def from_mapping(cls, conf, start_voltage=None, voltage_increment=None):
         values = {}
         for name in cls.__dataclass_fields__:

@@ -72,6 +72,15 @@ The former `alignment_entry_fraction` and `alignment_loss_fraction` are no longe
 used. Relative-search evidence controls finding and signal loss; the completion
 goal remains configured by `alignment_finish_fraction`.
 
+Settings snapshots from a GUI started before the relative-search update can
+still contain `entry_fraction` and `loss_fraction`. The experiment, stage service
+and sample-transfer GUI discard these two obsolete fields when reading a
+snapshot; missing relative-search settings use their defaults. Explicit voltages,
+motion limits and approach enable flags are preserved, and unknown fields or
+invalid values still fail validation. Fully close and reopen PyCCAPT after a code
+update so the GUI, stage service and experiment processes all load the new code
+and configuration defaults.
+
 At each coarse position, collect fresh paired hits for 2 s, extending to at most
 6 s if evidence is insufficient. A usable observation requires 200 recent hits
 and at least 200 newly arriving events after its first snapshot. Compare the

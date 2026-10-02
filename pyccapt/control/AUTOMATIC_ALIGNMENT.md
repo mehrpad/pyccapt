@@ -9,19 +9,24 @@ requested detection rate. Completion still requires stable centring and 80% of
 the requested rate (0.8% for a 1% experiment target).
 
 Sample-stage coarse search is configured to **±50 µm per X/Y axis** around the
-saved rough position. Fine alignment is limited to **±15 µm per X/Y axis** around
-the position where stable coarse signal is found. Fine moves must also remain
+saved rough position. A semi-coarse pass covers **±15 µm per X/Y axis** around
+the verified coarse candidate, limited to one third of the original range.
+Fine alignment is limited to **±5 µm per X/Y axis** around
+the selected semi-coarse position. Fine moves must also remain
 inside the original ±50 µm envelope and the calibrated absolute stage bounds.
 Reaching the fine range limit returns to coarse recovery. These are ranges,
 not individual movement steps. Coarse XY uses 0.1 mm/s; fine XY uses 0.016 mm/s
 and evaluates detector events after each 1 µm probe.
-The first probes cover the saved position and its eight neighbours at ±10 µm.
-If no candidate is confirmed, outer probe distances expand to 20, 40 and 50 µm,
-with eight axial/diagonal points per distance: **33 positions maximum per pass**.
+The broad pass checks the saved position, then eight axial/diagonal probes at
+half the X/Y ranges and eight at their full extents: **16 lateral probes plus
+the saved-position observation**. Each axis scales independently with its range.
+Targets are inset by 0.2 µm to avoid commanding exactly on a measured-position
+guard: with the default ±50 µm range, probe distances are 24.9 and 49.8 µm.
 This is a sparse search, so a narrow peak between probes can be missed. Re-save
-the rough position nearer that sample or reduce the first spacing if needed.
-A nominal complete pass, origin return and voltage increment fit within
-the 30-minute alignment timeout. Fine detector-feedback probes remain 1 µm.
+the rough position nearer the sample or reduce `alignment_xy_range_um` if needed;
+the probe spacings automatically shrink with it. The nominal failed broad pass,
+origin return and voltage increment take under 80 s with the current defaults,
+excluding hardware delays. Fine detector-feedback probes remain 1 µm.
 Startup rejects settings whose estimated complete coarse sweep and first voltage
 retry exceed the alignment timeout. The estimate includes dwell, settling,
 configured travel speed and a polling allowance; hardware delays and time spent
@@ -40,8 +45,9 @@ alignment begins:
 | --- | --- | --- | --- |
 | Absolute stage envelope | X [-2, 6], Y [-3, 7], Z [-10, 7] **mm** | Every target and measured position is checked | Phase-specific |
 | Initial/sample transfer | Current XY at Z -4 mm, then saved XY at Z -4 mm, then saved Z | Three separate acknowledged moves | 300 µm/s = 0.3 mm/s |
-| Coarse search | X0 ±50 µm, Y0 ±50 µm, Z = Z0 | Initial ±10 µm neighbourhood; double outer distance, clipped at 50 µm; 33 points | 100 µm/s = 0.1 mm/s |
-| Fine search | Xf ±15 µm, Yf ±15 µm, also within the coarse envelope and absolute bounds | 1 µm single-axis detector-feedback probes | 16 µm/s = 0.016 mm/s |
+| Coarse search | X0 ±50 µm, Y0 ±50 µm, Z = Z0 | Saved origin plus 8 probes at 24.9 µm and 8 at 49.8 µm | 100 µm/s = 0.1 mm/s |
+| Semi-coarse search | Candidate XY ±15 µm, also inside the inset coarse envelope; Z = Z0 | Candidate plus up to 16 probes at 7.5 and 15 µm, clipped and deduplicated near boundaries | 100 µm/s |
+| Fine search | Xf ±5 µm, Yf ±5 µm, also within the inset coarse envelope and absolute bounds | 1 µm single-axis detector-feedback probes | 16 µm/s = 0.016 mm/s |
 | Optional mapped fine correction | Same fine/coarse/absolute limits | At most ±0.1 µm per X/Y axis per correction | 16 µm/s |
 | Fine Z approach | **Enabled**, after stable XY centring and a valid circular footprint; total advance ≤20 µm from Z0 | +0.05 µm per step; never reset the allowance after a move | 0.1 µm/s |
 
@@ -55,18 +61,26 @@ Each movement requires stopped axes and the commanded axes within 0.02 µm
 (20 nm) of target continuously for 0.5 s. The per-move timeout is 180 s.
 The measured approach and XY search envelopes are checked before and throughout
 motion, allowing only that 20 nm positioning tolerance beyond their nominal limits.
+The target inset does not enlarge these measured limits. A true boundary,
+controller or interlock fault still stops the experiment; it is not treated as
+an unsuccessful detector search.
 
 ### Current detection and voltage decisions
 
 | Config key | Default | Meaning |
 | --- | --- | --- |
-| `alignment_xy_step_um` | 10 | First neighbourhood radius; outer distances double |
-| `alignment_coarse_dwell_s` / `alignment_coarse_max_dwell_s` | 2 / 6 | Minimum/maximum seconds for each neighbour or candidate observation |
+| `alignment_xy_range_um` | [50, 50] | Broad half-ranges; determine the 16 broad probe spacings |
+| `alignment_semi_xy_range_um` | 15 | Second-pass half-range, capped at one third of the inset coarse half-range |
+| `alignment_xy_step_um` | 10 | Cap on inner semi-coarse spacing; outer semi probes reach its full local range |
+| `alignment_fine_xy_range_um` | 5 | Fine half-range about the selected second-pass point |
+| `alignment_xy_boundary_margin_um` | 0.2 | Inset commanded XY targets; capped at 10% of each range for very small envelopes |
+| `alignment_coarse_dwell_s` / `alignment_coarse_max_dwell_s` | 1 / 3 | Minimum/maximum seconds for each broad, semi or confirmation observation |
 | `alignment_search_min_events` | 200 | Minimum fresh paired hits and independent new events for rate/density comparison |
 | `alignment_jump_ratio` / `alignment_jump_sigma` | 1.5 / 3 | Relative rate contrast and combined count-noise significance |
 | `alignment_fine_loss_ratio` | 0.25 | Signal-loss fraction of the verified fine-entry rate |
 | `alignment_voltage_increment` | 100 | Default stationary DC retry in volts; GUI value takes precedence |
 | `alignment_approach_enabled` / `alignment_z_max_advance_um` | true / 20 | Fine Z enable and total advance cap in µm from saved Z |
+| `alignment_max_attempts` | 1 | Fine entries at one voltage before recovery raises DC; does not terminate the sequence |
 
 The former `alignment_entry_fraction` and `alignment_loss_fraction` are no longer
 used. Relative-search evidence controls finding and signal loss; the completion
@@ -81,8 +95,8 @@ invalid values still fail validation. Fully close and reopen PyCCAPT after a cod
 update so the GUI, stage service and experiment processes all load the new code
 and configuration defaults.
 
-At each coarse position, collect fresh paired hits for 2 s, extending to at most
-6 s if evidence is insufficient. A usable observation requires 200 recent hits
+At each coarse or semi-coarse position, collect fresh paired hits for 1 s,
+extending to at most 3 s if evidence is insufficient. A usable observation requires 200 recent hits
 and at least 200 newly arriving events after its first snapshot. Compare the
 median measured detection rate against the closest observed neighbour at the
 same voltage. The default candidate must be at least **1.5 times** that neighbour
@@ -91,9 +105,20 @@ detector region or valid circular footprint. A single saturated pixel, diffuse
 background and detector-edge clipping cannot supply that evidence.
 
 Revisit the low neighbour, then revisit the candidate with new observation
-epochs at unchanged DC. Enter fine alignment only if the relative contrast and
+epochs at unchanged DC. Enter semi-coarse alignment only if the relative contrast and
 coherent region persist. This rejects single bursts and uniform temporal rate
 increases. Both the original comparison and repeat measurements are logged.
+
+The semi-coarse pass keeps saved Z and DC fixed. It checks the candidate and
+up to 16 smaller surrounding probes. Points outside the original inset envelope
+are clipped and duplicates removed. Its default ±15 µm range gives inner probes
+at 7.5 µm and outer probes at 15 µm. The highest coherent evaporation rate is
+preferred; when rate differences are within count noise, a detector centroid
+closer to the centre can break the tie. The selected point is revisited with a
+new event epoch. Only a fresh coherent repeat retaining at least 25% of the
+verified coarse rate starts fine alignment. A failed repeat retracts to saved
+Z, returns to saved XY, increases DC and restarts the broad pass. Second-pass
+observations, selection, confirmation and recovery are recorded in `alignment.jsonl`.
 
 Let `R` be the requested experiment detection rate, in percent. Completion
 requires the footprint centre within 0.8 mm of the detector centre (2% of the
@@ -124,21 +149,27 @@ distance. Each fine XY comparison waits 3 s and 200 independent new events.
 Otherwise return to the baseline and try another X/Y direction.
 The footprint centre determines which signs are tried first, but measured
 improvement determines acceptance. Exhausting all permitted directions causes
-recovery to saved Z and XY, then another coarse search.
+recovery to saved Z and XY, then a higher-voltage coarse search by default.
 
 After XY is centred with a valid circular footprint for 3 s and 2000 additional
 events, Z can advance while the rate is below the completion goal, the conservative
 footprint area including radius uncertainty is below 90%, and the next step is
 within the total 20 µm allowance from saved Z. Recheck centring after every step.
+If the next step would exceed that allowance, retract to saved Z, return to
+saved XY and retry at higher DC. Never extend the Z allowance to find a signal.
 If only a density centroid is available, Z remains fixed and stationary DC can
 increase instead. **The 90% area setting is an approach limit, not a mandatory
 completion condition.**
 
 In fine alignment, an invalid region or rate below 25% of the verified fine-entry
 signal (rather than a fraction of the requested target) must persist
-beyond the observation dwell and then for another 3 s before recovery. The
-five-attempt limit counts entries into fine alignment, not coarse grid points
-or voltage increments. The overall alignment deadline is 1800 s (30 min),
+beyond the observation dwell and then for another 3 s before recovery.
+`alignment_max_attempts` counts fine entries **at the current voltage** before
+recovery increases DC. Its default is one; larger values repeat the broad search
+at the same voltage first. Exhausting this counter does not stop the experiment.
+The counter resets after a voltage increase. A failed complete broad pass always
+increases DC after returning to the origin. At the configured voltage limit,
+the final unsuccessful pass skips the sample. The overall alignment deadline is 1800 s (30 min),
 starting when the experiment's alignment engine is created after transfer.
 Normal experiment time/ion/voltage stop criteria remain active throughout.
 
@@ -160,7 +191,10 @@ Measure and enter these values in `pyccapt/config.toml`:
   saved position. Each sample's local XY envelope must be clear throughout its
   permitted Z advance, including intermediate positions.
 - `alignment_fine_xy_range_um`: the permitted +/- X/Y travel from each fine
-  alignment starting position, currently 15 µm; it does not enlarge the coarse envelope.
+  alignment starting position, currently 5 µm; it does not enlarge the coarse envelope.
+- `alignment_semi_xy_range_um`: second-pass half-range, currently 15 µm, also
+  capped at one third of the inset coarse half-range. Coarse probe spacings derive
+  from the configured X/Y ranges; reducing those ranges reduces the spacings.
 - `alignment_xy_jacobian_mm_per_um`: optional measured 2 by 2 mapping. Empty
   selects detector feedback: fine alignment probes one axis at a time, waits for
   independent detector windows and retains only centring improvements.
@@ -284,10 +318,12 @@ and Reference are blocked throughout a sequence; Stage Stop cancels the sequence
    DC regulation is **held**, including the PID integrator, throughout XY
    moves and observation periods. The experiment's ordinary Kp values are not
    modified. Upward voltage changes are only allowed during stationary ramps.
-4. Probe the local ±10 µm neighbourhood at saved Z, then expand outer distances
-   within ±50 µm. Compare neighbouring fixed-DC observations, revisit both sides
-   of any significant rate jump, and enter fine alignment around its confirmed
-   high-density position. No requested-rate entry threshold is used.
+4. Check the saved position, then up to 16 broad probes derived from the X/Y
+   ranges, with targets inset from the boundary. Compare neighbouring fixed-DC
+   observations and revisit both sides of a significant rate jump. A verified
+   candidate starts a semi-coarse pass within ±15 µm, then fresh confirmation
+   starts fine alignment within ±5 µm. Saved Z remains fixed through both search
+   passes. No requested-rate entry threshold is used.
 5. If a full search fails, return to the saved origin and await acknowledgement,
    then increment voltage and repeat. The effective cap is the minimum of the
    alignment maximum (6000 V), experiment maximum and hardware maximum. The
@@ -301,10 +337,11 @@ and Reference are blocked throughout a sequence; Stage Stop cancels the sequence
    a conservative radius uncertainty; reaching it prevents additional approach.
    Voltage can still rise while the stage is stationary, within the alignment cap.
    If all four permitted XY directions fail to improve centring, recover to the
-   saved position and restart coarse search instead of repeating the same probes.
+   saved position and retry coarse search at higher DC by default.
 7. Sustained loss of sample signal during fine alignment triggers recovery:
    retract to the saved Z first, return to saved XY, then restart the XY search.
-   The five-attempt limit counts fine-alignment entries, not voltage search steps.
+   After the configured fine attempts at one DC level (one by default), recovery
+   increases voltage. It does not end the experiment just because attempts failed.
 8. Stop criteria remain active during alignment. All ions are saved, including
    alignment ions. Alignment does not reset experiment time/ion counters halfway
    through a sample.
@@ -313,8 +350,8 @@ and Reference are blocked throughout a sequence; Stage Stop cancels the sequence
    before positioning the next sample. Then run normal new-experiment startup,
    including visualization reset and new counters/output files.
 
-An exhausted voltage search skips that sample. Five failed fine attempts,
-alignment timeout, clearance/movement faults, detector errors, incomplete
+An exhausted voltage search skips that sample. Alignment timeout,
+physical clearance/movement faults, detector errors, incomplete
 shutdown and Operator Stop end the entire sequence. The existing ten-second
 no-event detector safeguard remains active. A coarse scan does not bypass it.
 

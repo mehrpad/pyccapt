@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 
 from pyccapt.control.apt.alignment_config import AlignmentConfig, coarse_positions
-from pyccapt.control.apt.alignment_search import RelativeSearch, significant_jump
+from pyccapt.control.apt.alignment_search import RelativeSearch, range_positions, significant_jump
 from pyccapt.control.apt.alignment_vision import Footprint, estimate_dense_region, estimate_footprint
 
 
@@ -47,6 +47,8 @@ class AutomaticAlignment:
         self.early_hold_armed = True
         self.ramp_resume_voltage = self.target_voltage
         self.attempts = 0
+        self.voltage_attempts = 0
+        self.recovery_after = 'restart_coarse'
         self.outcome = ''
         self.reason = ''
         self.pending = None
@@ -123,6 +125,8 @@ class AutomaticAlignment:
 
     def _move(self, target, after, *, z=False):
         self.cfg.check_position(target)
+        if not z:
+            self.cfg.check_search_xy(target, self.origin)
         identifier = uuid.uuid4().hex
         self.pending = (identifier, self.now, after)
         self.phase = 'moving'
@@ -158,11 +162,35 @@ class AutomaticAlignment:
         self.search = RelativeSearch(self.cfg)
         self.candidate = None
         self.grid = iter(coarse_positions(self.origin, self.cfg))
+        self._event('coarse_started', ranges_um=self.cfg.xy_range_um,
+                    max_lateral_probes=16, boundary_margin_um=self.cfg.xy_boundary_margin_um)
         self._next_coarse()
+
+    def _start_semi(self, record):
+        """Refine a verified spatial candidate at saved Z before fine XY/Z."""
+        centre = self._search_target(record)
+        lower, upper = self.cfg.search_xy_limits(self.origin)
+        ranges = np.minimum(self.cfg.semi_xy_range_um, (upper-lower)*1e6/6.)
+        self.semi_grid = iter(range_positions(centre, ranges, lower, upper, self.cfg.xy_step_um))
+        self.semi_reference_rate = record['rate']
+        self.semi_best = record
+        self.candidate = None
+        self._event('semi_coarse_started', centre_m=centre, ranges_um=tuple(ranges),
+                    max_lateral_probes=16, reference_rate=record['rate'])
+        self._next_semi()
+
+    def _next_semi(self):
+        target = next(self.semi_grid, None)
+        if target is None:
+            self._event('semi_coarse_selected', selected=self.semi_best)
+            self._move(self._search_target(self.semi_best), 'confirm_semi')
+        else:
+            self._move(target, 'observe_semi')
 
     def _start_fine(self, source='coarse', reference_rate=None):
         self.initial_ramp = False
         self.attempts += 1
+        self.voltage_attempts += 1
         self.fine_origin = self._position()
         self.fine_reference_rate = max(float(self.v.detection_rate_current) if reference_rate is None
                                        else float(reference_rate), 1e-9)
@@ -185,6 +213,10 @@ class AutomaticAlignment:
     def _after_move(self, action):
         if action == 'observe_coarse':
             self._observe()
+        elif action == 'observe_semi':
+            self._observe(phase='semi_coarse')
+        elif action == 'confirm_semi':
+            self._observe(phase='semi_confirm')
         elif action == 'confirm_candidate':
             self._observe(phase='candidate')
         elif action == 'verify_neighbour':
@@ -196,20 +228,21 @@ class AutomaticAlignment:
                 self.finish('voltage_limit', 'No alignment at the configured voltage limit; skipping sample.')
             else:
                 self.target_voltage = min(self.limit, self.target_voltage+self.cfg.voltage_increment)
+                self.voltage_attempts = 0
                 self.phase = 'ramp'
                 self.ramp_destination = 'coarse'
                 self._event('voltage_step', voltage=self.target_voltage, returned_to_origin=True)
         elif action == 'recover_xy':
-            self._move(self.origin, 'restart_coarse')
+            self._move(self.origin, self.recovery_after)
         elif action == 'restart_coarse':
             self._start_coarse()
 
-    def _recover(self):
+    def _recover(self, advance_voltage=False):
         self._event('signal_lost')
-        if self.attempts >= self.cfg.max_attempts:
-            self.finish('attempt_limit', 'Five coarse/fine attempts failed.' if self.cfg.max_attempts == 5
-                        else f'{self.cfg.max_attempts} coarse/fine attempts failed.')
-            return
+        self.recovery_after = ('increase_voltage' if advance_voltage or
+                               self.voltage_attempts >= self.cfg.max_attempts else 'restart_coarse')
+        self._event('search_recovery', next_action=self.recovery_after,
+                    attempts_at_voltage=self.voltage_attempts)
         # Retraction is a separate recovery phase. Coarse searching always uses
         # the saved Z, never the closer Z reached by a fine approach.
         position = self._position()
@@ -246,8 +279,16 @@ class AutomaticAlignment:
         rate = float(np.median(self.observation_rates)) if self.observation_rates else 0.
         count = self.observation_count
         return {'position_m': self._position(), 'rate': rate, 'count': count,
+                'target_m': tuple(self.v.alignment_move_request['target_m']),
                 'error': max(rate, 1e-6)/np.sqrt(max(1, count)), 'coherent': bool(fit.valid),
                 'footprint': fit.snapshot(), 'voltage': float(self.v.specimen_voltage)}
+
+    def _search_target(self, record):
+        # Revisit commanded coordinates, rather than adding readback noise to
+        # a boundary target on each candidate/second-pass confirmation.
+        lower, upper = self.cfg.search_xy_limits(self.origin)
+        xy = np.clip(record.get('target_m', record['position_m'])[:2], lower, upper)
+        return (*xy, self.origin[2])
 
     def _coarse_tick(self, fit, sequence):
         elapsed = self.now-self.observation_start
@@ -259,12 +300,34 @@ class AutomaticAlignment:
         record = self._coarse_record(fit)
         record['coherent'] = record['coherent'] and bool(ready)
         self._event('coarse_comparison_observation', **record, independent=bool(ready))
+        if self.phase == 'semi_coarse':
+            if record['coherent']:
+                # Prefer higher evaporation, using detector centring to break
+                # differences smaller than count noise; never use density for Z.
+                delta = record['rate']-self.semi_best['rate']
+                noise = self.cfg.jump_sigma*np.hypot(record['error'], self.semi_best['error'])
+                closer = np.linalg.norm(fit.centre_mm) < np.linalg.norm(
+                    self.semi_best['footprint']['centre_mm'])
+                if delta > noise or (abs(delta) <= noise and closer and
+                                    record['rate'] >= self.cfg.fine_loss_ratio*self.semi_reference_rate):
+                    self.semi_best = record
+            self._next_semi()
+            return
+        if self.phase == 'semi_confirm':
+            confirmed = (ready and fit.valid and
+                         record['rate'] >= self.cfg.fine_loss_ratio*self.semi_reference_rate)
+            self._event('semi_coarse_confirmed' if confirmed else 'semi_coarse_rejected', repeated=record)
+            if confirmed:
+                self._start_fine(source='relative_jump', reference_rate=record['rate'])
+            else:
+                self._recover(advance_voltage=True)
+            return
         if self.phase == 'neighbour':
             high, low = self.candidate
             self._event('relative_jump_neighbour_rechecked', original=low, repeated=record)
             self.search.observe(record)
             self.candidate = high, record
-            self._move(high['position_m'], 'confirm_candidate')
+            self._move(self._search_target(high), 'confirm_candidate')
             return
         if self.phase == 'candidate':
             high, low = self.candidate
@@ -274,7 +337,7 @@ class AutomaticAlignment:
             self.search.observe(record)
             self.candidate = None
             if confirmed:
-                self._start_fine(source='relative_jump', reference_rate=record['rate'])
+                self._start_semi(record)
             else:
                 self._next_coarse()
             return
@@ -283,7 +346,7 @@ class AutomaticAlignment:
             self.candidate = candidate
             self._event('relative_jump_candidate', high=candidate[0], neighbour=candidate[1],
                         ratio=self.cfg.jump_ratio, sigma=self.cfg.jump_sigma)
-            self._move(candidate[1]['position_m'], 'verify_neighbour')
+            self._move(self._search_target(candidate[1]), 'verify_neighbour')
         else:
             self._next_coarse()
 
@@ -379,7 +442,7 @@ class AutomaticAlignment:
                                 reason='Target-rate sample signal was not confirmed at the held voltage.')
                     self._publish()
                 return
-            if self.phase in ('coarse', 'candidate', 'neighbour'):
+            if self.phase in ('coarse', 'candidate', 'neighbour', 'semi_coarse', 'semi_confirm'):
                 self._coarse_tick(fit, sequence)
                 return
             if self.phase == 'fine':
@@ -419,6 +482,7 @@ class AutomaticAlignment:
                             return
                         try:
                             self.cfg.check_fine_position(target, self.fine_origin)
+                            self.cfg.check_search_xy(target, self.origin)
                         except ValueError:
                             self._event('fine_range_reached', centre_m=self.fine_origin)
                             self._recover()
@@ -432,12 +496,14 @@ class AutomaticAlignment:
                         return
                     advance = self.cfg.z_direction*(position[2]-self.origin[2])*1e6
                     if advance+self.cfg.z_step_um > self.cfg.z_max_advance_um + 1e-9:
-                        self.finish('clearance_limit', 'Calibrated approach limit reached before alignment.')
+                        self._event('clearance_limit_reached', advance_um=advance)
+                        self._recover(advance_voltage=True)
                         return
                     position[2] += self.cfg.z_direction*self.cfg.z_step_um*1e-6
                     self._move(tuple(position), 'observe_fine', z=True)
                 elif self.target_voltage < self.limit:
                     self.target_voltage = min(self.limit, self.target_voltage+self.cfg.voltage_increment)
+                    self.voltage_attempts = 1  # Continuing this fine attempt at a new DC level.
                     self.phase, self.ramp_destination = 'ramp', 'fine'
                     self._event('stationary_fine_voltage_step', voltage=self.target_voltage)
                 else:
@@ -494,6 +560,7 @@ class AutomaticAlignment:
             try:
                 self.cfg.check_position(target)
                 self.cfg.check_fine_position(target, self.fine_origin)
+                self.cfg.check_search_xy(target, self.origin)
             except ValueError:
                 continue
             if np.any(np.abs((target[:2]-np.asarray(self.origin[:2]))*1e6)

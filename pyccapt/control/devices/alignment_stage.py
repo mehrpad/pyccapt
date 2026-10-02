@@ -37,7 +37,10 @@ class AlignmentStageService:
                 raise ValueError('Measured sample Z exceeds the maximum permitted approach.')
             if np.any(np.abs((np.asarray(position[:2])-origin[:2])*1e6)
                       > np.asarray(cfg.xy_range_um)+cfg.position_tolerance_um):
-                raise ValueError('Measured sample XY exceeds the coarse search envelope.')
+                offset = (np.asarray(position[:2])-origin[:2])*1e6
+                raise ValueError('Measured sample XY exceeds the coarse search envelope: '
+                                 f'offset {tuple(float(x) for x in offset)} µm; '
+                                 f'ranges {cfg.xy_range_um} µm, tolerance {cfg.position_tolerance_um:g} µm.')
             if 'fine_origin_m' in request:
                 centre = np.asarray(request['fine_origin_m'], dtype=float)
                 if np.any(np.abs((np.asarray(position[:2])-centre[:2])*1e6)
@@ -131,6 +134,8 @@ class AlignmentStageService:
                         if not retract_target and not sample_target:
                             raise ValueError('Transfer Z must follow the calibrated clearance/sample path.')
                 else:
+                    if changed[:2].any():
+                        cfg.check_search_xy(target, self.v.alignment_sample_position)
                     if 'fine_origin_m' in request:
                         cfg.check_position(request['fine_origin_m'])
                         cfg.check_fine_position(target, request['fine_origin_m'])

@@ -45,9 +45,11 @@ The automatic sample-alignment sequence, commissioning settings, detector
 analysis and metadata are documented in [AUTOMATIC_ALIGNMENT.md](AUTOMATIC_ALIGNMENT.md).
 The initial transfer/settling/error journal is copied into each dataset as
 `meta_data/alignment_transfer.jsonl`; failed pre-start transfers retain their file
-under `data/alignment_sequences/`. The sample search starts with ±10 µm neighbours
-then expands within ±50 µm, comparing repeatable rate jumps and dense hitmap
-regions at unchanged DC. The default voltage increment is 100 V. Fine Z approach
+under `data/alignment_sequences/`. The sample search checks the saved position
+and 16 broad probes derived from the ±50 µm envelope. Repeatable rate jumps and
+dense hitmap regions trigger a second pass within ±15 µm, then fine XY within
+±5 µm. Targets are inset by 0.2 µm; failed searches return to saved Z/XY and retry
+at +100 V within the configured voltage/time limits. Fine Z approach
 requires stable XY centring and a circular fit and is capped at 20 µm total from
 the saved position.
 

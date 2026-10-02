@@ -100,7 +100,7 @@ class Rig:
     def step(self, rate=0., fresh=True):
         self.time += 0.5
         position = self.v.stage_position_snapshot[:3]
-        if self.engine.phase in ('coarse', 'candidate', 'neighbour') and np.linalg.norm(position[:2]) > 1e-10:
+        if self.engine.phase in ('coarse', 'candidate', 'neighbour', 'semi_coarse', 'semi_confirm') and np.linalg.norm(position[:2]) > 1e-10:
             rate *= .25  # Nearby background; the saved origin is a repeatable spatial maximum.
         self.v.detection_rate_current = rate
         self.v.alignment_stage_heartbeat = self.time
@@ -112,7 +112,7 @@ class Rig:
             self.v.alignment_move_status = {'id': req['id'], 'state': 'done'}
         self.v.stage_position_snapshot = (*position, self.time)
         if fresh:
-            self.sequence += 500
+            self.sequence += getattr(self, 'events_per_tick', 500)
             self.v.alignment_events = {'epoch': self.v.alignment_window_epoch, 'sequence': self.sequence,
                                        'time': self.time, 'first_time': self.time,
                                        'points_mm': [(0., 0.)]*self.cfg.window_ions}
@@ -139,8 +139,8 @@ def test_spiral_is_bounded_and_never_changes_z():
     assert points[0] == origin
     assert len(points) == len(set(points))
     assert all(p[2] == origin[2] for p in points)
-    assert max(abs(p[0]-origin[0]) for p in points) == pytest.approx(2.5e-6)
-    assert max(abs(p[1]-origin[1]) for p in points) == pytest.approx(1.5e-6)
+    assert max(abs(p[0]-origin[0]) for p in points) == pytest.approx(2.3e-6)
+    assert max(abs(p[1]-origin[1]) for p in points) == pytest.approx(1.35e-6)
 
 
 def test_requested_stage_ranges_accept_full_coarse_grid():
@@ -149,7 +149,8 @@ def test_requested_stage_ranges_accept_full_coarse_grid():
     conf = read_toml_file(Path(__file__).parents[2]/'pyccapt/config.toml')
     cfg = AlignmentConfig.from_mapping(conf)
     assert cfg.xy_range_um == (50., 50.)
-    assert cfg.fine_xy_range_um == 15.
+    assert cfg.semi_xy_range_um == 15.
+    assert cfg.fine_xy_range_um == 5.
     assert cfg.motion_calibrated
     assert cfg.z_direction == 1
     assert cfg.transfer_z_mm == -4.
@@ -161,13 +162,13 @@ def test_requested_stage_ranges_accept_full_coarse_grid():
     calibrated = settings(xy_range_um=cfg.xy_range_um, fine_xy_range_um=cfg.fine_xy_range_um,
                           xy_step_um=cfg.xy_step_um)
     calibrated.validate_motion([(0., 0., 0.)])
-    assert len(list(coarse_positions((0., 0., 0.), calibrated))) == 33
+    assert len(list(coarse_positions((0., 0., 0.), calibrated))) == 17
     assert cfg.voltage_increment == 100.
     assert cfg.approach_enabled and cfg.z_max_advance_um == 20.
 
 
 def test_fine_range_is_relative_to_coarse_result():
-    cfg = settings(xy_range_um=(50., 50.), xy_step_um=10.)
+    cfg = settings(xy_range_um=(50., 50.), xy_step_um=10., fine_xy_range_um=15.)
     centre = (20e-6, -10e-6, 0.)
     cfg.check_fine_position((35e-6, 5e-6, 0.), centre)
     with pytest.raises(ValueError, match='fine|Fine'):
@@ -282,15 +283,19 @@ def test_replayed_event_window_cannot_establish_stability(tmp_path):
     assert rig.engine.attempts == 0
 
 
-def test_five_fine_attempts_abort_sequence(tmp_path):
-    rig = Rig(tmp_path, footprint=Footprint(True, 'sample', (0., 0.), 10., .06, .9, .01, 1.))
+def test_five_fine_attempts_retry_at_higher_voltage_instead_of_aborting(tmp_path):
+    rig = Rig(tmp_path, settings(max_attempts=5),
+              footprint=Footprint(True, 'sample', (0., 0.), 10., .06, .9, .01, 1.))
     for attempt in range(1, 6):
         rig.until(lambda: rig.engine.phase == 'fine', rate=.4)
         assert rig.engine.attempts == attempt
         rig.until(lambda: rig.engine.phase != 'fine', rate=0.)
         if attempt < 5:
             rig.until(lambda: rig.engine.phase == 'coarse', rate=0.)
-    assert rig.engine.outcome == 'attempt_limit'
+    rig.until(lambda: rig.engine.target_voltage > 1500, rate=0.)
+    assert rig.engine.target_voltage == 1600
+    assert not rig.engine.outcome
+    assert rig.v.stage_position_snapshot[:3] == rig.engine.origin
 
 
 def test_fine_correction_uses_calibration_and_bounded_step(tmp_path):
@@ -343,8 +348,10 @@ def test_loss_after_approach_retracts_before_xy_search(tmp_path):
 def test_approach_never_exceeds_measured_advance(tmp_path):
     rig = Rig(tmp_path, settings(approach_enabled=True, z_max_advance_um=.05),
               footprint=Footprint(True, 'sample', (0., 0.), 10., .06, .9, .01, 1.))
-    rig.until(lambda: bool(rig.engine.outcome), rate=.4)
-    assert rig.engine.outcome == 'clearance_limit'
+    rig.until(lambda: rig.engine.target_voltage > 1500., rate=.4)
+    assert not rig.engine.outcome
+    assert rig.engine.target_voltage == 1600.
+    assert rig.v.stage_position_snapshot[:3] == rig.engine.origin
     assert max(m['target_m'][2] for m in rig.moves) <= .05e-6
 
 
@@ -624,7 +631,7 @@ def test_stage_request_published_during_read_is_not_expired(tmp_path, monkeypatc
         def __getattribute__(self, name):
             if name == 'alignment_move_request':
                 clock[0] += .005
-                return dict(id='new-request', target_m=(1e-6, 0., 0.),
+                return dict(id='new-request', target_m=(.8e-6, 0., 0.),
                             speed_um_s=1., kind='alignment', issued=clock[0])
             return super().__getattribute__(name)
     v = UpdatingState(**vars(state(settings(), tmp_path)))
@@ -645,7 +652,7 @@ def test_transfer_retracts_traverses_then_approaches_saved_position():
 
 
 def test_all_rejected_feedback_directions_recover_instead_of_repeating(tmp_path):
-    rig = Rig(tmp_path, settings(xy_jacobian_mm_per_um=()),
+    rig = Rig(tmp_path, settings(xy_jacobian_mm_per_um=(), xy_range_um=(50., 50.)),
               Footprint(True, 'unchanged centre', (2., 2.), 10.))
     rig.until(lambda: rig.engine.phase == 'fine', rate=.4)
     rig.until(lambda: rig.engine.pending and rig.engine.pending[2] == 'recover_xy', rate=.4)
@@ -665,7 +672,7 @@ def test_all_rejected_feedback_directions_recover_instead_of_repeating(tmp_path)
 @pytest.mark.parametrize('during_move', [False, True])
 def test_stage_interlocks_prevent_or_stop_motion(tmp_path, field, value, during_move):
     v = state(settings(), tmp_path)
-    v.alignment_move_request = dict(id='guarded', target_m=(1e-6, 0., 0.),
+    v.alignment_move_request = dict(id='guarded', target_m=(.8e-6, 0., 0.),
                                    speed_um_s=1., kind='alignment', issued=0.)
     motor = Motor()
     service = AlignmentStageService(v, lambda: motor)
@@ -724,6 +731,95 @@ def test_default_full_sweep_reaches_voltage_retry_before_timeout(tmp_path):
     assert rig.time < cfg.timeout_s
     assert rig.v.stage_position_snapshot[:3] == rig.engine.origin
     assert cfg.coarse_scan_duration_s() < cfg.timeout_s
+
+
+def test_sparse_low_count_search_retries_twice_without_stopping(tmp_path):
+    rig = Rig(tmp_path, settings(xy_range_um=(50., 50.)))
+    rig.events_per_tick = 3  # Like the few hits per second in the supplied log.
+    rig.until(lambda: rig.engine.target_voltage >= 1700., rate=.002)
+    assert not rig.engine.outcome and not rig.v.stop_flag
+    assert not rig.v.alignment_cancel_motion
+    assert rig.engine.attempts == 0
+    assert rig.v.stage_position_snapshot[:3] == rig.engine.origin
+    assert rig.time < 170.
+    records = [json.loads(line) for line in (tmp_path/'alignment.jsonl').read_text().splitlines()]
+    retries = [r for r in records if r['event'] == 'voltage_step']
+    assert [r['voltage'] for r in retries] == [1600., 1700.]
+    assert all(r['returned_to_origin'] for r in retries)
+
+
+@pytest.mark.parametrize('drift_m', [-60e-9, 60e-9])
+def test_all_broad_targets_tolerate_boundary_readback_drift(tmp_path, drift_m):
+    cfg = settings(xy_range_um=(50., 50.))
+    v = state(cfg, tmp_path)
+    motor = Motor()
+    service = AlignmentStageService(v, lambda: motor)
+    for index, target in enumerate(coarse_positions(v.alignment_sample_position, cfg)):
+        now = index*2.
+        v.experiment_heartbeat_monotonic = now
+        v.alignment_move_request = dict(id=str(index), target_m=target, axes=('x', 'y'),
+                                       speed_um_s=cfg.xy_speed_um_s, kind='alignment', issued=now)
+        service.tick(now=now)
+        service.tick(now=now+.1)
+        service.tick(now=now+.7)
+        assert v.alignment_move_status['state'] == 'done'
+        motor.position['x'] += drift_m
+        motor.position['y'] += drift_m
+        service.tick(now=now+1.3)
+        assert not v.alignment_cancel_motion
+    assert not motor.stopped
+
+
+def test_semi_pass_clips_at_original_boundary_and_rechecks_before_fine(tmp_path):
+    rig = Rig(tmp_path, settings(xy_range_um=(50., 50.)),
+              Footprint(True, 'sample', (2., 0.), 10.))
+    record = dict(position_m=(49.81e-6, 0., 0.), target_m=(49.8e-6, 0., 0.),
+                  rate=.03, error=.001, coherent=True, voltage=1500.,
+                  count=2000, footprint=rig.fit.snapshot())
+    rig.engine._start_semi(record)
+    rig.until(lambda: rig.engine.phase == 'fine', rate=.12)
+    assert rig.engine.fine_origin == pytest.approx((49.8e-6, 0., 0.))
+    assert all(abs(move['target_m'][0])*1e6 <= 49.8+1e-8 for move in rig.moves)
+    assert all(move['target_m'][2] == 0. for move in rig.moves)
+    records = [json.loads(line) for line in (tmp_path/'alignment.jsonl').read_text().splitlines()]
+    samples = [r for r in records if r['event'] == 'coarse_comparison_observation' and r['phase'] == 'semi_coarse']
+    assert 1 < len(samples) <= 17
+    assert all(abs(r['target_m'][0]-49.8e-6) <= 15e-6+1e-14 for r in samples)
+    events = [r['event'] for r in records]
+    assert events.index('semi_coarse_confirmed') < events.index('fine_started')
+
+
+def test_lost_semi_candidate_returns_and_raises_voltage(tmp_path):
+    rig = Rig(tmp_path, settings(xy_range_um=(50., 50.)))
+    record = dict(position_m=(25e-6, 0., 0.), rate=.03, error=.001,
+                  coherent=True, voltage=1500., count=2000,
+                  footprint=Footprint(True, 'old candidate', (2., 0.), 10.).snapshot())
+    rig.engine._start_semi(record)
+    rig.until(lambda: rig.engine.target_voltage > 1500.)
+    assert rig.engine.attempts == 0 and not rig.engine.outcome
+    assert rig.v.stage_position_snapshot[:3] == rig.engine.origin
+    records = [json.loads(line) for line in (tmp_path/'alignment.jsonl').read_text().splitlines()]
+    assert any(r['event'] == 'semi_coarse_rejected' for r in records)
+
+
+@pytest.mark.parametrize('ranges', [(50., 30.), (10., 5.)])
+def test_broad_steps_scale_with_each_axis_range(ranges):
+    cfg = settings(xy_range_um=ranges)
+    points = np.array(list(coarse_positions((0., 0., 0.), cfg)))
+    effective = np.array(ranges)-np.minimum(cfg.xy_boundary_margin_um, np.array(ranges)*.1)
+    assert len(points) == 17
+    assert np.max(abs(points[:, :2]), axis=0)*1e6 == pytest.approx(effective)
+    assert np.max(abs(points[1:9, :2]), axis=0)*1e6 == pytest.approx(effective*.5)
+
+
+def test_readback_drift_at_same_target_cannot_become_spatial_jump():
+    from pyccapt.control.apt.alignment_search import RelativeSearch
+    search = RelativeSearch(settings())
+    baseline = dict(position_m=(0., 0., 0.), target_m=(0., 0., 0.),
+                    rate=.01, error=.001, coherent=True, voltage=1500.)
+    assert search.observe(baseline) is None
+    assert search.observe(dict(baseline, position_m=(5e-9, -5e-9, 0.), rate=.1)) is None
+    assert len(search.records) == 1
 
 
 def test_relative_jump_enters_fine_far_below_old_absolute_threshold(tmp_path):
@@ -787,16 +883,16 @@ def test_density_centroid_guides_xy_but_single_pixel_and_background_are_rejected
     assert not estimate_dense_region(points[:40], 40, 200).valid
 
 
-def test_sparse_search_starts_near_saved_position_then_expands_without_z():
+def test_broad_search_has_16_range_based_moves_inside_boundary_without_z():
     cfg = settings(xy_range_um=(50., 50.), xy_step_um=10.)
     points = np.array(list(coarse_positions((1e-3, 2e-3, 3e-3), cfg)))
     offsets = np.round((points-np.array((1e-3, 2e-3, 3e-3)))*1e6, 8)
-    assert len(points) == 33
-    assert set(np.max(abs(offsets[:, :2]), axis=1)) == {0., 10., 20., 40., 50.}
-    assert np.max(abs(offsets[1:9, :2])) == 10.
+    assert len(points) == 17
+    assert set(np.max(abs(offsets[:, :2]), axis=1)) == {0., 24.9, 49.8}
+    assert np.max(abs(offsets[1:9, :2])) == 24.9
     assert np.all(offsets[:, 2] == 0.)
     assert len(set(map(tuple, points))) == len(points)
-    assert cfg.coarse_scan_duration_s() < 250.
+    assert cfg.coarse_scan_duration_s() < 80.
 
 
 def test_low_rate_publisher_drops_old_hits_without_starving_new_density_windows():

@@ -33,10 +33,12 @@ waiting; controller faults and detailed movement timeouts also appear in the
 GUI log under `pyccapt/files/logs/gui/`.
 The initial transfer journal, including settling and errors, is copied into each
 dataset as `meta_data/alignment_transfer.jsonl`. Failed pre-start transfers retain
-their journal under `data/alignment_sequences/`. Stage search begins with ±10 µm
-neighbours and expands within ±50 µm (33 points per pass), checking repeatable
-rate contrast and dense hitmap regions before fine alignment. Voltage increments
-default to 100 V; fine Z approach follows stable XY centring and circular-fit
+their journal under `data/alignment_sequences/`. Stage search checks the saved
+position and 16 broad probes derived from the ±50 µm range, checking repeatable
+rate contrast and dense hitmap regions. A second pass within ±15 µm precedes
+fine XY within ±5 µm. Targets are inset by 0.2 µm. Failed searches return to
+saved Z/XY and retry at +100 V within the configured voltage/time limits.
+Fine Z approach follows stable XY centring and circular-fit
 validation and is limited to 20 µm total from saved Z.
 See [Experiment Plans](experiment_plans.rst)
 for file format, units, sample-position mapping and step-by-step instructions.

@@ -11,8 +11,8 @@ import numpy as np
 class AlignmentConfig:
     start_voltage: float = 1500.0
     voltage_increment: float = 100.0
-    coarse_dwell_s: float = 2.0
-    coarse_max_dwell_s: float = 6.0
+    coarse_dwell_s: float = 1.0
+    coarse_max_dwell_s: float = 3.0
     search_min_events: int = 200
     jump_ratio: float = 1.5
     jump_sigma: float = 3.0
@@ -24,14 +24,16 @@ class AlignmentConfig:
     loss_s: float = 3.0
     dwell_s: float = 10.0
     timeout_s: float = 1800.0
-    max_attempts: int = 5
+    max_attempts: int = 1
     window_ions: int = 2000
     window_max_age_s: float = 10.0
     detector_radius_mm: float = 40.0
     centre_tolerance: float = 0.02
     area_target: float = 0.90
     xy_range_um: tuple = (50.0, 50.0)
-    fine_xy_range_um: float = 15.0
+    semi_xy_range_um: float = 15.0
+    fine_xy_range_um: float = 5.0
+    xy_boundary_margin_um: float = 0.2
     xy_step_um: float = 10.0
     fine_xy_step_um: float = 0.1
     fine_probe_step_um: float = 1.0
@@ -93,7 +95,8 @@ class AlignmentConfig:
                     'coarse_dwell_s', 'coarse_max_dwell_s', 'jump_sigma',
                     'stable_s', 'loss_s', 'dwell_s', 'timeout_s', 'window_max_age_s',
                     'detector_radius_mm', 'xy_step_um', 'fine_xy_step_um', 'fine_probe_step_um',
-                    'fine_xy_range_um', 'xy_speed_um_s', 'fine_xy_speed_um_s',
+                    'semi_xy_range_um', 'fine_xy_range_um', 'xy_boundary_margin_um',
+                    'xy_speed_um_s', 'fine_xy_speed_um_s',
                     'z_step_um', 'z_speed_um_s', 'transfer_speed_um_s',
                     'position_tolerance_um', 'settle_s', 'move_timeout_s')
         if any(getattr(self, name) <= 0 for name in positive):
@@ -108,6 +111,8 @@ class AlignmentConfig:
             raise ValueError('Alignment position tolerance must be smaller than the fine XY step.')
         if self.fine_probe_step_um > self.fine_xy_range_um:
             raise ValueError('Fine probe step must fit inside the fine XY range.')
+        if self.xy_boundary_margin_um < self.position_tolerance_um:
+            raise ValueError('XY boundary margin must cover the positioning tolerance.')
         if self.approach_enabled and self.position_tolerance_um >= self.z_step_um:
             raise ValueError('Alignment position tolerance must be smaller than the approach step.')
         if int(self.window_ions) != self.window_ions or self.window_ions < 200:
@@ -127,7 +132,7 @@ class AlignmentConfig:
                              'then set alignment_motion_calibrated = true. See control/AUTOMATIC_ALIGNMENT.md.')
         bounds = np.asarray(self.bounds_mm, dtype=float)
         jac = np.asarray(self.xy_jacobian_mm_per_um, dtype=float)
-        ranges = np.asarray(self.xy_range_um, dtype=float)
+        ranges = np.asarray(self.xy_range_um, dtype=float).copy()
         if bounds.shape != (3, 2) or not np.isfinite(bounds).all() or np.any(bounds[:, 0] >= bounds[:, 1]):
             raise ValueError('Configure alignment_bounds_mm as three calibrated [minimum, maximum] pairs.')
         if jac.size and (jac.shape != (2, 2) or not np.isfinite(jac).all() or np.linalg.cond(jac) > 100):
@@ -138,7 +143,7 @@ class AlignmentConfig:
             raise ValueError('Alignment search exceeds 20000 positions.')
         if self.coarse_scan_duration_s() >= self.timeout_s:
             raise ValueError('A complete coarse alignment sweep and voltage retry exceed the alignment timeout. '
-                             'Increase XY step or timeout, or reduce XY range / dwell.')
+                             'Increase timeout, or reduce XY range / coarse dwell.')
         if self.z_direction not in (-1, 1):
             raise ValueError('Set alignment_z_direction to +1 or -1, toward the electrode.')
         if self.approach_enabled and self.z_max_advance_um <= 0:
@@ -186,8 +191,23 @@ class AlignmentConfig:
         if np.any(np.abs(target[:2]-centre[:2])*1e6 > self.fine_xy_range_um+1e-8):
             raise ValueError('Fine alignment exceeds its configured XY range.')
 
+    def search_xy_limits(self, origin):
+        """Inset commanded XY targets; measured guards retain the full envelope."""
+        ranges = np.asarray(self.xy_range_um, dtype=float).copy()
+        ranges -= np.minimum(self.xy_boundary_margin_um, ranges*.1)
+        return (np.asarray(origin[:2])-ranges*1e-6,
+                np.asarray(origin[:2])+ranges*1e-6)
+
+    def check_search_xy(self, target, origin):
+        lower, upper = self.search_xy_limits(origin)
+        point = np.asarray(target[:2])
+        if np.any(point < lower-1e-14) or np.any(point > upper+1e-14):
+            raise ValueError('Alignment target exceeds the inset XY search envelope.')
+
 
 def coarse_positions(origin, cfg):
-    """Local surrounding probes followed by increasingly spaced outer probes."""
-    from pyccapt.control.apt.alignment_search import expanding_positions
-    yield from expanding_positions(origin, cfg.xy_range_um, cfg.xy_step_um)
+    """Saved position plus 16 broad probes derived from the calibrated ranges."""
+    from pyccapt.control.apt.alignment_search import range_positions
+    lower, upper = cfg.search_xy_limits(origin)
+    ranges = (upper-lower)*.5e6
+    yield from range_positions(origin, ranges, lower, upper)

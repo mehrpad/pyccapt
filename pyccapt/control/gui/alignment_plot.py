@@ -13,6 +13,7 @@ PHASE_COLOURS = {
     'ramp': (.7, .5, 1., 1.), 'moving': (.6, .65, .7, 1.),
     'confirming': (.7, .5, 1., 1.),
     'coarse': (.2, .7, 1., 1.), 'fine': (1., .7, .15, 1.),
+    'semi_coarse': (.1, .8, .8, 1.), 'semi_confirm': (.1, .8, .8, 1.),
     'aligned': (.2, .9, .4, 1.),
 }
 
@@ -171,7 +172,7 @@ class AlignmentPlotWindow(QtWidgets.QWidget):
             'Detector: last 2000 hits. Reset clears this display only.')
         help_label.setWordWrap(True)
         help_label.setToolTip(
-            'Blue: coarse; amber: fine; green: aligned; purple: ramp/confirming; grey: moving; white: latest.\n'
+            'Blue: coarse; teal: semi-coarse; amber: fine; green: aligned; purple: ramp/confirming; grey: moving; white: latest.\n'
             'The 3D view retains 10,000 readings per sample and updates up to 5 Hz.\n'
             'Detector hits come from the current alignment observation.')
         layout.addWidget(help_label)

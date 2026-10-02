@@ -196,6 +196,8 @@ group cryo temperatures and their target control, the three venting buttons, and
 all six Buffer/LL/CLL chamber and pre-vacuum displays. The gauge displays keep
 their existing sizes and colours; the vacuum plots, Gates controls and load-lock
 temperature controls remain visible. Smaller monitors use scrolling as needed.
+Venting sits beside the Gates diagram, separated from the vacuum LCDs by open
+space. The Buffer Chamber Pre label has enough width to stay on one line.
 
 Stage Control opens at 880 × 220. Its nine position readouts and speed selectors
 use compact widths, with less spacing around the headers and Z jog buttons.

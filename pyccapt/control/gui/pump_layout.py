@@ -58,6 +58,10 @@ class PumpLayoutMixin:
                 label.setMaximumWidth(170)
                 gauges.addWidget(label, row * 2, column)
                 gauges.addWidget(lcd, row * 2 + 1, column)
+        # Let this column grow to the full pre-vacuum label width rather
+        # than wrapping its units onto a second line above the LCD.
+        self.label_214.setMaximumWidth(16777215)
+        self.label_214.setWordWrap(False)
 
         self.venting_group, venting = group('Venting', 'venting_group')
         for row, button in enumerate((self.pump_cryo_load_lock_switch,
@@ -68,8 +72,10 @@ class PumpLayoutMixin:
         venting.setRowStretch(3, 1)
         lower = QtWidgets.QHBoxLayout()
         lower.addWidget(self.vacuum_gauges_group)
+        # Spare width separates the gauges from venting and keeps venting
+        # beside the Gates diagram at the right edge of the pump panel.
+        lower.addStretch(1)
         lower.addWidget(self.venting_group)
-        lower.addStretch()
         readings.addLayout(lower, 1, 0, 1, 2)
         self.verticalLayout.insertWidget(0, self.pump_readings_panel)
         self.verticalLayout.setSpacing(4)

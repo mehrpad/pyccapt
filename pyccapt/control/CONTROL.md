@@ -197,6 +197,8 @@ colours. The combined Pumps/Vacuum and Gates window opens at 1280 × 640, and th
 standalone Pumps/Vacuum window opens at 840 × 720. Vacuum history, Gates controls,
 load-lock temperature/baking controls and error messages remain available;
 smaller monitors scroll without hiding controls.
+Venting is aligned beside the Gates diagram with a gap from the vacuum displays.
+The Buffer Chamber Pre label sizes to its full text and stays on one line.
 
 Stage Control opens at 880 × 220 with compact 64 × 28 position readouts and
 speed-selector widths sized for the configured table. The nine mm/µm/nm readouts,

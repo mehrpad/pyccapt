@@ -200,6 +200,8 @@ retain their 150 × 50 sizes and warning colours. The combined Pumps/Vacuum and
 Gates window opens at 1280 × 640; standalone Pumps/Vacuum opens at 840 × 720.
 The vacuum history plots, Gates controls, load-lock temperature controls and
 error messages remain available, with scrolling on smaller monitors.
+Venting is aligned beside the Gates diagram with a gap from the vacuum displays.
+The Buffer Chamber Pre label sizes to its full text and stays on one line.
 
 Stage Control opens at 880 × 220 with compact position readouts and speed fields,
 closely spaced Z jog buttons and smaller layout margins. All nine mm/µm/nm

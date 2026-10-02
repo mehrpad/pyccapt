@@ -290,6 +290,14 @@ def test_pump_groups_keep_displays_and_controls_visible(instrument_window, tmp_p
     combined = isinstance(ui.temp_ll.parentWidget(), QtWidgets.QGroupBox)
     assert window.width() <= (1280 if combined else 840)
     assert window.height() <= (640 if combined else 720)
+    assert not ui.label_214.wordWrap()
+    assert ui.label_214.width() >= ui.label_214.fontMetrics().horizontalAdvance(ui.label_214.text())
+    gauges_right = ui.vacuum_gauges_group.mapTo(window, ui.vacuum_gauges_group.rect().topRight()).x()
+    venting_left = ui.venting_group.mapTo(window, QtCore.QPoint()).x()
+    assert venting_left - gauges_right >= 80
+    panel_right = ui.pump_readings_panel.mapTo(window, ui.pump_readings_panel.rect().topRight()).x()
+    venting_right = ui.venting_group.mapTo(window, ui.venting_group.rect().topRight()).x()
+    assert panel_right == venting_right
     gauges = (ui.vacuum_buffer, ui.vacuum_buffer_back, ui.vacuum_load_lock,
               ui.vacuum_load_lock_back, ui.vacuum_cryo_load_lock, ui.vacuum_cryo_load_lock_back)
     for lcd in gauges:

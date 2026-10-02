@@ -205,7 +205,10 @@ All axis controls, Home, Reference, STOP and Override Access remain visible.
 
 Cameras uses a narrower 900 × 700 default window, with each exposure slider and
 value on one row. All six camera views, camera connections, sample positions
-and instrument monitors remain available. Laser Control defaults to 980 × 650:
+and instrument monitors remain available. Camera connection rows show the serial
+and slot on one line; hover for the model and full state. Bottom notifications
+disappear after five seconds and are not restored by routine refreshes.
+Laser Control defaults to 980 × 650:
 laser settings, readouts and alignment controls sit beside the response plot,
 with all stage controls below. Its messages share a two-line area; scroll or
 hover to read longer messages. Alignment fields have space between rows and

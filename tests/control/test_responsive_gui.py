@@ -401,9 +401,39 @@ def test_camera_compact_layout_preserves_views_and_all_controls(instrument_windo
         assert viewport.rect().contains(QtCore.QRect(widget.mapTo(viewport, QtCore.QPoint()), widget.size()))
     for entry in ui._camera_row_widgets.values():
         label = entry['label']
-        assert label.height() >= label.heightForWidth(label.width())
+        assert not label.wordWrap()
+        assert label.width() >= label.fontMetrics().horizontalAdvance(label.text())
+        assert 'connected to slot' in label.toolTip()
     window.grab().save(str(tmp_path/'cameras.png'))
     print(f'Camera GUI preview: {tmp_path}')
+
+
+@pytest.mark.parametrize('instrument_window', ['cameras'], indirect=True)
+def test_camera_notification_expires_without_refresh_restoring_it(instrument_window):
+    window, ui, app = instrument_window
+    window.show()
+    worker = SimpleNamespace(latest_status='', list_cameras=lambda: [])
+    ui.camera_worker = worker
+    ui._show_camera_status('Camera illumination unavailable: simulated error')
+    ui._refresh_camera_panel()
+    assert ui.camera_status_label.text() == 'Camera illumination unavailable: simulated error'
+    worker.latest_status = 'Camera 40508827 attached (slot 1).'
+    ui._refresh_camera_panel()
+    assert ui.camera_status_label.isVisible()
+    assert ui.camera_status_timer.isSingleShot()
+    assert ui.camera_status_timer.interval() == 5000
+    ui.camera_status_timer.stop()
+    ui.camera_status_timer.timeout.emit()
+    ui._refresh_camera_panel()
+    assert not ui.camera_status_label.isVisible()
+    assert not ui.camera_status_label.text()
+    assert not ui.camera_status_timer.isActive()
+    worker.latest_status = 'Camera 22917980 attached (slot 0).'
+    ui._refresh_camera_panel()
+    assert ui.camera_status_label.isVisible() and ui.camera_status_timer.isActive()
+    ui._show_camera_status('Connect failed: simulated device error')
+    ui._refresh_camera_panel()
+    assert ui.camera_status_label.text() == 'Connect failed: simulated device error'
 
 
 @pytest.mark.parametrize('instrument_window', ['laser'], indirect=True)

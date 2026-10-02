@@ -72,6 +72,7 @@ class Ui_Cameras_Alignment(CameraLayoutMixin):
         self.emitter = SignalEmitter
         self.variables = variables
         self.saved_sample_positions = dict(getattr(variables, "sample_rough_positions", {}))
+        self._last_worker_camera_status = None
 
     def setupUi(self, Cameras_Alignment):
         """
@@ -600,6 +601,11 @@ class Ui_Cameras_Alignment(CameraLayoutMixin):
             "QLabel{ color: rgb(140,0,0); padding: 4px; border: 1px solid rgb(200,200,200); border-radius: 4px; }"
         )
         self.camera_status_label.setText("")
+        self.camera_status_label.hide()
+        self.camera_status_timer = QtCore.QTimer(Cameras_Alignment)
+        self.camera_status_timer.setSingleShot(True)
+        self.camera_status_timer.setInterval(5000)
+        self.camera_status_timer.timeout.connect(self._clear_camera_status)
         self.gridLayout_5.addWidget(self.camera_status_label, 1, 0, 1, 1)
 
         self.retranslateUi(Cameras_Alignment)
@@ -1055,12 +1061,12 @@ class Ui_Cameras_Alignment(CameraLayoutMixin):
             self.led_light.setPixmap(self.led_red)
             message = f"Camera illumination unavailable: {exc}"
             print(message)
-            self.camera_status_label.setText(message)
+            self._show_camera_status(message)
 
     def _report_illumination_error(self, exc):
         message = f"Camera illumination command failed: {exc}"
         print(message)
-        self.camera_status_label.setText(message)
+        self._show_camera_status(message)
 
     def super_user_access(self):
         """Toggle Override Access for camera illumination and exposure changes."""
@@ -1235,7 +1241,7 @@ class Ui_Cameras_Alignment(CameraLayoutMixin):
         # Add any additional cleanup code here
         # with self.variables.lock_setup_parameters:
         self.variables.flag_camera_grab = False
-        for timer_name in ('timer', 'camera_list_timer', 'instrument_monitor_timer'):
+        for timer_name in ('timer', 'camera_list_timer', 'instrument_monitor_timer', 'camera_status_timer'):
             timer = getattr(self, timer_name, None)
             if timer is not None:
                 timer.stop()
@@ -1251,6 +1257,21 @@ class Ui_Cameras_Alignment(CameraLayoutMixin):
 
     # -------------------------------------------------------------- list ui
 
+    def _show_camera_status(self, message):
+        """Show each new notification for five seconds."""
+        self.camera_status_label.setText(message)
+        self.camera_status_label.setToolTip(message)
+        self.camera_status_label.setVisible(bool(message))
+        if message:
+            self.camera_status_timer.start()
+        else:
+            self.camera_status_timer.stop()
+
+    def _clear_camera_status(self):
+        self.camera_status_label.clear()
+        self.camera_status_label.setToolTip('')
+        self.camera_status_label.hide()
+
     def _refresh_camera_panel(self):
         """Sync the camera-list rows and status banner with the worker."""
         worker = getattr(self, 'camera_worker', None)
@@ -1259,8 +1280,10 @@ class Ui_Cameras_Alignment(CameraLayoutMixin):
 
         # Status banner
         status = getattr(worker, 'latest_status', '') or ""
-        if status != self.camera_status_label.text():
-            self.camera_status_label.setText(status)
+        if status != self._last_worker_camera_status:
+            self._last_worker_camera_status = status
+            if status:
+                self._show_camera_status(status)
 
         # Camera list
         try:
@@ -1296,7 +1319,8 @@ class Ui_Cameras_Alignment(CameraLayoutMixin):
         layout.setSpacing(6)
         label = QtWidgets.QLabel(parent=row)
         label.setMinimumWidth(130)
-        label.setWordWrap(True)
+        label.setWordWrap(False)
+        label.setTextFormat(QtCore.Qt.TextFormat.PlainText)
         label.setStyleSheet("font-size: 9px;")
         layout.addWidget(label, 1)
         connect_btn = QtWidgets.QPushButton("Connect", parent=row)
@@ -1324,14 +1348,18 @@ class Ui_Cameras_Alignment(CameraLayoutMixin):
         model = cam['model'] or "Basler"
         if cam['user_disabled']:
             state = "disabled"
+            short_state = "Off"
             color = "color: rgb(120,120,120);"
         elif cam['attached']:
             state = f"connected to slot {cam['slot']}"
+            short_state = f"Slot {cam['slot']}"
             color = "color: rgb(0,120,0);"
         else:
             state = "detected (not connected)"
+            short_state = "Detected"
             color = "color: rgb(180,90,0);"
-        entry['label'].setText(f"<b>{model}</b> &nbsp; {sn} &nbsp; — {state}")
+        entry['label'].setText(f"{sn} · {short_state}")
+        entry['label'].setToolTip(f"{model} — {sn} — {state}")
         entry['label'].setStyleSheet(color)
         # Cameras attach automatically. Connect is only meaningful after the
         # operator explicitly disconnected that camera; leaving it enabled for
@@ -1349,7 +1377,7 @@ class Ui_Cameras_Alignment(CameraLayoutMixin):
         try:
             worker.connect_serial(serial)
         except Exception as e:
-            self.camera_status_label.setText(f"Connect failed: {e}")
+            self._show_camera_status(f"Connect failed: {e}")
         self._refresh_camera_panel()
 
     def _on_disconnect_clicked(self, serial):
@@ -1359,7 +1387,7 @@ class Ui_Cameras_Alignment(CameraLayoutMixin):
         try:
             worker.disconnect_serial(serial)
         except Exception as e:
-            self.camera_status_label.setText(f"Disconnect failed: {e}")
+            self._show_camera_status(f"Disconnect failed: {e}")
         self._refresh_camera_panel()
 
 

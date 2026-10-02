@@ -24,6 +24,80 @@ in fine alignment can still exhaust the overall deadline. A 1 µm coarse grid ha
 
 ## Commissioning before physical movement
 
+### Current configured movement limits
+
+These values describe the included `pyccapt/config.toml`. They are configured
+software limits; physical clearance still requires instrument measurements.
+For a saved position `(X0, Y0, Z0)` and the position `(Xf, Yf)` where fine
+alignment begins:
+
+| Movement | Permitted coordinates | Step or spacing | Speed |
+| --- | --- | --- | --- |
+| Absolute stage envelope | X [-2, 6], Y [-3, 7], Z [-10, 7] **mm** | Every target and measured position is checked | Phase-specific |
+| Initial/sample transfer | Current XY at Z -4 mm, then saved XY at Z -4 mm, then saved Z | Three separate acknowledged moves | 300 µm/s = 0.3 mm/s |
+| Coarse search | X0 ±50 µm, Y0 ±50 µm, Z = Z0 | 10 µm grid spacing per axis; 121 points | 100 µm/s = 0.1 mm/s |
+| Fine search | Xf ±15 µm, Yf ±15 µm, also within the coarse envelope and absolute bounds | 1 µm single-axis detector-feedback probes | 16 µm/s = 0.016 mm/s |
+| Optional mapped fine correction | Same fine/coarse/absolute limits | At most ±0.1 µm per X/Y axis per correction | 16 µm/s |
+| Fine Z approach | **Disabled**; maximum advance is currently 0 µm | If enabled, +0.05 µm per step from Z0, up to the configured maximum | 0.1 µm/s |
+
+`alignment_xy_jacobian_mm_per_um = []` selects the detector-feedback method.
+Consequently, `alignment_fine_probe_step_um = 1.0` controls the current fine
+probe size. `alignment_fine_xy_step_um = 0.1` limits the alternative mapped
+correction; it is not the current feedback probe size. Increasing Z is configured
+as approaching the electrode. Disabling fine Z approach does not disable the
+three transfer moves, which still retract and return Z.
+
+Each movement requires stopped axes and the commanded axes within 0.02 µm
+(20 nm) of target continuously for 0.5 s. The per-move timeout is 180 s.
+
+### Current detection and voltage decisions
+
+Let `R` be the requested experiment detection rate, in percent. Entry into
+fine alignment requires a valid footprint and at least `0.30 × R`. Completion
+requires the footprint centre within 0.8 mm of the detector centre (2% of the
+configured 40 mm detector radius) and at least `0.80 × R`. Both require at
+least 3 s of qualifying observations and 2000 additional events. For `R = 1%`,
+these rate thresholds are 0.30% and 0.80%, not 30% and 80% absolute rate.
+
+The detector window contains 2000 recent paired XY events. After a move or held
+voltage change, the observation epoch is reset and the publisher discards the
+straddling batch and a 0.5 s acquisition guard period. Old windows cannot
+authorize a new movement. The footprint analysis checks a coherent circular
+boundary, coverage, fit residual, background signal and detector-edge clipping;
+rate alone does not authorize fine alignment or success.
+
+At a coarse grid point the nominal dwell is 10 s. A qualifying observation can
+extend that dwell while waiting for enough independent events to establish
+stability. DC is held throughout movement and observations. A complete failed
+coarse sweep returns to the saved origin before increasing DC by 200 V at up to
+100 V/s. Start voltage defaults to 1500 V; the GUI values override the defaults.
+The effective voltage limit is the minimum of 6000 V, the run maximum and the
+hardware maximum, additionally capped by laser alignment when enabled together.
+The first-detector-event gate still blocks upward DC changes before an event
+has been received; the ordinary 10 s no-event shutdown remains active.
+
+During fine feedback, establish a stable baseline, probe one axis by 1 µm,
+and compare independent detector windows. Retain a probe only if its reduction
+in detector-centre distance is at least the larger of 0.1 mm and 3% of baseline
+distance. Otherwise return to the baseline and try another X/Y direction.
+The footprint centre determines which signs are tried first, but measured
+improvement determines acceptance. Exhausting all permitted directions causes
+recovery to saved Z and XY, then another coarse search.
+
+Once centred, a rate below the completion threshold leads to a stationary DC
+increment with the current configuration. If Z approach is enabled later, it
+can precede that increment only while the conservative footprint area, including
+radius uncertainty, is below 90% of detector area and the next Z step is within
+the maximum advance. **The 90% area setting is an approach limit, not a mandatory
+completion condition.**
+
+In fine alignment, an invalid footprint or rate below `0.10 × R` must persist
+beyond the observation dwell and then for another 3 s before recovery. The
+five-attempt limit counts entries into fine alignment, not coarse grid points
+or voltage increments. The overall alignment deadline is 1800 s (30 min),
+starting when the experiment's alignment engine is created after transfer.
+Normal experiment time/ion/voltage stop criteria remain active throughout.
+
 The configured bounds are X [-2, 6], Y [-3, 7] and Z [-10, 7] mm. Increasing
 Z approaches the electrode; sample transfers retract to -4 mm before XY travel.
 All three positioning moves (Z retraction, XY transfer and return to saved Z)

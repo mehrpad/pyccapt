@@ -209,7 +209,9 @@ and layout margins are tighter; long error messages still wrap.
 Cameras defaults to 900 × 700 with smaller margins and one row per exposure
 slider and value. All six overview/detail views, three camera connections,
 sample-position controls and five instrument monitors remain visible. The
-window grows if detected-camera descriptions require more height.
+connection rows show the serial and slot on one line, with the full model and
+state in a tooltip. Bottom notifications disappear after five seconds; routine
+refreshes do not restore an expired message.
 
 Laser Control defaults to 980 × 650. Settings and three optical readouts sit above
 the alignment controls beside the response plot; stage position readouts, speed

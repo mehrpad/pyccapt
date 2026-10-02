@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 from types import SimpleNamespace
+import json
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 import pytest
@@ -54,6 +55,10 @@ def gui(monkeypatch, tmp_path):
     monkeypatch.setattr(AlignmentPlotWindow, 'showNormal', lambda self: None)
     counter = tmp_path/'counter.txt'; counter.write_text('1')
     monkeypatch.setattr(runtime, 'ensure_counter_file', lambda: counter)
+    project_path = runtime.project_path
+    monkeypatch.setattr(runtime, 'project_path', lambda *parts:
+                        tmp_path.joinpath(*parts) if parts[:2] == ('data', 'alignment_sequences')
+                        else project_path(*parts))
     ui = Ui_PyCCAPT(variables, conf, None, None, None, None)
     window = QtWidgets.QMainWindow()
     ui.setupUi(window)
@@ -93,7 +98,7 @@ def gui(monkeypatch, tmp_path):
 def test_editable_voltage_fields_and_positioning_precede_launch(gui):
     ui, v, motor, tick = gui
     assert ui.alignment_start_voltage.value() == 1500
-    assert ui.alignment_voltage_increment.value() == 200
+    assert ui.alignment_voltage_increment.value() == 100
     ui.alignment_voltage_increment.setValue(125)
     ui._start_alignment_batch((1, 2))
     assert not ui.errors
@@ -231,6 +236,46 @@ def test_stage_transfer_fault_is_shown_in_main_gui(gui):
     tick()  # The stage service faults and requests cancellation.
     assert ui.errors == ['Simulated controller communication failure']
     assert not ui.started and not ui._alignment_batch
+    journal = Path(v.alignment_transfer_path)
+    assert journal.is_file()  # Preserved even though no experiment was launched.
+    records = [json.loads(line) for line in journal.read_text().splitlines()]
+    assert any(record['event'] == 'motion_error' and
+               record['error'] == 'Simulated controller communication failure' for record in records)
+    assert records[-1]['event'] == 'transfer_stopped'
+
+
+def test_initial_transfer_journal_contains_settling_and_is_copied_into_dataset(gui, tmp_path):
+    from pyccapt.control.core.alignment_diagnostics import copy_transfer_journal
+    ui, v, motor, tick = gui
+    ui._start_alignment_batch((1,))
+    for _ in range(30):
+        tick()
+        if ui.started:
+            break
+    records = [json.loads(line) for line in Path(v.alignment_transfer_path).read_text().splitlines()]
+    assert records[0]['event'] == 'transfer_start' and records[-1]['event'] == 'transfer_complete'
+    settled = [item for item in records if item['event'] == 'motion_settled']
+    assert len(settled) == 3
+    assert all(item['settled_s'] >= .5 and 'error_um' in item for item in settled)
+    assert any(item.get('wait_reason') == 'settling' for item in records)
+    metadata = tmp_path/'dataset'/'meta_data'
+    metadata.mkdir(parents=True)
+    copy_transfer_journal(v, metadata)
+    assert (metadata/'alignment_transfer.jsonl').read_bytes() == Path(v.alignment_transfer_path).read_bytes()
+
+
+def test_dense_xy_centroid_is_distinguished_from_fitted_circle_in_hitmap(gui):
+    ui, v, motor, tick = gui
+    plot = ui._alignment_plot_window
+    v.automatic_alignment_enabled = True
+    v.alignment_status = {'footprint': dict(valid=True, model='density', centre_mm=(5., -4.), radius_mm=8.)}
+    plot.redraw_hitmap()
+    assert not plot.footprint_circle.isVisible()
+    assert list(plot.density_centroid.getData()[0]) == [5.]
+    v.alignment_status = {'footprint': dict(valid=True, model='circle', centre_mm=(5., -4.), radius_mm=8.)}
+    plot.redraw_hitmap()
+    assert plot.footprint_circle.isVisible()
+    assert len(plot.density_centroid.getData()[0]) == 0
 
 
 @pytest.mark.parametrize('reason,error,safe', [('attempt_limit','',True), ('fault','',True),

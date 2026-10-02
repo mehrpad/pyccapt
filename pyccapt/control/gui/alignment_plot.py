@@ -213,6 +213,10 @@ class AlignmentPlotWindow(QtWidgets.QWidget):
         self.footprint_circle.setPen(pg.mkPen(color=(0, 170, 60), width=2))
         self.footprint_circle.setVisible(False)
         self.detector_hitmap.addItem(self.footprint_circle)
+        self.density_centroid = pg.ScatterPlotItem(symbol='+', size=14,
+                                                  pen=pg.mkPen((230, 140, 0), width=2))
+        self.detector_hitmap.addItem(self.density_centroid)
+        self.detector_hitmap.setToolTip('Green circle: fitted footprint. Orange +: dense-region centre for XY only.')
         column.addWidget(self.detector_hitmap, 1)
         controls = QtWidgets.QHBoxLayout()
         self.hitmap_reset = QtWidgets.QPushButton('Reset')
@@ -244,11 +248,16 @@ class AlignmentPlotWindow(QtWidgets.QWidget):
         fit = getattr(self.variables, 'alignment_status', {}).get('footprint', {})
         visible = bool(getattr(self.variables, 'automatic_alignment_enabled', False)
                        and fit.get('valid', False))
-        self.footprint_circle.setVisible(visible)
+        density = fit.get('model') == 'density'
+        self.footprint_circle.setVisible(visible and not density)
+        self.density_centroid.setData(x=[], y=[])
         if visible:
             x, y = fit['centre_mm']
-            radius = fit['radius_mm']
-            self.footprint_circle.setRect(x-radius, y-radius, 2*radius, 2*radius)
+            if density:
+                self.density_centroid.setData(x=[x], y=[y])
+            else:
+                radius = fit['radius_mm']
+                self.footprint_circle.setRect(x-radius, y-radius, 2*radius, 2*radius)
 
     def reset_view(self):
         if self.view is not None:

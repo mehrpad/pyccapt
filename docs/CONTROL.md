@@ -31,6 +31,13 @@ axes reach tolerance and settle, with all axes stopped and within the calibrated
 bounds. The main status bar shows remaining µm, tolerance and the reason for
 waiting; controller faults and detailed movement timeouts also appear in the
 GUI log under `pyccapt/files/logs/gui/`.
+The initial transfer journal, including settling and errors, is copied into each
+dataset as `meta_data/alignment_transfer.jsonl`. Failed pre-start transfers retain
+their journal under `data/alignment_sequences/`. Stage search begins with ±10 µm
+neighbours and expands within ±50 µm (33 points per pass), checking repeatable
+rate contrast and dense hitmap regions before fine alignment. Voltage increments
+default to 100 V; fine Z approach follows stable XY centring and circular-fit
+validation and is limited to 20 µm total from saved Z.
 See [Experiment Plans](experiment_plans.rst)
 for file format, units, sample-position mapping and step-by-step instructions.
 

@@ -160,6 +160,15 @@ TOML Plan → Load TOML** in the main GUI, review the compact queue, then start 
 Use **Add / Edit / Duplicate / Save As** to prepare plans without typing parameter
 blocks. Automatic Alignment maps each experiment's explicit `sample_id` to its
 saved Cameras position; without alignment the queue uses the current stage position.
+Automatic stage alignment first probes the local ±10 µm neighbourhood, then
+expands within ±50 µm, using up to 33 points per voltage pass. Repeatable rate
+jumps relative to neighbouring positions and coherent dense hitmap regions
+identify fine-alignment candidates. The default voltage increment is 100 V.
+Fine Z approach is enabled after stable XY centring and circular-fit validation,
+with a total 20 µm advance limit from saved Z. Initial transfer/settling/error
+history is saved as `meta_data/alignment_transfer.jsonl`; failed pre-start moves
+retain their journal under `data/alignment_sequences/`. See
+[Automatic Alignment](pyccapt/control/AUTOMATIC_ALIGNMENT.md) for all settings.
 
 Copy [experiment_plan.example.toml](pyccapt/files/experiment_plan.example.toml) and
 follow the [experiment-plan instructions](pyccapt/control/EXPERIMENT_PLANS.md).

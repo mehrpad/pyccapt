@@ -464,14 +464,18 @@ simulator_batch_size = 128
 simulator_interval_s = 0.02
 simulator_fail_after_batches = 0
 
-# Automatic alignment. Fractions refer to the experiment target detection rate.
+# Automatic alignment: fixed-DC neighbour contrast, then fine XY/Z.
 alignment_start_voltage = 1500.0     # GUI default, V DC
-alignment_voltage_increment = 200.0 # GUI default, V per completed XY search
+alignment_voltage_increment = 100.0 # GUI default, V per completed XY search
+alignment_coarse_dwell_s = 2.0       # fixed-DC neighbour observations when enough fresh hits exist
+alignment_coarse_max_dwell_s = 6.0   # upper wait per coarse/confirmation point
+alignment_search_min_events = 200   # minimum fresh paired hits for coherent density and contrast
+alignment_jump_ratio = 1.5          # repeatable rate increase relative to a neighbouring position
+alignment_jump_sigma = 3.0          # count-noise significance; candidates are separately rechecked
+alignment_fine_loss_ratio = 0.25    # loss relative to verified fine-entry signal, not requested rate
 alignment_max_voltage = 6000.0
 alignment_ramp_v_s = 100.0
-alignment_entry_fraction = 0.30
 alignment_finish_fraction = 0.80
-alignment_loss_fraction = 0.10
 alignment_stable_s = 3.0
 alignment_loss_s = 3.0
 alignment_dwell_s = 10.0
@@ -499,10 +503,10 @@ alignment_fine_xy_range_um = 15.0   # +/- X and Y about the position where fine 
 alignment_xy_jacobian_mm_per_um = [] # [[d(detX)/dX,d(detX)/dY],[d(detY)/dX,d(detY)/dY]]
 alignment_z_direction = 1           # increasing Z moves toward the electrode
 alignment_transfer_z_mm = -4.0       # retract before sideways movement between samples
-alignment_approach_enabled = false
-alignment_z_max_advance_um = 0.0     # safe advance from each saved Z
+alignment_approach_enabled = true   # fine only, after XY centring and circular-footprint validation
+alignment_z_max_advance_um = 20.0   # maximum total approach from each saved Z, in micrometres
 # Candidate commissioning settings; validate before enabling movement.
-alignment_xy_step_um = 10.0 # 11x11 coarse sweep fits the 30-minute timeout; fine probes use 1 um
+alignment_xy_step_um = 10.0 # first local probes; outer probe distances double within +/-50 um
 alignment_fine_xy_step_um = 0.1
 alignment_fine_probe_step_um = 1.0
 alignment_xy_speed_um_s = 100.0     # coarse XY: 0.1 mm/s

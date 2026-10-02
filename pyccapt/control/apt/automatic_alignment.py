@@ -13,7 +13,8 @@ from pathlib import Path
 import numpy as np
 
 from pyccapt.control.apt.alignment_config import AlignmentConfig, coarse_positions
-from pyccapt.control.apt.alignment_vision import Footprint, estimate_footprint
+from pyccapt.control.apt.alignment_search import RelativeSearch, significant_jump
+from pyccapt.control.apt.alignment_vision import Footprint, estimate_dense_region, estimate_footprint
 
 
 class AutomaticAlignment:
@@ -57,6 +58,14 @@ class AutomaticAlignment:
         self.stable_since = None
         self.stable_sequence = None
         self.loss_since = None
+        self.search = None
+        self.candidate = None
+        self.fine_reference_rate = None
+        self.observation_rates = []
+        self.observation_count = 0
+        self.observation_first_sequence = None
+        self.centred_since = None
+        self.centred_sequence = None
         self.events_path = Path(variables.path_meta) / 'alignment.jsonl'
         self._event('start', settings=self.cfg.snapshot(), sample=variables.alignment_sample,
                     saved_position_m=self.origin, effective_voltage_limit=self.limit,
@@ -119,6 +128,7 @@ class AutomaticAlignment:
         self.pending = (identifier, self.now, after)
         self.phase = 'moving'
         request = {'id': identifier, 'target_m': tuple(target), 'kind': 'alignment',
+                   'axes': ('z',) if z else ('x', 'y'),
                    'speed_um_s': (self.cfg.z_speed_um_s if z else self.cfg.fine_xy_speed_um_s
                                   if after in ('observe_fine', 'probe_return') else self.cfg.xy_speed_um_s),
                    'issued': self.now}
@@ -137,24 +147,33 @@ class AutomaticAlignment:
         self.fit = Footprint(False, 'Collecting events after settling')
         self.stable_since = self.stable_sequence = self.loss_since = None
         self.probe_stable_since = self.probe_stable_sequence = None
+        self.observation_rates = []
+        self.observation_count = 0
+        self.observation_first_sequence = None
+        self.centred_since = None
+        self.centred_sequence = None
         self._publish()
 
     def _start_coarse(self):
         self.initial_ramp = False
+        self.search = RelativeSearch(self.cfg)
+        self.candidate = None
         self.grid = iter(coarse_positions(self.origin, self.cfg))
         self._next_coarse()
 
-    def _start_fine(self, source='coarse'):
+    def _start_fine(self, source='coarse', reference_rate=None):
         self.initial_ramp = False
         self.attempts += 1
         self.fine_origin = self._position()
+        self.fine_reference_rate = max(float(self.v.detection_rate_current) if reference_rate is None
+                                       else float(reference_rate), 1e-9)
         self.probe_baseline = None
         self.probe_candidates = []
         self.probe_origin = None
         self.probe_state = 'baseline'
         self._event('fine_started', centre_m=self.fine_origin,
                     range_um=self.cfg.fine_xy_range_um, source=source,
-                    voltage=self.target_voltage)
+                    voltage=self.target_voltage, reference_rate=self.fine_reference_rate)
         self._observe(True)
 
     def _next_coarse(self):
@@ -167,6 +186,10 @@ class AutomaticAlignment:
     def _after_move(self, action):
         if action == 'observe_coarse':
             self._observe()
+        elif action == 'confirm_candidate':
+            self._observe(phase='candidate')
+        elif action == 'verify_neighbour':
+            self._observe(phase='neighbour')
         elif action in ('observe_fine', 'probe_return'):
             self._observe(True)
         elif action == 'increase_voltage':
@@ -200,16 +223,70 @@ class AutomaticAlignment:
                 or not 0 <= checked_at-data['time'] <= 1.0
                 or data['first_time'] < self.observation_start
                 or checked_at-data['first_time'] > self.cfg.window_max_age_s):
-            return Footprint(False, 'Waiting for fresh event window'), -1
+            self.fit = Footprint(False, 'Waiting for fresh event window')
+            self._publish()
+            return self.fit, -1
         sequence = data['sequence']
         if sequence != self.last_seq:
             self.last_seq = sequence
             self.fit = self.analyser(data['points_mm'], self.cfg.detector_radius_mm, self.cfg.window_ions)
+            if not self.fit.valid:
+                self.fit = estimate_dense_region(data['points_mm'], self.cfg.detector_radius_mm,
+                                                 self.cfg.search_min_events)
+            self.observation_count = len(data['points_mm'])
+            if self.observation_first_sequence is None:
+                self.observation_first_sequence = sequence
+            self.observation_rates.append(float(self.v.detection_rate_current))
             self._event('observation', voltage=float(self.v.specimen_voltage),
                         detection_rate=float(self.v.detection_rate_current), sequence=sequence,
                         position_m=self._position(), footprint=self.fit.snapshot())
             self._publish()
         return self.fit, sequence
+
+    def _coarse_record(self, fit):
+        rate = float(np.median(self.observation_rates)) if self.observation_rates else 0.
+        count = self.observation_count
+        return {'position_m': self._position(), 'rate': rate, 'count': count,
+                'error': max(rate, 1e-6)/np.sqrt(max(1, count)), 'coherent': bool(fit.valid),
+                'footprint': fit.snapshot(), 'voltage': float(self.v.specimen_voltage)}
+
+    def _coarse_tick(self, fit, sequence):
+        elapsed = self.now-self.observation_start
+        fresh = (self.observation_first_sequence is not None and
+                 sequence-self.observation_first_sequence >= self.cfg.search_min_events)
+        ready = elapsed >= self.cfg.coarse_dwell_s and fresh and self.observation_count >= self.cfg.search_min_events
+        if not ready and elapsed < self.cfg.coarse_max_dwell_s:
+            return
+        record = self._coarse_record(fit)
+        record['coherent'] = record['coherent'] and bool(ready)
+        self._event('coarse_comparison_observation', **record, independent=bool(ready))
+        if self.phase == 'neighbour':
+            high, low = self.candidate
+            self._event('relative_jump_neighbour_rechecked', original=low, repeated=record)
+            self.search.observe(record)
+            self.candidate = high, record
+            self._move(high['position_m'], 'confirm_candidate')
+            return
+        if self.phase == 'candidate':
+            high, low = self.candidate
+            confirmed = ready and significant_jump(record, low, self.cfg.jump_ratio, self.cfg.jump_sigma)
+            self._event('relative_jump_confirmed' if confirmed else 'relative_jump_rejected',
+                        original=high, neighbour=low, repeated=record)
+            self.search.observe(record)
+            self.candidate = None
+            if confirmed:
+                self._start_fine(source='relative_jump', reference_rate=record['rate'])
+            else:
+                self._next_coarse()
+            return
+        candidate = self.search.observe(record)
+        if ready and candidate is not None:
+            self.candidate = candidate
+            self._event('relative_jump_candidate', high=candidate[0], neighbour=candidate[1],
+                        ratio=self.cfg.jump_ratio, sigma=self.cfg.jump_sigma)
+            self._move(candidate[1]['position_m'], 'verify_neighbour')
+        else:
+            self._next_coarse()
 
     def _stable(self, condition, sequence):
         if not condition:
@@ -219,6 +296,15 @@ class AutomaticAlignment:
             self.stable_since, self.stable_sequence = self.now, sequence
         return (self.now-self.stable_since >= self.cfg.stable_s
                 and sequence-self.stable_sequence >= self.cfg.window_ions)
+
+    def _centre_ready_for_z(self, centred, sequence):
+        if not centred:
+            self.centred_since = self.centred_sequence = None
+            return False
+        if self.centred_since is None:
+            self.centred_since, self.centred_sequence = self.now, sequence
+        return (self.now-self.centred_since >= self.cfg.stable_s and
+                sequence-self.centred_sequence >= self.cfg.window_ions)
 
     def tick(self, voltage, rate, now=None):
         self._live_clock = now is None
@@ -294,15 +380,14 @@ class AutomaticAlignment:
                                 reason='Target-rate sample signal was not confirmed at the held voltage.')
                     self._publish()
                 return
-            if self.phase == 'coarse':
-                if self._stable(fit.valid and fraction >= self.cfg.entry_fraction, sequence):
-                    self._start_fine()
-                elif (self.now-self.observation_start >= self.cfg.dwell_s
-                      and self.stable_since is None):
-                    self._next_coarse()
+            if self.phase in ('coarse', 'candidate', 'neighbour'):
+                self._coarse_tick(fit, sequence)
                 return
             if self.phase == 'fine':
-                if not fit.valid or fraction < self.cfg.loss_fraction:
+                if not fit.valid or rate < self.cfg.fine_loss_ratio*self.fine_reference_rate:
+                    self._stable(False, sequence)
+                    self._centre_ready_for_z(False, sequence)
+                    self.probe_stable_since = self.probe_stable_sequence = None
                     if self.now-self.observation_start < self.cfg.dwell_s:
                         return
                     if self.loss_since is None:
@@ -312,6 +397,7 @@ class AutomaticAlignment:
                     return
                 self.loss_since = None
                 centred = np.linalg.norm(fit.centre_mm) <= self.cfg.centre_tolerance*self.cfg.detector_radius_mm
+                z_centred = self._centre_ready_for_z(centred and fit.model == 'circle', sequence)
                 if self._stable(centred and fraction >= self.cfg.finish_fraction, sequence):
                     self.phase = 'aligned'
                     self.v.alignment_outcome = 'aligned'
@@ -339,9 +425,12 @@ class AutomaticAlignment:
                             self._recover()
                             return
                         self._move(tuple(target), 'observe_fine')
-                elif (((fit.radius_mm+fit.radius_uncertainty_mm)/self.cfg.detector_radius_mm)**2
+                elif (fit.model == 'circle' and
+                      ((fit.radius_mm+fit.radius_uncertainty_mm)/self.cfg.detector_radius_mm)**2
                       < self.cfg.area_target and self.cfg.approach_enabled
                       and fraction < self.cfg.finish_fraction):
+                    if not z_centred:
+                        return
                     advance = self.cfg.z_direction*(position[2]-self.origin[2])*1e6
                     if advance+self.cfg.z_step_um > self.cfg.z_max_advance_um + 1e-9:
                         self.finish('clearance_limit', 'Calibrated approach limit reached before alignment.')
@@ -362,7 +451,7 @@ class AutomaticAlignment:
         if self.probe_stable_since is None:
             self.probe_stable_since, self.probe_stable_sequence = self.now, sequence
         if (self.now-self.probe_stable_since < self.cfg.stable_s
-                or sequence-self.probe_stable_sequence < self.cfg.window_ions):
+                or sequence-self.probe_stable_sequence < self.cfg.search_min_events):
             return
         distance = float(np.linalg.norm(fit.centre_mm))
         if self.probe_state == 'trial':

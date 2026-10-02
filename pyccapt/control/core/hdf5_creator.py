@@ -338,6 +338,8 @@ def hdf_creator(variables, conf, time_counter, time_ex):
                 provenance.attrs['alignment_settings_json'] = json.dumps(variables.alignment_settings)
                 provenance.attrs['alignment_final_status_json'] = json.dumps(variables.alignment_status)
                 provenance.attrs['alignment_transfer_json'] = json.dumps(variables.alignment_transfer_log)
+                provenance.attrs['alignment_transfer_journal_source'] = str(
+                    getattr(variables, 'alignment_transfer_path', ''))
             provenance.attrs["python_version"] = platform.python_version()
             provenance.attrs["platform"] = platform.platform()
             config_json = json.dumps(conf, sort_keys=True, default=str)

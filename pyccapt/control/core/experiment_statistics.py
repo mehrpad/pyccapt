@@ -133,7 +133,8 @@ TDC model: {conf['tdc_model']}
                    f"Saved stage position (m): {variables.alignment_sample_position}\n"
                    f"Alignment outcome: {variables.alignment_outcome}\n"
                    f"Alignment settings: {json.dumps(variables.alignment_settings, sort_keys=True)}\n"
-                   "Alignment movement/observation history: meta_data/alignment.jsonl\n")
+                   "Alignment movement/observation history: meta_data/alignment.jsonl\n"
+                   "Initial transfer and settling history: meta_data/alignment_transfer.jsonl\n")
     software_info = "Created by PyCCAPT software."
 
     return statistics + separator + header + software_info

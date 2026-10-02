@@ -635,6 +635,8 @@ class APT_Exp_Control:
             ensure_output_directories(data_path, path_meta)
             from pyccapt.control.core.experiment_plan import write_plan_snapshot
             write_plan_snapshot(path_meta, getattr(self.variables, 'experiment_plan_snapshot', {}))
+            from pyccapt.control.core.alignment_diagnostics import copy_transfer_journal
+            copy_transfer_journal(self.variables, path_meta)
         except Exception as exc:
             print('Can not create the directory for saving the data')
             print(exc)

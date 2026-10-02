@@ -2,9 +2,11 @@
 
 Automatic alignment runs a separate, fully finalized experiment for each saved
 sample. The main window exposes **Alignment start voltage** (1500 V by default)
-and **Alignment voltage increment** (200 V by default). These settings are frozen
-when the sequence starts. Detection-rate fractions refer to the requested rate:
-for a 1% experiment target, entry is 0.3% and completion is 0.8%.
+and **Alignment voltage increment** (100 V by default). These settings are frozen
+when the sequence starts. Sample finding compares repeatable evaporation jumps
+between neighbouring positions at the same DC; it does not require 30% of the
+requested detection rate. Completion still requires stable centring and 80% of
+the requested rate (0.8% for a 1% experiment target).
 
 Sample-stage coarse search is configured to **±50 µm per X/Y axis** around the
 saved rough position. Fine alignment is limited to **±15 µm per X/Y axis** around
@@ -13,14 +15,17 @@ inside the original ±50 µm envelope and the calibrated absolute stage bounds.
 Reaching the fine range limit returns to coarse recovery. These are ranges,
 not individual movement steps. Coarse XY uses 0.1 mm/s; fine XY uses 0.016 mm/s
 and evaluates detector events after each 1 µm probe.
-The default coarse spacing is 10 µm, producing 121 positions across the ±50 µm
-envelope. A nominal complete sweep, origin return and voltage increment fit within
+The first probes cover the saved position and its eight neighbours at ±10 µm.
+If no candidate is confirmed, outer probe distances expand to 20, 40 and 50 µm,
+with eight axial/diagonal points per distance: **33 positions maximum per pass**.
+This is a sparse search, so a narrow peak between probes can be missed. Re-save
+the rough position nearer that sample or reduce the first spacing if needed.
+A nominal complete pass, origin return and voltage increment fit within
 the 30-minute alignment timeout. Fine detector-feedback probes remain 1 µm.
 Startup rejects settings whose estimated complete coarse sweep and first voltage
 retry exceed the alignment timeout. The estimate includes dwell, settling,
 configured travel speed and a polling allowance; hardware delays and time spent
-in fine alignment can still exhaust the overall deadline. A 1 µm coarse grid has
-10,201 positions and needs a longer explicitly configured timeout.
+in fine alignment and candidate rechecks can still exhaust the overall deadline.
 
 ## Commissioning before physical movement
 
@@ -35,41 +40,68 @@ alignment begins:
 | --- | --- | --- | --- |
 | Absolute stage envelope | X [-2, 6], Y [-3, 7], Z [-10, 7] **mm** | Every target and measured position is checked | Phase-specific |
 | Initial/sample transfer | Current XY at Z -4 mm, then saved XY at Z -4 mm, then saved Z | Three separate acknowledged moves | 300 µm/s = 0.3 mm/s |
-| Coarse search | X0 ±50 µm, Y0 ±50 µm, Z = Z0 | 10 µm grid spacing per axis; 121 points | 100 µm/s = 0.1 mm/s |
+| Coarse search | X0 ±50 µm, Y0 ±50 µm, Z = Z0 | Initial ±10 µm neighbourhood; double outer distance, clipped at 50 µm; 33 points | 100 µm/s = 0.1 mm/s |
 | Fine search | Xf ±15 µm, Yf ±15 µm, also within the coarse envelope and absolute bounds | 1 µm single-axis detector-feedback probes | 16 µm/s = 0.016 mm/s |
 | Optional mapped fine correction | Same fine/coarse/absolute limits | At most ±0.1 µm per X/Y axis per correction | 16 µm/s |
-| Fine Z approach | **Disabled**; maximum advance is currently 0 µm | If enabled, +0.05 µm per step from Z0, up to the configured maximum | 0.1 µm/s |
+| Fine Z approach | **Enabled**, after stable XY centring and a valid circular footprint; total advance ≤20 µm from Z0 | +0.05 µm per step; never reset the allowance after a move | 0.1 µm/s |
 
 `alignment_xy_jacobian_mm_per_um = []` selects the detector-feedback method.
 Consequently, `alignment_fine_probe_step_um = 1.0` controls the current fine
 probe size. `alignment_fine_xy_step_um = 0.1` limits the alternative mapped
 correction; it is not the current feedback probe size. Increasing Z is configured
-as approaching the electrode. Disabling fine Z approach does not disable the
-three transfer moves, which still retract and return Z.
+as approaching the electrode. The three transfer moves still retract and return Z.
 
 Each movement requires stopped axes and the commanded axes within 0.02 µm
 (20 nm) of target continuously for 0.5 s. The per-move timeout is 180 s.
+The measured approach and XY search envelopes are checked before and throughout
+motion, allowing only that 20 nm positioning tolerance beyond their nominal limits.
 
 ### Current detection and voltage decisions
 
-Let `R` be the requested experiment detection rate, in percent. Entry into
-fine alignment requires a valid footprint and at least `0.30 × R`. Completion
-requires the footprint centre within 0.8 mm of the detector centre (2% of the
-configured 40 mm detector radius) and at least `0.80 × R`. Both require at
-least 3 s of qualifying observations and 2000 additional events. For `R = 1%`,
-these rate thresholds are 0.30% and 0.80%, not 30% and 80% absolute rate.
+| Config key | Default | Meaning |
+| --- | --- | --- |
+| `alignment_xy_step_um` | 10 | First neighbourhood radius; outer distances double |
+| `alignment_coarse_dwell_s` / `alignment_coarse_max_dwell_s` | 2 / 6 | Minimum/maximum seconds for each neighbour or candidate observation |
+| `alignment_search_min_events` | 200 | Minimum fresh paired hits and independent new events for rate/density comparison |
+| `alignment_jump_ratio` / `alignment_jump_sigma` | 1.5 / 3 | Relative rate contrast and combined count-noise significance |
+| `alignment_fine_loss_ratio` | 0.25 | Signal-loss fraction of the verified fine-entry rate |
+| `alignment_voltage_increment` | 100 | Default stationary DC retry in volts; GUI value takes precedence |
+| `alignment_approach_enabled` / `alignment_z_max_advance_um` | true / 20 | Fine Z enable and total advance cap in µm from saved Z |
 
-The detector window contains 2000 recent paired XY events. After a move or held
+The former `alignment_entry_fraction` and `alignment_loss_fraction` are no longer
+used. Relative-search evidence controls finding and signal loss; the completion
+goal remains configured by `alignment_finish_fraction`.
+
+At each coarse position, collect fresh paired hits for 2 s, extending to at most
+6 s if evidence is insufficient. A usable observation requires 200 recent hits
+and at least 200 newly arriving events after its first snapshot. Compare the
+median measured detection rate against the closest observed neighbour at the
+same voltage. The default candidate must be at least **1.5 times** that neighbour
+and exceed it by **3 combined Poisson standard errors**, with a coherent dense
+detector region or valid circular footprint. A single saturated pixel, diffuse
+background and detector-edge clipping cannot supply that evidence.
+
+Revisit the low neighbour, then revisit the candidate with new observation
+epochs at unchanged DC. Enter fine alignment only if the relative contrast and
+coherent region persist. This rejects single bursts and uniform temporal rate
+increases. Both the original comparison and repeat measurements are logged.
+
+Let `R` be the requested experiment detection rate, in percent. Completion
+requires the footprint centre within 0.8 mm of the detector centre (2% of the
+configured 40 mm detector radius) and at least `0.80 × R`, for at least 3 s with
+2000 additional events. For `R = 1%`, that is 0.80%, not 80% absolute rate.
+
+The detector window contains up to 2000 recent paired XY events, trimmed to a
+maximum age of 10 s so lower-rate streams can still provide fresh density windows.
+After a move or held
 voltage change, the observation epoch is reset and the publisher discards the
 straddling batch and a 0.5 s acquisition guard period. Old windows cannot
-authorize a new movement. The footprint analysis checks a coherent circular
-boundary, coverage, fit residual, background signal and detector-edge clipping;
-rate alone does not authorize fine alignment or success.
+authorize a new movement. Dense-region centroids can guide XY without a complete
+circular boundary. Z still requires the full circular-fit checks: coverage,
+residual, background signal and detector-edge clipping.
 
-At a coarse grid point the nominal dwell is 10 s. A qualifying observation can
-extend that dwell while waiting for enough independent events to establish
-stability. DC is held throughout movement and observations. A complete failed
-coarse sweep returns to the saved origin before increasing DC by 200 V at up to
+DC is held throughout movement and observations. A complete failed
+coarse pass returns to the saved origin before increasing DC by 100 V at up to
 100 V/s. Start voltage defaults to 1500 V; the GUI values override the defaults.
 The effective voltage limit is the minimum of 6000 V, the run maximum and the
 hardware maximum, additionally capped by laser alignment when enabled together.
@@ -79,19 +111,22 @@ has been received; the ordinary 10 s no-event shutdown remains active.
 During fine feedback, establish a stable baseline, probe one axis by 1 µm,
 and compare independent detector windows. Retain a probe only if its reduction
 in detector-centre distance is at least the larger of 0.1 mm and 3% of baseline
-distance. Otherwise return to the baseline and try another X/Y direction.
+distance. Each fine XY comparison waits 3 s and 200 independent new events.
+Otherwise return to the baseline and try another X/Y direction.
 The footprint centre determines which signs are tried first, but measured
 improvement determines acceptance. Exhausting all permitted directions causes
 recovery to saved Z and XY, then another coarse search.
 
-Once centred, a rate below the completion threshold leads to a stationary DC
-increment with the current configuration. If Z approach is enabled later, it
-can precede that increment only while the conservative footprint area, including
-radius uncertainty, is below 90% of detector area and the next Z step is within
-the maximum advance. **The 90% area setting is an approach limit, not a mandatory
+After XY is centred with a valid circular footprint for 3 s and 2000 additional
+events, Z can advance while the rate is below the completion goal, the conservative
+footprint area including radius uncertainty is below 90%, and the next step is
+within the total 20 µm allowance from saved Z. Recheck centring after every step.
+If only a density centroid is available, Z remains fixed and stationary DC can
+increase instead. **The 90% area setting is an approach limit, not a mandatory
 completion condition.**
 
-In fine alignment, an invalid footprint or rate below `0.10 × R` must persist
+In fine alignment, an invalid region or rate below 25% of the verified fine-entry
+signal (rather than a fraction of the requested target) must persist
 beyond the observation dwell and then for another 3 s before recovery. The
 five-attempt limit counts entries into fine alignment, not coarse grid points
 or voltage increments. The overall alignment deadline is 1800 s (30 min),
@@ -240,17 +275,18 @@ and Reference are blocked throughout a sequence; Stage Stop cancels the sequence
    DC regulation is **held**, including the PID integrator, throughout XY
    moves and observation periods. The experiment's ordinary Kp values are not
    modified. Upward voltage changes are only allowed during stationary ramps.
-4. Search a bounded square-spiral XY grid at the saved Z. Each position receives
-   a fresh observation window. A coherent footprint and at least 30% of the
-   target rate, stable for the configured duration and across independent event
-   windows, enter fine alignment. Rates above 50% also qualify.
+4. Probe the local ±10 µm neighbourhood at saved Z, then expand outer distances
+   within ±50 µm. Compare neighbouring fixed-DC observations, revisit both sides
+   of any significant rate jump, and enter fine alignment around its confirmed
+   high-density position. No requested-rate entry threshold is used.
 5. If a full search fails, return to the saved origin and await acknowledgement,
    then increment voltage and repeat. The effective cap is the minimum of the
    alignment maximum (6000 V), experiment maximum and hardware maximum. The
    final increment is shortened to the cap (5900 -> 6000 for the defaults).
 6. Fine alignment centres the footprint with bounded XY detector-feedback probes
    (or a measured XY mapping when supplied),
-   then takes small Z steps if enabled. Each step settles before using fresh
+   then takes small Z steps only after stable XY centring and circular-fit
+   validation, with a total maximum approach of 20 µm. Each step settles before using fresh
    events. Centre + stable 80% target rate freezes all alignment movement for
    the remainder of the experiment. The 90% detector-area approach limit includes
    a conservative radius uncertainty; reaching it prevents additional approach.
@@ -290,23 +326,38 @@ pixels, estimates background, smooths the density, extracts a half-contrast
 boundary and fits a circle with outlier rejection. Boundary residuals, angular
 coverage, estimated signal fraction and clipping determine validity. Invalid or
 stale fits cannot authorize an approach. The green hitmap circle shows the latest
-accepted footprint; the red detector circle now uses the detector configuration.
+accepted circular footprint; an orange + marks a density centroid used for XY
+only. The red detector circle uses the detector configuration.
 This is an initial geometric model, requiring validation against this instrument's
 actual evaporation patterns, crystallographic features and background distributions.
 
 Each experiment stores:
 
+- `meta_data/alignment_transfer.jsonl`: the initial retreat, XY transfer and saved-Z
+  return, with UTC/monotonic times, requested axes, measured positions, position
+  errors, settling transitions, completions, cancellation and faults.
 - `meta_data/alignment.jsonl`: settings, sample/rough position, movement requests
   and completions, observations, voltage steps, retries and alignment outcome.
 - HDF5 `provenance` attributes: `automatic_alignment`, `alignment_sample`,
   `alignment_sequence_id`, `alignment_selected_samples`,
   `alignment_saved_position_m`, `alignment_settings_json`,
-  `alignment_final_status_json`, `alignment_outcome`, `alignment_transfer_json`.
+  `alignment_final_status_json`, `alignment_outcome`, `alignment_transfer_json`,
+  `alignment_transfer_journal_source`.
 - `parameters.txt`: alignment settings, sample, rough position and outcome.
 - Existing `apt/stage_*` datasets: sampled actual stage positions.
 
 Runtime settings are snapshotted, including the two GUI voltage values. Control
 config provenance remains available in the HDF5 file as before.
+
+Before an experiment exists, the durable transfer journal is created under
+`data/alignment_sequences/<sequence_id>/<queue_index>_sample_<sample_id>/`.
+Successful transfers are copied into that experiment's metadata folder before
+hardware initialization. Failed or cancelled initial transfers keep their journal
+there even when no experiment is launched. Settling transitions are logged when
+they change, plus position/error progress at least once a second during a move.
+`alignment.jsonl` additionally records neighbour rates/counts/uncertainties,
+candidate rechecks, density/circle model decisions and the verified fine-entry
+reference rate. Laser sessions remain in `meta_data/laser_alignment.jsonl`.
 
 ## If positioning waits at -4 mm
 

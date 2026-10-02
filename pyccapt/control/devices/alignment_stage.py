@@ -7,6 +7,7 @@ import time
 import numpy as np
 
 from pyccapt.control.apt.alignment_config import AlignmentConfig
+from pyccapt.control.core.alignment_diagnostics import transfer_event
 
 
 class AlignmentStageService:
@@ -17,6 +18,8 @@ class AlignmentStageService:
         self.last_id = None
         self.settled_since = None
         self.last_snapshot_at = float('-inf')
+        self.last_transfer_detail = None
+        self.last_transfer_log_at = float('-inf')
 
     def _reply(self, state, error='', **details):
         self.v.alignment_move_status = {'id': self.last_id, 'state': state, 'error': error, **details}
@@ -25,6 +28,21 @@ class AlignmentStageService:
         position = tuple(float(position_map[axis]) for axis in 'xyz')
         cfg = AlignmentConfig(**dict(self.v.alignment_settings))
         cfg.check_position(position)
+        request = self.v.alignment_move_request
+        if request and request.get('kind') == 'alignment' and self.v.start_flag:
+            origin = np.asarray(self.v.alignment_sample_position, dtype=float)
+            advance = cfg.z_direction*(position[2]-origin[2])*1e6
+            allowed = cfg.z_max_advance_um if cfg.approach_enabled else 0.
+            if advance > allowed+cfg.position_tolerance_um:
+                raise ValueError('Measured sample Z exceeds the maximum permitted approach.')
+            if np.any(np.abs((np.asarray(position[:2])-origin[:2])*1e6)
+                      > np.asarray(cfg.xy_range_um)+cfg.position_tolerance_um):
+                raise ValueError('Measured sample XY exceeds the coarse search envelope.')
+            if 'fine_origin_m' in request:
+                centre = np.asarray(request['fine_origin_m'], dtype=float)
+                if np.any(np.abs((np.asarray(position[:2])-centre[:2])*1e6)
+                          > cfg.fine_xy_range_um+cfg.position_tolerance_um):
+                    raise ValueError('Measured sample XY exceeds the fine search envelope.')
         self.v.stage_position_snapshot = (*position, now)
         self.v.stage_pos_x, self.v.stage_pos_y, self.v.stage_pos_z = position
         self.v.stage_pos_updated_at = now
@@ -36,6 +54,12 @@ class AlignmentStageService:
         if device is not None:
             device.stop()
         if self.active is not None:
+            if self.active[3] == 'transfer':
+                try:
+                    transfer_event(self.v, 'motion_cancelled', id=self.last_id, reason=reason,
+                                   status=self.v.alignment_move_status)
+                except Exception:
+                    logging.getLogger('pyccapt.gui').exception('Could not record transfer cancellation')
             self._reply('error', reason)
         self.active = None
         self.settled_since = None
@@ -87,8 +111,13 @@ class AlignmentStageService:
                 target = np.asarray(request['target_m'], dtype=float)
                 cfg.check_position(target)
                 current = device.get_position()
-                position = np.array([current[axis] for axis in 'xyz'])
+                position = np.asarray(self._publish_position(current, checked_at))
                 changed = np.abs(target-position) > cfg.position_tolerance_um*1e-6
+                if 'axes' in request:
+                    axes = tuple(request['axes'])
+                    if axes not in (('x',), ('y',), ('x', 'y'), ('z',)):
+                        raise ValueError('Invalid automatic stage command axes.')
+                    changed &= np.array([axis in axes for axis in 'xyz'])
                 if changed[2] and changed[:2].any():
                     raise ValueError('Automatic Z and lateral movement must be separate.')
                 origin = np.asarray(self.v.alignment_sample_position, dtype=float)
@@ -113,6 +142,9 @@ class AlignmentStageService:
                         raise ValueError('Alignment request exceeds the permitted sample approach.')
                     if changed[2] and not cfg.approach_enabled:
                         raise ValueError('Automatic approach is disabled.')
+                    if (changed[2] and cfg.z_direction*(target[2]-position[2])*1e6 > cfg.position_tolerance_um
+                            and 'fine_origin_m' not in request):
+                        raise ValueError('Z approach is permitted only during fine alignment.')
                 speed = float(request['speed_um_s'])
                 ceiling = (cfg.transfer_speed_um_s if request['kind'] == 'transfer'
                            else cfg.z_speed_um_s if changed[2]
@@ -125,6 +157,12 @@ class AlignmentStageService:
                 self.active = (target, now, cfg, request['kind'], changed.copy())
                 self.settled_since = None
                 self._reply('moving')
+                if request['kind'] == 'transfer':
+                    self.last_transfer_detail = None
+                    transfer_event(self.v, 'motion_command', request=request,
+                                   position_m=tuple(position), commanded_axes=tuple(
+                                       axis for axis, change in zip('xyz', changed) if change),
+                                   tolerance_um=cfg.position_tolerance_um, settle_s=cfg.settle_s)
                 device.move_absolute(**{axis+'_m': float(value) if change else None
                                         for axis, value, change in zip('xyz', target, changed)},
                                      velocity_m_s=speed*1e-6, wait=False)
@@ -160,15 +198,30 @@ class AlignmentStageService:
                            error_um=tuple(float(error) for error in error_um),
                            wait_reason='stage moving' if moving else 'settling' if reached else 'waiting for target position')
             self._reply('moving', **details)
+            if kind == 'transfer' and (details['wait_reason'] != self.last_transfer_detail
+                                      or now-self.last_transfer_log_at >= 1.):
+                transfer_event(self.v, 'motion_progress', id=self.last_id, position_m=position, **details)
+                self.last_transfer_detail = details['wait_reason']
+                self.last_transfer_log_at = now
             if not reached:
                 self.settled_since = None
             elif self.settled_since is None:
                 self.settled_since = now
             elif now-self.settled_since >= cfg.settle_s:
                 self._reply('done', **details)
+                if kind == 'transfer':
+                    transfer_event(self.v, 'motion_settled', id=self.last_id, position_m=position,
+                                   settled_s=now-self.settled_since, **details)
                 self.active = None
         except Exception as exc:
             logging.getLogger('pyccapt.gui').error('Automatic stage command %s failed: %s', self.last_id, exc)
+            if request and request.get('kind') == 'transfer':
+                try:
+                    transfer_event(self.v, 'motion_error', id=self.last_id, error=str(exc), request=request,
+                                   status=self.v.alignment_move_status,
+                                   position_snapshot=self.v.stage_position_snapshot)
+                except Exception:
+                    logging.getLogger('pyccapt.gui').exception('Could not record transfer motion error')
             if device is not None:
                 try:
                     device.stop()

@@ -10,12 +10,16 @@ import numpy as np
 @dataclass(frozen=True)
 class AlignmentConfig:
     start_voltage: float = 1500.0
-    voltage_increment: float = 200.0
+    voltage_increment: float = 100.0
+    coarse_dwell_s: float = 2.0
+    coarse_max_dwell_s: float = 6.0
+    search_min_events: int = 200
+    jump_ratio: float = 1.5
+    jump_sigma: float = 3.0
+    fine_loss_ratio: float = 0.25
     max_voltage: float = 6000.0
     ramp_v_s: float = 100.0
-    entry_fraction: float = 0.30
     finish_fraction: float = 0.80
-    loss_fraction: float = 0.10
     stable_s: float = 3.0
     loss_s: float = 3.0
     dwell_s: float = 10.0
@@ -36,8 +40,8 @@ class AlignmentConfig:
     z_step_um: float = 0.05
     z_speed_um_s: float = 0.1
     z_direction: int = 0
-    z_max_advance_um: float = 0.0
-    approach_enabled: bool = False
+    z_max_advance_um: float = 20.0
+    approach_enabled: bool = True
     transfer_z_mm: float = 0.0
     transfer_speed_um_s: float = 300.0
     position_tolerance_um: float = 0.02
@@ -72,6 +76,7 @@ class AlignmentConfig:
             if isinstance(value, (float, int)) and not math.isfinite(value):
                 raise ValueError(f'Alignment {key} must be finite.')
         positive = ('start_voltage', 'voltage_increment', 'max_voltage', 'ramp_v_s',
+                    'coarse_dwell_s', 'coarse_max_dwell_s', 'jump_sigma',
                     'stable_s', 'loss_s', 'dwell_s', 'timeout_s', 'window_max_age_s',
                     'detector_radius_mm', 'xy_step_um', 'fine_xy_step_um', 'fine_probe_step_um',
                     'fine_xy_range_um', 'xy_speed_um_s', 'fine_xy_speed_um_s',
@@ -79,8 +84,8 @@ class AlignmentConfig:
                     'position_tolerance_um', 'settle_s', 'move_timeout_s')
         if any(getattr(self, name) <= 0 for name in positive):
             raise ValueError('Alignment voltages, durations, steps and speeds must be positive.')
-        if not 0 < self.loss_fraction < self.entry_fraction < self.finish_fraction <= 1:
-            raise ValueError('Alignment rate fractions must satisfy 0 < loss < entry < finish <= 1.')
+        if not 0 < self.finish_fraction <= 1:
+            raise ValueError('Alignment completion rate fraction must be between zero and one.')
         if not 0 < self.area_target < 1 or not 0 < self.centre_tolerance < 1:
             raise ValueError('Alignment area and centring fractions must be between 0 and 1.')
         if self.start_voltage > self.max_voltage or self.dwell_s < self.stable_s:
@@ -95,6 +100,11 @@ class AlignmentConfig:
             raise ValueError('Alignment window must contain at least 200 ions.')
         if int(self.max_attempts) != self.max_attempts or not 1 <= self.max_attempts <= 100:
             raise ValueError('Alignment attempts must be a positive integer (maximum 100).')
+        if (not 1 < self.jump_ratio or not 0 < self.fine_loss_ratio < 1
+                or self.coarse_max_dwell_s < self.coarse_dwell_s
+                or int(self.search_min_events) != self.search_min_events
+                or not 50 <= self.search_min_events <= self.window_ions):
+            raise ValueError('Invalid relative-search ratio, dwell or minimum event count.')
 
     def validate_motion(self, positions):
         if not self.motion_calibrated:
@@ -110,8 +120,8 @@ class AlignmentConfig:
             raise ValueError('Alignment XY Jacobian must be an invertible measured 2 by 2 matrix or empty for detector feedback.')
         if ranges.shape != (2,) or not np.isfinite(ranges).all() or np.any(ranges <= 0):
             raise ValueError('Configure positive calibrated alignment_xy_range_um values for X and Y.')
-        if np.prod(2 * np.ceil(ranges / self.xy_step_um) + 1) > 20000:
-            raise ValueError('Alignment search grid exceeds 20000 positions.')
+        if sum(1 for _ in coarse_positions((0., 0., 0.), self)) > 20000:
+            raise ValueError('Alignment search exceeds 20000 positions.')
         if self.coarse_scan_duration_s() >= self.timeout_s:
             raise ValueError('A complete coarse alignment sweep and voltage retry exceed the alignment timeout. '
                              'Increase XY step or timeout, or reduce XY range / dwell.')
@@ -147,7 +157,7 @@ class AlignmentConfig:
         duration = self.voltage_increment/self.ramp_v_s
         for point in coarse_positions((0., 0., 0.), self):
             point = np.asarray(point)
-            duration += (self.dwell_s + self.settle_s + 0.5
+            duration += (self.coarse_max_dwell_s + self.settle_s + 0.5
                          + np.max(np.abs(point-previous))*1e6/self.xy_speed_um_s)
             previous = point
         return float(duration + self.settle_s + 0.5
@@ -164,21 +174,6 @@ class AlignmentConfig:
 
 
 def coarse_positions(origin, cfg):
-    """Finite square-spiral XY grid, always at the saved origin Z."""
-    origin = np.asarray(origin, dtype=float)
-    yield tuple(origin)
-    nx, ny = (int(math.ceil(r / cfg.xy_step_um)) for r in cfg.xy_range_um)
-    seen = {(0., 0.)}
-    for ring in range(1, max(nx, ny) + 1):
-        offsets = ([(x, -ring) for x in range(-ring, ring + 1)] +
-                   [(ring, y) for y in range(-ring + 1, ring + 1)] +
-                   [(x, ring) for x in range(ring - 1, -ring - 1, -1)] +
-                   [(-ring, y) for y in range(ring - 1, -ring, -1)])
-        for x, y in offsets:
-            if abs(x) > nx or abs(y) > ny:
-                continue
-            dx = max(-cfg.xy_range_um[0], min(cfg.xy_range_um[0], x*cfg.xy_step_um))
-            dy = max(-cfg.xy_range_um[1], min(cfg.xy_range_um[1], y*cfg.xy_step_um))
-            if (dx, dy) not in seen:
-                seen.add((dx, dy))
-                yield (origin[0] + dx*1e-6, origin[1] + dy*1e-6, origin[2])
+    """Local surrounding probes followed by increasingly spaced outer probes."""
+    from pyccapt.control.apt.alignment_search import expanding_positions
+    yield from expanding_positions(origin, cfg.xy_range_um, cfg.xy_step_um)

@@ -13,6 +13,7 @@ from pyccapt.control.apt.alignment_config import AlignmentConfig
 from pyccapt.control.apt.detector_models import normalize_tdc_model
 from pyccapt.control.apt.laser_alignment_config import LaserAlignmentConfig
 from pyccapt.control.apt.laser_alignment_runtime import validate_laser_alignment
+from pyccapt.control.core.alignment_diagnostics import begin_transfer_journal, transfer_event
 from pyccapt.control.devices.alignment_stage import transfer_waypoints
 from pyccapt.control.gui import main_parameters
 
@@ -37,7 +38,7 @@ class AlignmentGuiMixin:
         self.alignment_voltage_increment = QtWidgets.QDoubleSpinBox(self.centralwidget)
         for widget, value in (
             (self.alignment_start_voltage, self.conf.get('alignment_start_voltage', 1500)),
-            (self.alignment_voltage_increment, self.conf.get('alignment_voltage_increment', 200)),
+            (self.alignment_voltage_increment, self.conf.get('alignment_voltage_increment', 100)),
         ):
             widget.setRange(1, float(self.conf['max_vdc']))
             widget.setDecimals(0)
@@ -47,7 +48,7 @@ class AlignmentGuiMixin:
         self.alignment_start_voltage.setObjectName('alignment_start_voltage')
         self.alignment_voltage_increment.setObjectName('alignment_voltage_increment')
         self.alignment_start_voltage.setToolTip('DC voltage for the first XY alignment search (default 1500 V).')
-        self.alignment_voltage_increment.setToolTip('Voltage increase after a failed XY search and return to its origin (default 200 V).')
+        self.alignment_voltage_increment.setToolTip('Voltage increase after a failed XY search and return to its origin (default 100 V).')
         for text, widget, name in (
             ('Alignment start voltage', self.alignment_start_voltage, 'alignment_start_voltage_label'),
             ('Alignment voltage increment', self.alignment_voltage_increment, 'alignment_voltage_increment_label'),
@@ -180,6 +181,7 @@ class AlignmentGuiMixin:
         self.variables.alignment_cancel_motion = False
         self.variables.stop_flag = False
         self.variables.alignment_transfer_log = []
+        begin_transfer_journal(self.variables, self._alignment_batch_index, cfg.snapshot(), current, target)
         self._alignment_transfer = {'waypoints': waypoints, 'pending': None, 'cfg': cfg,
                                     'values': values, 'sample': sample, 'step': 0, 'label': ''}
         self.statusbar.showMessage(f'Sample {sample}: preparing stage transfer')
@@ -245,6 +247,8 @@ class AlignmentGuiMixin:
                 records.append({**pending, 'completed_monotonic': time.monotonic(),
                                 'position_m': self.variables.stage_position_snapshot[:3]})
                 self.variables.alignment_transfer_log = records
+                transfer_event(self.variables, 'transfer_step_complete', step=transfer['step'],
+                               request=pending, position_m=records[-1]['position_m'], status=status)
                 logging.getLogger('pyccapt.gui').info(
                     'Sample %s transfer step %s/3 complete at XYZ %s m',
                     transfer['sample'], transfer['step'], records[-1]['position_m'])
@@ -258,6 +262,7 @@ class AlignmentGuiMixin:
                 self.statusbar.showMessage(f"Sample {transfer['sample']}: {label} "
                                            f'({step}/3)')
                 request = {'id': uuid.uuid4().hex, 'kind': 'transfer',
+                           'axes': ('x', 'y') if step == 2 else ('z',),
                            'target_m': transfer['waypoints'].pop(0),
                            'speed_um_s': transfer['cfg'].transfer_speed_um_s, 'issued': time.monotonic()}
                 transfer['pending'] = request
@@ -266,8 +271,10 @@ class AlignmentGuiMixin:
                     transfer['sample'], step, label, request['target_m'],
                     request['speed_um_s']*1e-3)
                 self.variables.alignment_move_request = request
+                transfer_event(self.variables, 'transfer_step_requested', step=step, label=label, request=request)
                 return
             # No outputs are enabled until all three moves are acknowledged.
+            transfer_event(self.variables, 'transfer_complete', position_m=self.variables.stage_position_snapshot[:3])
             for name, value in transfer['values'].items():
                 setattr(self.variables, name, value)
             if self.parameters_source.currentText() == 'TOML Plan':
@@ -306,6 +313,13 @@ class AlignmentGuiMixin:
         self._lock_alignment_controls()
 
     def _end_alignment_batch(self, error=''):
+        if self._alignment_transfer is not None:
+            try:
+                transfer_event(self.variables, 'transfer_stopped', error=error or 'Sequence stopped',
+                               status=self.variables.alignment_move_status,
+                               position_snapshot=self.variables.stage_position_snapshot)
+            except Exception:
+                logging.getLogger('pyccapt.gui').exception('Could not record transfer termination')
         self.variables.alignment_cancel_motion = True
         stage = getattr(self, 'gui_stage_control', None)
         if stage is not None and self.variables.automatic_alignment_enabled:

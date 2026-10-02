@@ -508,6 +508,74 @@ def test_stage_service_keeps_stationary_alignment_position_fresh(tmp_path):
     assert v.stage_position_snapshot[3] == 1.
 
 
+def test_z_transfer_ignores_held_xy_drift_but_requires_z_target_and_settling(tmp_path):
+    cfg = settings()
+    v = state(cfg, tmp_path)
+    v.hardware_safe = True
+    v.alignment_move_request = dict(id='retract', target_m=(0., 0., -.5e-3),
+                                   speed_um_s=1., kind='transfer', issued=0.)
+    motor = Motor()
+    service = AlignmentStageService(v, lambda: motor)
+    service.tick(now=0.)
+    # The held axes fluctuate more than 20 nm. The commanded axis still
+    # has to reach its own 20 nm tolerance for the full settling interval.
+    motor.position.update(x=50e-9, y=-50e-9, z=-.5e-3+50e-9)
+    for now in (.1, .6, 1.):
+        service.tick(now=now)
+    assert v.alignment_move_status['state'] == 'moving'
+    assert v.alignment_move_status['commanded_axes'] == ('z',)
+    assert v.alignment_move_status['wait_reason'] == 'waiting for target position'
+    assert v.alignment_move_status['error_um'] == pytest.approx((.05, -.05, .05))
+    motor.position['z'] = -.5e-3
+    motor.is_moving = lambda: True
+    service.tick(now=1.1)
+    assert v.alignment_move_status['wait_reason'] == 'stage moving'
+    motor.is_moving = lambda: False
+    service.tick(now=1.2)
+    assert v.alignment_move_status['wait_reason'] == 'settling'
+    service.tick(now=1.6)
+    assert v.alignment_move_status['state'] == 'moving'
+    service.tick(now=1.8)
+    assert v.alignment_move_status['state'] == 'done'
+    assert not motor.stopped
+
+
+def test_transfer_still_faults_if_held_axis_leaves_calibrated_bounds(tmp_path):
+    v = state(settings(), tmp_path)
+    v.hardware_safe = True
+    v.alignment_move_request = dict(id='retract', target_m=(0., 0., -.5e-3),
+                                   speed_um_s=1., kind='transfer', issued=0.)
+    motor = Motor()
+    service = AlignmentStageService(v, lambda: motor)
+    service.tick(now=0.)
+    motor.position['x'] = 2e-3
+    service.tick(now=.5)
+    assert v.alignment_move_status['state'] == 'error'
+    assert 'calibrated stage limits' in v.alignment_move_status['error']
+    assert motor.stopped and v.alignment_cancel_motion
+
+
+def test_transfer_timeout_reports_commanded_axes_and_position_error(tmp_path, caplog):
+    cfg = settings(move_timeout_s=1.)
+    v = state(cfg, tmp_path)
+    v.hardware_safe = True
+    v.alignment_move_request = dict(id='stuck', target_m=(0., 0., -.5e-3),
+                                   speed_um_s=1., kind='transfer', issued=0.)
+    motor = Motor()
+    service = AlignmentStageService(v, lambda: motor)
+    service.tick(now=0.)
+    motor.position['z'] += 50e-9
+    service.tick(now=.1)
+    service.tick(now=1.1)
+    error = v.alignment_move_status['error']
+    assert v.alignment_move_status['state'] == 'error'
+    assert 'waiting for target position' in error
+    assert "commanded axes ('z',)" in error
+    assert 'XYZ error' in error and 'tolerance 0.02 µm' in error
+    assert 'Automatic stage command stuck failed' in caplog.text
+    assert motor.stopped and v.alignment_cancel_motion
+
+
 def test_stage_request_published_during_read_is_not_expired(tmp_path, monkeypatch):
     clock = [10.]
     class UpdatingState(SimpleNamespace):

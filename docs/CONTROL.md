@@ -25,6 +25,12 @@ precedes Electrode and Flat Test. A second line separates these buttons from the
 bordered Auto Alignment box containing both voltage fields and Automatic Alignment.
 Start sits above Stop in a separate group immediately above the bottom
 full-width separator.
+
+Automatic sample positioning completes each Z or XY move after its commanded
+axes reach tolerance and settle, with all axes stopped and within the calibrated
+bounds. The main status bar shows remaining µm, tolerance and the reason for
+waiting; controller faults and detailed movement timeouts also appear in the
+GUI log under `pyccapt/files/logs/gui/`.
 See [Experiment Plans](experiment_plans.rst)
 for file format, units, sample-position mapping and step-by-step instructions.
 

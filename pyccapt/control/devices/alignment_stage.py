@@ -1,6 +1,7 @@
 """Acknowledged automatic moves using the Stage GUI's existing device handle."""
 from __future__ import annotations
 
+import logging
 import time
 
 import numpy as np
@@ -17,8 +18,8 @@ class AlignmentStageService:
         self.settled_since = None
         self.last_snapshot_at = float('-inf')
 
-    def _reply(self, state, error=''):
-        self.v.alignment_move_status = {'id': self.last_id, 'state': state, 'error': error}
+    def _reply(self, state, error='', **details):
+        self.v.alignment_move_status = {'id': self.last_id, 'state': state, 'error': error, **details}
 
     def _publish_position(self, position_map, now):
         position = tuple(float(position_map[axis]) for axis in 'xyz')
@@ -121,7 +122,7 @@ class AlignmentStageService:
                     raise ValueError('Automatic stage velocity exceeds calibrated limit.')
                 if device.is_moving():
                     raise ValueError('Stage is already moving before an automatic command.')
-                self.active = (target, now, cfg, request['kind'])
+                self.active = (target, now, cfg, request['kind'], changed.copy())
                 self.settled_since = None
                 self._reply('moving')
                 device.move_absolute(**{axis+'_m': float(value) if change else None
@@ -136,21 +137,38 @@ class AlignmentStageService:
                         raise ValueError('Sample stage disconnected during automatic alignment.')
                     self._publish_position(device.get_position(), time.monotonic() if live_clock else now)
                 return
-            target, started, cfg, kind = self.active
+            target, started, cfg, kind, commanded = self.active
             self._check_interlocks(kind, time.monotonic() if live_clock else now)
             device.validate_alignment_state()
             if now-started > cfg.move_timeout_s:
-                raise ValueError('Automatic stage movement timed out.')
+                status = self.v.alignment_move_status
+                raise ValueError('Automatic stage movement timed out: '
+                                 f"{status.get('wait_reason', 'waiting for controller')}; "
+                                 f"commanded axes {status.get('commanded_axes', ())}, "
+                                 f"XYZ error {status.get('error_um', ())} µm "
+                                 f'(tolerance {cfg.position_tolerance_um:g} µm).')
             position = self._publish_position(device.get_position(), time.monotonic() if live_clock else now)
-            reached = not device.is_moving() and np.all(np.abs(np.asarray(position)-target) <= cfg.position_tolerance_um*1e-6)
+            moving = bool(device.is_moving())
+            error_um = (np.asarray(position)-target)*1e6
+            # A Z-only command never corrects X/Y sensor drift (and vice
+            # versa). Waiting for those held axes to return within 20 nm
+            # can block a completed move indefinitely. Match the same axes
+            # that move_absolute was asked to move; all axes must be stopped
+            # and every measured position still passes the bounds check.
+            reached = not moving and np.all(np.abs(error_um[commanded]) <= cfg.position_tolerance_um)
+            details = dict(commanded_axes=tuple(axis for axis, changed in zip('xyz', commanded) if changed),
+                           error_um=tuple(float(error) for error in error_um),
+                           wait_reason='stage moving' if moving else 'settling' if reached else 'waiting for target position')
+            self._reply('moving', **details)
             if not reached:
                 self.settled_since = None
             elif self.settled_since is None:
                 self.settled_since = now
             elif now-self.settled_since >= cfg.settle_s:
-                self._reply('done')
+                self._reply('done', **details)
                 self.active = None
         except Exception as exc:
+            logging.getLogger('pyccapt.gui').error('Automatic stage command %s failed: %s', self.last_id, exc)
             if device is not None:
                 try:
                     device.stop()

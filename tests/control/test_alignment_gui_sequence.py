@@ -167,6 +167,34 @@ def test_single_start_completes_retract_xy_and_saved_z_before_experiment(gui):
     assert ui.started[0][1] == dict(x=.0002, y=.0001, z=.0006)
 
 
+def test_z_retreat_completes_when_uncommanded_xy_drifts_by_50_nm(gui):
+    """Reproduce the first-attempt stall using the October 2 transfer positions."""
+    ui, v, motor, tick = gui
+    ui.conf.update(alignment_transfer_z_mm=-4.,
+                   alignment_bounds_mm=[[-2., 6.], [-3., 7.], [-10., 7.]])
+    motor.position.update(x=.002448013562, y=.002579671224, z=.000728608972)
+    target = (.002448071847, .002579713089, .000728608972)
+    v.sample_rough_positions = {1: target}
+    move = motor.move_absolute
+    def with_sensor_drift(**kwargs):
+        move(**kwargs)
+        if len(motor.moves) == 1:
+            motor.position['x'] -= 51.497e-9
+            motor.position['y'] -= 47.054e-9
+    motor.move_absolute = with_sensor_drift
+    ui._start_alignment_batch((1,))
+    for _ in range(30):
+        tick()
+        if ui.started:
+            break
+    assert not ui.errors
+    assert len(ui.started) == 1
+    assert len(motor.moves) == 3
+    assert motor.moves[0]['x_m'] is None and motor.moves[0]['y_m'] is None
+    assert motor.moves[0]['z_m'] == -.004
+    assert ui.started[0][1] == dict(zip('xyz', target))
+
+
 def test_second_sample_waits_for_full_visualization_cleanup(gui):
     ui, v, motor, tick = gui
     ui._start_alignment_batch((1, 2))
@@ -191,6 +219,18 @@ def test_second_sample_waits_for_full_visualization_cleanup(gui):
     assert ui.started[1] == (2, dict(x=.0002, y=.0001, z=0.), 'test')
     assert v.alignment_outcome == ''
     assert v.alignment_events == {}
+
+
+def test_stage_transfer_fault_is_shown_in_main_gui(gui):
+    ui, v, motor, tick = gui
+    def failing_move(**kwargs):
+        raise RuntimeError('Simulated controller communication failure')
+    motor.move_absolute = failing_move
+    ui._start_alignment_batch((1,))
+    tick()  # Publish the first transfer request.
+    tick()  # The stage service faults and requests cancellation.
+    assert ui.errors == ['Simulated controller communication failure']
+    assert not ui.started and not ui._alignment_batch
 
 
 @pytest.mark.parametrize('reason,error,safe', [('attempt_limit','',True), ('fault','',True),

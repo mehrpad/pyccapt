@@ -151,6 +151,12 @@ and Reference are blocked throughout a sequence; Stage Stop cancels the sequence
    startup. The main status bar shows each of the three moves and remaining
    distance: retract Z to -4 mm, traverse XY, then move Z to the saved sample
    position. A positioning failure never starts the experiment.
+   Position tolerance and settling apply to the axes commanded in that step.
+   For example, a Z-only retreat waits for Z within the configured 0.02 µm
+   tolerance, rather than waiting for held X/Y readings to return to their
+   initial values. All axes must be stopped and all measured XYZ positions
+   must remain inside the calibrated bounds. Clearance checks still apply
+   before lateral travel.
 3. Ramp DC to the entered alignment start voltage, retaining the first-event
    gate. If the measured detection rate reaches the full experiment target
    during this initial ramp, immediately hold the current voltage and collect
@@ -227,6 +233,22 @@ Each experiment stores:
 
 Runtime settings are snapshotted, including the two GUI voltage values. Control
 config provenance remains available in the HDF5 file as before.
+
+## If positioning waits at -4 mm
+
+The experiment starts only after the Z retreat, XY transfer and saved-Z return
+have all completed. During each move, the main status bar reports the remaining
+distance in µm, the configured tolerance, and whether the controller is moving,
+waiting for the commanded position, or settling. Held-axis sensor drift does
+not block completion of a Z-only or XY-only move.
+
+If a commanded axis remains outside tolerance or the controller keeps reporting
+motion, the move still times out and stops the sequence. The error includes
+the commanded axes, the latest XYZ position errors in µm, and the tolerance.
+The GUI reports controller faults directly and records them in
+`pyccapt/files/logs/gui/gui_YYYY-MM-DD.log`, alongside each transfer request and
+completion. Restart PyCCAPT after updating the motion code so the Stage GUI
+uses the corrected completion check.
 
 ## Validation
 

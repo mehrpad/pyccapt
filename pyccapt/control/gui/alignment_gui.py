@@ -211,7 +211,13 @@ class AlignmentGuiMixin:
                         message += f" | {state['reason']}"
                     self.statusbar.showMessage(message)
                 return
-            if self._operator_stopped or self.variables.alignment_cancel_motion or self.variables.stop_flag:
+            if self._operator_stopped or self.variables.stop_flag:
+                raise ValueError('Sample positioning stopped.')
+            if self.variables.alignment_cancel_motion:
+                status = self.variables.alignment_move_status
+                pending = transfer['pending']
+                if pending and status.get('id') == pending['id'] and status.get('state') == 'error':
+                    raise ValueError(status.get('error', 'Sample positioning failed.'))
                 raise ValueError('Sample positioning stopped.')
             if time.monotonic()-self.variables.alignment_stage_heartbeat > 2:
                 raise ValueError('Stage controller is not responding during sample positioning.')
@@ -226,10 +232,14 @@ class AlignmentGuiMixin:
                     raise ValueError(status.get('error', 'Sample positioning failed.'))
                 if status.get('state') != 'done':
                     position = self.variables.stage_position_snapshot[:3]
-                    remaining_mm = max(abs(a-b) for a, b in zip(position, pending['target_m']))*1000
+                    axes = status.get('commanded_axes', tuple('xyz'))
+                    remaining_um = max((abs(position['xyz'.index(axis)]-pending['target_m']['xyz'.index(axis)])*1e6
+                                        for axis in axes), default=0.)
                     self.statusbar.showMessage(
                         f"Sample {transfer['sample']}: {transfer['label']} "
-                        f"({transfer['step']}/3), {remaining_mm:.3f} mm remaining")
+                        f"({transfer['step']}/3), {remaining_um:.3f} µm remaining "
+                        f"| {status.get('wait_reason', 'waiting for stage')} "
+                        f"| tolerance {transfer['cfg'].position_tolerance_um:g} µm")
                     return
                 records = list(self.variables.alignment_transfer_log)
                 records.append({**pending, 'completed_monotonic': time.monotonic(),
@@ -315,4 +325,5 @@ class AlignmentGuiMixin:
         self._update_parameter_editor_mode()
         self._update_alignment_fields()
         if error:
+            logging.getLogger('pyccapt.gui').error('Automatic sample sequence stopped: %s', error)
             self.error_message(error)

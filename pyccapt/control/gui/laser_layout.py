@@ -3,6 +3,11 @@ from PyQt6 import QtCore, QtWidgets
 
 
 class LaserLayoutMixin:
+    def _reset_laser_message_scroll(self):
+        area = getattr(self, 'laser_message_area', None)
+        if area is not None:
+            area.verticalScrollBar().setValue(0)
+
     def _setup_compact_laser_layout(self, parent):
         main = self.gridLayout_5
         while main.count():
@@ -26,6 +31,10 @@ class LaserLayoutMixin:
         self.laser_wavelegnth.setFixedSize(85, 25)
         for button in (self.laser_enable, self.laser_on, self.laser_standby, self.laser_listen):
             button.setFixedHeight(25)
+        for led in (self.led_laser_enable, self.led_laser_on,
+                    self.led_laser_laser_standby, self.led_laser_listen):
+            led.setFixedSize(28, 28)
+            led.setScaledContents(True)
         while self.horizontalLayout.count():
             self.horizontalLayout.takeAt(0)
         readouts = QtWidgets.QGridLayout()
@@ -40,8 +49,11 @@ class LaserLayoutMixin:
             readouts.addWidget(label, 0, column)
             readouts.addWidget(lcd, 1, column, alignment=QtCore.Qt.AlignmentFlag.AlignCenter)
         settings_layout.addLayout(readouts)
-        self.laser_alignment_panel.layout().setContentsMargins(6, 10, 6, 6)
-        self.laser_alignment_panel.layout().setSpacing(4)
+        alignment = self.laser_alignment_panel.layout()
+        alignment.setContentsMargins(10, 8, 10, 8)
+        alignment.setHorizontalSpacing(12)
+        alignment.setVerticalSpacing(6)
+        alignment.setSizeConstraint(QtWidgets.QLayout.SizeConstraint.SetMinimumSize)
         for field in self.laser_alignment_fields.values():
             widest_value = f'{field.maximum():.{field.decimals()}f}{field.suffix()}'
             field.setFixedSize(max(130, field.fontMetrics().horizontalAdvance(widest_value) + 30), 25)
@@ -86,11 +98,29 @@ class LaserLayoutMixin:
             button.setFixedSize(115, 28)
             connection.addWidget(button)
         self.laser_connection_banner.setMinimumWidth(0)
-        connection.addWidget(self.laser_connection_banner, 1)
-        connection.addStretch(1)
+        # Both message types share a two-line viewport. Long warnings remain
+        # readable by scrolling instead of increasing the window's height.
+        self.laser_message_area = QtWidgets.QScrollArea(parent)
+        self.laser_message_area.setObjectName('laser_message_area')
+        self.laser_message_area.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        self.laser_message_area.setWidgetResizable(True)
+        self.laser_message_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        line_height = max(self.Error.fontMetrics().lineSpacing(),
+                          self.laser_connection_banner.fontMetrics().lineSpacing())
+        self.laser_message_area.setFixedHeight(2 * line_height + 12)
+        messages = QtWidgets.QWidget()
+        message_layout = QtWidgets.QVBoxLayout(messages)
+        message_layout.setContentsMargins(0, 0, 0, 0)
+        message_layout.setSpacing(4)
+        message_layout.setSizeConstraint(QtWidgets.QLayout.SizeConstraint.SetMinimumSize)
+        for label in (self.Error, self.laser_connection_banner):
+            label.setMinimumWidth(0)
+            label.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum)
+            message_layout.addWidget(label)
+        self.Error.setVisible(getattr(self, '_laser_error_active', False))
+        self.laser_message_area.setWidget(messages)
+        connection.addWidget(self.laser_message_area, 1)
         main.addLayout(connection, 2, 0, 1, 2)
-        self.Error.setMinimumWidth(0)
-        main.addWidget(self.Error, 3, 0, 1, 2)
         main.setColumnStretch(0, 3)
         main.setColumnStretch(1, 2)
         main.setRowStretch(0, 1)

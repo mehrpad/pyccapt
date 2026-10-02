@@ -205,9 +205,12 @@ All axis controls, Home, Reference, STOP and Override Access remain visible.
 
 Cameras uses a narrower 900 × 700 default window, with each exposure slider and
 value on one row. All six camera views, camera connections, sample positions
-and instrument monitors remain available. Laser Control opens at 980 × 680:
+and instrument monitors remain available. Laser Control defaults to 980 × 650:
 laser settings, readouts and alignment controls sit beside the response plot,
-with all stage controls below. Visualization opens at 980 × 620, with compact
+with all stage controls below. Its messages share a two-line area; scroll or
+hover to read longer messages. Alignment fields have space between rows and
+columns, and the window grows to fit readable controls when needed.
+Visualization opens at 980 × 620, with compact
 fields and two rows of spectrum controls. Its four upper rectangular panels
 always have identical widths and heights, including during window resizing.
 These windows scroll on smaller screens so controls remain accessible.

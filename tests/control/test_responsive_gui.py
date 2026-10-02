@@ -410,8 +410,14 @@ def test_camera_compact_layout_preserves_views_and_all_controls(instrument_windo
 def test_laser_compact_layout_preserves_controls_and_readouts(instrument_window, tmp_path):
     window, ui, app = instrument_window
     # Exercise the persistent banner as well as the wrapped alignment status.
-    ui.laser_connection_banner.setText('Laser unavailable: reconnect the configured CLI port.')
-    ui.laser_connection_banner.show()
+    reason = ("Laser: port COM9 opened but the laser did not reply to any CLI command "
+              "(Incomplete or missing laser reply to ly_oxp2_dev_status?). Most likely "
+              "the laser is in NKTPBus mode — use 'Switch to CLI', or check the cable.")
+    ui._set_laser_disconnected_banner(reason)
+    led = QtGui.QPixmap(str(runtime.project_path('files', 'led-red-on.png')))
+    assert not led.isNull()
+    for widget in (ui.led_laser_on, ui.led_laser_enable, ui.led_laser_listen, ui.led_laser_laser_standby):
+        widget.setPixmap(led)
     if ui.alignment_plot.view is not None:
         ui.alignment_plot.tabs.setCurrentIndex(1)
     window.show()
@@ -429,7 +435,7 @@ def test_laser_compact_layout_preserves_controls_and_readouts(instrument_window,
                 *ui.laser_alignment_fields.values(), *ui.laser_alignment_buttons,
                 ui.laser_alignment_stop, ui.laser_alignment_label, ui.alignment_plot,
                 ui.laser_home, ui.laser_stage_reference, ui.laser_stage_stop, ui.laser_stage_superuser,
-                ui.switch_to_cli_button, ui.nktpbus_mode_switch, ui.laser_connection_banner,
+                ui.switch_to_cli_button, ui.nktpbus_mode_switch, ui.laser_message_area,
                 ui.laser_up, ui.laser_down, ui.laser_left, ui.laser_right,
                 ui.laser_forward, ui.laser_backward, ui.laser_power_disp,
                 ui.laser_pulse_energy_disp, ui.laser_repetion_rate_disp]
@@ -454,6 +460,34 @@ def test_laser_compact_layout_preserves_controls_and_readouts(instrument_window,
     assert not ui.switch_to_cli_button.isEnabled()
     assert ui.label_9.text() == 'Selected output (W)'
     assert ui.label_10.text() == 'Pulse energy (µJ)'
+    for suffix in ('range_um', 'step_um'):
+        fields = [ui.laser_alignment_fields[f'{mode}_{suffix}'] for mode in ('coarse', 'fine', 'focus')]
+        for top, bottom in zip(fields, fields[1:]):
+            assert bottom.y() - (top.y() + top.height()) >= 6
+    assert reason in ui.laser_connection_banner.text()
+    assert ui.laser_connection_banner.toolTip() == reason
+    area = ui.laser_message_area
+    assert area.height() == 2 * max(ui.Error.fontMetrics().lineSpacing(),
+                                   ui.laser_connection_banner.fontMetrics().lineSpacing()) + 12
+    assert area.verticalScrollBar().maximum() > 0
+    original_height = window.height()
+    ui.error_message('A long stage warning: ' + 'Keep the path clear and check the stage connection. ' * 12)
+    for _ in range(5):
+        app.processEvents()
+    assert ui.Error.isVisible()
+    assert 'Keep the path clear' in ui.Error.toolTip()
+    assert window.height() == original_height
+    area.verticalScrollBar().setValue(area.verticalScrollBar().maximum())
+    app.processEvents()
+    banner_bottom = ui.laser_connection_banner.mapTo(area.viewport(),
+                                                    ui.laser_connection_banner.rect().bottomLeft())
+    assert area.viewport().rect().contains(banner_bottom)
+    ui.hideMessage()
+    for _ in range(5):
+        app.processEvents()
+    assert ui.Error.isHidden()
+    assert ui.laser_connection_banner.isVisible()
+    assert area.verticalScrollBar().value() == 0
     window.grab().save(str(tmp_path/'laser.png'))
 
 

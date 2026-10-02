@@ -214,12 +214,15 @@ slider and value. All six overview/detail views, three camera connections,
 sample-position controls and five instrument monitors remain visible. The
 window grows if detected-camera descriptions require more height.
 
-Laser Control opens at 980 × 680. Settings and three optical readouts sit above
+Laser Control defaults to 980 × 650. Settings and three optical readouts sit above
 the alignment controls beside the response plot; stage position readouts, speed
 presets, jog buttons, Home, Reference, STOP and Override Access occupy the row
 below. Both plot tabs, alignment settings and CLI/NKTPBus controls remain
 available. Fields accommodate their maximum values and speed presets, and
-connection and alignment messages still wrap.
+connection and alignment messages still wrap. Alignment fields have six pixels
+between rows and wider column gaps so they cannot overlap. Connection warnings
+and temporary errors share a two-line message area; scroll or hover to read
+longer messages. The window grows to fit the controls when fonts require it.
 
 Visualization opens at 980 × 620. The four upper rectangular panels have
 identical pixel dimensions at every window size. Compact voltage controls and

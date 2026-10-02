@@ -99,7 +99,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             None
         """
         Laser_Control.setObjectName("Laser_Control")
-        Laser_Control.resize(980, 680)
+        Laser_Control.resize(980, 650)
         self.gridLayout_6 = QtWidgets.QGridLayout(Laser_Control)
         self.gridLayout_6.setObjectName("gridLayout_6")
         self.gridLayout_5 = QtWidgets.QGridLayout()
@@ -1422,6 +1422,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         """
         if not reason:
             self.laser_connection_banner.setText("")
+            self.laser_connection_banner.setToolTip("")
             self.laser_connection_banner.setVisible(False)
             self.laser_connection_banner.setStyleSheet("")
             try:
@@ -1431,10 +1432,12 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             return
         self._invalidate_laser_readouts(reason)
         self.laser_connection_banner.setText(f"⚠  LASER NOT CONNECTED — {reason}")
+        self.laser_connection_banner.setToolTip(str(reason))
         self.laser_connection_banner.setStyleSheet(
             "QLabel{background: #fff0f0;color: #c00000;border: 1px solid #c00000;border-radius: 4px;padding: 4px;}"
         )
         self.laser_connection_banner.setVisible(True)
+        self._reset_laser_message_scroll()
         try:
             self.variables.flag_laser_connected = False
         except Exception:
@@ -1653,7 +1656,10 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
                 "OXCART", "<html><head/><body><p><span style=\" color:#ff0000;\">" + message + "</span></p></body></html>"
             )
         )
-
+        self.Error.setToolTip(message)
+        self._laser_error_active = True
+        self.Error.show()
+        self._reset_laser_message_scroll()
         self.timer_hide_error.start(8000)
 
     def hideMessage(
@@ -1674,6 +1680,10 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         )
 
         self.timer_hide_error.stop()
+        self.Error.setToolTip('')
+        self._laser_error_active = False
+        self.Error.hide()
+        self._reset_laser_message_scroll()
 
     def stop(self):
         """Stop background workers and release device handles.

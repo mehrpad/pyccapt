@@ -19,6 +19,7 @@ from pyccapt.control.gui.stage_control_widgets import (
     make_jog_button,
 )
 from pyccapt.control.nkt_photonics import nktpbus_switch, origamiClassCLI, readback
+from pyccapt.control.nkt_photonics.state import LaserState, allowed_actions
 from pyccapt.control.gui.laser_readouts import LaserReadoutMixin
 from pyccapt.control.gui.laser_alignment_gui import LaserAlignmentGuiMixin
 from pyccapt.control.gui.laser_layout import LaserLayoutMixin
@@ -649,9 +650,9 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         Laser_Control.setTabOrder(self.start_scanning, self.scanning_disp)
 
         ######
-        self.led_red = QPixmap('./files/led-red-on.png')
-        self.led_green = QPixmap('./files/green-led-on.png')
-        self.led_orange = QPixmap('./files/led-orange.png')
+        self.led_red = QPixmap(str(runtime.project_path('files', 'led-red-on.png')))
+        self.led_green = QPixmap(str(runtime.project_path('files', 'green-led-on.png')))
+        self.led_orange = QPixmap(str(runtime.project_path('files', 'led-orange.png')))
         self.led_laser_laser_standby.setPixmap(self.led_red)
         self.led_laser_on.setPixmap(self.led_red)
         self.led_laser_enable.setPixmap(self.led_red)
@@ -1285,6 +1286,11 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         try:
             self.check_laser_status()
         except Exception as exc:
+            # Failed requests must not replay later when communication recovers.
+            for flag in ('listen_mode', 'standby_mode', 'on_mode', 'enable_ouput_mode',
+                         'change_laser_wavelegnth', 'change_laser_power', 'change_laser_rate',
+                         'change_laser_divition_factor'):
+                setattr(self, flag, False)
             self._invalidate_laser_readouts(exc)
             self._apply_button_locks_for_status(None)
             print(f"Laser status poll failed: {exc}")
@@ -1294,40 +1300,50 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
     def check_laser_status(self):
         if self.laser_device is None:
             return
-        status = self.laser_device.StatusRead()
-        code = readback.scalar(status)
-        if code not in (9, 33, 65, 129):
-            self._invalidate_laser_readouts(f'Laser status {code}: transitioning, warning or fault')
         requested = False
         # A later lower-state request must cancel any queued emission request.
         listen, standby, on, output = self.listen_mode, self.standby_mode, self.on_mode, self.enable_ouput_mode
         self.listen_mode = self.standby_mode = self.on_mode = self.enable_ouput_mode = False
         if listen:
+            # A lower-state request must be sent even if status queries fail.
             self.laser_device.Listen()
             requested = True
-        elif standby:
-            self.laser_device.Standby()
-            requested = True
-        elif on:
-            if code == 33:
-                # Manual pp116-117 / QSG p8: this command OPENS output.
-                self.laser_device.Enable()
+        status = self.laser_device.StatusRead()
+        code = readback.scalar(status)
+        actions = allowed_actions(LaserState.from_code(code), connected=True)
+        if not listen:
+            # Choose one request by priority before checking permission. An
+            # already-satisfied Standby request must still cancel queued On.
+            request = 'standby' if standby else ('on' if on else ('output' if output else None))
+            if request is not None and request not in actions:
+                self.error_message(f'Laser command unavailable in {LaserState.from_code(code).value}; request cancelled.')
+            elif request == 'standby':
+                self.laser_device.Standby()
                 requested = True
-            elif code == 129:
-                self.laser_device.AOMDisable()
+            elif request == 'on':
+                if code == 33:
+                    # Manual pp116-117 / QSG p8: this command OPENS output.
+                    self.laser_device.Enable()
+                else:
+                    self.laser_device.AOMDisable()
                 requested = True
-        elif output:
-            if code == 65:
-                self.laser_device.AOMEnable()
+            elif request == 'output':
+                if code == 65:
+                    self.laser_device.AOMEnable()
+                else:
+                    self.laser_device.AOMDisable()
                 requested = True
-            elif code == 129:
-                self.laser_device.AOMDisable()
-                requested = True
+            if requested:
+                status = self.laser_device.StatusRead()
+                code = readback.scalar(status)
+        if code not in (9, 33, 65, 129):
+            self._invalidate_laser_readouts(f'Laser status {code}: {LaserState.from_code(code).value}')
+        # Check queued edits against the state AFTER the requested transition.
         changed = self._apply_laser_settings(code)
-        if requested or changed:
+        if changed:
             status = self.laser_device.StatusRead()
         self._apply_button_locks_for_status(status)
-        if requested or changed or self.index >= 5:
+        if readback.scalar(status) in (9, 33, 65, 129) and (requested or changed or self.index >= 5):
             self._sync_controls_from_device()
             self.index = 0
         self.index += 1
@@ -1391,13 +1407,25 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
 
     def _apply_button_locks_for_status(self, status_text):
         code = readback.scalar(status_text) if self.laser_device is not None else None
+        state = LaserState.from_code(code)
+        actions = allowed_actions(state, connected=self.laser_device is not None)
+        self._last_laser_status = status_text
+        if getattr(self, '_observed_laser_state', None) != state:
+            logging.getLogger('pyccapt.laser').info('Observed laser state: %s (status %s)', state.value, code)
+            self._observed_laser_state = state
+        if hasattr(self, 'laser_state_label'):
+            self.laser_state_label.setText('Laser: '+(state.value if self.laser_device is not None else 'Disconnected'))
         known = code in (9, 33, 65, 129)
         idle = code in (9, 33)
         running = bool(self.variables.start_flag)
-        self.laser_listen.setEnabled(known and code != 9)
-        self.laser_standby.setEnabled(known and code != 33)
-        self.laser_on.setEnabled(code in (33, 129))
-        self.laser_enable.setEnabled(code in (65, 129))
+        self.laser_listen.setEnabled('listen' in actions)
+        self.laser_standby.setEnabled('standby' in actions)
+        self.laser_on.setEnabled('on' in actions)
+        self.laser_enable.setEnabled('output' in actions)
+        self.laser_on.setText('Close Output' if code == 129 else 'Laser On (emits)')
+        self.laser_enable.setText('Close Output' if code == 129 else 'Output Enable')
+        self.laser_listen.setToolTip('Request Listen (no emission), including while warming or after a status-read failure.')
+        self.laser_on.setToolTip('Close AOM output.' if code == 129 else 'Enable emission only after confirmed ready Standby.')
         self.laser_wavelegnth.setEnabled(idle and not running)
         self.laser_rate.setEnabled(idle and not running and bool(getattr(self, '_frequency_table', {})))
         self.laser_divition_factor.setEnabled(known and not running)
@@ -1406,7 +1434,10 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
                                (self.led_laser_laser_standby, code == 33),
                                (self.led_laser_on, code in (65, 129)),
                                (self.led_laser_enable, code == 129)):
-            widget.setPixmap(self.led_green if active else self.led_red)
+            if widget is self.led_laser_laser_standby and state == LaserState.SETUP:
+                widget.setPixmap(getattr(self, 'led_orange', self.led_red))
+            else:
+                widget.setPixmap(self.led_green if active else self.led_red)
 
     # ------------------------------------------------------------------
     # CLI session lifecycle

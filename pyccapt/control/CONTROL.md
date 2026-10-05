@@ -40,6 +40,8 @@ these after a short quiet interval, retaining multiline replies. Connection
 failures report the status-query error and received bytes; a timeout alone
 does not establish NKTPBus mode. See the audit's connection diagnosis for the
 real instrument replies and verification.
+Laser status, warmup recovery and the current scope of experiment/device state
+handling are described in [STATE_MECHANISMS.md](STATE_MECHANISMS.md).
 
 Laser-stage scanning, focus, tracking, GUI controls and required calibration are
 documented in [LASER_ALIGNMENT.md](LASER_ALIGNMENT.md).

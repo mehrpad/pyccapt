@@ -61,6 +61,13 @@ to load the corrected driver. If a port-open error occurs, close other serial
 applications using that port; NKT CONTROL was running during this check, but
 COM9 opened successfully, so exclusive ownership was not the observed failure.
 
+The subsequent GUI startup at 12:44:12 recorded an echo-only setter reply,
+`ly_oxp2_listen\r\n`. Setters now permit that framing, then their callers read
+back actual status/settings; an echo remains insufficient for a query or for
+claiming a completed transition. Setup status 17 no longer disables the Listen
+recovery request. See [STATE_MECHANISMS.md](STATE_MECHANISMS.md) for the action
+table, warmup handling and the limits of the broader device-state architecture.
+
 ## Wavelength values
 
 The GUI shows **nominal harmonic wavelengths**: IR 1030 nm, Green 515 nm,

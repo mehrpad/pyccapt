@@ -240,6 +240,18 @@ connection and alignment messages still wrap. Alignment fields have six pixels
 between rows and wider column gaps so they cannot overlap. Connection warnings
 and temporary errors share a two-line message area; scroll or hover to read
 longer messages. The window grows to fit the controls when fonts require it.
+The laser's observed state is displayed above the optical readouts. Setup/warming
+keeps Listen available and uses an orange Standby indicator; emission requires
+confirmed ready Standby. Echo-only setter replies are followed by state/settings
+readback, and failed or disallowed requests are cancelled rather than replayed.
+
+The experiment has validated lifecycle transitions through initializing,
+running, stopping, safe-off and finalization. Alignment has bounded command and
+phase handling. Device state handling is not uniform: gates largely display
+commanded positions, while pumps combine flags and status polling. Safe-off
+records successful shutdown commands rather than independent physical output
+measurement. The NI-DAQ E-stop/watchdog implementation requires its configured
+hardware backend; the default `none` backend provides no physical interlock.
 
 Visualization opens at 980 × 570. Hold DC, Set DC and the target voltage field
 share one row, and the LED with Running/Stopped text sits in the top-right

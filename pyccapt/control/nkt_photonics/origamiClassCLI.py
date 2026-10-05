@@ -61,7 +61,7 @@ class origClass:
                 self.ser.close()
                 self.ser = None
 
-    def _query(self, command, timeout=2.):
+    def _query(self, command, timeout=2., *, allow_echo=False):
         with self._lock:
             if self.ser is None:
                 raise ConnectionError('Laser CLI is not connected')
@@ -81,7 +81,8 @@ class origClass:
                         and time.monotonic()-last_received >= self.REPLY_IDLE_SECONDS
                         and response.endswith(b'\n')
                         and not self.ser.in_waiting
-                        and self._reply_text(response, command)):
+                        and (self._reply_text(response, command)
+                             or (allow_echo and response.decode('ascii', errors='replace').strip().lstrip('>') == command))):
                     break
             else:
                 raise TimeoutError(
@@ -89,6 +90,14 @@ class origClass:
                     f'received {len(response)} bytes: {bytes(response[:256])!r}'
                 )
             return self._reply_text(response, command)
+
+    def _command(self, command):
+        """Send a setter which this firmware may answer with only an echo.
+
+        An empty result means no acknowledgement, not confirmed success. The
+        caller must read back status/settings. Queries never accept echo alone.
+        """
+        return self._query(command, allow_echo=True)
 
     @staticmethod
     def _reply_text(response, command):
@@ -110,7 +119,7 @@ class origClass:
         value = float(pulse_energy_nj)
         if not math.isfinite(value) or value < 0:
             raise ValueError('Pulse energy must be finite and non-negative')
-        return self._query(f'ly_oxp2_power={value:g}')
+        return self._command(f'ly_oxp2_power={value:g}')
 
     def StatusRead(self, timeout=2.):
         response = self._query('ly_oxp2_dev_status?', timeout=timeout)
@@ -123,13 +132,13 @@ class origClass:
         return self._query('ly_oxp2_temp_status')
 
     def Listen(self):
-        return self._query('ly_oxp2_listen')
+        return self._command('ly_oxp2_listen')
 
     def Standby(self):
-        return self._query('ly_oxp2_standby')
+        return self._command('ly_oxp2_standby')
 
     def Enable(self):
-        return self._query('ly_oxp2_enabled')
+        return self._command('ly_oxp2_enabled')
 
     def PowerRead(self):
         return self._query('ly_oxp2_power?')
@@ -150,22 +159,22 @@ class origClass:
         return self._query('ly_oxp2_mode?')
 
     def ServiceMode(self):
-        return self._query('ly_oxp2_service_mode')
+        return self._command('ly_oxp2_service_mode')
 
     def DigitalGateLogicRead(self):
         return self._query('ly_oxp2_digiop?')
 
     def AOMEnable(self):
-        return self._query('ly_oxp2_output_enable')
+        return self._command('ly_oxp2_output_enable')
 
     def AOMDisable(self):
-        return self._query('ly_oxp2_output_disable')
+        return self._command('ly_oxp2_output_disable')
 
     def AOMState(self):
         return self._query('ly_oxp2_output?')
 
     def InterbusEnable(self):
-        return self._query('ly_oxp2_nktpbus=1')
+        return self._command('ly_oxp2_nktpbus=1')
 
     def wavelength_read(self):
         return self._query('ls_wavelength?')
@@ -184,26 +193,26 @@ class origClass:
 
     def AOM(self, value):
         value = self._integer(value, 0, 4000)
-        return self._query(f"e_power={value}")
+        return self._command(f"e_power={value}")
 
     def Freq(self, value):
         value = self._integer(value, 0, 11)
-        return self._query(f"e_freq={value}")
+        return self._command(f"e_freq={value}")
 
     def Div(self, value):
         value = self._integer(value, 1, 10000000)
-        return self._query(f"e_div={value}")
+        return self._command(f"e_div={value}")
 
     def Mode(self, value):
         value = self._integer(value, 2, 8)
         if value not in (2, 3, 8):
             raise ValueError("Laser mode must be 2, 3 or 8")
-        return self._query(f"e_mode={value}")
+        return self._command(f"e_mode={value}")
 
     def DigitalGateLogic(self, value):
         value = self._integer(value, 0, 1)
-        return self._query(f"ly_oxp2_digiop={value}")
+        return self._command(f"ly_oxp2_digiop={value}")
 
     def wavelength_change(self, value):
         value = self._integer(value, 0, 3)
-        return self._query(f"ls_wavelength={value}")
+        return self._command(f"ls_wavelength={value}")

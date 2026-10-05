@@ -132,6 +132,8 @@ class LaserReadoutMixin:
             setattr(self, flag, False)
             changed = True
             try:
+                if code not in (9, 33, 65, 129):
+                    raise ValueError('Wait for a stable laser state before changing settings.')
                 if getattr(self.variables, 'laser_alignment_status', {}).get('active'):
                     raise ValueError('Stop laser alignment before changing laser settings.')
                 if flag in ('change_laser_wavelegnth', 'change_laser_rate') and (running or code not in (9, 33)):

@@ -137,6 +137,25 @@ def test_setter_acknowledgement_without_newline(monkeypatch):
     assert device.Div(10) == 'e_div=10=ok'
 
 
+@pytest.mark.parametrize('method,command', [
+    ('Listen', 'ly_oxp2_listen'), ('Standby', 'ly_oxp2_standby'),
+    ('Enable', 'ly_oxp2_enabled'), ('AOMEnable', 'ly_oxp2_output_enable'),
+    ('AOMDisable', 'ly_oxp2_output_disable'),
+])
+def test_state_commands_can_return_echo_without_confirming_state(monkeypatch, method, command):
+    device = fragmented_device(monkeypatch, [(command+'\r\n').encode('ascii')])
+    assert getattr(device, method)() == ''
+    # The echo does not serve as a status reading or imply the desired state.
+    with pytest.raises(TimeoutError):
+        device.StatusRead(timeout=.5)
+
+
+def test_silent_setter_still_fails(monkeypatch):
+    device = fragmented_device(monkeypatch, [])
+    with pytest.raises(TimeoutError):
+        device.Listen()
+
+
 @pytest.mark.parametrize('reply,expected', [
     (b'ly_oxp2_dev_status?\nly_oxp2_dev_status 9\n', True),
     (b'ly_oxp2_dev_status?\n', False),
@@ -268,6 +287,122 @@ def test_listen_cancels_pending_emission_request(laser_gui):
     ui.check_laser_status()
     assert ui.laser_device.calls == [('Listen',)]
     assert not ui.on_mode
+
+
+def test_already_standby_request_still_cancels_queued_on(laser_gui):
+    ui = laser_gui
+    ui.laser_device.code = 33
+    ui.standby_mode = ui.on_mode = True
+    ui.check_laser_status()
+    assert not ui.laser_device.calls
+    assert not ui.on_mode
+
+
+@pytest.mark.parametrize('code,actions', [
+    (9, {'standby'}), (17, {'listen'}), (33, {'listen', 'on'}),
+    (65, {'listen', 'standby', 'output'}), (129, {'listen', 'standby', 'on', 'output'}),
+    (1, {'listen'}), (3, {'listen'}), (5, {'listen'}), (None, {'listen'}), (255, {'listen'}),
+])
+def test_laser_action_permissions_match_observed_state(laser_gui, code, actions):
+    ui = laser_gui
+    ui.laser_state_label = QtWidgets.QLabel()
+    ui._apply_button_locks_for_status(f'ly_oxp2_dev_status {code}' if code is not None else None)
+    actual = {name for name, widget in (
+        ('listen', ui.laser_listen), ('standby', ui.laser_standby),
+        ('on', ui.laser_on), ('output', ui.laser_enable),
+    ) if widget.isEnabled()}
+    assert actual == actions
+    if code == 17:
+        assert 'warming' in ui.laser_state_label.text()
+
+
+def test_disconnected_laser_has_no_actions(laser_gui):
+    ui = laser_gui
+    ui.laser_device = None
+    ui._apply_button_locks_for_status('ly_oxp2_dev_status 33')
+    assert not any(button.isEnabled() for button in (ui.laser_listen, ui.laser_standby, ui.laser_on, ui.laser_enable))
+
+
+def test_standby_warmup_keeps_listen_available_then_enables_on_when_ready(laser_gui):
+    ui = laser_gui
+    ui.laser_device.code = 9
+    def warmup():
+        ui.laser_device.calls.append(('Standby',))
+        ui.laser_device.code = 17
+    ui.laser_device.Standby = warmup
+    ui.standby_mode = True
+    ui.check_laser_status()
+    assert ui.laser_listen.isEnabled()
+    assert not ui.laser_on.isEnabled()
+    assert not ui.variables.laser_telemetry['valid']
+    ui.laser_device.code = 33
+    ui.check_laser_status()
+    assert ui.laser_on.isEnabled()
+    assert ui.laser_listen.isEnabled()
+
+
+def test_can_return_to_listen_from_warmup(laser_gui):
+    ui = laser_gui
+    ui.laser_device.code = 17
+    ui.listen_mode = True
+    ui.check_laser_status()
+    assert ui.laser_device.calls == [('Listen',)]
+    assert ui.laser_standby.isEnabled()
+
+
+def test_listen_is_attempted_even_if_status_reads_fail(laser_gui):
+    ui = laser_gui
+    ui._laser_status_in_progress = False
+    ui.laser_device.StatusRead = Mock(side_effect=TimeoutError('Status unavailable'))
+    ui.listen_mode = True
+    ui._poll_laser_status()
+    assert ui.laser_device.calls == [('Listen',)]
+    assert ui.laser_listen.isEnabled()
+    assert not ui.laser_on.isEnabled()
+
+
+def test_failed_status_does_not_replay_queued_emission_after_recovery(laser_gui):
+    ui = laser_gui
+    ui._laser_status_in_progress = False
+    ui.laser_device.StatusRead = Mock(side_effect=TimeoutError('Status unavailable'))
+    ui.on_mode = True
+    ui._poll_laser_status()
+    assert not ui.on_mode
+    assert not ui.laser_device.calls
+    ui.laser_device.StatusRead = lambda: 'ly_oxp2_dev_status 33'
+    ui.check_laser_status()
+    assert not ui.laser_device.calls
+
+
+def test_setting_permissions_use_state_after_emission_command(laser_gui):
+    ui = laser_gui
+    ui._sync_controls_from_device(initial=True)
+    ui.on_mode = True
+    ui.change_laser_rate = True
+    ui.check_laser_status()
+    assert ui.laser_device.calls == [('Enable',)]
+    assert any('Listen or Standby' in error for error in ui.errors)
+
+
+def test_pending_aom_edit_is_rejected_while_warming(laser_gui):
+    ui = laser_gui
+    ui.laser_device.code = 17
+    ui.change_laser_power = True
+    ui.check_laser_status()
+    assert not ui.laser_device.calls
+    assert any('stable laser state' in error for error in ui.errors)
+
+
+def test_queued_emission_is_cancelled_while_warming(laser_gui):
+    ui = laser_gui
+    ui.laser_device.code = 17
+    ui.on_mode = True
+    ui.check_laser_status()
+    assert not ui.laser_device.calls
+    assert not ui.on_mode
+    ui.laser_device.code = 33
+    ui.check_laser_status()
+    assert not ui.laser_device.calls
 
 
 def test_failed_readback_clears_previous_wavelength_and_values(laser_gui):

@@ -439,6 +439,7 @@ def test_camera_notification_expires_without_refresh_restoring_it(instrument_win
 @pytest.mark.parametrize('instrument_window', ['laser'], indirect=True)
 def test_laser_compact_layout_preserves_controls_and_readouts(instrument_window, tmp_path):
     window, ui, app = instrument_window
+    assert all(not pixmap.isNull() for pixmap in (ui.led_red, ui.led_green, ui.led_orange))
     # Exercise the persistent banner as well as the wrapped alignment status.
     reason = ("Laser: port COM9 opened but the laser did not reply to any CLI command "
               "(Incomplete or missing laser reply to ly_oxp2_dev_status?). Most likely "
@@ -461,7 +462,7 @@ def test_laser_compact_layout_preserves_controls_and_readouts(instrument_window,
     assert window._responsive_window.scroll.verticalScrollBar().maximum() == 0
     controls = [ui.laser_wavelegnth, ui.laser_wavelegnth_nm_label, ui.laser_power,
                 ui.laser_rate, ui.laser_divition_factor, ui.laser_enable, ui.laser_on,
-                ui.laser_standby, ui.laser_listen, ui.laser_auto_alignment, ui.laser_tracking,
+                ui.laser_standby, ui.laser_listen, ui.laser_state_label, ui.laser_auto_alignment, ui.laser_tracking,
                 *ui.laser_alignment_fields.values(), *ui.laser_alignment_buttons,
                 ui.laser_alignment_stop, ui.laser_alignment_label, ui.alignment_plot,
                 ui.laser_home, ui.laser_stage_reference, ui.laser_stage_stop, ui.laser_stage_superuser,

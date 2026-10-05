@@ -244,6 +244,9 @@ The laser's observed state is displayed above the optical readouts. Setup/warmin
 keeps Listen available and uses an orange Standby indicator; emission requires
 confirmed ready Standby. Echo-only setter replies are followed by state/settings
 readback, and failed or disallowed requests are cancelled rather than replayed.
+Listen is available immediately after Standby is requested. Listen and Standby
+remain available while Laser On is pending; pending Output Enable exposes an
+explicit Close Output request so cancellation cannot replay an enable toggle.
 
 The experiment has validated lifecycle transitions through initializing,
 running, stopping, safe-off and finalization. Alignment has bounded command and

@@ -55,6 +55,16 @@ Standby thermalization may take up to 15 minutes according to the local NKT
 manual, page 116. Setup is shown explicitly, with an orange Standby indicator.
 Emission stays unavailable until ready Standby is actually read. Listen can be
 requested during warming and is sent even if a status query is failing.
+Clicking Standby enables Listen immediately, including the interval where the
+device still reports its previous Listen state. Clicking Listen cancels any
+unsent Standby/emission request. The pending transition clears on confirmed
+ready status, a Listen cancellation or a communication error.
+Laser On requests keep Listen and Standby available before the new status
+arrives. Output Enable requests immediately expose Close Output while the last
+readback still says output closed. A Close Output click queues an explicit
+disable command, rather than re-evaluating a toggle against old readback and
+accidentally enabling output again. Lower-state requests cancel queued upward
+requests; they are not permission to automatically retry emission.
 Availability of Listen means the software can attempt the command; a broken
 serial connection can still prevent physical completion.
 

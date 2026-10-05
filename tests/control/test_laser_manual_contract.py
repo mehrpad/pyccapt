@@ -294,7 +294,7 @@ def test_already_standby_request_still_cancels_queued_on(laser_gui):
     ui.laser_device.code = 33
     ui.standby_mode = ui.on_mode = True
     ui.check_laser_status()
-    assert not ui.laser_device.calls
+    assert ui.laser_device.calls == [('Standby',)]
     assert not ui.on_mode
 
 
@@ -348,6 +348,118 @@ def test_can_return_to_listen_from_warmup(laser_gui):
     ui.check_laser_status()
     assert ui.laser_device.calls == [('Listen',)]
     assert ui.laser_standby.isEnabled()
+
+
+def test_standby_click_immediately_allows_listen_before_status_changes(laser_gui):
+    ui = laser_gui
+    ui.laser_device.code = 9
+    ui._apply_button_locks_for_status('ly_oxp2_dev_status 9')
+    assert not ui.laser_listen.isEnabled()
+    ui.laser_standby_clicked()
+    assert ui.laser_listen.isEnabled()
+    assert not ui.laser_standby.isEnabled()
+    ui._apply_button_locks_for_status('ly_oxp2_dev_status 9')
+    assert ui.laser_listen.isEnabled()
+    ui.laser_listen_clicked()
+    ui.check_laser_status()
+    assert ui.laser_device.calls == [('Listen',)]
+    assert not ui._laser_standby_pending
+    assert ui.laser_standby.isEnabled()
+
+
+def test_pending_standby_preserves_cancel_until_ready_status(laser_gui):
+    ui = laser_gui
+    ui.laser_device.code = 9
+    ui._apply_button_locks_for_status('ly_oxp2_dev_status 9')
+    ui.laser_standby_clicked()
+    # Simulate firmware still reporting Listen just after accepting Standby.
+    ui.laser_device.Standby = lambda: ui.laser_device.calls.append(('Standby',))
+    ui.check_laser_status()
+    assert ui.laser_listen.isEnabled()
+    assert not ui.laser_on.isEnabled()
+    assert ui._laser_standby_pending
+    ui.laser_device.code = 17
+    ui.check_laser_status()
+    assert ui.laser_listen.isEnabled()
+    ui.laser_device.code = 33
+    ui.check_laser_status()
+    assert not ui._laser_standby_pending
+    assert ui.laser_listen.isEnabled()
+    assert ui.laser_on.isEnabled()
+
+
+def test_on_request_can_be_cancelled_to_standby_before_status_changes(laser_gui):
+    ui = laser_gui
+    ui._apply_button_locks_for_status('ly_oxp2_dev_status 33')
+    ui.laser_on_clicked()
+    assert ui.laser_listen.isEnabled()
+    assert ui.laser_standby.isEnabled()
+    assert not ui.laser_on.isEnabled()
+    ui.laser_standby_clicked()
+    ui.check_laser_status()
+    assert ui.laser_device.calls == [('Standby',)]
+    assert not ui._laser_emission_pending
+
+
+def test_sent_on_request_keeps_lower_states_available(laser_gui):
+    ui = laser_gui
+    ui._apply_button_locks_for_status('ly_oxp2_dev_status 33')
+    ui.laser_device.Enable = lambda: ui.laser_device.calls.append(('Enable',))
+    ui.laser_on_clicked()
+    ui.check_laser_status()
+    assert ui.laser_listen.isEnabled()
+    assert ui.laser_standby.isEnabled()
+    ui.laser_listen_clicked()
+    ui.check_laser_status()
+    assert ui.laser_device.calls == [('Enable',), ('Listen',)]
+
+
+def test_on_transition_setup_can_be_cancelled_to_standby(laser_gui):
+    ui = laser_gui
+    ui._apply_button_locks_for_status('ly_oxp2_dev_status 33')
+    def enabling():
+        ui.laser_device.calls.append(('Enable',))
+        ui.laser_device.code = 17
+    ui.laser_device.Enable = enabling
+    ui.laser_on_clicked()
+    ui.check_laser_status()
+    assert ui.laser_listen.isEnabled()
+    assert ui.laser_standby.isEnabled()
+    ui.laser_standby_clicked()
+    ui.check_laser_status()
+    assert ui.laser_device.calls == [('Enable',), ('Standby',)]
+    assert not ui._laser_emission_pending
+
+
+@pytest.mark.parametrize('send_first', [False, True])
+def test_pending_output_enable_can_be_closed_without_replaying_enable(laser_gui, send_first):
+    ui = laser_gui
+    ui.laser_device.code = 65
+    ui._apply_button_locks_for_status('ly_oxp2_dev_status 65')
+    ui.laser_device.AOMEnable = lambda: ui.laser_device.calls.append(('AOMEnable',))
+    ui.laser_enable_clicked()
+    assert ui.laser_enable.text() == 'Close Output'
+    assert ui.laser_listen.isEnabled()
+    assert ui.laser_standby.isEnabled()
+    if send_first:
+        ui.check_laser_status()
+        assert ui.laser_enable.text() == 'Close Output'
+    ui.laser_enable_clicked()
+    ui.check_laser_status()
+    assert ui.laser_device.calls == ([('AOMEnable',)] if send_first else [])+[('AOMDisable',)]
+    assert not ui._laser_emission_pending
+
+
+def test_confirmed_open_output_has_all_lower_state_controls(laser_gui):
+    ui = laser_gui
+    ui.laser_device.code = 129
+    ui._apply_button_locks_for_status('ly_oxp2_dev_status 129')
+    assert ui.laser_listen.isEnabled()
+    assert ui.laser_standby.isEnabled()
+    assert ui.laser_enable.text() == 'Close Output'
+    ui.laser_enable_clicked()
+    ui.check_laser_status()
+    assert ui.laser_device.calls == [('AOMDisable',)]
 
 
 def test_listen_is_attempted_even_if_status_reads_fail(laser_gui):

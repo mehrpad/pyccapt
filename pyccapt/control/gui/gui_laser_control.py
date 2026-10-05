@@ -1487,16 +1487,14 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             self._apply_button_locks_for_status(None)
             return False
 
-        # Port opened. Now probe whether the laser actually answers
-        # CLI -- if it's in NKTPBus mode, the port opens fine but
-        # StatusRead returns garbage / nothing.
+        # A failed status query alone does not establish the interface mode.
         try:
             status = device.StatusRead()
         except Exception as exc:
             reason = (
-                f"Laser: port {com_port} opened but the laser did not reply to "
-                f"any CLI command ({exc}). Most likely the laser is in "
-                f"NKTPBus mode — use 'Switch to CLI', or check the cable."
+                f"Laser: {com_port} opened at 38400 baud, but the CLI status "
+                f"query failed ({exc}). Check the port, cable and other serial "
+                f"applications. Interface mode has not been determined."
             )
             print(reason)
             try:
@@ -1508,8 +1506,8 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             return False
         if not status or 'ly_oxp2' not in status:
             reason = (
-                f"Laser: port {com_port} opened but the laser did not reply "
-                f"to CLI (probably in NKTPBus mode). Use 'Switch to CLI'."
+                f"Laser: {com_port} returned an unrecognised CLI status: {status!r}. "
+                f"Interface mode has not been determined."
             )
             print(reason)
             try:
@@ -1522,6 +1520,9 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
 
         # We have a working CLI session. Wire up the rest of the init
         # path that used to live inline in setupUi.
+        logging.getLogger('pyccapt.laser').info(
+            'Laser CLI connected on %s at 38400 baud: %s', com_port, status
+        )
         self.laser_device = device
         try:
             # Send the laser to Listen mode -- the lowest-power, safest
@@ -1584,6 +1585,10 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             self.error_message("No COM port configured for the laser.")
             return
 
+        # Release our handle before probing; otherwise the probe would fail
+        # on our own working session and incorrectly attempt a bus switch.
+        self._close_laser_device()
+
         # If CLI already works there is nothing to do; just try to
         # (re)open the session.
         if nktpbus_switch.is_cli_responding(port):
@@ -1591,9 +1596,6 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             if self._open_laser_cli(port):
                 self.error_message("Laser CLI session opened.")
             return
-
-        # Drop our own CLI handle (if any) before NKTPDLL takes the port.
-        self._close_laser_device()
 
         self.error_message(f"Switching to CLI on {port}... please wait.")
         QtWidgets.QApplication.processEvents()

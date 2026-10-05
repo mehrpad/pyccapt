@@ -28,6 +28,39 @@ required when starting an enabled laser experiment. Pure Laser runs stop if the
 monitor data becomes invalid or older than 10 seconds. GUI reads do not modify
 settings; requested commands are confirmed by subsequent readback.
 
+## CLI connection diagnosis (2026-10-05)
+
+Read-only queries on the configured COM9 at 38400 baud confirmed that the laser
+was already in CLI mode. The raw status reply was
+`ly_oxp2_dev_status?\nly_oxp2_dev_status 9\n`: command echo followed by a
+newline-terminated Listen status, **without a trailing `>` prompt**. The AOM
+mode reply was `e_mode of AOM: 2`. The repetition-rate table also omitted the
+prompt and arrived in several fragments over approximately 62 ms.
+
+The old transaction reader required a prompt and therefore rejected these
+valid replies as timeouts. Transactions now accept either an explicit prompt
+or an LF-terminated non-echo response after 200 ms of serial silence, within
+the existing two-second deadline. This quiet interval preserves multiline
+replies instead of returning immediately after the first newline. An echo
+alone, an empty response or an unterminated line still times out. Timeout
+messages include the byte count and a bounded raw-reply excerpt for diagnosis.
+Firmware with gaps longer than 200 ms between complete lines may need a longer
+quiet interval; no such gaps were observed in this instrument's replies.
+
+The CLI mode probe uses the same status parser and documented question-mark
+syntax. It requires a valid numeric status rather than accepting an echo as
+proof of communication. The GUI releases its current serial handle before
+probing to avoid mistaking its own port ownership for a failed CLI connection.
+Failure messages no longer infer NKTPBus mode from a timeout alone.
+
+After the fix, the driver read status 9, internal AOM mode, all seven available
+repetition rates, IR wavelength and `0 mW`, and the CLI probe returned true.
+This diagnostic sent read queries only; it did not change interface mode,
+emission, wavelength, power or stage position. Restart the laser GUI/application
+to load the corrected driver. If a port-open error occurs, close other serial
+applications using that port; NKT CONTROL was running during this check, but
+COM9 opened successfully, so exclusive ownership was not the observed failure.
+
 ## Wavelength values
 
 The GUI shows **nominal harmonic wavelengths**: IR 1030 nm, Green 515 nm,

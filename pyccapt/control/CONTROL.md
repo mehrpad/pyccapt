@@ -35,6 +35,11 @@ separator.
 
 Laser command units, readback semantics and recording corrections are documented
 in [LASER_MANUAL_AUDIT.md](LASER_MANUAL_AUDIT.md).
+CLI replies may end with a newline without a `>` prompt. The driver accepts
+these after a short quiet interval, retaining multiline replies. Connection
+failures report the status-query error and received bytes; a timeout alone
+does not establish NKTPBus mode. See the audit's connection diagnosis for the
+real instrument replies and verification.
 
 Laser-stage scanning, focus, tracking, GUI controls and required calibration are
 documented in [LASER_ALIGNMENT.md](LASER_ALIGNMENT.md).

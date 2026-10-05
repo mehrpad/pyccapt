@@ -81,6 +81,78 @@ def test_missing_response_is_a_timeout_not_unbound_local_error():
         device._query('e_mlp?', timeout=.001)
 
 
+class FragmentedPort:
+    """Bounded simulated reads, including pauses between response lines."""
+    def __init__(self, chunks):
+        self.chunks = list(chunks)
+        self.elapsed = 0.
+        self.commands = []
+        self.closed = False
+
+    def reset_input_buffer(self): pass
+    def write(self, command): self.commands.append(command)
+    def close(self): self.closed = True
+    @property
+    def in_waiting(self): return 0
+
+    def read(self, count):
+        self.elapsed += .05
+        return self.chunks.pop(0) if self.chunks else b''
+
+
+def fragmented_device(monkeypatch, chunks):
+    from pyccapt.control.nkt_photonics import origamiClassCLI
+    port = FragmentedPort(chunks)
+    monkeypatch.setattr(origamiClassCLI, 'time', SimpleNamespace(monotonic=lambda: port.elapsed))
+    device = origClass('FAKE')
+    device.ser = port
+    return device
+
+
+@pytest.mark.parametrize('echo', [b'', b'ly_oxp2_dev_status?\n', b'>ly_oxp2_dev_status?\r\n'])
+def test_status_without_prompt_accepts_real_instrument_reply(monkeypatch, echo):
+    device = fragmented_device(monkeypatch, [echo+b'ly_oxp2_dev_status 9\n'])
+    assert device.StatusRead() == 'ly_oxp2_dev_status 9'
+
+
+def test_promptless_multiline_response_is_not_cut_at_first_newline(monkeypatch):
+    device = fragmented_device(monkeypatch, [
+        b'e_freq_available?\nAvailable repetition rates:\n', b'',
+        b'\t e_freq=4\t--> 400000 Hz\n', b'',
+        b'\t e_freq=5\t--> 500000 Hz\n', b'\t e_freq=6\t--> 579710 Hz\n',
+    ])
+    assert readback.frequency_table(device.freq_avaliable()) == {4: 400000., 5: 500000., 6: 579710.}
+
+
+@pytest.mark.parametrize('response', [b'e_mlp?\n', b'e_mlp?\n123 m', b''])
+def test_echo_or_unterminated_response_is_not_success(monkeypatch, response):
+    device = fragmented_device(monkeypatch, [response])
+    with pytest.raises(TimeoutError) as error:
+        device._query('e_mlp?', timeout=.5)
+    assert 'received' in str(error.value).lower()
+
+
+def test_setter_acknowledgement_without_newline(monkeypatch):
+    device = fragmented_device(monkeypatch, [b'e_div=10=ok>'])
+    assert device.Div(10) == 'e_div=10=ok'
+
+
+@pytest.mark.parametrize('reply,expected', [
+    (b'ly_oxp2_dev_status?\nly_oxp2_dev_status 9\n', True),
+    (b'ly_oxp2_dev_status?\n', False),
+    (b'ly_oxp2_dev_status?\nUnknown command\n', False),
+    (b'ly_oxp2_dev_status?\nly_oxp2_dev_status 999\n', False),
+])
+def test_cli_probe_requires_valid_status_and_closes_port(monkeypatch, reply, expected):
+    from pyccapt.control.nkt_photonics import nktpbus_switch, origamiClassCLI
+    device = fragmented_device(monkeypatch, [reply])
+    port = device.ser
+    monkeypatch.setattr(origamiClassCLI.serial, 'Serial', lambda **kwargs: port)
+    assert nktpbus_switch.is_cli_responding('FAKE', timeout_s=.5) is expected
+    assert port.commands == [b'ly_oxp2_dev_status?\r\n']
+    assert port.closed
+
+
 class Laser:
     def __init__(self):
         self.calls = []
@@ -207,3 +279,43 @@ def test_failed_readback_clears_previous_wavelength_and_values(laser_gui):
     assert not ui.variables.laser_telemetry['valid']
     assert math.isnan(ui.variables.laser_pulse_energy)
     assert math.isnan(ui.variables.laser_average_power)
+
+
+def test_connection_failure_reports_evidence_without_guessing_bus_mode(laser_gui, monkeypatch):
+    from pyccapt.control.nkt_photonics import origamiClassCLI
+    device = Mock(last_error=None)
+    device.open_port.return_value = 0
+    device.StatusRead.side_effect = TimeoutError('received 0 bytes: b\'\'')
+    monkeypatch.setattr(origamiClassCLI, 'origClass', lambda port: device)
+    ui = laser_gui
+    ui._set_laser_disconnected_banner = Mock()
+    assert not ui._open_laser_cli('FAKE')
+    reason = ui._set_laser_disconnected_banner.call_args.args[0]
+    assert 'status query failed' in reason
+    assert 'received 0 bytes' in reason
+    assert 'Interface mode has not been determined' in reason
+    assert 'NKTPBus' not in reason
+    device.close_port.assert_called_once()
+    device.Listen.assert_not_called()
+
+
+def test_cli_switch_releases_existing_session_before_probe(laser_gui, monkeypatch):
+    from pyccapt.control.nkt_photonics import nktpbus_switch
+    ui = laser_gui
+    ui.com_port_laser = 'FAKE'
+    ui.laser_device.close_port = Mock()
+    old_device = ui.laser_device
+    ui._open_laser_cli = Mock(return_value=True)
+
+    def probe(port):
+        assert port == 'FAKE'
+        old_device.close_port.assert_called_once()
+        assert ui.laser_device is None
+        return True
+
+    monkeypatch.setattr(nktpbus_switch, 'is_cli_responding', probe)
+    switch = Mock()
+    monkeypatch.setattr(nktpbus_switch, 'switch_to_cli', switch)
+    ui.switch_to_cli_clicked()
+    ui._open_laser_cli.assert_called_once_with('FAKE')
+    switch.assert_not_called()

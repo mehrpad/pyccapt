@@ -276,39 +276,23 @@ def switch_to_nktpbus(port: str) -> None:
 def is_cli_responding(port: str, *, timeout_s: float = 2.0) -> bool:
     """Quick probe: open the port at 38 400 baud and ask for status.
 
-    Returns True iff the laser replies with the expected ``ly_oxp2_*``
-    echo, meaning it is currently in CLI mode. Anything else (no reply,
-    garbage at 38 400 baud because the laser is at 115 200, exception)
-    returns False without raising.
-
-    This is the simplest, lowest-risk way to detect "laser is in
-    NKTPBus mode" before attempting an automatic recovery.
+    Requires a parsed numeric status, rather than just a command echo.
+    False means CLI communication was not established; it does not prove
+    NKTPBus mode. Uses the same framing as the GUI, including promptless replies.
     """
     try:
-        import serial as _serial
+        from pyccapt.control.nkt_photonics.origamiClassCLI import origClass
     except ImportError:
         return False
+    device = origClass(port)
     try:
-        with _serial.Serial(
-            port=port,
-            baudrate=38400,
-            stopbits=_serial.STOPBITS_ONE,
-            bytesize=_serial.EIGHTBITS,
-            rtscts=False,
-            timeout=timeout_s,
-        ) as ser:
-            ser.reset_input_buffer()
-            ser.write(b"ly_oxp2_dev_status\n")
-            deadline = time.time() + timeout_s
-            buf = b""
-            while time.time() < deadline:
-                chunk = ser.read(64)
-                if chunk:
-                    buf += chunk
-                    if b"\n" in buf:
-                        break
-                else:
-                    break
-        return b"ly_oxp2" in buf
+        if device.open_port() != 0:
+            return False
+        return bool(device.StatusRead(timeout=timeout_s))
     except Exception:
         return False
+    finally:
+        try:
+            device.close_port()
+        except Exception:
+            pass

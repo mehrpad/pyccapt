@@ -33,6 +33,11 @@ from pyccapt.control.nkt_photonics.readback import scalar
 
 class origClass:
     """NKT CLI wrapper. Transactions return complete replies, including units."""
+    # This instrument returns LF-terminated lines without a trailing prompt.
+    # Allow gaps between lines (e.g. the repetition-rate table), rather than
+    # treating the first newline or command echo as a complete response.
+    REPLY_IDLE_SECONDS = .2
+
     def __init__(self, comPort):
         self.comPort = comPort
         self.ser = None
@@ -64,17 +69,34 @@ class origClass:
             self.ser.write((command+'\r\n').encode('ascii'))
             deadline = time.monotonic()+timeout
             response = bytearray()
+            last_received = None
             while time.monotonic() < deadline:
-                response.extend(self.ser.read(max(1, self.ser.in_waiting)))
-                if b'\n' in response and re.search(rb'(?:[\r\n]\??>|=ok>)\s*$', response):
+                chunk = self.ser.read(max(1, self.ser.in_waiting))
+                if chunk:
+                    response.extend(chunk)
+                    last_received = time.monotonic()
+                if re.search(rb'(?:[\r\n]\??>|=ok>)\s*$', response):
+                    break
+                if (last_received is not None
+                        and time.monotonic()-last_received >= self.REPLY_IDLE_SECONDS
+                        and response.endswith(b'\n')
+                        and not self.ser.in_waiting
+                        and self._reply_text(response, command)):
                     break
             else:
-                raise TimeoutError(f'Incomplete or missing laser reply to {command}')
-            text = response.decode('utf-8', errors='replace')
-            # Keep all data lines, remove only the exact command echo/prompt.
-            lines = [line.strip().lstrip('>') for line in text.splitlines()]
-            lines = [line for line in lines if line and line not in (command, '>', '?>')]
-            return '\n'.join(lines).rstrip('>').strip()
+                raise TimeoutError(
+                    f'Incomplete or missing laser reply to {command}; '
+                    f'received {len(response)} bytes: {bytes(response[:256])!r}'
+                )
+            return self._reply_text(response, command)
+
+    @staticmethod
+    def _reply_text(response, command):
+        """Keep data lines, removing only the exact command echo and prompt."""
+        text = response.decode('utf-8', errors='replace')
+        lines = [line.strip().lstrip('>') for line in text.splitlines()]
+        lines = [line for line in lines if line and line not in (command, '>', '?>')]
+        return '\n'.join(lines).rstrip('>').strip()
 
     @staticmethod
     def _integer(value, low, high):
@@ -90,8 +112,8 @@ class origClass:
             raise ValueError('Pulse energy must be finite and non-negative')
         return self._query(f'ly_oxp2_power={value:g}')
 
-    def StatusRead(self):
-        response = self._query('ly_oxp2_dev_status?')
+    def StatusRead(self, timeout=2.):
+        response = self._query('ly_oxp2_dev_status?', timeout=timeout)
         value = scalar(response)
         if value is None or value != int(value) or not 0 <= value <= 255:
             raise ValueError(f'Unrecognised laser status: {response!r}')

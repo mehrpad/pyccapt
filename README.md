@@ -197,7 +197,7 @@ For device toggles, prefer `enabled` and `disabled`. Legacy `on` and `off` value
 
 ## Control Highlights
 
-![Main GUI](pyccapt/files/readme_images/main_gui.png)
+![Main GUI](pyccapt/files/readme_images/main_gui.jpg)
 
 The control stack includes the main acquisition GUI together with dedicated windows for gates, pumps and vacuum, cameras, laser, stage control, visualization, and baking. Startup reports unavailable configured ports clearly, GUI error boxes wrap long messages, and `Access Override` now asks for confirmation before allowing a run to proceed with missing enabled devices.
 

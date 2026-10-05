@@ -204,7 +204,7 @@ For legacy experiments that predate `apt_*` chunk flushing, the recovery falls b
 
 ## GUI Overview
 
-![Main GUI](../pyccapt/files/readme_images/main_gui.png)
+![Main GUI](../pyccapt/files/readme_images/main_gui.jpg)
 
 The main window is the experiment entry point. Long error messages now use a smaller wrapped font so port and device warnings remain readable inside the GUI instead of being clipped.
 
@@ -278,13 +278,12 @@ corner alongside the FDM count. The four upper rectangular panels have
 identical pixel dimensions at every window size. Compact voltage controls and
 two rows of spectrum controls reduce the width needed without removing any
 plot, calibration view, status indicator or input. Smaller screens use scrolling.
-The following Cameras, Laser and Visualization screenshots show layouts without
-connected hardware or acquired data.
+The screenshots below show captured instrument states and example data. Displayed
+values and available controls depend on connected hardware and experiment status.
 
-- Gates: ![Gates GUI](../pyccapt/files/readme_images/gates_gui.png)
-- Pumps/Vacuum: ![Pumps GUI](../pyccapt/files/readme_images/pumps_gui.png)
-- Cameras: ![Cameras GUI](../pyccapt/files/readme_images/cameras_gui.png)
-- Laser: ![Laser GUI](../pyccapt/files/readme_images/laser_gui.png)
-- Stage: ![Stage GUI](../pyccapt/files/readme_images/stage_gui.png)
-- Visualization: ![Visualization GUI](../pyccapt/files/readme_images/visualization_gui.png)
+- Gates and Pumps/Vacuum: ![Gates and Pumps/Vacuum GUI](../pyccapt/files/readme_images/gate_pumps_gui.jpg)
+- Cameras: ![Cameras GUI](../pyccapt/files/readme_images/cameras_gui.jpg)
+- Laser: ![Laser GUI](../pyccapt/files/readme_images/laser_gui.jpg)
+- Stage: ![Stage GUI](../pyccapt/files/readme_images/stage_gui.jpg)
+- Visualization: ![Visualization GUI](../pyccapt/files/readme_images/visualization_gui.jpg)
 - Baking: ![Baking GUI](../pyccapt/files/readme_images/baking_gui.png)

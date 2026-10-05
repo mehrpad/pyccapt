@@ -210,7 +210,7 @@ rather than scaling down controls. Monitor changes and work-area changes trigger
 another fit; ordinary resizing retains the operator's chosen window size.
 The automatic stage alignment monitor still opens at 660 × 350 logical pixels.
 
-![Main GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/main_gui.png?raw=True)
+![Main GUI](../files/readme_images/main_gui.jpg)
 
 Detailed sub-GUI snapshots:
 
@@ -253,16 +253,15 @@ corner alongside the FDM count. The four upper rectangular panels have
 identical pixel dimensions at every window size. Compact voltage controls and
 two rows of spectrum controls reduce the width needed without removing any
 plot, calibration view, status indicator or input. Smaller screens use scrolling.
-The following Cameras, Laser and Visualization screenshots show layouts without
-connected hardware or acquired data.
+The screenshots below show captured instrument states and example data. Displayed
+values and available controls depend on connected hardware and experiment status.
 
-- Gates: ![Gates GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/gates_gui.png?raw=True)
-- Pumps/Vacuum: ![Pumps GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/pumps_gui.png?raw=True)
-- Cameras: ![Cameras GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/cameras_gui.png?raw=True)
-- Laser: ![Laser GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/laser_gui.png?raw=True)
-- Stage: ![Stage GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/stage_gui.png?raw=True)
-- Visualization: ![Visualization GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/visualization_gui.png?raw=True)
-- Baking: ![Baking GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/baking_gui.png?raw=True)
+- Gates and Pumps/Vacuum: ![Gates and Pumps/Vacuum GUI](../files/readme_images/gate_pumps_gui.jpg)
+- Cameras: ![Cameras GUI](../files/readme_images/cameras_gui.jpg)
+- Laser: ![Laser GUI](../files/readme_images/laser_gui.jpg)
+- Stage: ![Stage GUI](../files/readme_images/stage_gui.jpg)
+- Visualization: ![Visualization GUI](../files/readme_images/visualization_gui.jpg)
+- Baking: ![Baking GUI](../files/readme_images/baking_gui.png)
 
 ## Electrode List
 

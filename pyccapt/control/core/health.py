@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Iterable
 from pathlib import Path
 
 from pyccapt.control.core.chunk_store import latest_manifest_record
+from pyccapt.control.core.state_diagnostics import collect_control_states
 
 
 @dataclass(frozen=True)
@@ -22,8 +23,9 @@ class HealthSnapshot:
     dropped_records: int
     write_latency_ms: float
     worker_heartbeat_age_s: float
+    control_states: dict = field(default_factory=dict)
 
-    def metrics(self) -> dict[str, float | int | bool | str]:
+    def metrics(self) -> dict[str, Any]:
         return asdict(self)
 
     def summary(self) -> str:
@@ -69,4 +71,5 @@ def build_health_snapshot(
         dropped_records=dropped,
         write_latency_ms=write_latency,
         worker_heartbeat_age_s=max(0.0, now - heartbeat_monotonic),
+        control_states=collect_control_states(variables),
     )

@@ -12,6 +12,9 @@ from PyQt6.QtGui import QPixmap
 # Local module and scripts
 from pyccapt.control.gui.responsive import make_window_responsive
 from pyccapt.control.core import runtime
+from pyccapt.control.core.control_state import (
+    CommandStatus, Connection, Evidence, commanded, complete, observe, publish, request, result,
+)
 from pyccapt.control.gui import tooltips
 from pyccapt.control.gui.stage_control_widgets import (
     JOG_GROUP_STYLE,
@@ -761,7 +764,9 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
     # ------------------------------------------------------------------
 
     def _connect_stage_device(self):
+        publish(self.variables, "laser_stage", "main", "connection", connection=Connection.CONNECTING)
         if not self._stage_locator:
+            publish(self.variables, "laser_stage", "main", "connection", connection=Connection.DISABLED)
             # Empty locator in config.toml means "no laser-side SmarAct
             # controller in this rig" - skip silently, leave the panel
             # disabled but don't bother the user with an error.
@@ -781,6 +786,8 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         except Exception as exc:
             self.stage_device = None
             self._stage_connect_error = str(exc)
+            publish(self.variables, "laser_stage", "main", "connection", connection=Connection.DISCONNECTED)
+            publish(self.variables, "laser_stage", "main", "fault", fault=str(exc))
             self.error_message(self._stage_connect_error)
             self._set_stage_movement_enabled(False)
             logging.getLogger("pyccapt.gui").warning(
@@ -791,6 +798,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             )
             return
         self._set_stage_movement_enabled(True)
+        publish(self.variables, "laser_stage", "main", "connection", connection=Connection.CONNECTED)
         logging.getLogger("pyccapt.gui").info(
 	        "Laser Control: connected to SmarAct laser stage '%s'; publishing "
 	        "position to apt/laser_*.",
@@ -917,12 +925,13 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         vel = self._axis_velocity_m_s(axis)
         step_m = mcs2_stage.click_step_m(vel, self._click_duration_s)
         try:
-            self.stage_device.move_relative_axis(
-                axis=axis,
-                delta_m=sign * step_m,
-                velocity_m_s=vel,
-                wait=False,
-            )
+            with commanded(self.variables, "laser_stage", "main", "jog"):
+                self.stage_device.move_relative_axis(
+                    axis=axis,
+                    delta_m=sign * step_m,
+                    velocity_m_s=vel,
+                    wait=False,
+                )
         except mcs2_stage.SmarActStageError as exc:
             self.error_message(f"Move failed: {exc}")
 
@@ -984,13 +993,14 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         # config.toml) instead of the per-axis speed presets - otherwise a
         # Home click with X at the slowest preset takes minutes.
         try:
-            self.stage_device.move_absolute(
-                x_m=x_m,
-                y_m=y_m,
-                z_m=z_m,
-                velocity_m_s=self._home_velocity_m_s,
-                wait=False,
-            )
+            with commanded(self.variables, "laser_stage", "main", "home"):
+                self.stage_device.move_absolute(
+                    x_m=x_m,
+                    y_m=y_m,
+                    z_m=z_m,
+                    velocity_m_s=self._home_velocity_m_s,
+                    wait=False,
+                )
         except mcs2_stage.SmarActStageError as exc:
             self.error_message(f"Home failed: {exc}")
 
@@ -1004,22 +1014,26 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         if self._stage_reference_worker is not None and self._stage_reference_worker.isRunning():
             self.error_message("Reference already in progress.")
             return
-        self._stage_reference_cancel = threading.Event()
-        self._stage_reference_worker = _LaserStageReferenceWorker(
-            self.stage_device,
-            self._stage_reference_cancel,
-            self._referencing_options,
-            self._reference_timeout_s,
-            self._reference_velocity_m_s,
-        )
-        self._stage_reference_worker.finished_ok.connect(self._on_stage_reference_done)
-        self._stage_reference_worker.finished_with_error.connect(self._on_stage_reference_failed)
-        self._set_stage_jog_enabled(False)
-        self.laser_stage_reference.setEnabled(False)
-        self.error_message("Referencing - keep the path clear; press STOP to abort.")
-        self._stage_reference_worker.start()
+        with commanded(self.variables, "laser_stage", "main", "referencing", confirmation="referenced") as state:
+            reference_id = state.command_id if state is not None else None
+            self._stage_reference_cancel = threading.Event()
+            self._stage_reference_worker = _LaserStageReferenceWorker(
+                self.stage_device,
+                self._stage_reference_cancel,
+                self._referencing_options,
+                self._reference_timeout_s,
+                self._reference_velocity_m_s,
+            )
+            self._stage_reference_worker.finished_ok.connect(lambda: self._on_stage_reference_done(reference_id))
+            self._stage_reference_worker.finished_with_error.connect(lambda message: self._on_stage_reference_failed(message, reference_id))
+            self._set_stage_jog_enabled(False)
+            self.laser_stage_reference.setEnabled(False)
+            self.error_message("Referencing - keep the path clear; press STOP to abort.")
+            self._stage_reference_worker.start()
 
-    def _on_stage_reference_done(self):
+    def _on_stage_reference_done(self, command_id=None):
+        complete(self.variables, "laser_stage", "main", "referenced", evidence=Evidence.READBACK,
+                 expected="referencing", command_id=command_id)
         self._stage_reference_worker = None
         self._stage_reference_cancel = None
         self._set_stage_jog_enabled(True)
@@ -1028,7 +1042,9 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         self._consecutive_stage_position_errors = 0
         self.error_message("Reference complete.")
 
-    def _on_stage_reference_failed(self, message):
+    def _on_stage_reference_failed(self, message, command_id=None):
+        publish(self.variables, "laser_stage", "main", "fault", fault=str(message), fail_command=True,
+                command_id=command_id)
         self._stage_reference_worker = None
         self._stage_reference_cancel = None
         self._set_stage_jog_enabled(True)
@@ -1061,7 +1077,8 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             self._stage_reference_cancel.set()
         if self.stage_device is None:
             return
-        self.stage_device.stop()
+        with commanded(self.variables, "laser_stage", "main", "stopped"):
+            self.stage_device.stop()
 
     def _refresh_stage_position(self):
         if self.stage_device is None:
@@ -1069,6 +1086,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         try:
             pos = self.stage_device.get_position()
         except mcs2_stage.SmarActStageError as exc:
+            publish(self.variables, "laser_stage", "main", "fault", fault=str(exc))
             text = str(exc)
             if text != self._last_stage_position_error:
                 self._last_stage_position_error = text
@@ -1173,6 +1191,9 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         # Manual p123: integer divider 1..10,000,000.
         self._clamp_divider_to_min_output_rate()
 
+    def _request_laser_state(self, target):
+        self._control_laser_request = request(self.variables, "laser", "main", target)
+
     def laser_enable_clicked(self):
         """
         Handle the close event of the GatesWindow.
@@ -1190,6 +1211,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         else:
             self.enable_ouput_mode = True
             self._laser_emission_pending = True
+        self._request_laser_state(LaserState.ON_DISABLED.value if getattr(self, "close_output_mode", False) else LaserState.ON_ENABLED.value)
         self._apply_button_locks_for_status(getattr(self, '_last_laser_status', None))
 
     def laser_on_clicked(self):
@@ -1208,6 +1230,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         else:
             self.on_mode = True
             self._laser_emission_pending = True
+        self._request_laser_state(LaserState.ON_DISABLED.value if getattr(self, "close_output_mode", False) else LaserState.ON_ENABLED.value)
         self._apply_button_locks_for_status(getattr(self, '_last_laser_status', None))
 
     def laser_standby_clicked(self):
@@ -1224,6 +1247,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             self._laser_emission_pending = False
         self.on_mode = self.enable_ouput_mode = self.close_output_mode = False
         self._laser_standby_pending = True
+        self._request_laser_state(LaserState.STANDBY.value)
         self._apply_button_locks_for_status(getattr(self, '_last_laser_status', None))
 
     def laser_listen_clicked(self):
@@ -1240,6 +1264,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         self.close_output_mode = False
         self._laser_emission_pending = False
         self._laser_standby_pending = False
+        self._request_laser_state(LaserState.LISTEN.value)
 
     def laser_wavelegnth_changed(self):
         """
@@ -1308,6 +1333,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
                 setattr(self, flag, False)
             self._invalidate_laser_readouts(exc)
             self._apply_button_locks_for_status(None)
+            publish(self.variables, "laser", "main", "fault", fault=str(exc), fail_command=True)
             print(f"Laser status poll failed: {exc}")
         finally:
             self._laser_status_in_progress = False
@@ -1342,6 +1368,9 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
                 actions = actions | {'close_output'}
             if request is not None and request not in actions:
                 self.error_message(f'Laser command unavailable in {LaserState.from_code(code).value}; request cancelled.')
+                command = getattr(self, "_control_laser_request", None)
+                if command is not None:
+                    result(self.variables, "laser", "main", command.command_id, CommandStatus.CANCELLED)
             elif request == 'standby':
                 self._laser_emission_pending = False
                 self._laser_standby_pending = True
@@ -1373,6 +1402,11 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         changed = self._apply_laser_settings(code)
         if changed:
             status = self.laser_device.StatusRead()
+        if requested:
+            command = getattr(self, "_control_laser_request", None)
+            if command is not None:
+                result(self.variables, "laser", "main", command.command_id, CommandStatus.SENT)
+        self._publish_laser_state(status)
         self._apply_button_locks_for_status(status)
         if readback.scalar(status) in (9, 33, 65, 129) and (requested or changed or self.index >= 5):
             self._sync_controls_from_device()
@@ -1435,6 +1469,20 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
     # ------------------------------------------------------------------
     # Strict adjacent-state button locks
     # ------------------------------------------------------------------
+
+    def _publish_laser_state(self, status_text):
+        """Publish only real serial reads; cached UI refreshes are not new evidence."""
+        code = readback.scalar(status_text)
+        state = LaserState.from_code(code)
+        actions = allowed_actions(state, connected=self.laser_device is not None)
+        observed = observe(self.variables, "laser", "main", state.value, evidence=Evidence.READBACK,
+                           valid=code in (1, 3, 5, 9, 17, 33, 65, 129),
+                           connection=Connection.CONNECTED if self.laser_device is not None else Connection.DISCONNECTED,
+                           fault=state.value if code in (3, 5) else "",
+                           details={"status_code": code, "observed_state_actions": sorted(actions)})
+        if (observed is not None and observed.command_status == CommandStatus.SENT
+                and observed.valid and not observed.fault and observed.requested == state.value):
+            result(self.variables, "laser", "main", observed.command_id, CommandStatus.CONFIRMED)
 
     def _apply_button_locks_for_status(self, status_text):
         code = readback.scalar(status_text) if self.laser_device is not None else None
@@ -1533,6 +1581,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         except Exception:
             pass
         self.laser_device = None
+        publish(self.variables, "laser", "main", "connection", connection=Connection.DISCONNECTED)
 
     def _open_laser_cli(self, com_port, *, initial_open=False):
         """Try to open a CLI session on ``com_port``.
@@ -1615,6 +1664,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             # _sync_controls_from_device.
             self.laser_device.Listen()
             status_after = self.laser_device.StatusRead()
+            self._publish_laser_state(status_after)
             self._sync_controls_from_device(initial=True)
             if status_after.strip() == 'ly_oxp2_dev_status 9':
                 self.led_laser_listen.setPixmap(self.led_green)
@@ -1826,6 +1876,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             self.stage_device = None
 
         # Close the laser serial port if we still own it.
+        publish(self.variables, "laser_stage", "main", "connection", connection=Connection.DISCONNECTED)
         # SAFETY: before closing, force the laser to a known-off state so
         # it can't continue emitting after the GUI has exited. The
         # previous code went straight to close_port() and the laser
@@ -1843,7 +1894,8 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
                 (lambda: laser_dev.Standby(), 'Standby'),
             ):
                 try:
-                    safe_call()
+                    with commanded(self.variables, "laser", "main", label):
+                        safe_call()
                 except Exception as exc:
                     print(f"laser safe-off: {label} failed (non-fatal): {exc}")
             try:
@@ -1851,6 +1903,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             except Exception:
                 pass
             self.laser_device = None
+        publish(self.variables, "laser", "main", "connection", connection=Connection.DISCONNECTED)
 
 
 class Worker(QThread):

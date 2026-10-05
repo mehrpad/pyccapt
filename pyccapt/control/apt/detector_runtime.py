@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from pyccapt.control.apt import simulator
+from pyccapt.control.core.control_state import CommandStatus, commanded, observe, result
 from pyccapt.control.apt.detector_models import (
     HSD_MODEL,
     ROENTDEK_MODEL,
@@ -79,22 +80,44 @@ class ProcessDetectorBackend(DetectorBackend):
         self.process = process_factory(target=target, args=(*args, self.stop_event))
 
     def start(self) -> None:
-        self.process.start()
+        with commanded(self.variables, "detector", "exp", "start", confirmation="running",
+                       details={"backend": self.name}):
+            self.process.start()
 
     def stop(self) -> None:
-        self.stop_event.set()
+        with commanded(self.variables, "detector", "exp", "stop", confirmation="stopped",
+                       details={"backend": self.name}):
+            self.stop_event.set()
 
     def join(self, timeout: float = 2.0) -> None:
         self.process.join(timeout)
-        if self.process.is_alive():
+        escalated = bool(self.process.is_alive())
+        if escalated:
             self.process.terminate()
             self.process.join(timeout)
+        exit_code = getattr(self.process, "exitcode", None)
+        if exit_code is not None:
+            state = observe(self.variables, "detector", "exp", "stopped" if exit_code == 0 else "failed",
+                            valid=exit_code == 0,
+                            fault="" if exit_code == 0 else f"Detector worker exit code {exit_code}",
+                            details={"exit_code": exit_code, "termination_requested": escalated,
+                                     "evidence_scope": "worker process, not detector electronics"})
+            if state is not None and state.command_status in {CommandStatus.REQUESTED, CommandStatus.SENT}:
+                result(self.variables, "detector", "exp", state.command_id,
+                       CommandStatus.CONFIRMED if exit_code == 0 and state.confirmation == "stopped" else CommandStatus.FAILED)
 
     def health(self) -> DetectorHealth:
         running = bool(self.process.is_alive())
         exit_code = getattr(self.process, "exitcode", None)
         requested = bool(self.stop_event.is_set()) if hasattr(self.stop_event, "is_set") else False
         message = "running" if running else ("stopped" if exit_code in {None, 0} else f"exited with code {exit_code}")
+        state = observe(self.variables, "detector", "exp", message, valid=running or exit_code == 0,
+                        fault=message if exit_code not in {None, 0} else "",
+                        details={"backend": self.name, "exit_code": exit_code,
+                                 "stop_requested": requested, "evidence_scope": "worker process, not detector electronics"})
+        if state is not None and state.command_status == CommandStatus.SENT:
+            if state.requested == "start" and running or state.requested == "stop" and not running and exit_code == 0:
+                result(self.variables, "detector", "exp", state.command_id, CommandStatus.CONFIRMED)
         return DetectorHealth(self.name, running, exit_code, requested, message)
 
     def stream_chunks(self) -> Iterator[dict[str, Any]]:

@@ -277,3 +277,18 @@ names = [
     "NC",    # Not categorized
 ]
 ```
+
+## Common owner state contract
+
+`core/control_state.py` defines the shared connection, request, observation,
+evidence, freshness, fault and command lifecycle contract. Every active control
+owner publishes through `Variables.update_control_state()`; the dedicated shared
+lock protects transactions across threads and spawned processes. Low-rate legacy
+adapters retain compatibility, and existing guards/actuation sequences remain
+authoritative. Live health includes the registry. Completed/failed datasets save
+`meta_data/control_states.json` after cleanup. Write-only devices expose commanded
+state; confirmation requires matching fresh evidence after a request.
+
+See [STATE_MECHANISMS.md](STATE_MECHANISMS.md) for the resource/owner inventory,
+physical feedback boundaries and extension instructions. Regression coverage is
+in `tests/control/test_control_states.py` alongside the existing device suites.

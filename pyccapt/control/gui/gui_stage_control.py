@@ -7,6 +7,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from pyccapt.control.gui.responsive import make_window_responsive
 from pyccapt.control.core import runtime
+from pyccapt.control.core.control_state import Connection, Evidence, commanded, complete, publish
 from pyccapt.control.gui import tooltips
 from pyccapt.control.gui.stage_control_widgets import (
     JOG_GROUP_STYLE,
@@ -371,8 +372,11 @@ class Ui_Stage_Control(object):
         self.superuser.clicked.connect(self._super_user_access)
 
     def _connect_device(self):
+        publish(self.variables, "sample_stage", "main", "connection", connection=Connection.CONNECTING)
         if not self._locator:
             self._connect_error = "No SmarAct stage locator configured (stage_smartact_main in config.toml)."
+            publish(self.variables, "sample_stage", "main", "connection", connection=Connection.DISCONNECTED)
+            publish(self.variables, "sample_stage", "main", "fault", fault=self._connect_error)
             self._set_error(self._connect_error)
             self._set_movement_enabled(False)
             _log.warning(
@@ -388,6 +392,8 @@ class Ui_Stage_Control(object):
         except Exception as exc:
             self.stage_device = None
             self._connect_error = str(exc)
+            publish(self.variables, "sample_stage", "main", "connection", connection=Connection.DISCONNECTED)
+            publish(self.variables, "sample_stage", "main", "fault", fault=str(exc))
             self._set_error(self._connect_error)
             self._set_movement_enabled(False)
             _log.warning(
@@ -398,6 +404,7 @@ class Ui_Stage_Control(object):
             )
             return
         self._set_error("")
+        publish(self.variables, "sample_stage", "main", "connection", connection=Connection.CONNECTED)
         self._set_movement_enabled(True)
         _log.info(
 	        "Stage Control: connected to SmarAct main stage '%s'; publishing "
@@ -504,12 +511,13 @@ class Ui_Stage_Control(object):
         vel = self._axis_velocity_m_s(axis)
         step_m = mcs2_stage.click_step_m(vel, self._click_duration_s)
         try:
-            self.stage_device.move_relative_axis(
-                axis=axis,
-                delta_m=sign * step_m,
-                velocity_m_s=vel,
-                wait=False,
-            )
+            with commanded(self.variables, "sample_stage", "main", "jog"):
+                self.stage_device.move_relative_axis(
+                    axis=axis,
+                    delta_m=sign * step_m,
+                    velocity_m_s=vel,
+                    wait=False,
+                )
         except mcs2_stage.SmarActStageError as exc:
             self._set_error(f"Move failed: {exc}")
 
@@ -582,13 +590,14 @@ class Ui_Stage_Control(object):
         # be selected - otherwise a Home click with X at
         # level 1 (a few um/s) takes minutes to complete.
         try:
-            self.stage_device.move_absolute(
-                x_m=x_m,
-                y_m=y_m,
-                z_m=z_m,
-                velocity_m_s=self._home_velocity_m_s,
-                wait=False,
-            )
+            with commanded(self.variables, "sample_stage", "main", "home"):
+                self.stage_device.move_absolute(
+                    x_m=x_m,
+                    y_m=y_m,
+                    z_m=z_m,
+                    velocity_m_s=self._home_velocity_m_s,
+                    wait=False,
+                )
         except mcs2_stage.SmarActStageError as exc:
             self._set_error(f"Home failed: {exc}")
 
@@ -614,24 +623,26 @@ class Ui_Stage_Control(object):
             self._set_error("Reference canceled - confirm there is no specimen on the stage.")
             return
 
-        self._reference_cancel = threading.Event()
-        self._reference_worker = _ReferenceWorker(
-            self.stage_device,
-            self._reference_cancel,
-            self._referencing_options,
-            self._reference_timeout_s,
-            self._reference_velocity_m_s,
-        )
-        self._reference_worker.finished_ok.connect(self._on_reference_done)
-        self._reference_worker.finished_with_error.connect(self._on_reference_failed)
-        # Lock the movement controls for the duration of the search - the
-        # controller will refuse jogs while channels are busy and the
-        # resulting error spam isn't useful.  STOP stays enabled so the
-        # user can always abort.
-        self._set_jog_enabled(False)
-        self.stage_reference.setEnabled(False)
-        self._set_error("Referencing - keep the path clear; press STOP to abort.")
-        self._reference_worker.start()
+        with commanded(self.variables, "sample_stage", "main", "referencing", confirmation="referenced") as state:
+            reference_id = state.command_id if state is not None else None
+            self._reference_cancel = threading.Event()
+            self._reference_worker = _ReferenceWorker(
+                self.stage_device,
+                self._reference_cancel,
+                self._referencing_options,
+                self._reference_timeout_s,
+                self._reference_velocity_m_s,
+            )
+            self._reference_worker.finished_ok.connect(lambda: self._on_reference_done(reference_id))
+            self._reference_worker.finished_with_error.connect(lambda message: self._on_reference_failed(message, reference_id))
+            # Lock the movement controls for the duration of the search - the
+            # controller will refuse jogs while channels are busy and the
+            # resulting error spam isn't useful.  STOP stays enabled so the
+            # user can always abort.
+            self._set_jog_enabled(False)
+            self.stage_reference.setEnabled(False)
+            self._set_error("Referencing - keep the path clear; press STOP to abort.")
+            self._reference_worker.start()
 
     def _confirm_reference_no_sample(self):
         """Show a red Critical-icon dialog confirming the stage is empty.
@@ -667,7 +678,9 @@ class Ui_Stage_Control(object):
         warning.setEscapeButton(QtWidgets.QMessageBox.StandardButton.No)
         return warning.exec() == QtWidgets.QMessageBox.StandardButton.Yes
 
-    def _on_reference_done(self):
+    def _on_reference_done(self, command_id=None):
+        complete(self.variables, "sample_stage", "main", "referenced", evidence=Evidence.READBACK,
+                 expected="referencing", command_id=command_id)
         self._reference_worker = None
         self._reference_cancel = None
         self._set_jog_enabled(True)
@@ -678,7 +691,9 @@ class Ui_Stage_Control(object):
         self._consecutive_position_errors = 0
         self._set_error("Reference complete.")
 
-    def _on_reference_failed(self, message):
+    def _on_reference_failed(self, message, command_id=None):
+        publish(self.variables, "sample_stage", "main", "fault", fault=str(message), fail_command=True,
+                command_id=command_id)
         self._reference_worker = None
         self._reference_cancel = None
         self._set_jog_enabled(True)
@@ -709,7 +724,8 @@ class Ui_Stage_Control(object):
             self._reference_cancel.set()
         if self.stage_device is None:
             return
-        self.stage_device.stop()
+        with commanded(self.variables, "sample_stage", "main", "stopped"):
+            self.stage_device.stop()
 
     def _alignment_tick(self):
         locked = bool(self.variables.automatic_alignment_enabled)
@@ -727,6 +743,7 @@ class Ui_Stage_Control(object):
             pos = self.stage_device.get_position()
         except mcs2_stage.SmarActStageError as exc:
             # Same error repeating every poll? Show it once then go quiet
+            publish(self.variables, "sample_stage", "main", "fault", fault=str(exc))
             # until the condition clears, otherwise the user's screen
             # fills with identical red text.  After 4 repeats we also
             # slow the timer down so we stop hammering the controller.
@@ -805,6 +822,8 @@ class Ui_Stage_Control(object):
             except Exception:
                 pass
             self.stage_device = None
+
+        publish(self.variables, "sample_stage", "main", "connection", connection=Connection.DISCONNECTED)
 
 
 class StageControlWindow(QtWidgets.QWidget):

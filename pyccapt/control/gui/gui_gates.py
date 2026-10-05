@@ -1,4 +1,5 @@
 import sys
+from pyccapt.control.core.control_state import commanded, publish
 
 import nidaqmx
 from PyQt6 import QtCore, QtGui, QtWidgets
@@ -465,10 +466,14 @@ class Ui_Gates(object):
             # several seconds of UI lockup. Schedule the low write via
             # QTimer.singleShot so the Qt event loop stays responsive.
             task = nidaqmx.Task()
+            resource = {0: "gate_main", 1: "gate_main", 2: "gate_load",
+                        3: "gate_load", 4: "gate_cryo", 5: "gate_cryo"}[num]
             try:
-                task.do_channels.add_do_chan(self.conf["COM_PORT_gates"] + 'line%s' % num)
-                task.start()
-                task.write([True])
+                with commanded(self.variables, resource, "main",
+                               "open" if num % 2 == 0 else "closed") as command:
+                    task.do_channels.add_do_chan(self.conf["COM_PORT_gates"] + 'line%s' % num)
+                    task.start()
+                    task.write([True])
             except Exception:
                 # Ensure the task is closed if the high-write blew up.
                 try:
@@ -480,6 +485,10 @@ class Ui_Gates(object):
             def _finish_gate_pulse():
                 try:
                     task.write([False])
+                except Exception as exc:
+                    publish(self.variables, resource, "main", "fault", fault=str(exc), fail_command=True,
+                            command_id=command.command_id if command is not None else None)
+                    raise
                 finally:
                     try:
                         task.close()

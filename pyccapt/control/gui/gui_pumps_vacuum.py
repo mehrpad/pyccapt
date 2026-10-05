@@ -1,5 +1,6 @@
 import os
 import sys
+from pyccapt.control.core.control_state import commanded, observe
 import threading
 import time
 from datetime import datetime, timedelta
@@ -1004,6 +1005,7 @@ class Ui_Pumps_Vacuum(PumpLayoutMixin):
         in :meth:`_stop_ll_baking_log` once the baking duration elapses or the
         user deselects the button.
         """
+        observe(self.variables, "load_lock_baking", "main", "heating_requested")
         try:
             now = datetime.now()
             now_time = now.strftime("%d-%m-%Y_%H-%M-%S")
@@ -1044,6 +1046,8 @@ class Ui_Pumps_Vacuum(PumpLayoutMixin):
 
     def _stop_ll_baking_log(self):
         """Stop sampling, write a final row, and release the log buffer."""
+        if self.ll_baking_log_data is not None:
+            observe(self.variables, "load_lock_baking", "main", "logging_stopped")
         if self.ll_baking_log_timer.isActive():
             self.ll_baking_log_timer.stop()
         if self.ll_baking_log_data is not None:
@@ -1427,7 +1431,8 @@ class Ui_Pumps_Vacuum(PumpLayoutMixin):
         try:
             task.do_channels.add_do_chan(self.conf['COM_PORT_gates'] + 'line%s' % line_num)
             task.start()
-            task.write([bool(state)])
+            with commanded(self.variables, ("valve_cll_backing" if line_num == self.conf.get("cll_backing_valve_line") else "valve_cll_turbo"), "main", "line_high" if state else "line_low"):
+                task.write([bool(state)])
         except Exception as e:
             print('Error setting CLL valve line %s' % line_num)
             print(e)
@@ -1465,7 +1470,8 @@ class Ui_Pumps_Vacuum(PumpLayoutMixin):
                 self._vent_valve_task = nidaqmx.Task()
                 self._vent_valve_task.do_channels.add_do_chan(self.conf['COM_PORT_cll_vent_valve'])
                 self._vent_valve_task.start()
-            self._vent_valve_task.write([bool(state)])
+            with commanded(self.variables, "valve_cll_vent", "main", "line_high" if state else "line_low"):
+                self._vent_valve_task.write([bool(state)])
         except Exception as e:
             print('Error setting CLL vent valve')
             print(e)

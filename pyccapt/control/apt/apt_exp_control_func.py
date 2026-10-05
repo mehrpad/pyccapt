@@ -1,5 +1,7 @@
 import serial.tools.list_ports
 
+from pyccapt.control.core.control_state import commanded
+
 from pyccapt.control.devices import signal_generator, email_send
 
 
@@ -98,18 +100,19 @@ def initialization_v_dc(com_port_v_dc, log_apt, variables):
     """
 
     try:
-        # Initialize high voltage
-        if com_port_v_dc.is_open:
-            com_port_v_dc.flushInput()
-            com_port_v_dc.flushOutput()
+        with commanded(variables, "dc_supply", "exp", "initialized"):
+            # Initialize high voltage
+            if com_port_v_dc.is_open:
+                com_port_v_dc.flushInput()
+                com_port_v_dc.flushOutput()
 
-            cmd_list = [">S1 3.0e-4", ">S0B 0", ">S0 %s" % variables.vdc_min, "F0", ">S0?", ">DON?", ">S0A?"]
-            for cmd in range(len(cmd_list)):
-                command_v_dc(com_port_v_dc, cmd_list[cmd])
-        else:
-            raise RuntimeError("High-voltage serial port is not open")
-        log_apt.info('High voltage is initialized')
-        initialization_error = False
+                cmd_list = [">S1 3.0e-4", ">S0B 0", ">S0 %s" % variables.vdc_min, "F0", ">S0?", ">DON?", ">S0A?"]
+                for cmd in range(len(cmd_list)):
+                    command_v_dc(com_port_v_dc, cmd_list[cmd])
+            else:
+                raise RuntimeError("High-voltage serial port is not open")
+            log_apt.info('High voltage is initialized')
+            initialization_error = False
     except Exception as e:
         log_apt.info('High voltage is  not initialized')
         print('Can not initialize the high voltage')
@@ -135,9 +138,10 @@ def initialization_v_p(com_port_v_p, log_apt, variables):
     """
 
     try:
-        command_v_p(com_port_v_p, '*RST')
-        log_apt.info('Pulser is initialized')
-        initialization_error = False
+        with commanded(variables, "pulse_supply", "exp", "initialized"):
+            command_v_p(com_port_v_p, '*RST')
+            log_apt.info('Pulser is initialized')
+            initialization_error = False
     except Exception as e:
         log_apt.info('Pulser is not initialized')
         print('Can not initialize the pulser')

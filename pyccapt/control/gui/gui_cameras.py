@@ -13,6 +13,7 @@ from PyQt6.QtGui import QPixmap
 from pyccapt.control.gui.responsive import make_window_responsive
 from pyccapt.control.core import runtime
 from pyccapt.control.devices import arduino_illumination, camera
+from pyccapt.control.core.control_state import Connection, commanded, publish
 from pyccapt.control.gui import tooltips
 from pyccapt.control.gui.camera_layout import CameraLayoutMixin
 
@@ -1027,6 +1028,7 @@ class Ui_Cameras_Alignment(CameraLayoutMixin):
         brightness, switch the light, or alter exposure modes.
         """
         if self.conf.get("camera_illumination", "off") != "on":
+            publish(self.variables, "illumination", "cam", "connection", connection=Connection.DISABLED)
             self.variables.light = False
             self.led_light.setPixmap(self.led_red)
             return
@@ -1035,7 +1037,9 @@ class Ui_Cameras_Alignment(CameraLayoutMixin):
             controller = arduino_illumination.ArduinoIllumination(
                 self.conf.get("COM_PORT_camera_illumination", "auto")
             )
+            publish(self.variables, "illumination", "cam", "connection", connection=Connection.CONNECTING)
             port = controller.connect()
+            publish(self.variables, "illumination", "cam", "connection", connection=Connection.CONNECTED)
             color_name, color = self._configured_illumination_color()
             try:
                 controller.set_color(*color)
@@ -1046,7 +1050,9 @@ class Ui_Cameras_Alignment(CameraLayoutMixin):
                     f"Camera illumination firmware does not accept colour "
                     f"control yet ({exc}); retaining its existing colour."
                 )
-            controller.set_on(self.illumination_percent.value())
+            with commanded(self.variables, "illumination", "cam", "on",
+                           details={"percent": self.illumination_percent.value(), "port": port}):
+                controller.set_on(self.illumination_percent.value())
             self.illumination_controller = controller
             self.variables.light = True
             self.variables.light_switch = True
@@ -1057,6 +1063,8 @@ class Ui_Cameras_Alignment(CameraLayoutMixin):
             )
         except Exception as exc:
             self.illumination_controller = None
+            publish(self.variables, "illumination", "cam", "connection", connection=Connection.DISCONNECTED)
+            publish(self.variables, "illumination", "cam", "fault", fault=str(exc))
             self.variables.light = False
             self.led_light.setPixmap(self.led_red)
             message = f"Camera illumination unavailable: {exc}"
@@ -1064,6 +1072,7 @@ class Ui_Cameras_Alignment(CameraLayoutMixin):
             self._show_camera_status(message)
 
     def _report_illumination_error(self, exc):
+        publish(self.variables, "illumination", "cam", "fault", fault=str(exc))
         message = f"Camera illumination command failed: {exc}"
         print(message)
         self._show_camera_status(message)
@@ -1100,7 +1109,9 @@ class Ui_Cameras_Alignment(CameraLayoutMixin):
         try:
             _, color = self._configured_illumination_color()
             self.illumination_controller.set_color(*color)
-            self.illumination_controller.set_brightness(percent)
+            with commanded(getattr(self, "variables", None), "illumination_settings", "cam", "brightness_set",
+                           details={"percent": percent}):
+                self.illumination_controller.set_brightness(percent)
         except Exception as exc:
             self._report_illumination_error(exc)
 
@@ -1110,11 +1121,13 @@ class Ui_Cameras_Alignment(CameraLayoutMixin):
             return
         try:
             if self.variables.light:
-                self.illumination_controller.set_off()
+                with commanded(self.variables, "illumination", "cam", "off"):
+                    self.illumination_controller.set_off()
                 self.variables.light = False
                 self.led_light.setPixmap(self.led_red)
             else:
-                self.illumination_controller.set_on(self.illumination_percent.value())
+                with commanded(self.variables, "illumination", "cam", "on"):
+                    self.illumination_controller.set_on(self.illumination_percent.value())
                 self.variables.light = True
                 self.led_light.setPixmap(self.led_green)
             # Keep the camera worker's exposure presets in sync with light.

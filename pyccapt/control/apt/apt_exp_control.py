@@ -11,6 +11,8 @@ import serial.tools.list_ports
 from simple_pid import PID
 
 from pyccapt.control.apt import apt_exp_control_func
+from pyccapt.control.core.control_state import Connection, Evidence, commanded, observe
+from pyccapt.control.core.state_diagnostics import save_control_states
 from pyccapt.control.apt.detector_runtime import (
     DetectorRuntime,
     join_detector_processes,
@@ -523,6 +525,7 @@ class APT_Exp_Control:
 
     def run_experiment(self):
         """Run one experiment with a safety envelope covering every phase."""
+        self._control_state_snapshot_directory = None
         set_experiment_state(self.variables, ExperimentState.INITIALIZING)
         self._publish_status(StatusKind.STATE, "Experiment initializing")
         self.variables.hardware_safe = True
@@ -565,6 +568,7 @@ class APT_Exp_Control:
                 set_experiment_state(self.variables, ExperimentState.FAILED, failure_error)
             elif current != ExperimentState.FAILED:
                 set_experiment_state(self.variables, ExperimentState.COMPLETE)
+            save_control_states(self.variables, getattr(self, "_control_state_snapshot_directory", None))
             # State/flags are authoritative and must be visible before wake-up.
             self.variables.flag_end_experiment = True
             self._completion_published = True
@@ -633,6 +637,7 @@ class APT_Exp_Control:
         # Create folder to save the data
         try:
             ensure_output_directories(data_path, path_meta)
+            self._control_state_snapshot_directory = path_meta
             from pyccapt.control.core.experiment_plan import write_plan_snapshot
             write_plan_snapshot(path_meta, getattr(self.variables, 'experiment_plan_snapshot', {}))
             from pyccapt.control.core.alignment_diagnostics import copy_transfer_journal
@@ -645,9 +650,11 @@ class APT_Exp_Control:
 
         from pyccapt.control.apt.laser_alignment_runtime import LaserAlignmentRuntime
         self.laser_alignment_runtime = LaserAlignmentRuntime(self)
-        self.safety_interlock = build_safety_interlock(self.conf)
+        with commanded(self.variables, "safety_interlock", "exp", "initialize"):
+            self.safety_interlock = build_safety_interlock(self.conf)
         physical_safe = bool(self.safety_interlock.is_safe())
         self.variables.physical_estop_ok = physical_safe
+        self._publish_interlock_state(physical_safe)
         if not physical_safe:
             raise RuntimeError("Physical E-stop/interlock is open; experiment start is blocked")
 
@@ -767,7 +774,8 @@ class APT_Exp_Control:
         if not self.initialization_error:
             if self.pulse_mode in ['Voltage', 'VoltageLaser']:
                 if self._vp_active():
-                    apt_exp_control_func.command_v_p(self.com_port_v_p, 'OUTPut ON')
+                    with commanded(self.variables, "pulse_supply", "exp", "output_on"):
+                        apt_exp_control_func.command_v_p(self.com_port_v_p, 'OUTPut ON')
                     self._outputs_safe = False
                     self.variables.hardware_safe = False
                     vol = self.variables.v_p_min / self.pulse_amp_per_supply_voltage
@@ -781,7 +789,8 @@ class APT_Exp_Control:
                         f"{initialize_devices.bcolors.ENDC}"
                     )
             if self._vdc_active():
-                apt_exp_control_func.command_v_dc(self.com_port_v_dc, "F1")
+                with commanded(self.variables, "dc_supply", "exp", "output_on"):
+                    apt_exp_control_func.command_v_dc(self.com_port_v_dc, "F1")
                 self._outputs_safe = False
                 self.variables.hardware_safe = False
                 time.sleep(0.1)
@@ -838,6 +847,7 @@ class APT_Exp_Control:
                 self._publish_health_if_due()
                 self.safety_interlock.kick_watchdog()
                 self.variables.physical_estop_ok = bool(self.safety_interlock.is_safe())
+                self._publish_interlock_state(self.variables.physical_estop_ok)
                 if not self.variables.physical_estop_ok:
                     self.variables.experiment_error = "Physical E-stop/interlock opened during acquisition"
                     self._run_failure = self.variables.experiment_error
@@ -916,7 +926,8 @@ class APT_Exp_Control:
                                     self.com_port_v_p, self.log_apt, self.variables
                                 )
                                 self.initialization_v_p = True
-                                apt_exp_control_func.command_v_p(self.com_port_v_p, 'OUTPut ON')
+                                with commanded(self.variables, "pulse_supply", "exp", "output_on"):
+                                    apt_exp_control_func.command_v_p(self.com_port_v_p, 'OUTPut ON')
                             except Exception as e:
                                 print('Can not open the COM port for V_p')
                                 print(e)
@@ -1204,6 +1215,14 @@ class APT_Exp_Control:
                 self.log_apt.exception(message)
             set_experiment_state(self.variables, ExperimentState.FAILED, message)
 
+    def _publish_interlock_state(self, permitted):
+        physical = str(self.conf.get("safety_interlock_backend", "none")).lower() == "nidaq"
+        observe(self.variables, "safety_interlock", "exp",
+                ("permitted" if permitted else "interlock_open") if physical else "no_hardware_backend",
+                evidence=Evidence.READBACK if physical else Evidence.SOFTWARE,
+                connection=Connection.CONNECTED if physical else Connection.DISABLED,
+                fault="" if permitted else "Physical interlock opened")
+
     def safe_outputs_off(self):
         """Best-effort, idempotent transition of every energized output to off."""
         if getattr(self, 'alignment', None) is not None:
@@ -1229,13 +1248,15 @@ class APT_Exp_Control:
         errors = []
         try:
             if self._vdc_active():
-                apt_exp_control_func.command_v_dc(self.com_port_v_dc, 'F0')
+                with commanded(self.variables, "dc_supply", "exp", "output_off"):
+                    apt_exp_control_func.command_v_dc(self.com_port_v_dc, 'F0')
         except Exception as exc:
             errors.append(f"Vdc: {exc}")
         try:
             if self._vp_active():
                 apt_exp_control_func.command_v_p(self.com_port_v_p, 'VOLT 0')
-                apt_exp_control_func.command_v_p(self.com_port_v_p, 'OUTPut OFF')
+                with commanded(self.variables, "pulse_supply", "exp", "output_off"):
+                    apt_exp_control_func.command_v_p(self.com_port_v_p, 'OUTPut OFF')
         except Exception as exc:
             errors.append(f"pulser: {exc}")
         try:

@@ -1,5 +1,6 @@
 import os
 import sys
+from pyccapt.control.core.control_state import Connection, Evidence, observe, observe_sensor, publish
 import threading
 import time
 from datetime import datetime
@@ -43,6 +44,8 @@ class Ui_Baking(object):
         self.parent = parent
         self.now = datetime.now()
         self.running = True
+        if self.conf.get("baking") == "on":
+            observe(self.variables, "baking", "main", "monitoring")
         self.vacuum_main = 0
         self.vacuum_buffer = 0
         self.vacuum_load_lock = 0
@@ -216,6 +219,7 @@ class Ui_Baking(object):
     def _read_temperatures(self):
         """Return DAQ temperatures or NaN placeholders when the DAQ is unavailable."""
         if ul is None or TempScale is None or TInOptions is None:
+            publish(self.variables, "baking_temperature_daq", "main", "fault", fault="DAQ backend unavailable")
             self._warn_once(
                 'daq_unavailable',
                 'DAQ temperature input is unavailable. Baking temperatures will remain empty until mcculw and cbw64.dll are installed.',
@@ -231,8 +235,13 @@ class Ui_Baking(object):
                 value_temperature.append(round(val, 3))
         except Exception as e:
             self._warn_once('daq_read_error', f'Error reading baking temperatures: {e}')
+            publish(self.variables, "baking_temperature_daq", "main", "fault", fault=str(e))
             return np.full(8, np.nan, dtype=float)
 
+        valid = bool(np.all(np.isfinite(value_temperature)))
+        observe(self.variables, "baking_temperature_daq", "main", "measuring", evidence=Evidence.READBACK,
+                valid=valid, fault="" if valid else "Invalid baking temperature readback",
+                connection=Connection.CONNECTED, details={"channels_celsius": value_temperature})
         return np.array(value_temperature, dtype=np.dtype(float))
 
     def read(self):
@@ -319,6 +328,9 @@ class Ui_Baking(object):
                             gauge_cll = -1
                     else:
                         gauge_cll = -1
+                    for name, value in (("buffer", gauge_bc), ("main", gauge_mc),
+                                        ("load_lock", gauge_ll), ("cryo_load_lock", gauge_cll)):
+                        observe_sensor(self.variables, f"gauge_{name}", "pump", value, "mbar")
                 else:
                     gauge_bc = self.vacuum_buffer
                     gauge_mc = self.vacuum_main
@@ -461,6 +473,7 @@ class Ui_Baking(object):
                 None
         """
         self.running = False
+        observe(self.variables, "baking", "main", "stopped")
         self.timer.stop()  # Stop the QTimer
 
 

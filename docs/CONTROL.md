@@ -107,6 +107,7 @@ Two log files are written for every experiment:
 | File | Location | Content |
 |------|-----------|---------|
 | GUI session log | `<project_root>/files/logs/gui/gui_<YYYY-MM-DD>.log` | All processes, all experiments for that day |
+| Final control-state snapshot | `<exp_folder>/meta_data/control_states.json` | Owner states, command outcomes, evidence, faults and freshness at completion |
 | Per-experiment log | `<exp_folder>/meta_data/apt.log` | Parameters, device state, stop reason |
 
 When an experiment ends abnormally, search both files for `ERROR`, `CRITICAL`, `Traceback`, or `hdf_creator`.
@@ -256,13 +257,20 @@ Optical power/energy dashes mean unavailable, rather than zero. Hover over
 either LCD for the diagnostic and raw monitor reply; changed failures are also
 recorded in the GUI log. Pulse energy cannot be calculated from frequency alone.
 
-The experiment has validated lifecycle transitions through initializing,
-running, stopping, safe-off and finalization. Alignment has bounded command and
-phase handling. Device state handling is not uniform: gates largely display
-commanded positions, while pumps combine flags and status polling. Safe-off
-records successful shutdown commands rather than independent physical output
-measurement. The NI-DAQ E-stop/watchdog implementation requires its configured
-hardware backend; the default `none` backend provides no physical interlock.
+All control owners publish a common state contract with separate connection,
+requested action, observed state, evidence, freshness and fault information.
+Correlated command results distinguish sent writes from confirmed readbacks;
+old command replies cannot complete a newer request. Existing device guards,
+button behavior and experiment/motion sequences remain unchanged. Live health
+messages include the records, and each dataset saves a final
+`meta_data/control_states.json` snapshot. Stage and laser alignment retain their
+full event journals. See the [state contract](state_mechanisms.rst)
+for owners, evidence limits, diagnostics and extension instructions.
+
+Safe-off records successful shutdown commands. Independent physical output
+confirmation depends on installed hardware feedback. The configured NI-DAQ
+E-stop/watchdog provides physical readings; the default `none` backend is
+explicitly represented with software evidence and `no_hardware_backend`.
 
 Visualization opens at 980 × 570. Hold DC, Set DC and the target voltage field
 share one row, and the LED with Running/Stopped text sits in the top-right

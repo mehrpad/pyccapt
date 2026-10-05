@@ -1,4 +1,5 @@
 import sys
+from pyccapt.control.core.control_state import observe
 import time
 
 import numpy as np
@@ -776,6 +777,7 @@ class Ui_Visualization(VisualizationLayoutMixin):
             return
 
         self._experiment_status_running = running
+        observe(self.variables, "visualization", "viz", "running" if running else "stopped")
         color = "#22a447" if running else "#d32f2f"
         state = "Running" if running else "Stopped"
         self.experiment_status_led.setStyleSheet(

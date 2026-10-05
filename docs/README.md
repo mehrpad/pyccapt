@@ -7,6 +7,10 @@ The user guide for TOML experiment queues is in
 `pyccapt/control/EXPERIMENT_PLANS.md`. Its downloadable example is
 [`experiment_plan.example.toml`](../pyccapt/files/experiment_plan.example.toml).
 
+The shared control-state contract, resource owners and diagnosis instructions
+are in [Control State Mechanisms](state_mechanisms.rst), sourced from
+`pyccapt/control/STATE_MECHANISMS.md`.
+
 ## Prerequisites
 
 From the repository root, install documentation dependencies:

@@ -1,5 +1,6 @@
 import threading
 import time
+from pyccapt.control.core.control_state import Connection, Evidence, observe, publish
 
 import cv2
 import numpy as np
@@ -279,6 +280,7 @@ class CameraWorker(QObject):
     def _close_slot(self, slot):
         cam = self._slots[slot]
         self._slots[slot] = None
+        publish(self.variables, f"camera_{slot}", "cam", "connection", connection=Connection.DISCONNECTED)
         self._applied_exposure[slot] = None
         self._applied_exposure_mode[slot] = None
         if cam is None:
@@ -382,6 +384,7 @@ class CameraWorker(QObject):
         return repr(device_info)
 
     def _attach_slot(self, slot, device_info):
+        publish(self.variables, f"camera_{slot}", "cam", "connection", connection=Connection.CONNECTING)
         device_key = self._device_key(device_info)
         cam = None
         try:
@@ -400,6 +403,8 @@ class CameraWorker(QObject):
             cam.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
         except Exception as e:
             # Never leave a device exclusively open after a failed optional
+            publish(self.variables, f"camera_{slot}", "cam", "connection", connection=Connection.DISCONNECTED)
+            publish(self.variables, f"camera_{slot}", "cam", "fault", fault=str(e))
             # feature/configuration step. Otherwise the retry loop (or the
             # Connect button) cannot open it again until garbage collection.
             if cam is not None:
@@ -426,6 +431,8 @@ class CameraWorker(QObject):
         # the next failure (if any) prints again.
         self._last_attach_error_by_device.pop(device_key, None)
         self._slots[slot] = cam
+        observe(self.variables, f"camera_{slot}", "cam", "attached", evidence=Evidence.READBACK,
+                connection=Connection.CONNECTED, details={"device": device_key})
         # If we're attaching in auto mode we didn't write ExposureTime, so
         # leave the cache empty — the manual-mode branch in
         # _apply_exposure_changes will push the configured value the
@@ -820,10 +827,15 @@ class CameraWorker(QObject):
                         if grab.GrabSucceeded():
                             image = self._converter.Convert(grab)
                             grabbed_images[slot] = image.GetArray()
+                            observe(self.variables, f"camera_{slot}", "cam", "capturing",
+                                    evidence=Evidence.READBACK, connection=Connection.CONNECTED)
+                        else:
+                            publish(self.variables, f"camera_{slot}", "cam", "fault", fault="Frame grab failed")
                     finally:
                         grab.Release()
                 except Exception as e:
                     msg = str(e)
+                    publish(self.variables, f"camera_{slot}", "cam", "fault", fault=msg)
                     if self._last_grab_error[slot] != msg:
                         self._last_grab_error[slot] = msg
                         print(f"Slot {slot} grab failed: {msg}; will try to reconnect.")

@@ -59,3 +59,17 @@ def test_legacy_atomic_manifest_remains_recoverable(tmp_path):
     assert not invalid
     assert valid[0]["manifest_version"] == 0
     assert chunk_store.validated_files_for_stem(tmp_path, "x") == [tmp_path / "x_chunk_7.npy"]
+
+
+def test_field_index_excludes_entire_corrupt_group_and_sorts_chunks(tmp_path):
+    for chunk_id in (3, 1, 2):
+        atomic_write_chunk_group(tmp_path, stream_name='dld', chunk_id=chunk_id,
+                                 arrays={'x': np.array([float(chunk_id)]),
+                                         'y': np.array([float(chunk_id)+1])})
+    # Well-formed NPY with unchanged shape/dtype, but an incorrect checksum.
+    np.save(tmp_path/'x_chunk_2.npy', np.array([99.]))
+    index = chunk_store.validated_files_by_stem(tmp_path)
+    assert index['x'] == [tmp_path/'x_chunk_1.npy', tmp_path/'x_chunk_3.npy']
+    assert index['y'] == [tmp_path/'y_chunk_1.npy', tmp_path/'y_chunk_3.npy']
+    assert (tmp_path/'quarantine'/'dld-2'/'y_chunk_2.npy').is_file()
+    assert 'checksum mismatch' in (tmp_path/'quarantine'/'dld-2'/'reason.json').read_text()

@@ -4,9 +4,11 @@ import json
 from types import SimpleNamespace
 
 import h5py
+import numpy as np
 
 from pyccapt.control.core.data_integrity import validate_hdf5
 from pyccapt.control.core.hdf5_creator import hdf_creator
+from pyccapt.control.core import chunk_store
 
 
 def test_hdf5_records_schema_units_hashes_and_model_provenance(tmp_path):
@@ -40,6 +42,35 @@ def test_hdf5_records_schema_units_hashes_and_model_provenance(tmp_path):
     result = validate_hdf5(output)
     assert result["valid"], result["issues"]
     assert result["schema_version"] == "2.0"
+
+
+def test_finalization_validates_chunks_once_for_metadata_and_detector(tmp_path, monkeypatch):
+    chunks = tmp_path/'temp_data'/'chunks'
+    for chunk_id in (1, 2):
+        chunk_store.atomic_write_chunk_group(chunks, stream_name='apt', chunk_id=chunk_id,
+            arrays={'apt_id': np.array([chunk_id], dtype=np.uint64),
+                    'apt_temperature': np.array([40.+chunk_id])})
+        chunk_store.atomic_write_chunk_group(chunks, stream_name='dld', chunk_id=chunk_id,
+            arrays={'x': np.array([float(chunk_id)]), 'y': np.array([-float(chunk_id)])})
+    original = chunk_store.validate_manifest_records
+    calls = []
+    def validate(*args, **kwargs):
+        calls.append(args[0])
+        return original(*args, **kwargs)
+    monkeypatch.setattr(chunk_store, 'validate_manifest_records', validate)
+    variables = SimpleNamespace(path=str(tmp_path), exp_name='indexed', counter_source='TDC',
+        main_counter=[1, 1], main_raw_counter=[1, 1], main_temperature=[0., 0.],
+        main_chamber_vacuum=[1e-8, 1e-8], t=[0., 0.], main_v_dc_dld=[1500., 1500.],
+        main_v_p_dld=[300., 300.], main_l_p_dld=[0., 0.], dld_start_counter=[1, 2],
+        channel=[0, 0], time_data=[0, 0], tdc_start_counter=[1, 2],
+        main_v_dc_tdc=[1500., 1500.], main_v_p_tdc=[300., 300.], main_l_p_tdc=[0., 0.])
+    hdf_creator(variables, {'tdc': 'on', 'tdc_model': 'Surface_Concept'}, [0, 0], [0., 1.])
+    assert len(calls) == 1
+    with h5py.File(tmp_path/'indexed.h5', 'r') as handle:
+        np.testing.assert_array_equal(handle['apt/id'][:], [1, 2])
+        np.testing.assert_array_equal(handle['apt/temperature'][:], [41., 42.])
+        np.testing.assert_array_equal(handle['dld/x'][:], [1., 2.])
+        np.testing.assert_array_equal(handle['dld/y'][:], [-1., -2.])
 
 
 def test_hdf5_keeps_alignment_settings_sample_and_outcome(tmp_path):

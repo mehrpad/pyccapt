@@ -8,6 +8,7 @@ import datetime as dt
 import json
 import hashlib
 import platform
+import time
 from pathlib import Path
 
 import h5py
@@ -58,8 +59,10 @@ def _sanitize_for_path(name: str) -> str:
     return cleaned or 'experiment'
 
 
-def _sorted_chunk_files(chunk_dir: Path, stem: str) -> list[Path]:
-    manifested = chunk_store.validated_files_for_stem(chunk_dir, stem)
+def _sorted_chunk_files(chunk_dir: Path, stem: str,
+                        manifest_files: dict[str, list[Path]] | None = None) -> list[Path]:
+    manifested = (manifest_files.get(stem, []) if manifest_files is not None
+                  else chunk_store.validated_files_for_stem(chunk_dir, stem))
     if manifested is not None:
         return manifested
     pattern = re.compile(rf"^{re.escape(stem)}_chunk_(\d+)\.npy$")
@@ -98,7 +101,8 @@ _APT_CHUNK_STEMS: list[tuple[str, str, str]] = [
 _APT_CHUNK_STEMS.extend(('apt_laser_'+key, 'apt/laser_'+key, 'float64') for key in TELEMETRY_UNITS)
 
 
-def _load_apt_from_chunks(chunk_dir: Path) -> dict[str, np.ndarray] | None:
+def _load_apt_from_chunks(chunk_dir: Path,
+                          manifest_files: dict[str, list[Path]] | None = None) -> dict[str, np.ndarray] | None:
     """Load apt/* metadata from chunk files.
 
     Returns a dict {hdf5_path: array} if at least one apt chunk stem is present,
@@ -107,7 +111,7 @@ def _load_apt_from_chunks(chunk_dir: Path) -> dict[str, np.ndarray] | None:
     result: dict[str, np.ndarray] = {}
     any_found = False
     for stem, ds_path, dtype in _APT_CHUNK_STEMS:
-        files = _sorted_chunk_files(chunk_dir, stem)
+        files = _sorted_chunk_files(chunk_dir, stem, manifest_files)
         if not files:
             continue
         any_found = True
@@ -245,7 +249,7 @@ def _create_dataset(hdf_file, dataset_name: str, data, dtype) -> None:
     _annotate_dataset(dataset, dataset_name)
 
 
-def _write_surface_concept_detector_data(hdf_file, variables) -> None:
+def _write_surface_concept_detector_data(hdf_file, variables, manifest_files=None) -> None:
 	chunk_dir = Path(variables.path) / "temp_data" / "chunks"
 	chunk_dir_exists = chunk_dir.is_dir()
 
@@ -275,7 +279,7 @@ def _write_surface_concept_detector_data(hdf_file, variables) -> None:
     )
 
 	for dataset_name, chunk_stem, var_attr, dtype in combined_mapping:
-		chunk_files = _sorted_chunk_files(chunk_dir, chunk_stem) if chunk_dir_exists else []
+		chunk_files = _sorted_chunk_files(chunk_dir, chunk_stem, manifest_files) if chunk_dir_exists else []
 		if chunk_files:
 			_write_chunked_dataset(hdf_file, dataset_name, chunk_files, dtype)
 		else:
@@ -308,7 +312,15 @@ def hdf_creator(variables, conf, time_counter, time_ex):
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     tdc_model = normalize_tdc_model(conf.get("tdc_model")) if conf.get("tdc") == "on" else ""
     chunk_dir = Path(variables.path) / "temp_data" / "chunks"
+    save_started = time.monotonic()
+    logger.info('Finalizing HDF5: validating acquisition chunks')
     try:
+        # Acquisition is stopped and joined before finalization. Keep this
+        # validated index local to this save: every checksum is checked once,
+        # rather than reopening all chunks for each metadata/detector field.
+        manifest_files = chunk_store.validated_files_by_stem(chunk_dir)
+        logger.info('Acquisition chunk validation completed in %.3f s; writing HDF5',
+                    time.monotonic()-save_started)
         with h5py.File(tmp_path, "w") as hdf_file:
             provenance = hdf_file.require_group("provenance")
             provenance.attrs["schema_version"] = "2.0"
@@ -361,7 +373,7 @@ def hdf_creator(variables, conf, time_counter, time_ex):
             # apt/* group: prefer chunk files written during the run (crash-safe),
             # fall back to the in-memory lists for backwards-compatibility with
             # experiments that ran before chunk flushing was introduced.
-            apt_from_chunks = _load_apt_from_chunks(chunk_dir)
+            apt_from_chunks = _load_apt_from_chunks(chunk_dir, manifest_files)
             if apt_from_chunks is not None:
                 for ds_path, arr in apt_from_chunks.items():
                     _create_dataset(hdf_file, ds_path, arr, arr.dtype)
@@ -390,7 +402,7 @@ def hdf_creator(variables, conf, time_counter, time_ex):
                 _create_dataset(hdf_file, "apt/timestamps", time_ex, np.float64)
 
             if conf["tdc"] == "on" and tdc_model == "Surface_Concept" and variables.counter_source == "TDC":
-                _write_surface_concept_detector_data(hdf_file, variables)
+                _write_surface_concept_detector_data(hdf_file, variables, manifest_files)
 
             elif conf["tdc"] == "on" and tdc_model == "RoentDek" and variables.counter_source == "TDC":
                 _create_dataset(hdf_file, "dld/x", variables.x, np.float64)
@@ -524,3 +536,4 @@ def hdf_creator(variables, conf, time_counter, time_ex):
             logger.info("Archived merged chunks at %s", archive_path)
     except Exception as exc:
         logger.warning("Could not archive chunk directory %s: %s", chunk_dir, exc)
+    logger.info('HDF5 finalization completed in %.3f s', time.monotonic()-save_started)

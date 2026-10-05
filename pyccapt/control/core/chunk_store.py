@@ -225,15 +225,24 @@ def validate_manifest_records(chunk_dir: str | Path, *, quarantine: bool = True)
     return valid, invalid
 
 
-def validated_files_for_stem(chunk_dir: str | Path, stem: str) -> list[Path] | None:
-    """Return manifest-validated files, or None for a legacy manifest-less run."""
+def validated_files_by_stem(chunk_dir: str | Path) -> dict[str, list[Path]] | None:
+    """Validate once and index every field of a stopped acquisition.
+
+    The caller owns this snapshot; it must not be reused after files change.
+    None identifies legacy runs without a manifest.
+    """
     directory = Path(chunk_dir).resolve()
     if not any(directory.glob("manifest*.jsonl")):
         return None
     valid, _ = validate_manifest_records(directory, quarantine=True)
-    files: list[tuple[int, Path]] = []
+    files: dict[str, list[tuple[int, Path]]] = {}
     for record in valid:
-        metadata = record.get("fields", {}).get(stem)
-        if metadata:
-            files.append((int(record["chunk_id"]), directory / metadata["file"]))
-    return [path for _, path in sorted(files)]
+        for stem, metadata in record.get("fields", {}).items():
+            files.setdefault(stem, []).append((int(record["chunk_id"]), directory / metadata["file"]))
+    return {stem: [path for _, path in sorted(parts)] for stem, parts in files.items()}
+
+
+def validated_files_for_stem(chunk_dir: str | Path, stem: str) -> list[Path] | None:
+    """Return manifest-validated files, or None for a legacy manifest-less run."""
+    files = validated_files_by_stem(chunk_dir)
+    return None if files is None else files.get(stem, [])

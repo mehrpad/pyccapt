@@ -41,6 +41,14 @@ documented in [LASER_ALIGNMENT.md](LASER_ALIGNMENT.md).
 
 ## Runtime Architecture
 
+Stop first cancels alignment, stops acquisition and commands the energized
+outputs off. The GUI enables a new run after detector shutdown, HDF5 saving and
+cleanup finish. Finalization validates the acquisition manifest once and reuses
+its field index across all datasets; checksums, shapes, dtypes and quarantine
+remain active. The index is local to one save and is not reused across runs.
+`meta_data/apt.log` records chunk-validation and total HDF5-finalization times
+to distinguish data-saving delays from acquisition shutdown delays.
+
 The automatic sample-alignment sequence, commissioning settings, detector
 analysis and metadata are documented in [AUTOMATIC_ALIGNMENT.md](AUTOMATIC_ALIGNMENT.md).
 The initial transfer/settling/error journal is copied into each dataset as

@@ -1,13 +1,16 @@
 import multiprocessing as mp
 import os
 import time
+from pathlib import Path
 from queue import Empty, Queue
 
 import numpy as np
 
 # local imports
 from pyccapt.control.core import runtime as _runtime
+from pyccapt.control.core.chunk_store import atomic_write_chunk_group
 from pyccapt.control.devices import initialize_devices
+from pyccapt.control.nkt_photonics.readback import pulse_energy_pj, experiment_frequency_hz
 from pyccapt.control.tdc_surface_concept import scTDC
 
 QUEUE_DATA = 0
@@ -65,7 +68,10 @@ class BufDataCB4(scTDC.buffered_data_callbacks_pipe):
         """
         super().__init__(lib, dev_desc, data_field_selection, max_buffered_data_len, dld_events)
 
-        self.queue = Queue()
+        # Bound callback backlog so a stalled consumer cannot exhaust RAM.
+        # put() intentionally applies backpressure; silently dropping detector
+        # records would be worse than slowing acquisition.
+        self.queue = Queue(maxsize=32)
         self.end_of_meas = False
 
     def on_data(self, d):
@@ -132,17 +138,20 @@ def save_chunk_worker(save_queue):
         if task is None:  # Stop signal
             break
 
-        chunk_id, path, chunk_data = task  # Extract data
-        try:
-            for key, data in chunk_data.items():
-                target_dtype = CHUNK_DTYPES.get(key)
-                if target_dtype is not None:
-                    arr = np.asarray(data, dtype=target_dtype)
-                else:
-                    arr = np.array(data)
-                np.save(os.path.join(path, f"chunks/{key}_chunk_{chunk_id}.npy"), arr)
-        except Exception as e:
-            print(f"Error saving chunk {chunk_id}: {e}")
+        chunk_id, path, chunk_data = task
+        normalized = {
+            key: np.asarray(data, dtype=CHUNK_DTYPES.get(key))
+            if CHUNK_DTYPES.get(key) is not None
+            else np.asarray(data)
+            for key, data in chunk_data.items()
+        }
+        stream_name = "tdc" if "channel" in normalized else "dld"
+        atomic_write_chunk_group(
+            Path(path) / "chunks",
+            stream_name=stream_name,
+            chunk_id=chunk_id,
+            arrays=normalized,
+        )
 
         # No artificial throttle: save_queue.get() already blocks when idle,
         # so the worker never busy-waits. A fixed per-chunk sleep would cap
@@ -284,12 +293,16 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
         variables.flag_tdc_failure = False
         return 0
 
+    from pyccapt.control.apt.laser_alignment_data import LaserAlignmentPublisher
+    laser_alignment_publisher = LaserAlignmentPublisher(variables)
+    from pyccapt.control.apt.alignment_vision import AlignmentEventPublisher
+    alignment_publisher = AlignmentEventPublisher(variables, _conf)
     loop_time = 1 / variables.ex_freq
     events_detected = 0
     events_detected_tmp = 0
     raw_signal_detected = 0
-    start_time = time.time()
-    pulse_frequency = variables.pulse_frequency * 1000
+    start_time = time.monotonic()
+    pulse_frequency = experiment_frequency_hz(variables)
     loop_counter = 0
     loop_delay_counter = 0
 
@@ -302,7 +315,7 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
     # channel_chunk_*), so reusing the same id counter values never collides.
     dld_chunk_id = 0
     tdc_chunk_id = 0
-    save_queue = mp.Queue()
+    save_queue = mp.Queue(maxsize=8)
     save_process = mp.Process(target=save_chunk_worker, args=(save_queue,))
     save_process.start()
     path = variables.path + "/temp_data/"
@@ -338,7 +351,7 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
         try:
             specimen_voltage = variables.specimen_voltage
             voltage_pulse = variables.pulse_voltage
-            laser_pulse = variables.laser_pulse_energy
+            laser_pulse = pulse_energy_pj(variables)
         except Exception as exc:
             # Manager IPC can transiently fail under heavy load; skip
             # this iteration but keep the loop alive.
@@ -369,6 +382,8 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
                 y_plot.write(yy_tmp)
                 t_plot.write(tt_tmp)
                 main_v_dc_plot.write(dc_voltage_tmp)
+                alignment_publisher.append(xx_tmp, yy_tmp)
+                laser_alignment_publisher.append(tt_tmp)
 
                 # change to list
                 xx_tmp = xx_tmp.tolist()
@@ -413,20 +428,21 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
                 break
 
         # Calculate the detection rate
-        current_time = time.time()
-        if current_time - start_time >= 0.5:
+        current_time = time.monotonic()
+        elapsed_s = current_time - start_time
+        if elapsed_s >= 0.5:
             # Re-read pulse_frequency every interval so the rate calc
             # stays correct if the user changes it mid-run.  Guard
             # against zero (would divide by zero on first chunk after a
             # bad value).
             try:
-                live_pulse_frequency = max(float(variables.pulse_frequency) * 1000.0, 1.0)
+                live_pulse_frequency = max(experiment_frequency_hz(variables), 1.0)
             except Exception:
                 live_pulse_frequency = pulse_frequency
             pulse_frequency = live_pulse_frequency
-            detection_rate = events_detected_tmp * 100 / pulse_frequency
-            variables.detection_rate_current = detection_rate * 2  # rate per second
-            variables.detection_rate_current_plot = detection_rate * 2
+            detection_rate = events_detected_tmp * 100 / (pulse_frequency * elapsed_s)
+            variables.detection_rate_current = detection_rate
+            variables.detection_rate_current_plot = detection_rate
             variables.total_ions = events_detected
             variables.total_raw_signals = raw_signal_detected
             events_detected_tmp = 0
@@ -538,6 +554,10 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
     save_queue.put(None)
     save_process.join()
     _tlog("save worker joined in %.1fs" % (time.time() - _save_join_t))
+    if save_process.exitcode != 0:
+        variables.flag_tdc_failure = True
+        variables.detector_error = f"Chunk save worker exited with code {save_process.exitcode}"
+        _tlog(variables.detector_error)
 
     # Per-stream fallback for a stream that NEVER reached a single full chunk
     # (its chunk-id is still 0): no chunk files exist for it, so hdf_creator

@@ -13,17 +13,6 @@ from pathlib import Path
 # way: it takes effect even for matplotlib imports that happen inside imported
 # project modules before the test body runs.
 os.environ.setdefault("MPLBACKEND", "Agg")
-try:
-    import matplotlib
-
-    matplotlib.use("Agg", force=True)
-    import matplotlib.pyplot as _plt  # noqa: F401  (force backend init)
-
-    _plt.ioff()
-except Exception:
-    # If matplotlib isn't available the project tests can't run anyway.
-    pass
-
 import pytest
 
 

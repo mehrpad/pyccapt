@@ -24,8 +24,14 @@ Process keys (single letters keep the table narrow):
 from __future__ import annotations
 
 import multiprocessing
+import logging
+from copy import deepcopy
+from contextlib import contextmanager
 from collections.abc import Iterable, Mapping
 from typing import Any
+
+from pyccapt.control.core.control_state import STATE_SPECS, evolve, initial_states
+from pyccapt.control.core.legacy_state import STATUS_FIELDS, adapt
 
 
 class Variables:
@@ -47,6 +53,11 @@ class Variables:
     # listed as readers; only data-flow consumers are.
     # ------------------------------------------------------------------
     _OWNERSHIP = {
+        # Shared state records contain owner observations and client requests;
+        # update_control_state validates authority under a dedicated shared lock.
+        **{f"control_state_{name}": (f"{spec.owner}; requests: {','.join(spec.requesters)}",
+                                    ("main", "exp", "cam", "pump", "viz", "tdc", "drs"))
+           for name, spec in STATE_SPECS.items()},
         # --- Setup parameters (GUI inputs the experiment loop reads) -----
         "ex_time": ("main", ("exp",)),
         "max_ions": ("main", ("exp",)),
@@ -70,6 +81,15 @@ class Variables:
         "criteria_ions": ("main", ("exp",)),
         "criteria_vdc": ("main", ("exp",)),
         "criteria_laser": ("main", ("exp",)),
+        # GUI checkbox: when True the experiment loop sends an interim
+        # notification e-mail every ``email_interval_events`` ions.
+        "criteria_email": ("main", ("exp",)),
+        # GUI field: how many ions between interim notification e-mails.
+        "email_interval_events": ("main", ("exp",)),
+        # Raised by the experiment loop to ask the visualization process
+        # to dump a fresh snapshot to meta_data for the interim e-mail;
+        # the viz process clears it once the PNGs are written.
+        "flag_save_email_screenshot": ("exp", ("viz",)),
         "detection_rate": ("main", ("exp",)),
         "hit_display": ("main", ("viz",)),
         "fixed_laser": ("main", ("exp",)),
@@ -101,11 +121,15 @@ class Variables:
         "stop_flag": ("main", ("exp", "tdc")),
         "end_experiment": ("exp", ("main",)),
         "flag_end_experiment": ("exp", ("main",)),
+        "experiment_state": ("exp", ("main", "tdc", "drs")),
+        "experiment_error": ("exp", ("main",)),
+        "hardware_safe": ("exp", ("main",)),
         "flag_visualization_start": ("exp", ("viz",)),
         "flag_pumps_vacuum_start": ("main", ("pump",)),
         "flag_finished_tdc": ("tdc", ("exp",)),
         "flag_stop_tdc": ("exp", ("tdc",)),
         "flag_tdc_failure": ("tdc", ("exp", "main")),
+        "detector_error": ("tdc", ("exp", "main")),
         # --- Visualization controls / clear handshakes -------------------
         "vdc_hold": ("viz", ("exp",)),
         "reset_heatmap": ("viz", ("viz",)),  # internal to viz
@@ -128,6 +152,22 @@ class Variables:
         "laser_freq": ("main", ("exp",)),
         "laser_division_factor": ("main", ("exp",)),
         "laser_average_power": ("main", ("exp",)),
+        "laser_telemetry": ("main", ("exp", "tdc")),
+        "laser_alignment_enabled": ("main", ("exp",)),
+        "laser_alignment_tracking": ("main", ("exp",)),
+        "laser_alignment_settings": ("main", ("exp",)),
+        "laser_alignment_command": ("main", ("exp",)),
+        "laser_alignment_cancel": ("main/exp", ("main/exp",)),
+        "laser_alignment_run": ("exp", ("main",)),
+        "laser_alignment_status": ("exp", ("main",)),
+        "laser_alignment_plot": ("exp", ("main",)),
+        "laser_alignment_move_request": ("exp", ("main",)),
+        "laser_alignment_move_status": ("main", ("exp",)),
+        "laser_alignment_heartbeat": ("main", ("exp",)),
+        "laser_stage_snapshot": ("main", ("exp",)),
+        "laser_alignment_epoch": ("exp", ("tdc",)),
+        "laser_alignment_observation": ("tdc", ("exp",)),
+
         # Set by the laser GUI on every CLI session open/close so the main
         # GUI status bar can show a "laser disconnected" warning, and so
         # the experiment subprocess can refuse to start in laser pulse
@@ -142,7 +182,32 @@ class Variables:
 	    "laser_pos_z": ("main", ("exp",)),
 	    "stage_pos_x": ("main", ("exp",)),
 	    "stage_pos_y": ("main", ("exp",)),
-	    "stage_pos_z": ("main", ("exp",)),
+        "stage_pos_z": ("main", ("exp",)),
+        "stage_pos_updated_at": ("main", ("exp",)),
+        "stage_position_snapshot": ("main", ("cam", "exp")),
+        "sample_rough_positions": ("cam", ("main", "exp")),
+        "sample_selection_locked": ("main", ("cam",)),
+        "automatic_alignment_enabled": ("main", ("exp",)),
+        "automatic_alignment_samples": ("main", ("exp",)),
+        "alignment_settings": ("main", ("exp", "tdc")),
+        "alignment_sequence_id": ("main", ("exp",)),
+        "alignment_sample": ("main", ("exp",)),
+        "alignment_sample_position": ("main", ("exp",)),
+        "alignment_status": ("exp", ("main", "viz")),
+        "alignment_plot_snapshot": ("exp", ("main",)),
+        "alignment_outcome": ("exp", ("main",)),
+        "alignment_window_epoch": ("exp", ("tdc", "main")),
+        "alignment_events": ("tdc", ("exp", "main")),
+        "alignment_move_request": ("exp/main", ("main",)),
+        "alignment_move_status": ("main", ("exp",)),
+        "alignment_cancel_motion": ("main/exp", ("main", "exp")),
+        "alignment_stage_heartbeat": ("main", ("exp",)),
+        "alignment_transfer_log": ("main", ("exp",)),
+        "alignment_transfer_path": ("main", ("exp",)),
+        "electrode_out": ("main", ("exp",)),
+        "flat_test_active": ("main", ("exp",)),
+        "flat_test_peak_rate": ("exp", ("main",)),
+        "flat_test_reached_max": ("exp", ("main",)),
         # --- Gates ---------------------------------------------------------
         "flag_main_gate": ("main", ("exp",)),
         "flag_load_gate": ("main", ("exp",)),
@@ -166,7 +231,9 @@ class Variables:
         "flag_pump_cryo_load_lock": ("main", ("pump",)),
         "flag_pump_cryo_load_lock_click": ("main", ("pump",)),
         "flag_pump_cryo_load_lock_led": ("pump", ("main",)),
+        "flag_vent_cryo_load_lock_partial": ("main", ("main",)),
         # --- Path / metadata fields --------------------------------------
+        "experiment_plan_snapshot": ("main", ("main", "exp")),
         "path": ("exp", ("exp", "viz", "main")),
         "path_meta": ("exp", ("exp", "viz", "main")),
         "log_path": ("main", ("exp",)),
@@ -180,9 +247,8 @@ class Variables:
         "index_wait_on_plot_start": ("viz", ("viz",)),
         "clear_index_save_image": ("main", ("viz",)),
         "index_warning_message": ("main", ("main",)),
-        "index_line": ("main", ("main",)),
-        "number_of_experiment_in_text_line": ("main", ("main",)),
-        "index_experiment_in_text_line": ("main", ("main",)),
+        "experiment_plan_count": ("main", ("main",)),
+        "experiment_plan_index": ("main", ("main",)),
         # --- TDC list-typed fields (TDC writes per-event, exp/viz drain) -
         # Where readership is unclear the entry is "?" - please audit
         # before adding new dependencies.
@@ -381,6 +447,7 @@ class Variables:
         "camera_1_ExposureTime": 2000,
         "path": "",
         "path_meta": "",
+        "experiment_plan_snapshot": {},
         "index_save_image": 0,
         "index_plot": 0,
         "index_wait_on_plot_start": 0,
@@ -391,17 +458,27 @@ class Variables:
         "flag_pump_cryo_load_lock": True,
         "flag_pump_cryo_load_lock_click": False,
         "flag_pump_cryo_load_lock_led": None,
+        "flag_vent_cryo_load_lock_partial": False,
         "flag_camera_grab": False,
         "flag_camera_win_show": False,
         "flag_visualization_win_show": False,
         "flag_end_experiment": False,
+        "experiment_state": "idle",
+        "experiment_error": "",
+        "hardware_safe": True,
+        "physical_estop_ok": True,
+        "last_chunk_write_latency_ms": 0.0,
+        "experiment_heartbeat_monotonic": 0.0,
         "flag_new_min_voltage": False,
         "flag_visualization_start": False,
         "flag_pumps_vacuum_start": False,
-        "criteria_time": True,
-        "criteria_ions": True,
+        "criteria_time": False,
+        "criteria_ions": False,
         "criteria_vdc": True,
         "criteria_laser": True,
+        "criteria_email": False,
+        "email_interval_events": 1000000,
+        "flag_save_email_screenshot": False,
         "exp_name": "",
         "log_path": "",
         "fixed_laser": 0,
@@ -426,17 +503,17 @@ class Variables:
         "count_temp": 0,
         "avg_n_count": 0,
         "index_warning_message": 0,
-        "index_line": 0,
         "stop_flag": False,
         "end_experiment": False,
         "start_flag": False,
         "flag_stop_tdc": False,
         "flag_finished_tdc": False,
         "flag_tdc_failure": False,
+        "detector_error": "",
         "plot_clear_flag": False,
         "clear_index_save_image": False,
-        "number_of_experiment_in_text_line": 0,
-        "index_experiment_in_text_line": 0,
+        "experiment_plan_count": 0,
+        "experiment_plan_index": 0,
         "flag_cameras_take_screenshot": False,
         "access_override_enabled": False,
         "temperature": 0,
@@ -456,6 +533,22 @@ class Variables:
         "laser_freq": 0,
         "laser_division_factor": 0,
         "laser_average_power": 0,
+        "laser_telemetry": {},
+        "laser_alignment_enabled": False,
+        "laser_alignment_tracking": False,
+        "laser_alignment_settings": {},
+        "laser_alignment_command": {},
+        "laser_alignment_cancel": True,
+        "laser_alignment_run": {},
+        "laser_alignment_status": {},
+        "laser_alignment_plot": {},
+        "laser_alignment_move_request": {},
+        "laser_alignment_move_status": {},
+        "laser_alignment_heartbeat": 0.0,
+        "laser_stage_snapshot": (),
+        "laser_alignment_epoch": '',
+        "laser_alignment_observation": {},
+
 	    # Stage positions in meters (published by the laser/stage GUIs).
 	    "laser_pos_x": 0.0,
 	    "laser_pos_y": 0.0,
@@ -463,6 +556,31 @@ class Variables:
 	    "stage_pos_x": 0.0,
 	    "stage_pos_y": 0.0,
 	    "stage_pos_z": 0.0,
+	    "stage_pos_updated_at": 0.0,
+        "stage_position_snapshot": (0.0, 0.0, 0.0, 0.0),
+        "sample_rough_positions": {},
+        "sample_selection_locked": False,
+        "automatic_alignment_enabled": False,
+        "automatic_alignment_samples": (),
+        "alignment_settings": {},
+        "alignment_sequence_id": "",
+        "alignment_sample": 0,
+        "alignment_sample_position": (),
+        "alignment_status": {},
+        "alignment_plot_snapshot": {},
+        "alignment_outcome": "",
+        "alignment_window_epoch": "",
+        "alignment_events": {},
+        "alignment_move_request": {},
+        "alignment_move_status": {},
+        "alignment_cancel_motion": False,
+        "alignment_stage_heartbeat": 0.0,
+        "alignment_transfer_log": [],
+        "alignment_transfer_path": "",
+        "electrode_out": True,
+        "flat_test_active": False,
+        "flat_test_peak_rate": 0.0,
+        "flat_test_reached_max": False,
         # Set True by the laser GUI when a CLI session is open and
         # responsive; False (the default) means the laser is either not
         # configured, the COM port is unavailable, or the laser is
@@ -474,6 +592,7 @@ class Variables:
     }
 
     _INTERNAL_ATTRS = {
+        "lock_state",
         "ns",
         "lock",
         "lock_lists",
@@ -498,6 +617,7 @@ class Variables:
 
         object.__setattr__(self, "ns", namespace)
         object.__setattr__(self, "lock", multiprocessing.Lock())
+        object.__setattr__(self, "lock_state", multiprocessing.Lock())
         object.__setattr__(self, "lock_lists", multiprocessing.Lock())
         object.__setattr__(self, "lock_data_plot", multiprocessing.Lock())
         object.__setattr__(self, "lock_exp", multiprocessing.Lock())
@@ -510,6 +630,7 @@ class Variables:
         object.__setattr__(self, "lock_experiment_variables", self.lock_lists)
 
         defaults = dict(self._DEFAULTS)
+        defaults.update({f"control_state_{name}": state for name, state in initial_states(dict(conf)).items()})
         defaults.update(
             {
                 "COM_PORT_cryo": conf["COM_PORT_cryo"],
@@ -540,6 +661,8 @@ class Variables:
         return self._ALIASES.get(name, name)
 
     def _lock_for_field(self, field: str):
+        if field.startswith("control_state_"):
+            return self.lock_state
         if field in self._LIST_FIELDS:
             return self.lock_lists
         if field in self._DATA_PLOT_FIELDS:
@@ -564,6 +687,9 @@ class Variables:
         # (the TDC drain loop reads many flags per tick). Do a single
         # ``getattr`` under the lock and translate a missing field into the
         # same AttributeError -- one IPC instead of two, identical semantics.
+        if field.startswith("control_state_"):
+            with self._state_transaction(0.05):
+                return deepcopy(getattr(namespace, field))
         lock = self._lock_for_field(field)
         with lock:
             try:
@@ -579,10 +705,65 @@ class Variables:
             return
 
         field = self._resolve_field_name(name)
+        if field.startswith("control_state_"):
+            raise AttributeError("Use update_control_state() to publish an owned state event")
         lock = self._lock_for_field(field)
         with lock:
             setattr(self.ns, field, value)
             self._known_fields.add(field)
+
+        if field in STATUS_FIELDS:
+            try:
+                adapt(self, field, value)
+            except Exception:
+                # State telemetry must never turn a successful legacy write
+                # into a failed hardware action or interrupt acquisition.
+                logging.getLogger("pyccapt.state").exception("Could not adapt shared field %s", field)
+
+    @contextmanager
+    def _state_transaction(self, timeout_s):
+        # A terminated publisher can leave a multiprocessing semaphore locked.
+        # Additional diagnostic state must never trap the physical stop path.
+        if not self.lock_state.acquire(timeout=timeout_s):
+            raise TimeoutError("Control state registry is busy or its publisher exited while holding the lock")
+        try:
+            yield
+        finally:
+            self.lock_state.release()
+
+    def control_state(self, device: str):
+        """Return an immutable owner/request snapshot (freshness is computed on read)."""
+        if device not in STATE_SPECS:
+            raise KeyError(f"Unknown control resource {device!r}")
+        with self._state_transaction(0.05):
+            return deepcopy(getattr(self.ns, f"control_state_{device}"))
+
+    def control_states(self) -> dict:
+        """Consistent snapshot of all resources, without reading acquisition lists."""
+        with self._state_transaction(0.05):
+            return {name: deepcopy(getattr(self.ns, f"control_state_{name}")) for name in STATE_SPECS}
+
+    def update_control_state(self, device: str, source: str, event: str, *, lock_timeout_s=0.5, **changes):
+        """Atomic read/reduce/write across GUI threads and spawned processes."""
+        if device not in STATE_SPECS:
+            raise KeyError(f"Unknown control resource {device!r}")
+        field = f"control_state_{device}"
+        with self._state_transaction(lock_timeout_s):
+            previous = getattr(self.ns, field)
+            state = evolve(previous, source, event, **changes)
+            if state is not previous:
+                setattr(self.ns, field, state)
+        # No file I/O under the shared lock. Ordinary numeric polling does not
+        # spam the transition log; faults, recovery and commands do.
+        keys = ("connection", "requested", "observed", "valid", "fault", "command_id", "command_status")
+        if any(getattr(previous, key) != getattr(state, key) for key in keys):
+            logging.getLogger("pyccapt.state").info(
+                "%s owner=%s event=%s connection=%s requested=%s observed=%s evidence=%s "
+                "valid=%s command=%s/%s fault=%s", device, source, event,
+                state.connection.value, state.requested, state.observed, state.evidence.value,
+                state.valid, state.command_id, state.command_status.value, state.fault,
+            )
+        return deepcopy(state)
 
     def extend_to(self, variable_name: str, value: Iterable[Any]) -> None:
         """Extend a shared list attribute with iterable values.

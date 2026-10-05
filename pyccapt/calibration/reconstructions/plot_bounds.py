@@ -5,6 +5,18 @@ from __future__ import annotations
 import numpy as np
 
 
+def evaporation_frame_boundaries(num_events, frame_count):
+    """Return evenly spaced cumulative event endpoints for an evaporation GIF."""
+    num_events = int(num_events)
+    frame_count = int(frame_count)
+    if frame_count < 1:
+        raise ValueError("Evaporation GIF frame count must be at least 1")
+    if num_events < 1:
+        return np.array([], dtype=int)
+    count = min(num_events, frame_count)
+    return np.unique(np.ceil(np.linspace(0, num_events, count + 1)[1:]).astype(int))
+
+
 def sample_mask(mask, fraction, n_points):
     """Return a deterministic random subset mask for a display fraction."""
     mask = np.asarray(mask, dtype=bool)

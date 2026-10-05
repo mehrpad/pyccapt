@@ -26,3 +26,11 @@ def test_sample_mask_treats_fraction_as_display_fraction():
     sampled = plot_bounds.sample_mask(mask, 0.9, len(mask))
 
     assert np.count_nonzero(sampled) == 90
+
+
+def test_evaporation_boundaries_use_requested_evenly_spaced_frame_count():
+    boundaries = plot_bounds.evaporation_frame_boundaries(1_000_000, 120)
+
+    assert len(boundaries) == 120
+    assert boundaries[-1] == 1_000_000
+    assert np.max(np.diff(boundaries)) - np.min(np.diff(boundaries)) <= 1

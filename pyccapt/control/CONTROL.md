@@ -16,7 +16,57 @@ This module is responsible for:
 
 Calibration and reconstruction are implemented in `pyccapt.calibration`.
 
+Reusable TOML experiment queues, compact queue editing, explicit sample mapping
+and recorded starting settings are described in
+[EXPERIMENT_PLANS.md](EXPERIMENT_PLANS.md). Copy
+[experiment_plan.example.toml](../files/experiment_plan.example.toml), select
+**Setup Parameters → TOML Plan → Load TOML**, and review all rows before Start.
+The main GUI opens at 760 × 670 and shows the queue when TOML Plan is selected.
+TextBox provides the single-run form. In TextBox mode, **Advanced settings…**
+opens detection mode, control algorithm, refresh frequency, pulse-voltage limits
+and K_p controls together. These are the same controls used by the main form:
+edits apply immediately and existing run locks remain in effect. The Advanced
+settings label and button sit below the target Detection Rate input on the left.
+A separator below the Run Statistics detection rate precedes Electrode and
+Flat Test. A second line separates these buttons from the bordered Auto Alignment box
+containing alignment start voltage, voltage increment and Automatic Alignment.
+Start sits above Stop in a separate group just above the bottom full-width
+separator.
+
+Laser command units, readback semantics and recording corrections are documented
+in [LASER_MANUAL_AUDIT.md](LASER_MANUAL_AUDIT.md).
+CLI replies may end with a newline without a `>` prompt. The driver accepts
+these after a short quiet interval, retaining multiline replies. Connection
+failures report the status-query error and received bytes; a timeout alone
+does not establish NKTPBus mode. See the audit's connection diagnosis for the
+real instrument replies and verification.
+Laser status, warmup recovery and the current scope of experiment/device state
+handling are described in [STATE_MECHANISMS.md](STATE_MECHANISMS.md).
+
+Laser-stage scanning, focus, tracking, GUI controls and required calibration are
+documented in [LASER_ALIGNMENT.md](LASER_ALIGNMENT.md).
+
 ## Runtime Architecture
+
+Stop first cancels alignment, stops acquisition and commands the energized
+outputs off. The GUI enables a new run after detector shutdown, HDF5 saving and
+cleanup finish. Finalization validates the acquisition manifest once and reuses
+its field index across all datasets; checksums, shapes, dtypes and quarantine
+remain active. The index is local to one save and is not reused across runs.
+`meta_data/apt.log` records chunk-validation and total HDF5-finalization times
+to distinguish data-saving delays from acquisition shutdown delays.
+
+The automatic sample-alignment sequence, commissioning settings, detector
+analysis and metadata are documented in [AUTOMATIC_ALIGNMENT.md](AUTOMATIC_ALIGNMENT.md).
+The initial transfer/settling/error journal is copied into each dataset as
+`meta_data/alignment_transfer.jsonl`; failed pre-start transfers retain their file
+under `data/alignment_sequences/`. The sample search checks the saved position
+and 16 broad probes derived from the ±50 µm envelope. Repeatable rate jumps and
+dense hitmap regions trigger a second pass within ±15 µm, then fine XY within
+±5 µm. Targets are inset by 0.2 µm; failed searches return to saved Z/XY and retry
+at +100 V within the configured voltage/time limits. Fine Z approach
+requires stable XY centring and a circular fit and is capped at 20 µm total from
+the saved position.
 
 The control application uses multiple processes:
 
@@ -26,6 +76,12 @@ The control application uses multiple processes:
 - optional sub-GUI processes (cameras, visualization)
 
 Shared state is managed through `core/share_variables.py` using a `multiprocessing.Manager().Namespace()` wrapper.
+
+Experiment lifecycle is explicit and observable through `variables.experiment_state`:
+`idle -> initializing -> running -> stopping -> safe_off -> finalizing -> complete`.
+Any unhandled failure transitions to `failed`, records `experiment_error`, requests detector shutdown, and attempts the
+idempotent hardware safe-off path before publishing the completion event. New code should use
+`apt/experiment_state.py` rather than inventing additional lifecycle flags.
 
 Configuration is loaded from `config.toml` (supports comments).
 `config.json` is no longer accepted by the control runtime.
@@ -95,6 +151,33 @@ uncaught exceptions with full stack traces.
 
 HDF5 groups and dataset semantics are documented in [DATA_STRUCTURE.md](DATA_STRUCTURE.md).
 
+For hardware-free development set `tdc_model = "Simulator"`. The simulator follows the same stop-event and ring-buffer
+contract as the real detector backends, so startup, acquisition, finalization, and GUI behavior can be exercised without
+vendor SDKs. Its deterministic controls are `simulator_seed`, `simulator_batch_size`, and `simulator_interval_s`;
+`simulator_fail_after_batches` injects a worker crash for tests and must remain `0` in normal dry runs.
+
+Every detector now implements the same lifecycle contract (`start`, `stop`, `join`, `health`, and completed chunk
+streaming). The experiment worker consumes an immutable `RunConfig`, accepts typed stop commands, and emits typed status
+plus exactly one completion acknowledgement. The state sequence is guarded as `IDLE -> INITIALIZING -> RUNNING ->
+SAFE_OFF -> FINALIZING -> COMPLETE`, with failures transitioning to `FAILED` only after safe-off is attempted.
+
+For a physical interlock, configure `safety_interlock_backend = "nidaq"`, `safety_estop_input_channel`, and optionally
+`safety_watchdog_output_channel`. Software access overrides are appended and fsynced to
+`meta_data/safety_overrides.jsonl`; an override never bypasses a physical E-stop. The status bar reports worker health,
+queue depth, dropped plot records, chunk-write latency, heartbeat age, and the safe-state acknowledgement.
+
+The main command (and the backwards-compatible `pyccapt-data` alias) provides operational checks and recovery:
+
+```text
+pyccapt validate-config pyccapt/config.toml
+pyccapt validate-hdf5 path/to/experiment.h5
+pyccapt recover-run path/to/chunks path/to/recovered.h5
+```
+
+Chunks are published by temp-write/fsync/atomic-rename and recorded in per-stream JSONL manifests with row counts,
+shapes, dtypes, IDs, checksums, write latency, and completion state. Recovery never overwrites the source chunks,
+quarantines inconsistent evidence instead of deleting it, and writes the destination transactionally.
+
 ## Folder Responsibilities
 
 - `apt/`: experiment orchestration and control loop
@@ -118,17 +201,67 @@ HDF5 groups and dataset semantics are documented in [DATA_STRUCTURE.md](DATA_STR
 
 ## GUI Overview
 
-![Main GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/main_gui.png?raw=True)
+All control windows use `gui/responsive.py` to fit their frame inside the current
+monitor's available desktop area, including taskbar space. Existing opening sizes,
+layout order, fonts, button sizes and colours are retained when they fit. Plot and
+camera panels can contract to readable minimum sizes or expand with the window.
+Below the layout's minimum size, scrollbars provide access to the complete layout
+rather than scaling down controls. Monitor changes and work-area changes trigger
+another fit; ordinary resizing retains the operator's chosen window size.
+The automatic stage alignment monitor still opens at 660 × 350 logical pixels.
+
+![Main GUI](../files/readme_images/main_gui.jpg)
 
 Detailed sub-GUI snapshots:
 
-- Gates: ![Gates GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/gates_gui.png?raw=True)
-- Pumps/Vacuum: ![Pumps GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/pumps_gui.png?raw=True)
-- Cameras: ![Cameras GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/cameras_gui.png?raw=True)
-- Laser: ![Laser GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/laser_gui.png?raw=True)
-- Stage: ![Stage GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/stage_gui.png?raw=True)
-- Visualization: ![Visualization GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/visualization_gui.png?raw=True)
-- Baking: ![Baking GUI](https://github.com/mmonajem/pyccapt/blob/main/pyccapt/files/readme_images/baking_gui.png?raw=True)
+Pumps/Vacuum groups cryo temperatures and their target control, the three venting
+buttons, and the six Buffer/LL/CLL chamber/pre-vacuum LCDs in bordered boxes.
+The six LCDs occupy two rows of three, retaining their 150 × 50 sizes and warning
+colours. The combined Pumps/Vacuum and Gates window opens at 1280 × 640, and the
+standalone Pumps/Vacuum window opens at 840 × 720. Vacuum history, Gates controls,
+load-lock temperature/baking controls and error messages remain available;
+smaller monitors scroll without hiding controls.
+Venting is aligned beside the Gates diagram with a gap from the vacuum displays.
+The Buffer Chamber Pre label sizes to its full text and stays on one line.
+
+Stage Control opens at 880 × 220 with compact 64 × 28 position readouts and
+speed-selector widths sized for the configured table. The nine mm/µm/nm readouts,
+three speed presets and jog-distance labels remain visible alongside all jog
+buttons, Home, Reference, STOP and Override Access. Header spacing, Z jog spacing
+and layout margins are tighter; long error messages still wrap.
+
+Cameras defaults to 900 × 700 with smaller margins and one row per exposure
+slider and value. All six overview/detail views, three camera connections,
+sample-position controls and five instrument monitors remain visible. The
+connection rows show the serial and slot on one line, with the full model and
+state in a tooltip. Bottom notifications disappear after five seconds; routine
+refreshes do not restore an expired message.
+
+Laser Control defaults to 980 × 650. Settings and three optical readouts sit above
+the alignment controls beside the response plot; stage position readouts, speed
+presets, jog buttons, Home, Reference, STOP and Override Access occupy the row
+below. Both plot tabs, alignment settings and CLI/NKTPBus controls remain
+available. Fields accommodate their maximum values and speed presets, and
+connection and alignment messages still wrap. Alignment fields have six pixels
+between rows and wider column gaps so they cannot overlap. Connection warnings
+and temporary errors share a two-line message area; scroll or hover to read
+longer messages. The window grows to fit the controls when fonts require it.
+
+Visualization opens at 980 × 570. Hold DC, Set DC and the target voltage field
+share one row, and the LED with Running/Stopped text sits in the top-right
+corner alongside the FDM count. The four upper rectangular panels have
+identical pixel dimensions at every window size. Compact voltage controls and
+two rows of spectrum controls reduce the width needed without removing any
+plot, calibration view, status indicator or input. Smaller screens use scrolling.
+The screenshots below show captured instrument states and example data. Displayed
+values and available controls depend on connected hardware and experiment status.
+
+- Gates and Pumps/Vacuum: ![Gates and Pumps/Vacuum GUI](../files/readme_images/gate_pumps_gui.jpg)
+- Cameras: ![Cameras GUI](../files/readme_images/cameras_gui.jpg)
+- Laser: ![Laser GUI](../files/readme_images/laser_gui.jpg)
+- Stage: ![Stage GUI](../files/readme_images/stage_gui.jpg)
+- Visualization: ![Visualization GUI](../files/readme_images/visualization_gui.jpg)
+- Baking: ![Baking GUI](../files/readme_images/baking_gui.png)
 
 ## Electrode List
 
@@ -143,3 +276,18 @@ names = [
     "NC",    # Not categorized
 ]
 ```
+
+## Common owner state contract
+
+`core/control_state.py` defines the shared connection, request, observation,
+evidence, freshness, fault and command lifecycle contract. Every active control
+owner publishes through `Variables.update_control_state()`; the dedicated shared
+lock protects transactions across threads and spawned processes. Low-rate legacy
+adapters retain compatibility, and existing guards/actuation sequences remain
+authoritative. Live health includes the registry. Completed/failed datasets save
+`meta_data/control_states.json` after cleanup. Write-only devices expose commanded
+state; confirmation requires matching fresh evidence after a request.
+
+See [STATE_MECHANISMS.md](STATE_MECHANISMS.md) for the resource/owner inventory,
+physical feedback boundaries and extension instructions. Regression coverage is
+in `tests/control/test_control_states.py` alongside the existing device suites.

@@ -27,7 +27,7 @@ PyCCAPT was developed and validated on the OXCART atom probe platform and is des
 
 ## Installation
 
-PyCCAPT requires Python `>=3.9`.
+PyCCAPT requires Python `>=3.10`.
 
 ### Recommended Quick Start (Conda)
 
@@ -39,6 +39,9 @@ conda activate pyccapt
 python -m pip install --upgrade pip
 pip install "pyccapt[full]"
 ```
+
+Narrower PEP 621 extras are available for lean deployments: `control-core`, `control-gui`, `control-hardware`,
+`calibration-core`, `calibration-viz`, `calibration-notebooks`, `calibration-materials`, and `calibration-cameca`.
 
 If you want to work from this repository instead of PyPI:
 
@@ -127,6 +130,19 @@ pytest -q --run-control
 pytest -q
 ```
 
+Validate or recover an acquisition without starting the GUI:
+
+```bash
+pyccapt validate-config pyccapt/config.toml
+pyccapt validate-hdf5 path/to/experiment.h5
+pyccapt recover-run path/to/chunks path/to/recovered.h5
+```
+
+The repository also provides deterministic detector/property tests, golden scientific fixtures, injected failure tests,
+and an opt-in two-million-ion regression benchmark (`PYCCAPT_RUN_BENCHMARKS=1 pytest tests/performance`). CI enforces
+critical-contract coverage and typing, clean wheel/sdist installation, dependency and secret scanning, CodeQL, and SBOM
+generation.
+
 Run calibration tutorials:
 
 ```bash
@@ -138,6 +154,34 @@ Then open notebooks under `pyccapt/calibration/tutorials`.
 ## Configuration
 
 Control runtime configuration is stored in `pyccapt/config.toml`.
+
+Reusable experiment queues are separate TOML files. Select **Setup Parameters →
+TOML Plan → Load TOML** in the main GUI, review the compact queue, then start it.
+Use **Add / Edit / Duplicate / Save As** to prepare plans without typing parameter
+blocks. Automatic Alignment maps each experiment's explicit `sample_id` to its
+saved Cameras position; without alignment the queue uses the current stage position.
+Automatic stage alignment checks the saved position and up to 16 broad probes
+scaled from the configured ±50 µm range. Repeatable rate jumps and coherent
+dense hitmap regions trigger a second pass within ±15 µm, then fine XY within
+±5 µm. Probe targets stay 0.2 µm inside the original boundary. Failed searches
+return to saved Z/XY and retry at +100 V within the configured voltage/time limits.
+Fine Z approach is enabled after stable XY centring and circular-fit validation,
+with a total 20 µm advance limit from saved Z. Initial transfer/settling/error
+history is saved as `meta_data/alignment_transfer.jsonl`; failed pre-start moves
+retain their journal under `data/alignment_sequences/`. See
+[Automatic Alignment](pyccapt/control/AUTOMATIC_ALIGNMENT.md) for all settings.
+
+Copy [experiment_plan.example.toml](pyccapt/files/experiment_plan.example.toml) and
+follow the [experiment-plan instructions](pyccapt/control/EXPERIMENT_PLANS.md).
+The main window opens at 760 × 670 with monitor-aware scrolling. **Advanced
+settings…** groups detection mode, control algorithm, refresh frequency,
+pulse-voltage limits and K_p settings in a separate dialog. The Advanced settings
+label and button sit directly below the target Detection Rate input on the left.
+A separator below the Run Statistics detection rate precedes Electrode and
+Flat Test. A second line separates these buttons from the bordered Auto Alignment
+box containing both voltage fields and Automatic Alignment. Start sits above Stop
+in a separate group just above the bottom full-width separator.
+The parameter sources are TextBox for a single run and TOML Plan for a queue.
 
 Control GUI electrode labels are stored in `pyccapt/control/electrode.toml`:
 
@@ -153,9 +197,44 @@ For device toggles, prefer `enabled` and `disabled`. Legacy `on` and `off` value
 
 ## Control Highlights
 
-![Main GUI](pyccapt/files/readme_images/main_gui.png)
+![Main GUI](pyccapt/files/readme_images/main_gui.jpg)
 
 The control stack includes the main acquisition GUI together with dedicated windows for gates, pumps and vacuum, cameras, laser, stage control, visualization, and baking. Startup reports unavailable configured ports clearly, GUI error boxes wrap long messages, and `Access Override` now asks for confirmation before allowing a run to proceed with missing enabled devices.
+
+Control owners share a consistent state contract for requests, readbacks,
+connection, faults and stale data. Existing device guards and hardware command
+sequences are preserved. Live health carries these records; each dataset saves
+`meta_data/control_states.json` for later diagnosis. See
+[STATE_MECHANISMS.md](pyccapt/control/STATE_MECHANISMS.md) for the implementation,
+evidence limits and developer instructions.
+
+The combined Pumps/Vacuum and Gates window opens at 1280 × 640. Bordered boxes
+group cryo temperatures and their target control, the three venting buttons, and
+all six Buffer/LL/CLL chamber and pre-vacuum displays. The gauge displays keep
+their existing sizes and colours; the vacuum plots, Gates controls and load-lock
+temperature controls remain visible. Smaller monitors use scrolling as needed.
+Venting sits beside the Gates diagram, separated from the vacuum LCDs by open
+space. The Buffer Chamber Pre label has enough width to stay on one line.
+
+Stage Control opens at 880 × 220. Its nine position readouts and speed selectors
+use compact widths, with less spacing around the headers and Z jog buttons.
+All axis controls, Home, Reference, STOP and Override Access remain visible.
+
+Cameras uses a narrower 900 × 700 default window, with each exposure slider and
+value on one row. All six camera views, camera connections, sample positions
+and instrument monitors remain available. Camera connection rows show the serial
+and slot on one line; hover for the model and full state. Bottom notifications
+disappear after five seconds and are not restored by routine refreshes.
+Laser Control defaults to 980 × 650:
+laser settings, readouts and alignment controls sit beside the response plot,
+with all stage controls below. Its messages share a two-line area; scroll or
+hover to read longer messages. Alignment fields have space between rows and
+columns, and the window grows to fit readable controls when needed.
+Visualization opens at 980 × 570, with Hold DC, Set DC and the target voltage
+field on one row, and the running/stopped indicator in the top-right corner.
+It has two rows of spectrum controls. Its four upper rectangular panels
+always have identical widths and heights, including during window resizing.
+These windows scroll on smaller screens so controls remain accessible.
 
 Vacuum logs are written under `pyccapt/files/logs/vacuum`, and baking logs are written under `pyccapt/files/logs/baking/<timestamp>`.
 

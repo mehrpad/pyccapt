@@ -13,6 +13,7 @@ import plotly.io as pio
 
 
 from pyccapt.calibration.clustering import build_cluster_context_trace, build_cluster_scatter_traces
+from pyccapt.calibration.clustering import isosurface as voxel_tools
 from pyccapt.calibration.reconstructions import reconstruction
 from pyccapt.calibration.reconstructions.io_utils import (
     save_gif,
@@ -20,6 +21,7 @@ from pyccapt.calibration.reconstructions.io_utils import (
     write_plotly_html,
     write_plotly_image,
 )
+from pyccapt.calibration.reconstructions.species_display import range_row_masks_and_unranged
 
 
 def build_range_mask(
@@ -214,7 +216,7 @@ def _structured_grid_from_volume(grid_vec, data, scalar_name):
     """Build a PyVista structured grid from a volume on the reconstruction grid."""
     x, y, z = np.meshgrid(grid_vec[0], grid_vec[1], grid_vec[2], indexing='ij')
     grid = pv.StructuredGrid(x, y, z)
-    grid.point_data[scalar_name] = np.asarray(data, dtype=float).flatten()
+    grid.point_data[scalar_name] = np.asarray(data, dtype=float).flatten(order='F')
     return grid
 
 
@@ -416,6 +418,7 @@ def reconstruction_plot(
     pure_element_only=False,
     manual_iso_value=None,
     cluster_display_mode='overlay',
+    unranged_fraction=0.01,
 ):
     """
     Generate a 3D plot for atom probe reconstruction data.
@@ -444,6 +447,7 @@ def reconstruction_plot(
         only_iso (bool): Whether to plot only the isosurface.
         cluster_result: Optional Min-Max precipitate segmentation overlay.
         cluster_display_mode (str): `overlay` or `clusters-only`.
+        unranged_fraction (float): Fraction of ions outside every mass range to display.
 
     Returns:
         None
@@ -483,7 +487,7 @@ def reconstruction_plot(
 
     def _safe_random_subset(mask_s, fraction):
         true_indices = np.flatnonzero(mask_s)
-        if len(true_indices) == 0:
+        if len(true_indices) == 0 or float(fraction) <= 0:
             return np.zeros_like(mask_s, dtype=bool)
 
         size = int(len(true_indices) * float(fraction))
@@ -531,23 +535,24 @@ def reconstruction_plot(
 
     # Create a subplots with shared axes
     if variables.range_data is not None:
-        colors = reconstruction._normalize_plotly_colors(variables.range_data['color'].tolist())
-        mc_low = variables.range_data['mc_low'].tolist()
-        mc_up = variables.range_data['mc_up'].tolist()
-        ion = variables.range_data['ion'].tolist()
-        element = variables.range_data['element'].tolist()
-        complex = variables.range_data['complex'].tolist()
-        # add the noise color and name
+        all_colors = reconstruction._normalize_plotly_colors(variables.range_data['color'].tolist())
+        all_mc_low = variables.range_data['mc_low'].tolist()
+        all_mc_up = variables.range_data['mc_up'].tolist()
+        all_ion = variables.range_data['ion'].tolist()
+        all_element = variables.range_data['element'].tolist()
+        all_complex = variables.range_data['complex'].tolist()
+        _, mask_unranged, ranged_indices = range_row_masks_and_unranged(variables.mc, variables.range_data)
+        colors = [all_colors[i] for i in ranged_indices]
+        mc_low = [all_mc_low[i] for i in ranged_indices]
+        mc_up = [all_mc_up[i] for i in ranged_indices]
+        ion = [all_ion[i] for i in ranged_indices]
+        element = [all_element[i] for i in ranged_indices]
+        complex = [all_complex[i] for i in ranged_indices]
+        supplied_percentage = [0.01] * len(all_ion) if element_percentage is None else list(element_percentage)
+        element_percentage = [supplied_percentage[i] for i in ranged_indices]
         colors.append('#000000')
-        ion.append('$noise$')
-        mask_noise = np.full(len(variables.mc), False)
-
-        if element_percentage is None:
-            print('The element percentage is not provided, setting it to 0.01')
-            element_percentage = [0.01] * len(ion)
-            element_percentage[-1] = 0.0001  # add the noise percentage
-        else:
-            element_percentage.append(0.0001)  # add the noise percentage
+        ion.append('unranged')
+        element_percentage.append(float(unranged_fraction))
 
         if not detailed_isotope_charge:
             # Create the ion list
@@ -567,7 +572,6 @@ def reconstruction_plot(
             mask_new = []
             element_percentage_new = []
             ion_iso_targets_new = []
-            mask_noise = np.full(len(variables.mc), False)
             for ion_k, indexes in ion_to_indexes.items():
                 ion_new.append(ion_k)
                 colors_new.append(colors[indexes[0]])
@@ -576,7 +580,6 @@ def reconstruction_plot(
                 for idx in indexes:
                     mask_tmp = mask_tmp | ((variables.mc > mc_low[idx]) & (variables.mc < mc_up[idx]))
                 mask_new.append(mask_tmp)
-                mask_noise = mask_noise | mask_tmp
                 ion_iso_target = None
                 if isosurface_dic is not None:
                     for idx in indexes:
@@ -586,10 +589,10 @@ def reconstruction_plot(
                         if ion_iso_target is not None:
                             break
                 ion_iso_targets_new.append(ion_iso_target)
-            ion_new.append('$noise$')
+            ion_new.append('unranged')
             colors_new.append('#000000')
-            element_percentage_new.append(0.0001)
-            mask_new.append(mask_noise)
+            element_percentage_new.append(float(unranged_fraction))
+            mask_new.append(mask_unranged)
             ion_iso_targets_new.append(None)
             ion = ion_new
             colors = colors_new
@@ -620,11 +623,10 @@ def reconstruction_plot(
                     if index == len(ion):
                         break
                     if detailed_isotope_charge:
-                        if ion[index] == 'noise':
-                            mask_s = mask_noise
+                        if ion[index] == 'unranged':
+                            mask_s = mask_unranged
                         else:
                             mask_s = (variables.mc > mc_low[index]) & (variables.mc < mc_up[index])
-                            mask_noise = mask_noise | mask_s
                     else:
                         mask_s = mask_new[index]
                     new_mask = _safe_random_subset(mask_s, element_percentage[index])
@@ -691,11 +693,10 @@ def reconstruction_plot(
             drawn_iso_targets = set()
             for index, elemen in enumerate(ion):
                 if detailed_isotope_charge:
-                    if ion[index] == 'noise':
-                        mask_s = mask_noise
+                    if ion[index] == 'unranged':
+                        mask_s = mask_unranged
                     else:
                         mask_s = (variables.mc > mc_low[index]) & (variables.mc < mc_up[index])
-                        mask_noise = mask_noise | mask_s
                 else:
                     mask_s = mask_new[index]
                 new_mask = _safe_random_subset(mask_s, element_percentage[index])
@@ -848,7 +849,9 @@ def reconstruction_plot(
                     eye=dict(x=4, y=4, z=4),  # Adjust the camera position for zooming
                 )
             )
-            write_plotly_html(fig, variables, f"{figname}_3d.html", include_mathjax='cdn')
+            write_plotly_html(
+                fig, variables, f"{figname}_3d.html", include_mathjax='cdn', add_camera_gif_exporter=True
+            )
             fig.update_layout(showlegend=False)
             layout = go.Layout(
                 margin=go.layout.Margin(
@@ -868,7 +871,9 @@ def reconstruction_plot(
             write_plotly_image(fig, variables, f"{figname}_3d_o.png", scale=3, image_format='png')
             write_plotly_image(fig, variables, f"{figname}_3d_o.svg", scale=3, image_format='svg')
             fig.update_layout(showlegend=True)
-            write_plotly_html(fig, variables, f"{figname}_3d_o.html", include_mathjax='cdn')
+            write_plotly_html(
+                fig, variables, f"{figname}_3d_o.html", include_mathjax='cdn', add_camera_gif_exporter=True
+            )
             fig.update_scenes(xaxis_visible=True, yaxis_visible=True, zaxis_visible=True)
         except Exception as e:
             print('The figure could not be saved')
@@ -994,6 +999,7 @@ def rotary_fig(fig, variables, rotary_fig_save, make_gif, figname):
             show_link=True,
             auto_open=False,
             include_mathjax='cdn',
+            add_camera_gif_exporter=True,
         )
 
 
@@ -1011,191 +1017,18 @@ def format_ion(elements, complexities):
 
 
 def bin_vectors_from_distance(dist, bin_values, mode='distance'):
-    """
-    Create a set of grid vectors to be used in nD binning. The bounds are calculated
-    such that they don't go beyond the size of the dataset.
-
-    Args:
-        dist (numpy.ndarray): The distance variable to be binned. One column per dimension.
-                              It is the generalized distance.
-        bin_values (list or numpy.ndarray): The bin 'distance' per bin in either a distance metric or a count.
-                                             Non-isometric bins are possible.
-        mode (str): Mode can be 'distance' (constant distance) or 'count' (constant count). Default is 'distance'.
-
-    Returns:
-        tuple:
-            - bin_centers (list of numpy.ndarray): The bin centers of each bin.
-            - bin_edges (list of numpy.ndarray): The edges of each bin.
-    """
-    if mode not in ['distance', 'count']:
-        raise ValueError("Mode must be 'distance' or 'count'.")
-
-    is_constant_count = mode == 'count'
-    is_constant_distance = mode == 'distance'
-    num_dim = len(bin_values)
-    # if dist is list of numpy arrays, convert to numpy array and reshape it
-    if isinstance(dist, list):
-        dist = np.array(dist).reshape(-1, num_dim)
-
-    if dist.shape[1] != num_dim:
-        raise ValueError("Dimensions of distance variable and bin variable must match.")
-    if is_constant_count and num_dim != 1:
-        raise ValueError("Constant count mode is only available for 1D binning.")
-
-    bin_centers = []
-    bin_edges = []
-
-    # Constant bin distance interval
-    if is_constant_distance:
-        for dim in range(num_dim):
-            # Size the raw bin vector from the ACTUAL data span instead of
-            # a fixed 10001-entry grid capped at 10000*bin. The old fixed
-            # grid silently clipped any point beyond +/- 500 nm (e.g. a
-            # 600 nm specimen with 0.05 nm bins), lumping out-of-range
-            # ions into the end bin -- a silently wrong histogram -- while
-            # also over-allocating 20001 entries for small specimens.
-            bin = float(bin_values[dim])
-            dmin = float(dist[:, dim].min())
-            dmax = float(dist[:, dim].max())
-            reach = max(abs(dmin), abs(dmax)) + bin
-            n_steps = max(1, int(np.ceil(reach / bin)))
-            bin_vector_raw = np.arange(0, (n_steps + 1)) * bin
-            bin_vector_raw = np.concatenate((-np.flip(bin_vector_raw[1:]), bin_vector_raw))
-
-            # Filter bin centers within the distance range
-            centers = bin_vector_raw[
-                (bin_vector_raw >= dist[:, dim].min() - bin_values[dim])
-                & (bin_vector_raw <= dist[:, dim].max() + bin_values[dim])
-            ]
-            bin_centers.append(centers)
-
-            # Calculate bin edges
-            edges = (centers[1:] + centers[:-1]) / 2
-            edges = np.concatenate(
-                ([centers[0] - (centers[1] - centers[0]) / 2], edges, [centers[-1] + (centers[-1] - centers[-2]) / 2])
-            )
-            bin_edges.append(edges)
-
-    # Constant bin count interval
-    elif is_constant_count:
-        dist = np.sort(dist.flatten())
-        idx_edge = np.arange(0, len(dist), bin_values[0])
-
-        # Handle remainder
-        if idx_edge[-1] < len(dist):
-            idx_edge = np.append(idx_edge, len(dist))
-
-        idx_cent = np.round((idx_edge[1:] + idx_edge[:-1]) / 2).astype(int)
-        centers = dist[idx_cent]
-        edges = dist[idx_edge]
-
-        # Adjust edges to avoid creating extra bins
-        edges[0] -= 0.0001
-        edges[-1] += 0.0001
-
-        bin_centers.append(centers)
-        bin_edges.append(edges)
-
-    return bin_centers, bin_edges
+    """Compatibility wrapper for the canonical voxel implementation."""
+    return voxel_tools.bin_vectors_from_distance(dist, bin_values, mode=mode)
 
 
 def pos_to_voxel(data, grid_vec, species=None):
-    """
-        Creates a voxelization of the data in 'pos' based on the bin centers in 'grid_vec'
-        for the atoms/ions in the specified species.
-
-        Args:
-            data (pyccapt DataFrame): The data to be voxelized. when input species is given, ranges must be allocated.
-    %          A decomposed DataFrame file is also possible. Use range_to_pyccapt to decompose the data.
-            grid_vec (list of numpy.ndarray): Grid vectors for the voxel grid. These are the bin centers.
-            species (list, str, or numpy.ndarray, optional): The species to filter by. Can be:
-                                                             - List of species names (e.g., ['Fe', 'Mn']).
-                                                             - Boolean array matching the length of `pos`.
-                                                             - None, to include all atoms/ions.
-
-        Returns:
-            numpy.ndarray: A 3D array representing the voxelized data.
-    """
-    # Ensure `pos` is a numpy array
-    if hasattr(data, "columns"):  # Assume pandas.DataFrame
-        # pos_array = np.array([data["x (nm)"], data["y (nm)"], data["z (nm)"]]).T
-        x = data["x (nm)"].to_numpy()
-        y = data["y (nm)"].to_numpy()
-        z = data["z (nm)"].to_numpy()
-        pos_array = np.column_stack([x, y, z])
-    elif isinstance(data, list):
-        pos_array = np.array(data).T
-    else:
-        pos_array = data
-
-    # Check for species filtering
-    if species is not None:
-        if isinstance(species, list):
-            element_col = data.columns.get_loc("element") if "element" in data.columns else None
-            species_mask = np.full(len(data), False)
-            if element_col:
-                for s in species:
-                    mask_s = data['element'].apply(lambda x: s in x)
-                    species_mask |= mask_s
-
-            else:
-                raise ValueError("Invalid species filter or table format.")
-        elif isinstance(species, np.ndarray) and species.dtype == bool:
-            species_mask = species
-        else:
-            raise ValueError("Species must be a list, boolean array, or None.")
-
-        pos_array = pos_array[species_mask]
-
-    # Calculate bin sizes and edge vectors
-    bin_sizes = [grid_vec[d][1] - grid_vec[d][0] for d in range(3)]
-    edge_vec = [np.concatenate(([grid_vec[d][0] - bin_sizes[d] / 2], grid_vec[d] + bin_sizes[d] / 2)) for d in range(3)]
-
-    # Determine voxel indices
-    loc = np.empty((pos_array.shape[0], 3), dtype=int)
-    for d in range(3):
-        loc[:, d] = np.digitize(pos_array[:, d], edge_vec[d]) - 1  # Adjust for 0-based indexing
-
-    # Calculate the voxel grid size
-    grid_size = np.maximum(np.max(loc, axis=0) + 1, [len(e) - 1 for e in edge_vec])
-
-    # Count atoms in each voxel
-    vox = np.zeros(grid_size, dtype=int)
-    for i in range(loc.shape[0]):
-        vox[tuple(loc[i])] += 1
-
-    # ``vox`` is indexed [ix, iy, iz] (matches np.meshgrid(..., indexing='ij'));
-    # the downstream ``isosurface`` builder also assumes 'ij' ordering and
-    # flattens the data with the same convention. Returning ``vox.T`` here
-    # silently transposed to [iz, iy, ix] and put voxel concentration at the
-    # wrong spatial coordinate. Mirror the leap-clustering copy in
-    # clustering/isosurface.py and return ``vox`` directly.
-    return vox
+    """Compatibility wrapper for the canonical voxel implementation."""
+    return voxel_tools.pos_to_voxel(data, grid_vec, species=species)
 
 
 def isosurface(gridVec, data, isovalue):
-    """
-    Extract isosurface using pyvista for a custom 3D grid.
-
-    Args:
-        gridVec (list of np.ndarray): List of 3 arrays representing the grid points in x, y, and z.
-        data (np.ndarray): 3D scalar field (same shape as the meshgrid defined by gridVec).
-        isovalue (float): Scalar value to extract the isosurface.
-
-    Returns:
-        pyvista.PolyData: Isosurface with faces and vertices.
-    """
-    reordered_gridVec = [gridVec[0], gridVec[1], gridVec[2]]
-
-    # Create a pyvista structured grid
-    x, y, z = np.meshgrid(reordered_gridVec[0], reordered_gridVec[1], reordered_gridVec[2], indexing='ij')
-    grid = pv.StructuredGrid(x, y, z)
-    grid.point_data["values"] = data.flatten()
-
-    # Extract the isosurface
-    isosurf = grid.contour([isovalue])  # Pass isovalue as a list for compatibility
-    return isosurf
-
+    """Compatibility wrapper for the canonical voxel implementation."""
+    return voxel_tools.isosurface(gridVec, data, isovalue)
 
 def calculate_iso_value(conc, save_path=None, fig_name=None):
     """

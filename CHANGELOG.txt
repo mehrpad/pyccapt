@@ -1,6 +1,25 @@
 Change Log
 ==========
 
+0.2.4 (05.10.2026)
+-------------------
+- Add reusable TOML experiment plans, a queue editor and an example plan.
+- Improve automatic stage and laser alignment with broad/semi-coarse searches,
+  relative detection-rate checks, detector hit-map centering, bounded fine Z,
+  voltage retries and complete transfer/alignment diagnostics.
+- Unify control state reporting across device owners, with separate requests,
+  observations, correlated command outcomes, faults and readback freshness.
+  Save a final control-state snapshot in each dataset's metadata directory.
+- Improve laser CLI connection/reply handling, lower-state cancellation,
+  frequency controls and unavailable optical readback diagnostics.
+- Compact the control GUIs, preserve access on smaller monitors, update the
+  GUI screenshots and expand control documentation.
+- Improve acquisition shutdown, chunk validation, fault handling and provenance.
+- Extend calibration tools for concentration profiles, ROI analysis, SDM
+  calibration, species display, peak modeling and reconstruction export.
+- Strengthen scientific/data contracts and add CI checks for critical coverage,
+  typing, clean distribution installation, security and performance regressions.
+
 0.2.2 (04.05.2026)
 -------------------
 - Add GitHub Actions CI: tests (matrix on Linux/Windows × Py 3.10/3.11/3.12),

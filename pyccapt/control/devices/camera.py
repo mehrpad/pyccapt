@@ -1,5 +1,6 @@
 import threading
 import time
+from pyccapt.control.core.control_state import Connection, Evidence, observe, publish
 
 import cv2
 import numpy as np
@@ -90,12 +91,11 @@ class CameraWorker(QObject):
 
     def __init__(self, variables, emitter, conf=None):
         super().__init__()
-        # Cameras start in manual mode (ExposureAuto = 'Off') with the
-        # light-dependent presets applied, matching the GUI's Auto Exposure
-        # Time button which starts deselected. Clicking that button toggles
-        # the worker into Continuous (firmware auto) and back.
-        self.exposure_auto = False
-        self.exposure_mode = 'Off'
+        # Cameras start with firmware auto exposure enabled, matching the
+        # GUI's selected Auto Exposure Time button. The operator can still
+        # switch to preset or user-manual exposure from the GUI.
+        self.exposure_auto = True
+        self.exposure_mode = 'Continuous'
         self.emitter = emitter
         self.variables = variables
 
@@ -105,6 +105,29 @@ class CameraWorker(QObject):
         # which reproduces the legacy first-come behaviour. Order must match
         # VIEW_ORDER / the slot layout (side=0, top=1, angle=2).
         conf = conf or {}
+        # The illuminated alignment preset and its frame-rate ceiling are
+        # configuration values because they depend on the installed optics.
+        # Keep the dark preset in code so the long-standing light-off
+        # behaviour is unchanged.
+        self.preset_exposure_light = tuple(
+            self._positive_config_int(
+                conf.get(f"camera_exposure_light_{view}_us"), default
+            )
+            for view, default in zip(self.VIEW_ORDER, self.PRESET_EXPOSURE_LIGHT)
+        )
+        self.camera_alignment_frame_rate_hz = self._positive_config_float(
+            conf.get("camera_alignment_frame_rate_hz"), 30.0
+        )
+        self.camera_auto_target_brightness = min(
+            1.0,
+            self._positive_config_float(conf.get("camera_auto_target_brightness"), 0.5),
+        )
+        self.camera_noise_reduction = self._positive_config_float(
+            conf.get("camera_noise_reduction"), 0.2
+        )
+        self.camera_sharpness_enhancement = self._positive_config_float(
+            conf.get("camera_sharpness_enhancement"), 1.0
+        )
         self._configured_serials = [
             _normalize_serial(conf.get(f"camera_serial_{view}"))
             for view in self.VIEW_ORDER
@@ -195,7 +218,6 @@ class CameraWorker(QObject):
         self.running = False
 
     @pyqtSlot(bool)
-    @pyqtSlot(bool)
     def set_manual_exposure_mode(self, manual):
         """Choose the manual-exposure source (only used when auto is off).
 
@@ -209,13 +231,13 @@ class CameraWorker(QObject):
             self._applied_exposure[slot] = None
 
     @pyqtSlot(bool)
-    def set_auto_exposure_time(self):
-        if not self.exposure_auto:
-            self.exposure_mode = 'Continuous'
-            self.exposure_auto = True
-        else:
-            self.exposure_mode = 'Off'
-            self.exposure_auto = False
+    def set_auto_exposure_time(self, enabled):
+        """Set, rather than toggle, the camera firmware auto-exposure mode."""
+        self.exposure_auto = bool(enabled)
+        self.exposure_mode = 'Continuous' if self.exposure_auto else 'Off'
+        for slot in range(self.SLOT_COUNT):
+            self._applied_exposure_mode[slot] = None
+            self._applied_exposure[slot] = None
 
     @pyqtSlot(int)
     def set_exposure_time_1(self, exposure_time):
@@ -235,12 +257,30 @@ class CameraWorker(QObject):
             return (self.exposure_time_cam_1, self.exposure_time_cam_2, self.exposure_time_cam_3)[slot]
         # Preset mode: light-dependent defaults (side, top, angle).
         light_on = bool(getattr(self.variables, 'light', False))
-        presets = self.PRESET_EXPOSURE_LIGHT if light_on else self.PRESET_EXPOSURE_DARK
+        presets = self.preset_exposure_light if light_on else self.PRESET_EXPOSURE_DARK
         return presets[slot]
+
+    @staticmethod
+    def _positive_config_int(value, default):
+        """Return a positive integer config value, falling back safely."""
+        try:
+            return max(1, int(value))
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _positive_config_float(value, default):
+        """Return a positive floating config value, falling back safely."""
+        try:
+            number = float(value)
+            return number if number > 0 else default
+        except (TypeError, ValueError):
+            return default
 
     def _close_slot(self, slot):
         cam = self._slots[slot]
         self._slots[slot] = None
+        publish(self.variables, f"camera_{slot}", "cam", "connection", connection=Connection.DISCONNECTED)
         self._applied_exposure[slot] = None
         self._applied_exposure_mode[slot] = None
         if cam is None:
@@ -344,7 +384,9 @@ class CameraWorker(QObject):
         return repr(device_info)
 
     def _attach_slot(self, slot, device_info):
+        publish(self.variables, f"camera_{slot}", "cam", "connection", connection=Connection.CONNECTING)
         device_key = self._device_key(device_info)
+        cam = None
         try:
             cam = pylon.InstantCamera(self._tl_factory.CreateDevice(device_info))
             cam.Open()
@@ -360,6 +402,22 @@ class CameraWorker(QObject):
             self._apply_quality_settings(cam)
             cam.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
         except Exception as e:
+            # Never leave a device exclusively open after a failed optional
+            publish(self.variables, f"camera_{slot}", "cam", "connection", connection=Connection.DISCONNECTED)
+            publish(self.variables, f"camera_{slot}", "cam", "fault", fault=str(e))
+            # feature/configuration step. Otherwise the retry loop (or the
+            # Connect button) cannot open it again until garbage collection.
+            if cam is not None:
+                try:
+                    if cam.IsGrabbing():
+                        cam.StopGrabbing()
+                except Exception:
+                    pass
+                try:
+                    if cam.IsOpen():
+                        cam.Close()
+                except Exception:
+                    pass
             # Dedup per-device. The reconcile loop tries every visible
             # device against every empty slot, so a single stuck device
             # would otherwise emit one message per (slot, iteration).
@@ -373,6 +431,8 @@ class CameraWorker(QObject):
         # the next failure (if any) prints again.
         self._last_attach_error_by_device.pop(device_key, None)
         self._slots[slot] = cam
+        observe(self.variables, f"camera_{slot}", "cam", "attached", evidence=Evidence.READBACK,
+                connection=Connection.CONNECTED, details={"device": device_key})
         # If we're attaching in auto mode we didn't write ExposureTime, so
         # leave the cache empty — the manual-mode branch in
         # _apply_exposure_changes will push the configured value the
@@ -408,6 +468,32 @@ class CameraWorker(QObject):
             except Exception:
                 continue
         return False
+
+    @staticmethod
+    def _get_node(cam, name):
+        """Return an optional pypylon feature node without propagating lookup errors.
+
+        Pypylon's dynamic attribute lookup raises a GenICam RuntimeException,
+        rather than AttributeError, when a camera model lacks a node. That
+        means even ``getattr(cam, name, None)`` must be guarded.
+        """
+        try:
+            return getattr(cam, name)
+        except Exception:
+            return None
+
+    def _lock_gain_low(self, cam):
+        """Disable firmware auto-gain and select the camera's lowest gain."""
+        self._try_set(self._get_node(cam, "GainAuto"), "Off")
+        for name in ("Gain", "GainRaw"):
+            node = self._get_node(cam, name)
+            if node is None:
+                continue
+            try:
+                node.SetValue(node.GetMin())
+                return
+            except Exception:
+                continue
 
     def _apply_quality_settings(self, cam):
         """Push image-quality tweaks that help with sample alignment.
@@ -459,30 +545,41 @@ class CameraWorker(QObject):
         except Exception:
             pass
 
-        # Sharpness / PGI: Basler's image enhancement pipeline.
-        # BslSharpnessEnhancement is the modern node; older firmware
-        # exposes SharpnessEnhancement (no Bsl prefix) and the legacy
-        # PgiMode toggle.
-        try:
-            self._try_set(getattr(cam, "BslSharpnessEnhancement", None), 1.5)
-        except Exception:
-            pass
-        try:
-            self._try_set(getattr(cam, "SharpnessEnhancement", None), 1.5)
-        except Exception:
-            pass
-        try:
-            self._try_set(getattr(cam, "PgiMode", None), "On")
-        except Exception:
-            pass
+        # Basler PGI image-quality recipe. ace U/L mono cameras require
+        # PgiMode first; ace 2 X/Pro mono cameras enable PGI automatically
+        # when their BslNoiseReduction / BslSharpnessEnhancement nodes move
+        # away from defaults. Feature-name fallbacks cover both installed
+        # camera generations without assuming every node exists.
+        applied_enhancements = []
+        if self._try_set(
+            self._get_node(cam, "PgiMode"),
+            "On",
+            "Manual",
+            "On_ManualNoiseReduction",
+        ):
+            applied_enhancements.append("PGI")
+        for name in ("BslNoiseReduction", "NoiseReduction", "NoiseReductionAbs"):
+            if self._try_set(self._get_node(cam, name), self.camera_noise_reduction):
+                applied_enhancements.append(f"{name}={self.camera_noise_reduction:g}")
+                break
+        for name in (
+            "BslSharpnessEnhancement",
+            "SharpnessEnhancement",
+            "SharpnessEnhancementAbs",
+        ):
+            if self._try_set(self._get_node(cam, name), self.camera_sharpness_enhancement):
+                applied_enhancements.append(f"{name}={self.camera_sharpness_enhancement:g}")
+                break
+        if applied_enhancements:
+            print("Camera image enhancements: " + ", ".join(applied_enhancements))
 
         # Gamma < 1 lifts shadows — useful when the light is off and
         # the specimen detail lives in the darker half of the histogram.
         try:
-            gsel = getattr(cam, "GammaSelector", None)
+            gsel = self._get_node(cam, "GammaSelector")
             if gsel is not None:
                 self._try_set(gsel, "User")
-            gamma = getattr(cam, "Gamma", None)
+            gamma = self._get_node(cam, "Gamma")
             if gamma is not None:
                 gamma.SetValue(0.7)
         except Exception:
@@ -491,7 +588,7 @@ class CameraWorker(QObject):
         # Lock auto-white-balance off so the image is stable while the
         # operator is centring the specimen.
         try:
-            wb = getattr(cam, "BalanceWhiteAuto", None)
+            wb = self._get_node(cam, "BalanceWhiteAuto")
             if wb is not None:
                 self._try_set(wb, "Off")
         except Exception:
@@ -500,9 +597,29 @@ class CameraWorker(QObject):
         # Black-level: keep at default but make sure it isn't pinned to
         # an inherited high value from a previous run.
         try:
-            bl = getattr(cam, "BlackLevel", None)
+            bl = self._get_node(cam, "BlackLevel")
             if bl is not None:
                 bl.SetValue(0)
+        except Exception:
+            pass
+
+        # Exposure is allowed to adapt, but gain remains fixed at its lowest
+        # value. Running both automatic loops made bright top-camera regions
+        # saturate even when the reported exposure was shorter than a good
+        # manual exposure.
+        self._lock_gain_low(cam)
+
+        # Limit the alignment stream to a responsive, modest rate.  Basler
+        # exposes AcquisitionFrameRate on current cameras and
+        # AcquisitionFrameRateAbs on some older models.  Exposure, ROI, and
+        # transport bandwidth can still make the resulting rate lower.
+        try:
+            self._try_set(self._get_node(cam, "AcquisitionFrameRateEnable"), True)
+            for name in ("AcquisitionFrameRate", "AcquisitionFrameRateAbs"):
+                if self._try_set(
+                    self._get_node(cam, name), self.camera_alignment_frame_rate_hz
+                ):
+                    break
         except Exception:
             pass
 
@@ -514,18 +631,17 @@ class CameraWorker(QObject):
         # something much shorter (often 100,000–500,000 µs), so the
         # firmware auto-loop hits the ceiling and gives up before the
         # image is bright enough. Raising the ceiling lets the auto
-        # loop keep extending exposure for dark scenes, while a higher
-        # target brightness (≈0.6 vs. the default 0.5) shifts the
-        # set-point a notch brighter so dim specimen edges remain
-        # visible. Feature names vary across Basler model families
+        # loop keep extending exposure for dark scenes. Target brightness is
+        # configurable and defaults to 0.5; gain stays fixed so exposure is
+        # the only automatic brightness control. Feature names vary across Basler model families
         # (ace2/dart use AutoExposureTimeUpperLimit, older ace uses
         # AutoExposureTimeAbsUpperLimit, …), so each set is wrapped.
         DARK_EXPOSURE_UPPER_US = 2_000_000  # 2 s — same as the manual light-off default.
         SHORT_EXPOSURE_LOWER_US = 100       # 100 µs — fast end for "light on".
-        TARGET_BRIGHTNESS = 0.6             # 0..1, default ~0.5; lift dark scenes.
+        target_brightness = self.camera_auto_target_brightness
 
         for name in ("AutoExposureTimeUpperLimit", "AutoExposureTimeAbsUpperLimit"):
-            node = getattr(cam, name, None)
+            node = self._get_node(cam, name)
             if node is not None:
                 try:
                     node.SetValue(DARK_EXPOSURE_UPPER_US)
@@ -533,7 +649,7 @@ class CameraWorker(QObject):
                 except Exception:
                     continue
         for name in ("AutoExposureTimeLowerLimit", "AutoExposureTimeAbsLowerLimit"):
-            node = getattr(cam, name, None)
+            node = self._get_node(cam, name)
             if node is not None:
                 try:
                     node.SetValue(SHORT_EXPOSURE_LOWER_US)
@@ -541,11 +657,11 @@ class CameraWorker(QObject):
                 except Exception:
                     continue
         for name in ("AutoTargetBrightness", "AutoTargetValue", "BslAutoTargetBrightness"):
-            node = getattr(cam, name, None)
+            node = self._get_node(cam, name)
             if node is not None:
                 try:
                     # Some firmwares expect 0..1, some 0..255. Try both.
-                    self._try_set(node, TARGET_BRIGHTNESS, int(TARGET_BRIGHTNESS * 255))
+                    self._try_set(node, target_brightness, int(target_brightness * 255))
                     break
                 except Exception:
                     continue
@@ -620,6 +736,13 @@ class CameraWorker(QObject):
         """Permit *serial* to attach again and force a reconcile pass."""
         if not serial:
             return
+        # The cameras auto-attach at startup. Treat Connect as an idempotent
+        # re-enable operation so a stale/double click can never try to open an
+        # already active camera again.
+        for slot in range(self.SLOT_COUNT):
+            if self._slot_serials[slot] == serial and self._slots[slot] is not None:
+                self._set_status(f"Camera {serial} is already connected (slot {slot}).")
+                return
         self._user_disabled_serials.discard(serial)
         # Drop the cached attach error so the next failure (if any)
         # prints fresh.
@@ -644,15 +767,10 @@ class CameraWorker(QObject):
             if self._applied_exposure_mode[slot] != target_mode:
                 try:
                     cam.ExposureAuto.SetValue(target_mode)
-                    # Gain follows exposure: in auto mode, let the camera
-                    # also auto-tune the gain so low-light / high-light
-                    # scenes (light on/off) converge faster and cleaner.
-                    # In manual mode, GainAuto must be Off or the camera
-                    # will keep overriding the user's exposure value.
-                    try:
-                        cam.GainAuto.SetValue(target_mode)
-                    except Exception:
-                        pass
+                    # Keep gain fixed at minimum in both modes. ExposureAuto
+                    # is sufficient and avoids the two firmware loops jointly
+                    # overexposing bright/specular top-camera regions.
+                    self._lock_gain_low(cam)
                     # Auto-mode wrote its own value into ExposureTime; the
                     # cache no longer reflects the camera. Invalidate so
                     # the manual block below always re-pushes the user's
@@ -709,10 +827,15 @@ class CameraWorker(QObject):
                         if grab.GrabSucceeded():
                             image = self._converter.Convert(grab)
                             grabbed_images[slot] = image.GetArray()
+                            observe(self.variables, f"camera_{slot}", "cam", "capturing",
+                                    evidence=Evidence.READBACK, connection=Connection.CONNECTED)
+                        else:
+                            publish(self.variables, f"camera_{slot}", "cam", "fault", fault="Frame grab failed")
                     finally:
                         grab.Release()
                 except Exception as e:
                     msg = str(e)
+                    publish(self.variables, f"camera_{slot}", "cam", "fault", fault=msg)
                     if self._last_grab_error[slot] != msg:
                         self._last_grab_error[slot] = msg
                         print(f"Slot {slot} grab failed: {msg}; will try to reconnect.")
@@ -780,10 +903,16 @@ class CameraWorker(QObject):
             cam = self._slots[slot] if slot < self.SLOT_COUNT else None
             if cam is None:
                 return None
-            try:
-                return int(cam.ExposureTime.GetValue())
-            except Exception:
-                return None
+            # ace 2 cameras expose ExposureTime, while some older ace models
+            # use ExposureTimeAbs. Pypylon can raise while merely looking up
+            # a missing dynamic node, so both lookup and read must be guarded.
+            for node_name in ("ExposureTime", "ExposureTimeAbs"):
+                try:
+                    node = getattr(cam, node_name)
+                    return int(round(float(node.GetValue())))
+                except Exception:
+                    continue
+            return None
 
         t0 = _read(0)
         t1 = _read(1)

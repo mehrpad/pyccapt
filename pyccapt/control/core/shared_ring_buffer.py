@@ -44,7 +44,7 @@ from multiprocessing import shared_memory
 import numpy as np
 
 _INDEX_DTYPE = np.int64
-_INDEX_BYTES = 16  # two int64s: [write_idx, read_idx]
+_INDEX_BYTES = 24  # three int64s: [write_idx, read_idx, dropped]
 
 
 class SharedRingBuffer:
@@ -71,7 +71,7 @@ class SharedRingBuffer:
         self._owner = owner
         # Numpy views over the shared blocks - no copy.
         self._data = np.ndarray((self.capacity,), dtype=self.dtype, buffer=data_shm.buf)
-        self._idx = np.ndarray((2,), dtype=_INDEX_DTYPE, buffer=index_shm.buf)
+        self._idx = np.ndarray((3,), dtype=_INDEX_DTYPE, buffer=index_shm.buf)
 
     # ------------------------------------------------------------------ ctors
 
@@ -90,7 +90,7 @@ class SharedRingBuffer:
             size=_INDEX_BYTES,
         )
         # Initialise both indices to 0 in the shared block.
-        np.ndarray((2,), dtype=_INDEX_DTYPE, buffer=index_shm.buf)[:] = 0
+        np.ndarray((3,), dtype=_INDEX_DTYPE, buffer=index_shm.buf)[:] = 0
         return cls(name, capacity, dtype, data_shm, index_shm, owner=True)
 
     @classmethod
@@ -127,6 +127,10 @@ class SharedRingBuffer:
             n = arr.size
 
         write_idx = int(self._idx[0])
+        unread = max(0, write_idx - int(self._idx[1]))
+        overwritten = max(0, unread + n - self.capacity)
+        if overwritten:
+            self._idx[2] = int(self._idx[2]) + overwritten
         start = write_idx % self.capacity
         end = start + n
         if end <= self.capacity:
@@ -177,11 +181,17 @@ class SharedRingBuffer:
         """Set both write and read indices to zero (drops all queued data)."""
         self._idx[0] = 0
         self._idx[1] = 0
+        self._idx[2] = 0
 
     def pending(self) -> int:
         """Number of samples waiting to be read (capped at capacity)."""
         n = int(self._idx[0]) - int(self._idx[1])
         return max(0, min(n, self.capacity))
+
+    @property
+    def dropped(self) -> int:
+        """Total samples overwritten before the consumer observed them."""
+        return max(0, int(self._idx[2]))
 
     # ------------------------------------------------------------------ teardown
 

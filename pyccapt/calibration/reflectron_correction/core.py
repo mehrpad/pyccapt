@@ -237,13 +237,19 @@ def correct_detector_coordinates(
     if detx.shape != dety.shape:
         raise ValueError("detx and dety must have the same shape")
 
-    query_points = np.column_stack([detx, dety])
+    finite_mask = np.isfinite(detx) & np.isfinite(dety)
+    corrected_detx = np.full(detx.shape, np.nan, dtype=float)
+    corrected_dety = np.full(dety.shape, np.nan, dtype=float)
+    if not finite_mask.any():
+        return corrected_detx, corrected_dety
+
+    query_points = np.column_stack([detx[finite_mask], dety[finite_mask]])
     detector_vertices = mesh.detector_vertices
     grid_vertices = mesh.grid_vertices
     triangles = np.asarray(mesh.triangles, dtype=int)
 
     tri_finder = _triangle_finder(mesh)
-    triangle_number = np.asarray(tri_finder(detx, dety), dtype=int)
+    triangle_number = np.asarray(tri_finder(detx[finite_mask], dety[finite_mask]), dtype=int)
     outside_mask = triangle_number < 0
     if np.any(outside_mask):
         nearest_tree = _nearest_vertex_tree(mesh)
@@ -261,8 +267,8 @@ def correct_detector_coordinates(
         bary = _barycentric_coordinates(detector_vertices[vertex_ids], query_points[point_mask])
         corrected_coords[point_mask] = bary @ grid_vertices[vertex_ids]
 
-    corrected_detx = corrected_coords[:, 0]
-    corrected_dety = corrected_coords[:, 1]
+    corrected_detx[finite_mask] = corrected_coords[:, 0]
+    corrected_dety[finite_mask] = corrected_coords[:, 1]
     return corrected_detx, corrected_dety
 
 
@@ -331,7 +337,10 @@ def correct_epos_file(
 
 def _detector_histogram(data: pd.DataFrame, bins: int = 256) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     detx_mm, dety_mm, _ = _extract_detector_mm(data)
-    histogram, x_edges, y_edges = np.histogram2d(detx_mm, dety_mm, bins=int(bins))
+    finite = np.isfinite(detx_mm) & np.isfinite(dety_mm)
+    if not finite.any():
+        raise ValueError("Detector map has no finite coordinate pairs")
+    histogram, x_edges, y_edges = np.histogram2d(detx_mm[finite], dety_mm[finite], bins=int(bins))
     return histogram.T, x_edges, y_edges
 
 
@@ -428,6 +437,7 @@ def correct_epos_streaming(
     h5_output_path.parent.mkdir(parents=True, exist_ok=True)
 
     rows_written = 0
+    empty_schema = None
     with leap_tools.read_epos_lazy(epos_path) as epos_table:
         total_rows = epos_table.n_rows
         # Warm the trifinder once so we don't pay the matplotlib build cost
@@ -436,6 +446,8 @@ def correct_epos_streaming(
         with pd.HDFStore(str(h5_output_path), mode="w") as store:
             for chunk in ccapt_tools.epos_lazy_to_ccapt_chunks(epos_table, chunk_size=chunk_size):
                 if len(chunk) == 0:
+                    if empty_schema is None:
+                        empty_schema = apply_reflectron_correction_to_ccapt(chunk, mesh)
                     continue
                 corrected_chunk = apply_reflectron_correction_to_ccapt(chunk, mesh)
                 # ``format='table'`` lets pandas append along the row axis and
@@ -450,6 +462,16 @@ def correct_epos_streaming(
                 rows_written += len(chunk)
                 if progress_callback is not None:
                     progress_callback(rows_written, total_rows)
+            if rows_written == 0:
+                # Empty / truncated .epos: append(format='table') never creates
+                # the key for a 0-row frame, so persist the schema frame
+                # explicitly or pd.read_hdf(path, key='df') raises KeyError.
+                if empty_schema is None:
+                    empty_schema = pd.DataFrame()
+                try:
+                    store.put("df", empty_schema, format="table")
+                except (ValueError, TypeError):
+                    store.put("df", empty_schema, format="fixed")
 
     return {"h5": str(h5_output_path), "rows": rows_written}
 

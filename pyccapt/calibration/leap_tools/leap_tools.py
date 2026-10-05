@@ -652,9 +652,16 @@ def volvis(pos, size=2, alpha=1):
         # Extract colors from the 'colour' column
         colours = np.asarray(list(pos['colour'].apply(cols.hex2color)))
     else:
-        # Calculate brightness based on Da values
-        Dapc = pos['m/n (Da)'].values / pos['m/n (Da)'].max()
-        colours = np.array(zip(Dapc, Dapc, Dapc))
+        # Calculate brightness based on Da values. ``np.array(zip(...))`` is a
+        # Python-2-ism: in Py3 zip() is an iterator, so np.array() wraps it in a
+        # 0-d object array (vispy then renders garbage / errors). Use
+        # column_stack for a real (N, 3) array, and pick the mass column the way
+        # label_ions does instead of hardcoding 'm/n (Da)'.
+        mass_col = next((c for c in ('m/n (Da)', 'mc (Da)', 'Da') if c in pos.columns), None)
+        if mass_col is None:
+            raise KeyError("volvis: no mass column found (expected 'm/n (Da)', 'mc (Da)', or 'Da')")
+        Dapc = pos[mass_col].values / pos[mass_col].max()
+        colours = np.column_stack([Dapc, Dapc, Dapc])
 
     # Adjust colors based on transparency (alpha value)
     if alpha != 1:

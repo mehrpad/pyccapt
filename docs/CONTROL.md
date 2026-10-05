@@ -16,6 +16,33 @@ The control module is responsible for:
 
 Calibration and reconstruction are implemented in `pyccapt.calibration`.
 
+Select **Setup Parameters → TOML Plan** to load and edit a reusable experiment
+queue, or use **TextBox** for a single run. The main window opens at 760 × 670.
+The **Advanced settings** label and button sit below the target Detection Rate
+input on the left and open the detection/control settings and pulse-voltage
+limits in one dialog. A separator below the Run Statistics detection rate
+precedes Electrode and Flat Test. A second line separates these buttons from the
+bordered Auto Alignment box containing both voltage fields and Automatic Alignment.
+Start sits above Stop in a separate group immediately above the bottom
+full-width separator.
+
+Automatic sample positioning completes each Z or XY move after its commanded
+axes reach tolerance and settle, with all axes stopped and within the calibrated
+bounds. The main status bar shows remaining µm, tolerance and the reason for
+waiting; controller faults and detailed movement timeouts also appear in the
+GUI log under `pyccapt/files/logs/gui/`.
+The initial transfer journal, including settling and errors, is copied into each
+dataset as `meta_data/alignment_transfer.jsonl`. Failed pre-start transfers retain
+their journal under `data/alignment_sequences/`. Stage search checks the saved
+position and 16 broad probes derived from the ±50 µm range, checking repeatable
+rate contrast and dense hitmap regions. A second pass within ±15 µm precedes
+fine XY within ±5 µm. Targets are inset by 0.2 µm. Failed searches return to
+saved Z/XY and retry at +100 V within the configured voltage/time limits.
+Fine Z approach follows stable XY centring and circular-fit
+validation and is limited to 20 µm total from saved Z.
+See [Experiment Plans](experiment_plans.rst)
+for file format, units, sample-position mapping and step-by-step instructions.
+
 ## Runtime Architecture
 
 The application runs as multiple processes, typically including:
@@ -80,6 +107,7 @@ Two log files are written for every experiment:
 | File | Location | Content |
 |------|-----------|---------|
 | GUI session log | `<project_root>/files/logs/gui/gui_<YYYY-MM-DD>.log` | All processes, all experiments for that day |
+| Final control-state snapshot | `<exp_folder>/meta_data/control_states.json` | Owner states, command outcomes, evidence, faults and freshness at completion |
 | Per-experiment log | `<exp_folder>/meta_data/apt.log` | Parameters, device state, stop reason |
 
 When an experiment ends abnormally, search both files for `ERROR`, `CRITICAL`, `Traceback`, or `hdf_creator`.
@@ -176,16 +204,86 @@ For legacy experiments that predate `apt_*` chunk flushing, the recovery falls b
 
 ## GUI Overview
 
-![Main GUI](../pyccapt/files/readme_images/main_gui.png)
+![Main GUI](../pyccapt/files/readme_images/main_gui.jpg)
 
 The main window is the experiment entry point. Long error messages now use a smaller wrapped font so port and device warnings remain readable inside the GUI instead of being clipped.
 
 Sub-GUI views:
 
-- Gates: ![Gates GUI](../pyccapt/files/readme_images/gates_gui.png)
-- Pumps/Vacuum: ![Pumps GUI](../pyccapt/files/readme_images/pumps_gui.png)
-- Cameras: ![Cameras GUI](../pyccapt/files/readme_images/cameras_gui.png)
-- Laser: ![Laser GUI](../pyccapt/files/readme_images/laser_gui.png)
-- Stage: ![Stage GUI](../pyccapt/files/readme_images/stage_gui.png)
-- Visualization: ![Visualization GUI](../pyccapt/files/readme_images/visualization_gui.png)
+Pumps/Vacuum uses bordered Cryo temperature, Venting and Buffer/LL/CLL vacuum
+groups. The six chamber/pre-vacuum LCDs are arranged in two rows of three and
+retain their 150 × 50 sizes and warning colours. The combined Pumps/Vacuum and
+Gates window opens at 1280 × 640; standalone Pumps/Vacuum opens at 840 × 720.
+The vacuum history plots, Gates controls, load-lock temperature controls and
+error messages remain available, with scrolling on smaller monitors.
+Venting is aligned beside the Gates diagram with a gap from the vacuum displays.
+The Buffer Chamber Pre label sizes to its full text and stays on one line.
+
+Stage Control opens at 880 × 220 with compact position readouts and speed fields,
+closely spaced Z jog buttons and smaller layout margins. All nine mm/µm/nm
+readouts, three speed presets, jog-distance labels, jog controls, Home, Reference,
+STOP and Override Access remain visible. Preset widths accommodate the configured
+speed table, and long status messages still wrap.
+
+Cameras defaults to 900 × 700 with smaller margins and a single row per exposure
+slider and value. All six overview/detail views, three camera connections,
+sample-position controls and five instrument monitors remain visible. The
+connection rows show the serial and slot on one line, with the full model and
+state in a tooltip. Bottom notifications disappear after five seconds; routine
+refreshes do not restore an expired message.
+
+Laser Control defaults to 980 × 650. Settings and three optical readouts sit above
+the alignment controls beside the response plot; stage position readouts, speed
+presets, jog buttons, Home, Reference, STOP and Override Access occupy the row
+below. Both plot tabs, alignment settings and CLI/NKTPBus controls remain
+available. Fields accommodate their maximum values and speed presets, and
+connection and alignment messages still wrap. Alignment fields have six pixels
+between rows and wider column gaps so they cannot overlap. Connection warnings
+and temporary errors share a two-line message area; scroll or hover to read
+longer messages. The window grows to fit the controls when fonts require it.
+The laser's observed state is displayed above the optical readouts. Setup/warming
+keeps Listen available and uses an orange Standby indicator; emission requires
+confirmed ready Standby. Echo-only setter replies are followed by state/settings
+readback, and failed or disallowed requests are cancelled rather than replayed.
+Listen is available immediately after Standby is requested. Listen and Standby
+remain available while Laser On is pending; pending Output Enable exposes an
+explicit Close Output request so cancellation cannot replay an enable toggle.
+The rate dropdown shows **Base rate (kHz)** from the device's factory table;
+the LCD shows **Output rate (kHz)**, equal to base rate divided by the readback
+divider. Base rate can change only in Listen or Standby (vendor manual p122).
+The divider can change while the laser is on (p123), outside an experiment.
+Both remain locked during acquisition. Internal telemetry stays in Hz.
+Optical power/energy dashes mean unavailable, rather than zero. Hover over
+either LCD for the diagnostic and raw monitor reply; changed failures are also
+recorded in the GUI log. Pulse energy cannot be calculated from frequency alone.
+
+All control owners publish a common state contract with separate connection,
+requested action, observed state, evidence, freshness and fault information.
+Correlated command results distinguish sent writes from confirmed readbacks;
+old command replies cannot complete a newer request. Existing device guards,
+button behavior and experiment/motion sequences remain unchanged. Live health
+messages include the records, and each dataset saves a final
+`meta_data/control_states.json` snapshot. Stage and laser alignment retain their
+full event journals. See the [state contract](state_mechanisms.rst)
+for owners, evidence limits, diagnostics and extension instructions.
+
+Safe-off records successful shutdown commands. Independent physical output
+confirmation depends on installed hardware feedback. The configured NI-DAQ
+E-stop/watchdog provides physical readings; the default `none` backend is
+explicitly represented with software evidence and `no_hardware_backend`.
+
+Visualization opens at 980 × 570. Hold DC, Set DC and the target voltage field
+share one row, and the LED with Running/Stopped text sits in the top-right
+corner alongside the FDM count. The four upper rectangular panels have
+identical pixel dimensions at every window size. Compact voltage controls and
+two rows of spectrum controls reduce the width needed without removing any
+plot, calibration view, status indicator or input. Smaller screens use scrolling.
+The screenshots below show captured instrument states and example data. Displayed
+values and available controls depend on connected hardware and experiment status.
+
+- Gates and Pumps/Vacuum: ![Gates and Pumps/Vacuum GUI](../pyccapt/files/readme_images/gate_pumps_gui.jpg)
+- Cameras: ![Cameras GUI](../pyccapt/files/readme_images/cameras_gui.jpg)
+- Laser: ![Laser GUI](../pyccapt/files/readme_images/laser_gui.jpg)
+- Stage: ![Stage GUI](../pyccapt/files/readme_images/stage_gui.jpg)
+- Visualization: ![Visualization GUI](../pyccapt/files/readme_images/visualization_gui.jpg)
 - Baking: ![Baking GUI](../pyccapt/files/readme_images/baking_gui.png)

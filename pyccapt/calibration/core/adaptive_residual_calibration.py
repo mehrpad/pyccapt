@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from scipy import sparse
 from scipy.interpolate import RegularGridInterpolator, UnivariateSpline
 from scipy.ndimage import gaussian_filter, gaussian_filter1d
 
@@ -446,10 +447,17 @@ def _fit_spatial_residual(calibration_array, template, x_det_cm, y_det_cm, grid_
                 left=template.log_floor,
                 right=template.log_floor,
             ).reshape(in_idx.size, n_shifts)
-            # Scatter-add per cell.
+            # Sum logp rows per cell. A sparse one-hot (n_cells x n_ions) matmul
+            # is bit-identical to np.add.at (an unbuffered, Python-level scatter)
+            # but ~3x faster here -- the dominant cost of the spatial residual
+            # stage. (A per-shift np.bincount loop is actually slower than
+            # np.add.at at the realistic n_shifts ~ 200-480, so it is not used.)
             cell_id_eligible = cell_id_of_ion[in_idx]
-            scores_per_cell = np.zeros((n_cells, n_shifts), dtype=float)
-            np.add.at(scores_per_cell, cell_id_eligible, logp)
+            onehot = sparse.csr_matrix(
+                (np.ones(in_idx.size), (cell_id_eligible, np.arange(in_idx.size))),
+                shape=(n_cells, in_idx.size),
+            )
+            scores_per_cell = onehot @ logp
             # Best shift per cell.
             best_shift_idx = np.argmax(scores_per_cell, axis=1)
             best_shifts = shift_grid[best_shift_idx]
@@ -771,9 +779,13 @@ def adaptive_residual_calibration(
             if verbose:
                 print(f"[Adaptive residual] round {round_index + 1}: accepted {best_temporal['label']}")
         elif verbose:
+            # Use temporal_specs (always defined) not temporal_candidates,
+            # which is only bound in the non-coarse-to-fine else branch above
+            # -- referencing it here raised UnboundLocalError on the
+            # recommended coarse_to_fine_top_k path when no candidate improved.
             print(
                 f"[Adaptive residual] round {round_index + 1}: no temporal candidate improved over baseline "
-                f"({len(temporal_candidates)} evaluated)"
+                f"({len(temporal_specs)} evaluated)"
             )
 
         spatial_quality = None
@@ -860,9 +872,11 @@ def adaptive_residual_calibration(
                 if verbose:
                     print(f"[Adaptive residual] round {round_index + 1}: accepted {best_spatial['label']}")
             elif verbose:
+                # spatial_specs is always defined; spatial_candidates is only
+                # bound in the non-coarse-to-fine else branch above.
                 print(
                     f"[Adaptive residual] round {round_index + 1}: no spatial candidate improved over baseline "
-                    f"({len(spatial_candidates)} evaluated)"
+                    f"({len(spatial_specs)} evaluated)"
                 )
 
         iteration_history.append(

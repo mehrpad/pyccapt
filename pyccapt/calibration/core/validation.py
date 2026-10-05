@@ -43,6 +43,8 @@ def ensure_positive(value: float, *, field_name: str, allow_zero: bool = False) 
     except (TypeError, ValueError) as exc:
         raise CalibrationInputError(f"{field_name!r} must be numeric, got {value!r}") from exc
 
+    if not np.isfinite(numeric):
+        raise CalibrationInputError(f"{field_name!r} must be finite, got {numeric}")
     if allow_zero and numeric < 0:
         raise CalibrationInputError(f"{field_name!r} must be >= 0, got {numeric}")
     if not allow_zero and numeric <= 0:

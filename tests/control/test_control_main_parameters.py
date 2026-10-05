@@ -24,24 +24,6 @@ def conf():
     }
 
 
-def test_parse_textline_experiments_requires_keys():
-    with pytest.raises(main_parameters.ParameterError):
-        main_parameters.parse_textline_experiments("{ex_user=a}")
-
-
-def test_parse_textline_experiments_parses_numeric_and_bool():
-    block = (
-        "{ex_user=u;ex_name=e;electrode=el;ex_time=10;max_ions=20;ex_freq=5;"
-        "vdc_min=100;vdc_max=500;vdc_steps_up=0.5;vdc_steps_down=0.7;control_algorithm=PID;"
-        "pulse_mode=Voltage;vp_min=200;vp_max=900;pulse_fraction=10;pulse_frequency=200;"
-        "detection_rate_init=1.5;hit_displayed=1000;email=a@b.com;counter_source=TDC;"
-        "criteria_time=true;criteria_ions=false;criteria_vdc=true}"
-    )
-    items = main_parameters.parse_textline_experiments(block)
-    assert items[0]["vdc_steps_up"] == 0.5
-    assert items[0]["criteria_time"] is True
-
-
 def test_apply_form_values_returns_corrections(conf):
     variables = SimpleNamespace()
     errors: list[str] = []

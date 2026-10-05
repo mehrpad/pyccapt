@@ -4,6 +4,20 @@ pyccapt.control.gui package
 Submodules
 ----------
 
+pyccapt.control.gui.main_layout module
+------------------------------------------------------------
+
+.. automodule:: pyccapt.control.gui.main_layout
+   :members:
+   :show-inheritance:
+
+pyccapt.control.gui.experiment_plan_gui module
+------------------------------------------------------------
+
+.. automodule:: pyccapt.control.gui.experiment_plan_gui
+   :members:
+   :show-inheritance:
+
 pyccapt.control.gui.gui\_baking module
 --------------------------------------
 

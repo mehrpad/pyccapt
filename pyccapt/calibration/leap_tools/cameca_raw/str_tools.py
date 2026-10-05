@@ -14,12 +14,19 @@ ELECTRON_CHARGE_C = 1.602176634e-19
 ATOMIC_MASS_UNIT_KG = 1.66053906660e-27
 
 
-def _int24_little_endian_to_int32(raw4: np.ndarray) -> np.ndarray:
-    values = raw4[:, 0].astype(np.int32)
-    values += raw4[:, 1].astype(np.int32) * 256
-    values += raw4[:, 2].astype(np.int32) * 65536
-    sign_mask = values >= 8388608
-    values[sign_mask] -= 16777216
+def _uint24_little_endian_to_uint32(raw4: np.ndarray) -> np.ndarray:
+    """Decode Cameca TLV payloads as unsigned 24-bit little-endian values.
+
+    The STR payload is a TDC/counter word, not a signed numerical field.  In
+    particular, valid delay-line timestamps can be greater than ``2**23``.
+    Decoding the complete file as signed 24-bit integers silently turned those
+    timestamps negative, corrupting positions and time-of-flight for affected
+    events.  Signed interpretation can be applied by a caller to a documented
+    tag in the future; the raw loader must preserve the wire value first.
+    """
+    values = raw4[:, 0].astype(np.uint32)
+    values += raw4[:, 1].astype(np.uint32) * np.uint32(256)
+    values += raw4[:, 2].astype(np.uint32) * np.uint32(65536)
     return values
 
 
@@ -28,11 +35,18 @@ def _parse_str_header(tag_vec: np.ndarray, value_vec: np.ndarray) -> dict[str, A
 
     metadata["version"] = int(value_vec[0] & 255) if len(tag_vec) and int(tag_vec[0]) == 0xA0 else 0
 
-    labels = []
+    label_bytes = []
     for tag in range(0x27, 0x2D):
         match = np.where(tag_vec[: min(50, len(tag_vec))] == tag)[0]
-        labels.append(chr(int(value_vec[match[0]])) if len(match) else "\x00")
-    metadata["detectorLabels"] = "".join(labels)
+        label_bytes.append(int(value_vec[match[0]]) if len(match) else 0)
+    # Some STR v2 files use these tags for non-text detector settings.  Do not
+    # report arbitrary non-printable words as channel labels.
+    metadata["detectorLabelBytes"] = label_bytes
+    metadata["detectorLabels"] = (
+        "".join(chr(value) for value in label_bytes)
+        if all(value == 0 or 32 <= value <= 126 for value in label_bytes)
+        else ""
+    )
 
     thresholds = []
     for tag in range(0x2D, 0x30):
@@ -116,11 +130,12 @@ def str_load(file_path: str | Path, verbose: bool = True) -> tuple[pd.DataFrame,
 
     raw4 = raw[: n_fields * 4].reshape(-1, 4)
     tag_vec = raw4[:, 3]
-    value_vec = _int24_little_endian_to_int32(raw4)
+    value_vec = _uint24_little_endian_to_uint32(raw4)
 
     metadata = _parse_str_header(tag_vec, value_vec)
     metadata["fileName"] = str(file_path)
     metadata["nFields"] = int(n_fields)
+    metadata["payloadEncoding"] = "unsigned 24-bit little-endian TLV payload"
 
     if verbose:
         print(f"  STR/HITS file: {file_path}")
@@ -130,7 +145,10 @@ def str_load(file_path: str | Path, verbose: bool = True) -> tuple[pd.DataFrame,
             f"({'STR v2' if metadata.get('version') == 2 else 'HITS v3' if metadata.get('version') == 3 else 'unknown'})"
         )
         labels = metadata.get("detectorLabels", "").replace("\x00", "?")
-        print(f"  Detector channel labels: {labels!r}")
+        if labels:
+            print(f"  Detector channel labels: {labels!r}")
+        else:
+            print("  Detector channel labels: unavailable (raw 0x27..0x2c words are not printable ASCII)")
         print(f"  Thresholds: {metadata.get('thresholds')}")
         print(f"  Walk corrections: {metadata.get('walkCorrections')}")
         if "voltage" in metadata:
@@ -165,42 +183,95 @@ def str_load(file_path: str | Path, verbose: bool = True) -> tuple[pd.DataFrame,
             print(f"  HITS v3: extracted {len(hits):,} initial events from header region only.")
         return hits, metadata
 
-    is_end = tag_vec == 0x18
-    event_id = np.cumsum(is_end)
-    event_id = event_id - is_end + 1
-    n_events = int(event_id.max())
+    # STR v2 places the TLV file header (which includes the version, channel
+    # thresholds and initial voltage) before the first 0x18 terminator.  That
+    # terminator is *not* an ion event.  Treating it as one silently shifted
+    # the raw stream by one row and made the first header value look like a
+    # detector ``quality``.  Keep the header metadata above, then decode only
+    # complete post-header records as acquisition events.
+    header_end = 0
+    if metadata.get("version") == 2 and len(tag_vec) and int(tag_vec[0]) == 0xA0:
+        ends = np.flatnonzero(tag_vec == 0x18)
+        if len(ends):
+            header_end = int(ends[0]) + 1
+    event_tags = tag_vec[header_end:]
+    event_values = value_vec[header_end:]
+    is_end = event_tags == 0x18
+    n_events = int(np.count_nonzero(is_end))
+    if n_events == 0:
+        return pd.DataFrame(), {
+            **metadata,
+            "nEvents": 0,
+            "nHeaderRecords": int(header_end),
+            "note": "No post-header STR v2 event terminators (0x18) were found.",
+        }
+    # The index of each field is its preceding completed-record count.  A
+    # record's terminator belongs to that record, hence the subtraction.
+    event_id = np.cumsum(is_end) - is_end
 
     channel_tags = np.array([0x01, 0x02, 0x03, 0x04, 0x21, 0x22], dtype=np.uint8)
     channel_data = np.full((n_events, 6), np.nan, dtype=float)
     for column_index, channel_tag in enumerate(channel_tags):
-        mask = tag_vec == channel_tag
+        mask = event_tags == channel_tag
         if not np.any(mask):
             continue
         indexes = np.where(mask)[0]
-        events = event_id[indexes] - 1
-        channel_data[events, column_index] = value_vec[indexes].astype(float)
+        events = event_id[indexes]
+        # Ignore incomplete trailing fields after the final 0x18 terminator.
+        # They are not a complete acquisition record and otherwise index one
+        # position beyond the event table.
+        complete = events < n_events
+        channel_data[events[complete], column_index] = event_values[indexes[complete]].astype(float)
 
-    quality_data = value_vec[is_end].astype(float)
-    if len(quality_data) < n_events:
-        quality_data = np.pad(quality_data, (0, n_events - len(quality_data)))
+    # 0x05/0x0B are raw firmware counters.  Their exact physical units are
+    # acquisition-mode dependent, so retain them verbatim rather than calling
+    # either one a calibrated pulse number.  They are the keys needed to
+    # correlate a raw STR stream with a co-recorded RHIT stream.
+    counter_data = np.full((n_events, 2), np.nan, dtype=float)
+    for counter_index, counter_tag in enumerate((0x05, 0x0B)):
+        mask = event_tags == counter_tag
+        if not np.any(mask):
+            continue
+        indexes = np.where(mask)[0]
+        events = event_id[indexes]
+        complete = events < n_events
+        counter_data[events[complete], counter_index] = event_values[indexes[complete]].astype(float)
+
+    # The semantic meaning of the 0x18 payload is undocumented here.  Retain
+    # the historical ``quality`` column for compatibility, but expose its raw
+    # name as well so calibration code cannot mistake it for physical TOF.
+    event_end_data = event_values[is_end].astype(float)
 
     has_any_channel = np.any(np.isfinite(channel_data), axis=1)
     channel_data = channel_data[has_any_channel]
-    quality_data = quality_data[has_any_channel]
+    counter_data = counter_data[has_any_channel]
+    event_end_data = event_end_data[has_any_channel]
+    raw_event_index = np.flatnonzero(has_any_channel) + 1
 
     hits = pd.DataFrame(
         {
             "ionIdx": np.arange(1, len(channel_data) + 1, dtype=int),
+            "strEventIdx": raw_event_index,
             "detxt1": channel_data[:, 0],
             "detxt2": channel_data[:, 1],
             "detyt1": channel_data[:, 2],
             "detyt2": channel_data[:, 3],
             "detwt1": channel_data[:, 4],
             "detwt2": channel_data[:, 5],
-            "quality": quality_data,
+            "pulseCounterA": counter_data[:, 0],
+            "pulseCounterB": counter_data[:, 1],
+            "eventEndValue": event_end_data,
+            "quality": event_end_data,
         }
     )
     metadata["nEvents"] = int(len(hits))
+    metadata["nEventRecords"] = int(n_events)
+    metadata["nHeaderRecords"] = int(header_end)
+    metadata["eventEndValueMeaning"] = "raw 0x18 payload; retained as quality for backward compatibility"
+    metadata["rawCounters"] = {
+        "pulseCounterA": "raw STR tag 0x05 (units not inferred)",
+        "pulseCounterB": "raw STR tag 0x0B (units not inferred)",
+    }
     metadata["nFull6Channels"] = int(np.sum(np.all(np.isfinite(channel_data), axis=1)))
     if verbose:
         per_channel_counts = {

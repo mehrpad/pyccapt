@@ -65,13 +65,21 @@ def _categorise_rows(dld_df: pd.DataFrame) -> dict[str, np.ndarray]:
     n = len(dld_df)
     out: dict[str, np.ndarray] = {}
     if DLTS_QUALITY_COL in dld_df.columns:
-        q = dld_df[DLTS_QUALITY_COL].astype(str).to_numpy()
+        q = np.asarray(dld_df[DLTS_QUALITY_COL].astype(str).to_numpy(), dtype=str)
     else:
-        q = np.array(["native"] * n)
+        q = np.array(["native"] * n, dtype=str)
+    # ``recovered_xy`` must cover BOTH the 4-stop xy recovery
+    # (``recovered_xy``) and the 3-of-4 time-sum recovery
+    # (``recovered_xy_3of4``); both are full (dlts==4) hits with finite
+    # x/y written by ``partial_recovery._build_recovered_row``. Match by
+    # prefix so the 3of4 variant is not silently dropped from every
+    # diagnostic. ``recovered_x`` shares the ``recovered_x`` prefix with
+    # ``recovered_xy*``, so exclude the xy matches from it.
+    recovered_xy = np.char.startswith(q, "recovered_xy")
     out["native"] = q == "native"
-    out["recovered_xy"] = q == "recovered_xy"
-    out["recovered_x"] = q == "recovered_x"
-    out["recovered_y"] = q == "recovered_y"
+    out["recovered_xy"] = recovered_xy
+    out["recovered_x"] = np.char.startswith(q, "recovered_x") & ~recovered_xy
+    out["recovered_y"] = np.char.startswith(q, "recovered_y")
     out["full"] = out["native"] | out["recovered_xy"]
     out["partial"] = out["recovered_x"] | out["recovered_y"]
     return out

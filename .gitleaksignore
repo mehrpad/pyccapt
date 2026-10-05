@@ -1,0 +1,9 @@
+# Reviewed 2026-10-05: these four historical notebook outputs contain identical
+# bundled anywidget JavaScript. The generic-api-key rule matches the internal
+# geometry assignment `this.keys,Sr=this.bboxes`, not a credential. Ignore only
+# these exact commit/file/rule/line fingerprints; continue scanning notebooks
+# and all other history normally.
+5abea0ceac1291deae8aab96b42e78216ccdaa60:pyccapt/calibration/tutorials/jupyter_files/data_processing.ipynb:generic-api-key:8084
+5abea0ceac1291deae8aab96b42e78216ccdaa60:pyccapt/calibration/tutorials/jupyter_files/data_processing.ipynb:generic-api-key:21910
+bded3f5577a3c478e54f32e5d77544f110cafef3:pyccapt/calibration/tutorials/jupyter_files/data_processing.ipynb:generic-api-key:9875
+bded3f5577a3c478e54f32e5d77544f110cafef3:pyccapt/calibration/tutorials/jupyter_files/data_processing.ipynb:generic-api-key:34597

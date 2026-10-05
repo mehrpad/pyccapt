@@ -1,5 +1,5 @@
-from copy import copy
 import re
+from copy import copy
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -16,16 +16,16 @@ from pyccapt.calibration.reconstructions.io_utils import (
     resolve_result_file,
     save_gif,
     save_matplotlib_figure,
-    save_plotly_animation,
     write_plotly_html,
     write_plotly_image,
 )
+from pyccapt.calibration.reconstructions.plot_bounds import evaporation_frame_boundaries, range_cube_from_mask, sample_mask
 from pyccapt.calibration.reconstructions.rotation_tools import (
     plotly_fig2array,
-    rotary_fig,
     rotate_z,
+    rotary_fig,
 )
-from pyccapt.calibration.reconstructions.plot_bounds import range_cube_from_mask, sample_mask
+from pyccapt.calibration.reconstructions.species_display import range_row_masks_and_unranged
 
 def _normalize_plotly_color(value):
     """Return a Plotly-safe color string from stored range colors."""
@@ -37,7 +37,6 @@ def _normalize_plotly_color(value):
 def _normalize_plotly_colors(values):
     """Normalize a sequence of stored range colors for Plotly usage."""
     return [_normalize_plotly_color(value) for value in values]
-
 def cart2pol(x, y):
     """
     Convert Cartesian coordinates to polar coordinates.
@@ -93,8 +92,13 @@ def atom_probe_recons_from_detector_Geiser_et_al(detx, dety, hv, flight_path_len
     # Convert detector coordinates to polar form
     rad, ang = cart2pol(detx * 1e1, dety * 1e1)
 
-    # Calculate effective detector area
-    det_area = (np.max(rad) ** 2) * np.pi
+    # Calculate effective detector area. Use nanmax so a partial-recovered hit
+    # (NaN detector x/y) does not poison det_area -- and hence dz -- for EVERY
+    # event. dz depends on the global det_area + hv, not on per-ion x/y, so
+    # valid rows reconstruct correctly while partials keep NaN x/y/z.
+    if not np.any(np.isfinite(rad)):
+        raise ValueError("No finite detector coordinates available for reconstruction")
+    det_area = (np.nanmax(rad) ** 2) * np.pi
 
     # Calculate radius evolution
     radius_evolution = hv / (kf * field_evap)
@@ -166,8 +170,17 @@ def atom_probe_recons_Bas_et_al(detx, dety, hv, flight_path_length, kf, det_eff,
     x = (detx * 1e-2) / m
     y = (dety * 1e-2) / m
 
-    rad, ang = cart2pol(detx * 1e-3, dety * 1e-3)
-    det_area = (np.max(rad) ** 2) * np.pi
+    # cm -> m is 1e-2 (matching x/y above). The previous 1e-3 made rad 10x too
+    # small and det_area 100x too small, inflating every dz (and the z extent)
+    # by ~100x relative to the lateral dimensions. VALIDATE z against a
+    # reference reconstruction before relying on this.
+    rad, ang = cart2pol(detx * 1e-2, dety * 1e-2)
+    # nanmax: a partial-recovered hit (NaN detector x/y) must not poison
+    # det_area for every event (dz depends on the global det_area + hv, not on
+    # per-ion x/y), so valid rows reconstruct while partials keep NaN x/y/z.
+    if not np.any(np.isfinite(rad)):
+        raise ValueError("No finite detector coordinates available for reconstruction")
+    det_area = (np.nanmax(rad) ** 2) * np.pi
 
     omega = 1e-9**3 / avg_dens
     dz = (omega * ((flight_path_length * 1e-3) ** 2) * (kf**2) * ((field_evap / 1e-9) ** 2)) / (
@@ -268,6 +281,10 @@ def reconstruction_plot(
     cluster_display_mode='overlay',
     cluster_opacity_override=None,
     element_alpha=None,
+    unranged_fraction=0.01,
+    unranged_alpha=None,
+    evaporation_gif_frames=120,
+    evaporation_gif_fps=15,
 ):
     """
     Generate a 3D plot for atom probe reconstruction data.
@@ -294,7 +311,9 @@ def reconstruction_plot(
         colab (bool): Whether to run in Google Colab.
         cluster_result: Optional Min-Max segmentation result for precipitate overlays.
         cluster_display_mode (str): `overlay` or `clusters-only`.
-        element_alpha (list[float] | None): Optional per-ion opacity overrides aligned with the range table order.
+        element_alpha (list[float] | None): Per-ion opacity overrides aligned with the range table.
+        evaporation_gif_frames (int): Number of cumulative frames in the evaporation GIF.
+        evaporation_gif_fps (int): Evaporation GIF playback frames per second.
     Returns:
         None
     """
@@ -341,25 +360,25 @@ def reconstruction_plot(
     else:
         print('element_percentage should be a list')
 
-    colors = _normalize_plotly_colors(variables.range_data['color'].tolist())
-    mc_low = variables.range_data['mc_low'].tolist()
-    mc_up = variables.range_data['mc_up'].tolist()
-    ion = variables.range_data['ion'].tolist()
-
-    if element_alpha is None:
-        element_alpha = [float(opacity)] * len(ion)
-    else:
-        element_alpha = [float(value) for value in element_alpha]
-        if len(element_alpha) < len(ion):
-            element_alpha.extend([float(opacity)] * (len(ion) - len(element_alpha)))
+    row_colors = _normalize_plotly_colors(variables.range_data['color'].tolist())
+    row_ions = variables.range_data['ion'].tolist()
+    row_masks, unranged_mask, ranged_indices = range_row_masks_and_unranged(variables.mc, variables.range_data)
+    element_percentage = list(element_percentage)
+    row_alpha = [float(opacity)] * len(row_ions) if element_alpha is None else [float(v) for v in element_alpha]
+    row_alpha.extend([float(opacity)] * (len(row_ions) - len(row_alpha)))
+    ion = [row_ions[i] for i in ranged_indices] + ['unranged']
+    colors = [row_colors[i] for i in ranged_indices] + ['#000000']
+    element_percentage = [element_percentage[i] for i in ranged_indices] + [float(unranged_fraction)]
+    element_alpha = [row_alpha[i] for i in ranged_indices]
+    element_alpha.append(float(opacity) if unranged_alpha is None else float(unranged_alpha))
+    source_masks = [row_masks[i] for i in ranged_indices] + [unranged_mask]
 
     cluster_only = cluster_result is not None and str(cluster_display_mode).strip().lower() == 'clusters-only'
     n_points = len(mask_f)
     sampled_masks = []
     if not cluster_only:
         for index, _element in enumerate(ion):
-            mask = (variables.mc > mc_low[index]) & (variables.mc < mc_up[index])
-            mask = mask & mask_f
+            mask = source_masks[index] & mask_f
             sampled_masks.append(sample_mask(mask, element_percentage[index], n_points))
 
     if sampled_masks:
@@ -476,33 +495,23 @@ def reconstruction_plot(
         from tqdm.auto import tqdm
 
         num_events = len(variables.dld_t)
-        event_index = np.arange(num_events)
         rng = np.random.default_rng(0)
-
-        # Cumulative growth: each frame shows every event evaporated up to q.
-        # The old code masked on variables.dld_t (time-of-flight per hit), which
-        # is not a wall-clock evaporation time and produced an incorrect subset.
-        chunk = 100_000
-        boundaries = list(range(chunk, num_events, chunk)) + [num_events]
+        boundaries = evaporation_frame_boundaries(num_events, evaporation_gif_frames)
+        gif_indices = []
+        for index, source_mask in enumerate(source_masks):
+            candidates = np.flatnonzero(source_mask & mask_f)
+            size = int(len(candidates) * float(element_percentage[index]))
+            sampled = rng.choice(candidates, size=size, replace=False) if size else candidates[:0]
+            gif_indices.append(np.sort(sampled))
         images = []
         for q in tqdm(boundaries, desc="Evaporation GIF frames", unit="frame"):
-            mask_evap = event_index < q
-
             frame_fig = go.Figure()
             frame_fig = draw_qube(frame_fig, range_cube)
             frame_fig.update_layout(showlegend=False)
             frame_fig.update_layout(margin=go.layout.Margin(l=0, r=0, b=0, t=0))
 
             for index, _elem in enumerate(ion):
-                mask = (variables.mc > mc_low[index]) & (variables.mc < mc_up[index])
-                mask = mask & mask_f & mask_evap
-                true_indices = np.where(mask)[0]
-                size = int(len(true_indices) * float(element_percentage[index]))
-                if size > 0:
-                    sampled = rng.choice(true_indices, size=size, replace=False)
-                else:
-                    sampled = true_indices[:0]
-
+                sampled = gif_indices[index][gif_indices[index] < q]
                 frame_fig.add_trace(
                     go.Scatter3d(
                         x=variables.x[sampled],
@@ -520,8 +529,7 @@ def reconstruction_plot(
                 )
             images.append(plotly_fig2array(frame_fig))
 
-        # Save the images as a GIF using imageio
-        save_gif(images, variables, f"rota_evaporation_{figname}.gif", fps=2)
+        save_gif(images, variables, f"rota_evaporation_{figname}.gif", fps=max(1, int(evaporation_gif_fps)))
 
     fig.update_layout(legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.99))
 
@@ -545,8 +553,15 @@ def reconstruction_plot(
         )
     )
 
-    # Show the plot in the Jupyter cell output
-    variables.plotly_3d_reconstruction = go.FigureWidget(fig)
+    # Show the plot in the Jupyter cell output.
+    # FigureWidget requires the optional `anywidget` package (Plotly >= 6). Fall
+    # back to a plain Figure if it is missing so the reconstruction still renders.
+    try:
+	    variables.plotly_3d_reconstruction = go.FigureWidget(fig)
+    except ImportError:
+	    print("anywidget not installed; falling back to go.Figure "
+	          "(install it with `pip install anywidget` for the interactive widget).")
+	    variables.plotly_3d_reconstruction = fig
 
     if not colab:
         pio.renderers.default = 'browser'
@@ -562,7 +577,9 @@ def reconstruction_plot(
                     eye=dict(x=4, y=4, z=4),  # Adjust the camera position for zooming
                 )
             )
-            write_plotly_html(fig, variables, f"{figname}_3d.html", include_mathjax='cdn')
+            write_plotly_html(
+                fig, variables, f"{figname}_3d.html", include_mathjax='cdn', add_camera_gif_exporter=True
+            )
             fig.update_layout(showlegend=False)
             layout = go.Layout(
                 margin=go.layout.Margin(
@@ -582,7 +599,9 @@ def reconstruction_plot(
             write_plotly_image(fig, variables, f"{figname}_3d_o.png", scale=3, image_format='png')
             write_plotly_image(fig, variables, f"{figname}_3d_o.svg", scale=3, image_format='svg')
             fig.update_layout(showlegend=True)
-            write_plotly_html(fig, variables, f"{figname}_3d_o.html", include_mathjax='cdn')
+            write_plotly_html(
+                fig, variables, f"{figname}_3d_o.html", include_mathjax='cdn', add_camera_gif_exporter=True
+            )
             fig.update_scenes(xaxis_visible=True, yaxis_visible=True, zaxis_visible=True)
         except Exception as e:
             print('The figure could not be saved')
@@ -1155,6 +1174,8 @@ def x_y_z_calculation_and_plot(
     save,
     colab=False,
     cluster_result=None,
+    unranged_fraction=0.01,
+    unranged_alpha=None,
 ):
     """
     Calculate the x, y, z coordinates of the atoms and plot them.
@@ -1223,4 +1244,6 @@ def x_y_z_calculation_and_plot(
         save,
         colab=colab,
         cluster_result=cluster_result,
+        unranged_fraction=unranged_fraction,
+        unranged_alpha=unranged_alpha,
     )

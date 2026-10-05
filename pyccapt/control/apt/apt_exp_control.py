@@ -1,6 +1,8 @@
-import copy
 import datetime
+import json
 import multiprocessing
+import queue
+import threading
 import time
 from pathlib import Path
 
@@ -9,19 +11,34 @@ import serial.tools.list_ports
 from simple_pid import PID
 
 from pyccapt.control.apt import apt_exp_control_func
+from pyccapt.control.core.control_state import Connection, Evidence, commanded, observe
+from pyccapt.control.core.state_diagnostics import save_control_states
 from pyccapt.control.apt.detector_runtime import (
     DetectorRuntime,
     join_detector_processes,
     start_detector_processes,
 )
 from pyccapt.control.apt.experiment_state import (
+    ExperimentState,
     append_main_loop_results,
     ensure_output_directories,
     prepare_experiment_output_paths,
     reset_runtime_variables,
+    set_experiment_state,
     validate_detector_data_lengths,
 )
 from pyccapt.control.core import experiment_statistics, hdf5_creator, loggi, runtime
+from pyccapt.control.nkt_photonics.readback import TELEMETRY_UNITS, fresh_snapshot, experiment_frequency_hz, json_safe
+from pyccapt.control.core.chunk_store import atomic_write_chunk_group
+from pyccapt.control.core.safety import audit_safety_override, build_safety_interlock
+from pyccapt.control.core.health import build_health_snapshot
+from pyccapt.control.core.contracts import (
+    CommandKind,
+    CompletionAck,
+    RunConfig,
+    StatusKind,
+    WorkerStatus,
+)
 from pyccapt.control.devices import initialize_devices, signal_generator
 
 
@@ -30,7 +47,20 @@ class APT_Exp_Control:
     This class is responsible for controlling the experiment.
     """
 
-    def __init__(self, variables, conf, experiment_finished_event, x_plot, y_plot, t_plot, main_v_dc_plot):
+    def __init__(
+        self,
+        variables,
+        conf,
+        experiment_finished_event,
+        x_plot,
+        y_plot,
+        t_plot,
+        main_v_dc_plot,
+        run_config: RunConfig | None = None,
+        command_queue=None,
+        status_queue=None,
+        completion_queue=None,
+    ):
 
         self.stop_event = None
         self.control_algorithm = None
@@ -41,11 +71,21 @@ class APT_Exp_Control:
         self.pulse_mode = None
         self.variables = variables
         self.conf = conf
+        self.run_config = run_config
+        if run_config is not None:
+            # Legacy device helpers still read the namespace. Apply the
+            # authoritative immutable snapshot before deriving any worker
+            # timing or limits from that namespace.
+            for key, value in run_config.as_dict().items():
+                setattr(self.variables, key, value)
         self.experiment_finished_event = experiment_finished_event
         self.x_plot = x_plot
         self.y_plot = y_plot
         self.t_plot = t_plot
         self.main_v_dc_plot = main_v_dc_plot
+        self.command_queue = command_queue
+        self.status_queue = status_queue
+        self.completion_queue = completion_queue
 
         self.com_port_v_p = None
         self.log_apt = None
@@ -84,19 +124,79 @@ class APT_Exp_Control:
         self.main_laser_x = []
         self.main_laser_y = []
         self.main_laser_z = []
+        self.main_laser_telemetry = {key: [] for key in TELEMETRY_UNITS}
+        self._last_laser_snapshot_time = None
         self.main_stage_x = []
         self.main_stage_y = []
         self.main_stage_z = []
 
         self.initialization_error = False
         self.detector_runtime = DetectorRuntime()
+        self._detector_joined = False
         self.access_override_enabled = False
         self.override_disabled_devices = set()
+        # Gate voltage ramp-up until the TDC has produced at least one
+        # event, so we don't blindly raise the specimen voltage while the
+        # detector isn't confirmed to be receiving anything yet.
+        self._tdc_first_event_seen = False
+        self._run_failure = ""
+        self._outputs_safe = True
+        self._cleanup_complete = False
+        self._completion_published = False
+        self.safety_interlock = None
+        self._last_health_publish = 0.0
+        self.alignment = None
+        self.laser_alignment_runtime = None
 
         # apt/* metadata chunk state: how many items have already been flushed
         # to disk and which chunk file ID to use next.
         self._apt_meta_flush_offset = 0
         self._apt_meta_chunk_id = 0
+
+    def _publish_status(self, kind: StatusKind, message: str = "", **metrics) -> None:
+        if self.status_queue is None:
+            return
+        status = WorkerStatus(
+            worker="experiment",
+            kind=kind,
+            state=str(getattr(self.variables, "experiment_state", "unknown")),
+            message=message,
+            metrics=metrics,
+        )
+        try:
+            self.status_queue.put_nowait(status)
+        except queue.Full:
+            # Low-rate status is lossy by design; acquisition data is not.
+            pass
+
+    def _drain_commands(self) -> None:
+        if self.command_queue is None:
+            return
+        while True:
+            try:
+                command = self.command_queue.get_nowait()
+            except queue.Empty:
+                return
+            kind = getattr(command, "kind", command)
+            if kind in {CommandKind.STOP, CommandKind.EMERGENCY_STOP, "stop", "emergency_stop"}:
+                self.variables.stop_flag = True
+                if kind in {CommandKind.EMERGENCY_STOP, "emergency_stop"}:
+                    self.variables.experiment_error = getattr(command, "reason", "Emergency stop requested")
+
+    def _publish_health_if_due(self) -> None:
+        now = time.monotonic()
+        if now - self._last_health_publish < 1.0:
+            return
+        self._last_health_publish = now
+        previous_heartbeat = float(getattr(self.variables, "experiment_heartbeat_monotonic", 0.0)) or now
+        self.variables.experiment_heartbeat_monotonic = now
+        snapshot = build_health_snapshot(
+            self.variables,
+            self.detector_runtime,
+            (self.x_plot, self.y_plot, self.t_plot, self.main_v_dc_plot),
+            heartbeat_monotonic=previous_heartbeat,
+        )
+        self._publish_status(StatusKind.HEALTH, snapshot.summary(), **snapshot.metrics())
 
     def _is_config_enabled(self, key):
         value = str(self.conf.get(key, "off")).strip().lower()
@@ -165,27 +265,37 @@ class APT_Exp_Control:
             self._apt_meta_chunk_id += 1
             cid = self._apt_meta_chunk_id
 
-            def _save(stem: str, seq, dtype) -> None:
-                arr = np.asarray(seq[start:end], dtype=dtype)
-                np.save(chunk_dir / f"{stem}_chunk_{cid}.npy", arr)
-
-            _save("apt_id",              time_counter,             np.uint64)
-            _save("apt_timestamps",      time_ex,                  np.float64)
-            _save("apt_num_events",      self.main_counter,        np.uint32)
-            _save("apt_num_raw_signals", self.main_raw_counter,    np.uint32)
-            _save("apt_temperature",     self.main_temperature,    np.float64)
-            _save("apt_vacuum",          self.main_chamber_vacuum, np.float64)
-            _save("apt_laser_x", self.main_laser_x, np.float64)
-            _save("apt_laser_y", self.main_laser_y, np.float64)
-            _save("apt_laser_z", self.main_laser_z, np.float64)
-            _save("apt_stage_x", self.main_stage_x, np.float64)
-            _save("apt_stage_y", self.main_stage_y, np.float64)
-            _save("apt_stage_z", self.main_stage_z, np.float64)
+            atomic_write_chunk_group(
+                chunk_dir,
+                stream_name="apt",
+                chunk_id=cid,
+                arrays={
+                    "apt_id": np.asarray(time_counter[start:end], dtype=np.uint64),
+                    "apt_timestamps": np.asarray(time_ex[start:end], dtype=np.float64),
+                    "apt_num_events": np.asarray(self.main_counter[start:end], dtype=np.uint32),
+                    "apt_num_raw_signals": np.asarray(self.main_raw_counter[start:end], dtype=np.uint32),
+                    "apt_temperature": np.asarray(self.main_temperature[start:end], dtype=np.float64),
+                    "apt_vacuum": np.asarray(self.main_chamber_vacuum[start:end], dtype=np.float64),
+                    "apt_laser_x": np.asarray(self.main_laser_x[start:end], dtype=np.float64),
+                    "apt_laser_y": np.asarray(self.main_laser_y[start:end], dtype=np.float64),
+                    "apt_laser_z": np.asarray(self.main_laser_z[start:end], dtype=np.float64),
+                    **{'apt_laser_' + key: np.asarray(values[start:end], dtype=np.float64)
+                       for key, values in self.main_laser_telemetry.items()},
+                    "apt_stage_x": np.asarray(self.main_stage_x[start:end], dtype=np.float64),
+                    "apt_stage_y": np.asarray(self.main_stage_y[start:end], dtype=np.float64),
+                    "apt_stage_z": np.asarray(self.main_stage_z[start:end], dtype=np.float64),
+                },
+            )
 
             self._apt_meta_flush_offset = end
         except Exception as exc:
             if self.log_apt is not None:
                 self.log_apt.warning("apt meta chunk flush failed (chunk %d): %s", self._apt_meta_chunk_id, exc)
+
+    def _pulse_supply_target(self, specimen_voltage):
+        """Convert the desired sample pulse into a pulser supply command."""
+        sample_pulse = specimen_voltage * (self.pulse_fraction / 100)
+        return sample_pulse / self.pulse_amp_per_supply_voltage
 
     def main_ex_loop(
         self,
@@ -214,6 +324,9 @@ class APT_Exp_Control:
         count_temp = self.total_ions - self.count_last
         self.count_last = self.total_ions
 
+        if not self._tdc_first_event_seen and (self.total_ions > 0 or count_temp > 0):
+            self._tdc_first_event_seen = True
+
         count_raw_signals_temp = self.total_raw_signals - self.count_raw_signals_last
         self.count_raw_signals_last = self.total_raw_signals
 
@@ -228,6 +341,15 @@ class APT_Exp_Control:
         self.main_laser_x.extend([self.variables.laser_pos_x])
         self.main_laser_y.extend([self.variables.laser_pos_y])
         self.main_laser_z.extend([self.variables.laser_pos_z])
+        laser_snapshot = fresh_snapshot(self.variables)
+        if laser_snapshot and laser_snapshot['monotonic'] != self._last_laser_snapshot_time:
+            meta_path = getattr(self.variables, 'path_meta', '')
+            if meta_path and Path(meta_path).is_dir():
+                with (Path(meta_path)/'laser_readings.jsonl').open('a', encoding='utf-8') as stream:
+                    stream.write(json.dumps(json_safe(laser_snapshot), allow_nan=False)+'\n')
+            self._last_laser_snapshot_time = laser_snapshot['monotonic']
+        for key, values in self.main_laser_telemetry.items():
+            values.append(float(laser_snapshot.get(key, 0. if key == 'valid' else float('nan'))))
         self.main_stage_x.extend([self.variables.stage_pos_x])
         self.main_stage_y.extend([self.variables.stage_pos_y])
         self.main_stage_z.extend([self.variables.stage_pos_z])
@@ -241,7 +363,15 @@ class APT_Exp_Control:
 
         error = self.detection_rate - self.variables.detection_rate_current
 
-        if self.control_algorithm == 'Proportional':
+        laser_step = (self.laser_alignment_runtime.voltage_step(self.specimen_voltage, self.sleep_time)
+                      if self.laser_alignment_runtime is not None else None)
+        if laser_step is not None:
+            voltage_step = laser_step
+        elif self.alignment is not None and self.alignment.phase != 'aligned':
+            # Alignment owns the voltage target during search. Do not call PID
+            # here: a held output must not accumulate an integral correction.
+            voltage_step = self.alignment.voltage_step(self.specimen_voltage, self.sleep_time)
+        elif self.control_algorithm == 'Proportional':
             # P with deadband + asymmetric up/down gains + hard cap.
             if error > 0.05:
                 voltage_step = error * self.variables.vdc_step_up * 10
@@ -303,8 +433,18 @@ class APT_Exp_Control:
         else:
             voltage_step = 0
 
+        # Don't ramp the voltage up before the detector has confirmed it is
+        # actually receiving events - only holds back increases, a
+        # decrease (voltage_step < 0) is still allowed to go through.
+        if (
+            voltage_step > 0
+            and not self._tdc_first_event_seen
+            and laser_step is None
+        ):
+            voltage_step = 0
+
         # update v_dc
-        if not self.variables.vdc_hold and voltage_step != 0:
+        if not self.variables.stop_flag and not self.variables.vdc_hold and voltage_step != 0:
             specimen_voltage_temp = min(self.specimen_voltage + voltage_step, self.vdc_max)
             if specimen_voltage_temp > self.vdc_min:
                 if specimen_voltage_temp != self.specimen_voltage:
@@ -314,25 +454,42 @@ class APT_Exp_Control:
                         self.variables.specimen_voltage = self.specimen_voltage
                         self.variables.specimen_voltage_plot = self.specimen_voltage
                     if self.pulse_mode in ['Voltage', 'VoltageLaser']:
-                        new_vp = self.specimen_voltage * (self.pulse_fraction / 100) / self.pulse_amp_per_supply_voltage
+                        new_vp = self._pulse_supply_target(self.specimen_voltage)
                         if self.pulse_voltage_max > new_vp > self.pulse_voltage_min and self._vp_active():
                             apt_exp_control_func.command_v_p(self.com_port_v_p, 'VOLT %s' % new_vp)
                             self.pulse_voltage = new_vp * self.pulse_amp_per_supply_voltage
                             self.variables.pulse_voltage = self.pulse_voltage
 
     def precise_sleep(self, seconds):
-        """
-        Precise sleep function.
+        """Yield the CPU while pacing the experiment loop."""
+        if seconds > 0:
+            time.sleep(seconds)
 
-        Args:
-            seconds:    Seconds to sleep
+    def _send_interim_email_async(self):
+        """Send a progress e-mail (off the control loop) every N ions.
 
-        Returns:
-            None
+        Asks the Visualization process for a fresh snapshot, gives it a
+        short window to write the PNGs, then sends the e-mail on a daemon
+        thread so SMTP latency never stalls the experiment loop.
         """
-        start_time = time.perf_counter()
-        while time.perf_counter() - start_time < seconds:
-            pass
+        # Request a fresh Visualization snapshot for the e-mail attachment.
+        self.variables.flag_save_email_screenshot = True
+
+        def _worker():
+            # Give the viz process up to ~3 s to write the snapshot. If it
+            # is closed / not running, the e-mail just falls back to the
+            # most recent existing snapshot (or none).
+            for _ in range(30):
+                if not self.variables.flag_save_email_screenshot:
+                    break
+                time.sleep(0.1)
+            try:
+                apt_exp_control_func.send_info_email(self.log_apt, self.variables, self.conf, interim=True)
+                self.log_apt.info('Interim e-mail sent at %s ions', self.variables.total_ions)
+            except Exception:
+                self.log_apt.exception('Interim e-mail notification failed')
+
+        threading.Thread(target=_worker, name='interim-email', daemon=True).start()
 
     def _build_pid(self):
         """(Re)create the PID controller from the current config gains."""
@@ -367,6 +524,90 @@ class APT_Exp_Control:
             self.pid = None
 
     def run_experiment(self):
+        """Run one experiment with a safety envelope covering every phase."""
+        self._control_state_snapshot_directory = None
+        set_experiment_state(self.variables, ExperimentState.INITIALIZING)
+        self._publish_status(StatusKind.STATE, "Experiment initializing")
+        self.variables.hardware_safe = True
+        failure_error = ""
+        try:
+            self._run_experiment_impl()
+        except BaseException as exc:
+            failure_error = f"{exc.__class__.__name__}: {exc}"
+            self.variables.experiment_error = failure_error
+            current = ExperimentState(self.variables.experiment_state)
+            if current in {ExperimentState.INITIALIZING, ExperimentState.RUNNING}:
+                set_experiment_state(self.variables, ExperimentState.STOPPING, failure_error)
+            if self.log_apt is not None:
+                self.log_apt.exception("Experiment failed")
+            else:
+                print(f"Experiment failed: {exc.__class__.__name__}: {exc}")
+        finally:
+            failure_error = failure_error or self._run_failure
+            try:
+                self.clear_up()
+            except Exception as exc:
+                cleanup_error = f"Cleanup failed: {exc.__class__.__name__}: {exc}"
+                failure_error = f"{failure_error}; {cleanup_error}".strip("; ")
+                self.variables.experiment_error = failure_error
+                if self.log_apt is not None:
+                    self.log_apt.exception("Experiment cleanup failed")
+
+            current = ExperimentState(self.variables.experiment_state)
+            if bool(self.variables.hardware_safe) and current in {
+                ExperimentState.INITIALIZING,
+                ExperimentState.RUNNING,
+                ExperimentState.STOPPING,
+            }:
+                set_experiment_state(self.variables, ExperimentState.SAFE_OFF, failure_error)
+                current = ExperimentState.SAFE_OFF
+            if current == ExperimentState.SAFE_OFF:
+                set_experiment_state(self.variables, ExperimentState.FINALIZING, failure_error)
+                current = ExperimentState.FINALIZING
+            if failure_error:
+                set_experiment_state(self.variables, ExperimentState.FAILED, failure_error)
+            elif current != ExperimentState.FAILED:
+                set_experiment_state(self.variables, ExperimentState.COMPLETE)
+            save_control_states(self.variables, getattr(self, "_control_state_snapshot_directory", None))
+            # State/flags are authoritative and must be visible before wake-up.
+            self.variables.flag_end_experiment = True
+            self._completion_published = True
+            acknowledgement = CompletionAck(
+                state=self.variables.experiment_state,
+                hardware_safe=bool(self.variables.hardware_safe),
+                error=str(self.variables.experiment_error),
+            )
+            if self.completion_queue is not None:
+                # A stale acknowledgement must never deadlock a later run.
+                # The GUI normally drains this single-slot queue; replacement
+                # here is the final guard if it was closed or paused.
+                try:
+                    self.completion_queue.put_nowait(acknowledgement)
+                except queue.Full:
+                    try:
+                        self.completion_queue.get_nowait()
+                    except queue.Empty:
+                        pass
+                    try:
+                        self.completion_queue.put(acknowledgement, timeout=0.2)
+                    except queue.Full:
+                        if self.log_apt is not None:
+                            self.log_apt.error("Completion acknowledgement queue remained full")
+            self._publish_status(
+                StatusKind.STATE,
+                "Experiment finished",
+                hardware_safe=acknowledgement.hardware_safe,
+            )
+            self.experiment_finished_event.set()
+
+    def _request_detector_stop(self):
+        """Signal every detector backend; inactive backends ignore the flags."""
+        self.variables.stop_flag = True
+        self.variables.flag_stop_tdc = True
+        if self.stop_event is not None:
+            self.stop_event.set()
+
+    def _run_experiment_impl(self):
         """
         Run the main experiment.
 
@@ -376,6 +617,8 @@ class APT_Exp_Control:
         Returns:
             None
         """
+        if self.variables.electrode_out:
+            raise RuntimeError("Electrode is out; experiment start is blocked")
         self.variables.flag_visualization_start = True
         self.pulse_mode = self.variables.pulse_mode
         self.control_algorithm = self.variables.control_algorithm
@@ -394,11 +637,26 @@ class APT_Exp_Control:
         # Create folder to save the data
         try:
             ensure_output_directories(data_path, path_meta)
+            self._control_state_snapshot_directory = path_meta
+            from pyccapt.control.core.experiment_plan import write_plan_snapshot
+            write_plan_snapshot(path_meta, getattr(self.variables, 'experiment_plan_snapshot', {}))
+            from pyccapt.control.core.alignment_diagnostics import copy_transfer_journal
+            copy_transfer_journal(self.variables, path_meta)
         except Exception as exc:
             print('Can not create the directory for saving the data')
             print(exc)
             self.variables.stop_flag = True
             self.initialization_error = True
+
+        from pyccapt.control.apt.laser_alignment_runtime import LaserAlignmentRuntime
+        self.laser_alignment_runtime = LaserAlignmentRuntime(self)
+        with commanded(self.variables, "safety_interlock", "exp", "initialize"):
+            self.safety_interlock = build_safety_interlock(self.conf)
+        physical_safe = bool(self.safety_interlock.is_safe())
+        self.variables.physical_estop_ok = physical_safe
+        self._publish_interlock_state(physical_safe)
+        if not physical_safe:
+            raise RuntimeError("Physical E-stop/interlock is open; experiment start is blocked")
 
         if self._is_config_enabled('tdc') and not self.initialization_error and not self._is_override_disabled("tdc"):
             self.variables.flag_tdc_failure = False
@@ -407,6 +665,9 @@ class APT_Exp_Control:
             self.variables.flag_finished_tdc = True
 
         self.log_apt = loggi.logger_creator('apt', self.variables, 'apt.log', path=self.variables.log_path)
+        if self.variables.automatic_alignment_enabled:
+            from pyccapt.control.apt.automatic_alignment import AutomaticAlignment
+            self.alignment = AutomaticAlignment(self.variables, self.conf)
         # Record the inputs that produced this experiment so the apt.log file
         # is self-contained for later debugging / forensics.
         try:
@@ -426,6 +687,12 @@ class APT_Exp_Control:
                 self.log_apt.warning(
                     'Super-user override active. Disabled devices: %s', sorted(self.override_disabled_devices)
                 )
+                audit_safety_override(
+                    path_meta,
+                    operator=str(getattr(self.variables, "user_name", "unknown")),
+                    disabled_devices=self.override_disabled_devices,
+                    reason=str(getattr(self.variables, "override_reason", "GUI super-user override")),
+                )
             loggi.log_configuration_snapshot(self.log_apt, self.conf, self.variables)
         except Exception:
             self.log_apt.debug('Could not log experiment context', exc_info=True)
@@ -438,6 +705,8 @@ class APT_Exp_Control:
             self.initialization_error = apt_exp_control_func.initialization_signal_generator(self.variables, self.log_apt)
             if not self.initialization_error:
                 self.initialization_signal_generator = True
+                self._outputs_safe = False
+                self.variables.hardware_safe = False
 
         if self._is_config_enabled('v_dc') and not self._is_override_disabled("v_dc") and not self.initialization_error:
             try:
@@ -451,7 +720,8 @@ class APT_Exp_Control:
             except Exception as e:
                 print('Can not open the COM port for V_dc')
                 print(e)
-                self.initialization_v_dc = True
+                self.initialization_v_dc = False
+                self.initialization_error = True
             if not self.initialization_error:
                 self.initialization_error = apt_exp_control_func.initialization_v_dc(
                     self.com_port_v_dc, self.log_apt, self.variables
@@ -470,7 +740,8 @@ class APT_Exp_Control:
             except Exception as e:
                 print('Can not open the COM port for V_p')
                 print(e)
-                self.initialization_v_p = True
+                self.initialization_v_p = False
+                self.initialization_error = True
             if not self.initialization_error:
                 self.initialization_error = apt_exp_control_func.initialization_v_p(
                     self.com_port_v_p, self.log_apt, self.variables
@@ -494,15 +765,20 @@ class APT_Exp_Control:
 
         desired_rate = self.variables.ex_freq  # Hz
         desired_period = 1.0 / desired_rate  # seconds
-        self.pulse_frequency = self.variables.pulse_frequency * 1000
+        self.pulse_frequency = experiment_frequency_hz(self.variables)
         self.counts_target = self.pulse_frequency * self.variables.detection_rate / 100
+        self.pulse_fraction = self.variables.pulse_fraction
+        self.pulse_amp_per_supply_voltage = self.variables.pulse_amp_per_supply_voltage
 
         # Turn on the v_dc and v_p
         if not self.initialization_error:
             if self.pulse_mode in ['Voltage', 'VoltageLaser']:
                 if self._vp_active():
-                    apt_exp_control_func.command_v_p(self.com_port_v_p, 'OUTPut ON')
-                    vol = self.variables.v_p_min / self.variables.pulse_amp_per_supply_voltage
+                    with commanded(self.variables, "pulse_supply", "exp", "output_on"):
+                        apt_exp_control_func.command_v_p(self.com_port_v_p, 'OUTPut ON')
+                    self._outputs_safe = False
+                    self.variables.hardware_safe = False
+                    vol = self.variables.v_p_min / self.pulse_amp_per_supply_voltage
                     cmd = 'VOLT %s' % vol
                     apt_exp_control_func.command_v_p(self.com_port_v_p, cmd)
                     time.sleep(0.1)
@@ -513,11 +789,12 @@ class APT_Exp_Control:
                         f"{initialize_devices.bcolors.ENDC}"
                     )
             if self._vdc_active():
-                apt_exp_control_func.command_v_dc(self.com_port_v_dc, "F1")
+                with commanded(self.variables, "dc_supply", "exp", "output_on"):
+                    apt_exp_control_func.command_v_dc(self.com_port_v_dc, "F1")
+                self._outputs_safe = False
+                self.variables.hardware_safe = False
                 time.sleep(0.1)
 
-        self.pulse_fraction = self.variables.pulse_fraction
-        self.pulse_amp_per_supply_voltage = self.variables.pulse_amp_per_supply_voltage
         self.specimen_voltage = self.variables.specimen_voltage
         if self.pulse_mode in ['Voltage', 'VoltageLaser']:
             self.pulse_voltage = self.variables.pulse_voltage
@@ -546,29 +823,49 @@ class APT_Exp_Control:
 
         self.ex_freq = self.variables.ex_freq
 
-        # Wait for 8 second to all devices get ready specially tdc
-        time.sleep(8)
+        # The no-event deadline starts when the outputs are enabled. Poll the
+        # detector immediately; a fixed startup sleep would consume it.
+        last_event_at = time.monotonic()
+        last_event_count = int(self.variables.total_ions)
         self.log_apt.info('Experiment is started')
+        set_experiment_state(self.variables, ExperimentState.RUNNING)
+        self._publish_status(StatusKind.STATE, "Experiment running")
         # Main loop of experiment
         remaining_time_list = []
-        total_ions_tmp = 0
-        index_tdc_failure = 0
         last_pulse_mode = self.pulse_mode
         flag_change_pulse_mode = False
         pulse_frequency_tmp = self.pulse_frequency
+        # Interim-email bookkeeping: send a progress e-mail every
+        # email_interval_events ions while the GUI checkbox is ticked. The
+        # interval itself is read live from the GUI field inside the loop.
+        self._last_email_ions = 0
         if self.initialization_error:
-            pass
+            self._run_failure = 'Experiment device initialization failed.'
         else:
             while True:
+                self._drain_commands()
+                self._publish_health_if_due()
+                self.safety_interlock.kick_watchdog()
+                self.variables.physical_estop_ok = bool(self.safety_interlock.is_safe())
+                self._publish_interlock_state(self.variables.physical_estop_ok)
+                if not self.variables.physical_estop_ok:
+                    self.variables.experiment_error = "Physical E-stop/interlock opened during acquisition"
+                    self._run_failure = self.variables.experiment_error
+                    self._request_detector_stop()
+                    break
                 start_time = time.perf_counter()
                 self.vdc_max = self.variables.vdc_max
                 self.vdc_min = self.variables.vdc_min
-                self.pulse_frequency = self.variables.pulse_frequency * 1000
+                if self.pulse_mode == 'Laser' and not fresh_snapshot(self.variables).get('valid'):
+                    self._run_failure = 'Laser readback lost or stale; check Laser Control.'
+                    self._request_detector_stop()
+                    break
+                self.pulse_frequency = experiment_frequency_hz(self.variables)
                 if self.pulse_mode in ['Voltage', 'VoltageLaser']:
                     self.pulse_voltage_min = self.variables.v_p_min / self.pulse_amp_per_supply_voltage
                     self.pulse_voltage_max = self.variables.v_p_max / self.pulse_amp_per_supply_voltage
                 if pulse_frequency_tmp != self.pulse_frequency:
-                    self.pulse_frequency = self.variables.pulse_frequency * 1000
+                    self.pulse_frequency = experiment_frequency_hz(self.variables)
                     pulse_frequency_tmp = self.pulse_frequency
                     self.counts_target = self.pulse_frequency * self.detection_rate / 100
                     if self.pulse_mode in ['Voltage', 'VoltageLaser'] and self._signal_generator_active():
@@ -584,18 +881,33 @@ class APT_Exp_Control:
 
                 self.total_ions = self.variables.total_ions
                 self.total_raw_signals = self.variables.total_raw_signals
-                # TDC failure detection should only run for an active TDC
-                # process and only after the detector has produced at least
-                # one event. Early zero-ion ramp-up is physically valid.
-                detector_running = self.variables.counter_source == 'TDC' and self.detector_runtime.tdc_process is not None
-                has_seen_tdc_events = self.total_ions > 0 or total_ions_tmp > 0
-                if detector_running and has_seen_tdc_events and total_ions_tmp == self.total_ions and not self.variables.vdc_hold:
-                    index_tdc_failure += 1
-                    if index_tdc_failure > 200:
-                        self.variables.flag_tdc_failure = True
-                else:
-                    index_tdc_failure = 0
-                    total_ions_tmp = copy.deepcopy(self.total_ions)
+                now = time.monotonic()
+                if self.total_ions > last_event_count:
+                    last_event_count = self.total_ions
+                    last_event_at = now
+                elif now - last_event_at >= 10.0:
+                    self._run_failure = "No event for 10 seconds; check detector and TDC status."
+                    self.log_apt.error(self._run_failure)
+                    self._request_detector_stop()
+                    break
+                if self.variables.flat_test_active:
+                    self.variables.flat_test_peak_rate = max(
+                        self.variables.flat_test_peak_rate,
+                        float(self.variables.detection_rate_current),
+                    )
+                # Interim progress e-mail every email_interval_events ions
+                # (only while the GUI checkbox is ticked and a recipient is
+                # set). The interval is read live from the GUI field. Sent on
+                # a background thread so SMTP latency never stalls the loop.
+                email_interval_events = self.variables.email_interval_events
+                if (
+                    self.variables.criteria_email
+                    and email_interval_events > 0
+                    and len(self.variables.email) > 3
+                    and self.total_ions - self._last_email_ions >= email_interval_events
+                ):
+                    self._last_email_ions = self.total_ions
+                    self._send_interim_email_async()
 
                 if self.variables.vdc_hold:
                     self.pulse_mode = self.variables.pulse_mode
@@ -614,7 +926,8 @@ class APT_Exp_Control:
                                     self.com_port_v_p, self.log_apt, self.variables
                                 )
                                 self.initialization_v_p = True
-                                apt_exp_control_func.command_v_p(self.com_port_v_p, 'OUTPut ON')
+                                with commanded(self.variables, "pulse_supply", "exp", "output_on"):
+                                    apt_exp_control_func.command_v_p(self.com_port_v_p, 'OUTPut ON')
                             except Exception as e:
                                 print('Can not open the COM port for V_p')
                                 print(e)
@@ -628,7 +941,7 @@ class APT_Exp_Control:
                         # set the v_dc and v_p
                         self.pulse_voltage_min = self.variables.v_p_min / self.pulse_amp_per_supply_voltage
                         self.pulse_voltage_max = self.variables.v_p_max / self.pulse_amp_per_supply_voltage
-                        start_vp = self.specimen_voltage * (self.pulse_fraction / 100) / self.pulse_amp_per_supply_voltage
+                        start_vp = self._pulse_supply_target(self.specimen_voltage)
                         if start_vp < self.pulse_voltage_min:
                             start_vp = self.variables.v_p_min / self.variables.pulse_amp_per_supply_voltage
 
@@ -656,9 +969,7 @@ class APT_Exp_Control:
                                     apt_exp_control_func.command_v_dc(self.com_port_v_dc, ">S0 %s" % self.specimen_voltage)
                                 time.sleep(0.3)
                             if self._vdc_active() and self.pulse_mode in ['Voltage', 'VoltageLaser']:
-                                new_vp = (
-                                    self.specimen_voltage * (self.pulse_fraction / 100) / self.pulse_amp_per_supply_voltage
-                                )
+                                new_vp = self._pulse_supply_target(self.specimen_voltage)
                                 if self.pulse_voltage_max > new_vp > self.pulse_voltage_min and self._vp_active():
                                     apt_exp_control_func.command_v_p(self.com_port_v_p, 'VOLT %s' % new_vp)
                                     self.pulse_voltage = new_vp * self.pulse_amp_per_supply_voltage
@@ -669,6 +980,25 @@ class APT_Exp_Control:
                             self.variables.flag_new_min_voltage = False
 
                 # main loop function
+                if self.alignment is not None:
+                    if self.variables.flag_tdc_failure:
+                        self._run_failure = 'Detector failure during automatic alignment.'
+                        self._request_detector_stop()
+                        break
+                    was_aligned = self.alignment.phase == 'aligned'
+                    self.alignment.tick(self.specimen_voltage, self.variables.detection_rate_current)
+                    if not was_aligned and self.alignment.phase == 'aligned':
+                        self._switch_control_algorithm(self.variables.control_algorithm)
+                        self.log_apt.info('Automatic alignment complete; stage position locked.')
+                    if self.alignment.phase == 'finished':
+                        self.log_apt.info('Automatic alignment ended: %s', self.alignment.reason)
+                        if self.alignment.outcome not in ('voltage_limit', 'cancelled'):
+                            self._run_failure = self.alignment.reason
+                        self._request_detector_stop()
+                        break
+                if self.laser_alignment_runtime is not None and not self.laser_alignment_runtime.tick():
+                    self._request_detector_stop()
+                    break
                 self.main_ex_loop()
 
                 # Counter of iteration
@@ -684,24 +1014,15 @@ class APT_Exp_Control:
 
                 if self.variables.stop_flag:
                     self.log_apt.info('Experiment is stopped')
-                    if self._is_config_enabled('tdc'):
-                        if self.variables.counter_source == 'TDC':
-                            self.variables.flag_stop_tdc = True
-                            if self.stop_event is not None:
-                                self.stop_event.set()  # Signal the tdc to stop
-                    time.sleep(1)
+                    self._request_detector_stop()
                     break
 
                 if self.variables.flag_tdc_failure:
+                    self._run_failure = str(self.variables.detector_error or 'Detector failure during acquisition.')
                     self.log_apt.info('Experiment is stopped because of tdc failure')
                     print(f"{initialize_devices.bcolors.FAIL}Experiment is stopped because of TDC failure")
                     print(f"{initialize_devices.bcolors.FAIL}Restart the TDC and start the experiment again")
-                    if self._is_config_enabled('tdc'):
-                        if self.variables.counter_source == 'TDC':
-                            self.variables.stop_flag = True  # Set the STOP flag
-                            if self.stop_event is not None:
-                                self.stop_event.set()  # Signal the tdc to stop
-                    time.sleep(1)
+                    self._request_detector_stop()
                     break
 
                 if self.variables.criteria_ions:
@@ -710,25 +1031,15 @@ class APT_Exp_Control:
                     # (both sides == 0) and stop the experiment immediately.
                     if self.variables.max_ions > 0 and self.variables.max_ions <= self.total_ions:
                         self.log_apt.info('Experiment is stopped because total number of ions is achieved')
-                        if self._is_config_enabled('tdc'):
-                            if self.variables.counter_source == 'TDC':
-                                self.variables.flag_stop_tdc = True
-                                self.variables.stop_flag = True  # Set the STOP flag
-                                if self.stop_event is not None:
-                                    self.stop_event.set()  # Signal the tdc to stop
-                        time.sleep(1)
+                        self._request_detector_stop()
                         break
                 if self.variables.criteria_vdc:
                     if self.vdc_max <= self.specimen_voltage:
+                        if self.variables.flat_test_active:
+                            self.variables.flat_test_reached_max = True
                         if flag_achieved_high_voltage > self.ex_freq * 10:
                             self.log_apt.info('Experiment is stopped because dc voltage Max. is achieved')
-                            if self._is_config_enabled('tdc'):
-                                if self.variables.counter_source == 'TDC':
-                                    self.variables.flag_stop_tdc = True
-                                    self.variables.stop_flag = True  # Set the STOP flag
-                                    if self.stop_event is not None:
-                                        self.stop_event.set()  # Signal the tdc to stop
-                            time.sleep(1)
+                            self._request_detector_stop()
                             break
                         flag_achieved_high_voltage += 1
                     else:
@@ -740,18 +1051,12 @@ class APT_Exp_Control:
                 if self.variables.criteria_time:
                     if self.variables.elapsed_time >= self.variables.ex_time:
                         self.log_apt.info('Experiment is stopped because experiment time Max. is achieved')
-                        if self._is_config_enabled('tdc'):
-                            if self.variables.counter_source == 'TDC':
-                                self.variables.flag_stop_tdc = True
-                                if self.stop_event is not None:
-                                    self.stop_event.set()  # Signal the tdc to stop
                         # Set the stop flag and exit the loop unconditionally —
                         # without this break the loop kept running for one more
                         # iteration before stop_flag handling caught it on the
                         # next pass, which is inconsistent with the criteria_ions
                         # and criteria_vdc branches above.
-                        self.variables.stop_flag = True
-                        time.sleep(1)
+                        self._request_detector_stop()
                         break
 
                 end_time = time.perf_counter()
@@ -770,8 +1075,19 @@ class APT_Exp_Control:
                 if steps % self._APT_META_CHUNK_SIZE == 0:
                     self._flush_apt_meta_chunks(time_counter, time_ex)
 
+        if self.laser_alignment_runtime is not None:
+            self.laser_alignment_runtime.stop()
         self.variables.start_flag = False  # Set the START flag
-        time.sleep(1)
+        if self.alignment is not None:
+            self.variables.alignment_cancel_motion = True
+            if not self.variables.alignment_outcome:
+                self.variables.alignment_outcome = 'fault' if self._run_failure else 'stop_condition'
+            self.alignment._event('experiment_stopping', outcome=self.variables.alignment_outcome,
+                                  error=self._run_failure or self.variables.experiment_error)
+        set_experiment_state(self.variables, ExperimentState.STOPPING)
+        self._request_detector_stop()
+        # Hardware safety must not wait for detector joins or HDF5/email work.
+        self.safe_outputs_off()
 
         self.log_apt.info('Experiment is finished')
         print(
@@ -809,7 +1125,12 @@ class APT_Exp_Control:
 
         try:
             join_detector_processes(self.conf, self.variables, self.detector_runtime)
+            self._detector_joined = True
+            for process in (self.detector_runtime.tdc_process, self.detector_runtime.hsd_process):
+                if process is not None and (process.is_alive() or process.exitcode not in (None, 0)):
+                    self._run_failure = 'Detector worker did not complete cleanly; automatic sequence stopped.'
         except Exception as exc:
+            self._run_failure = f'Detector shutdown failed: {exc}'
             print(
                 f"{initialize_devices.bcolors.WARNING}Warning: The TDC or HSD process cannot be terminated "
                 f"properly{initialize_devices.bcolors.ENDC}"
@@ -836,6 +1157,7 @@ class APT_Exp_Control:
         # This flag set to True to save the last screenshot of the experiment in the GUI visualization
         self.variables.last_screen_shot = True
         validate_detector_data_lengths(self.variables, self.conf, self.log_apt)
+        set_experiment_state(self.variables, ExperimentState.FINALIZING)
 
         # Sanity check: stage/laser positions are published by the Stage Control
         # and Laser Control GUIs' poll timers. If a SmarAct stage was not
@@ -875,7 +1197,7 @@ class APT_Exp_Control:
             # send an email
             if len(self.variables.email) > 3:
                 try:
-                    apt_exp_control_func.send_info_email(self.log_apt, self.variables)
+                    apt_exp_control_func.send_info_email(self.log_apt, self.variables, self.conf)
                 except Exception:
                     # Email failure must not block counter increment, HDF5
                     # closure, or any other finalization step.
@@ -891,18 +1213,69 @@ class APT_Exp_Control:
             print(message)
             if self.log_apt is not None:
                 self.log_apt.exception(message)
-        finally:
+            set_experiment_state(self.variables, ExperimentState.FAILED, message)
+
+    def _publish_interlock_state(self, permitted):
+        physical = str(self.conf.get("safety_interlock_backend", "none")).lower() == "nidaq"
+        observe(self.variables, "safety_interlock", "exp",
+                ("permitted" if permitted else "interlock_open") if physical else "no_hardware_backend",
+                evidence=Evidence.READBACK if physical else Evidence.SOFTWARE,
+                connection=Connection.CONNECTED if physical else Connection.DISABLED,
+                fault="" if permitted else "Physical interlock opened")
+
+    def safe_outputs_off(self):
+        """Best-effort, idempotent transition of every energized output to off."""
+        if getattr(self, 'alignment', None) is not None:
+            self.variables.alignment_cancel_motion = True
+        if getattr(self, 'laser_alignment_runtime', None) is not None:
             try:
-                # Clear up all the variables and deinitialize devices
-                self.clear_up()
+                self.laser_alignment_runtime.stop()
+            except Exception:
+                # Metadata / IPC failures must never prevent physical safe-off.
                 if self.log_apt is not None:
-                    self.log_apt.info('Variables and devices are cleared and deinitialized')
-            except Exception as exc:
-                print(f'Experiment cleanup failed: {exc.__class__.__name__}: {exc}')
-                if self.log_apt is not None:
-                    self.log_apt.exception('Experiment cleanup failed')
-            self.experiment_finished_event.set()
-            self.variables.flag_end_experiment = True
+                    self.log_apt.exception('Could not finalize laser alignment during safe-off')
+        if self._outputs_safe:
+            self.variables.hardware_safe = True
+            current = ExperimentState(self.variables.experiment_state)
+            if current in {
+                ExperimentState.INITIALIZING,
+                ExperimentState.RUNNING,
+                ExperimentState.STOPPING,
+            }:
+                set_experiment_state(self.variables, ExperimentState.SAFE_OFF)
+            return
+
+        errors = []
+        try:
+            if self._vdc_active():
+                with commanded(self.variables, "dc_supply", "exp", "output_off"):
+                    apt_exp_control_func.command_v_dc(self.com_port_v_dc, 'F0')
+        except Exception as exc:
+            errors.append(f"Vdc: {exc}")
+        try:
+            if self._vp_active():
+                apt_exp_control_func.command_v_p(self.com_port_v_p, 'VOLT 0')
+                with commanded(self.variables, "pulse_supply", "exp", "output_off"):
+                    apt_exp_control_func.command_v_p(self.com_port_v_p, 'OUTPut OFF')
+        except Exception as exc:
+            errors.append(f"pulser: {exc}")
+        try:
+            if self._signal_generator_active():
+                signal_generator.turn_off_signal_generator(self.variables)
+        except Exception as exc:
+            errors.append(f"signal generator: {exc}")
+
+        self._outputs_safe = not errors
+        self.variables.hardware_safe = self._outputs_safe
+        if errors:
+            message = "Hardware safe-off incomplete: " + "; ".join(errors)
+            if self.log_apt is not None:
+                self.log_apt.error(message)
+            raise RuntimeError(message)
+        # Safe-off is a lifecycle milestone, not a recovery from failure.
+        # Preserve the original failure and its diagnostic through cleanup.
+        if self.variables.experiment_state != ExperimentState.FAILED.value:
+            set_experiment_state(self.variables, ExperimentState.SAFE_OFF)
 
     def clear_up(self):
         """
@@ -918,33 +1291,39 @@ class APT_Exp_Control:
             None
         """
 
-        self.log_apt.info('Starting cleanup')
+        if self._cleanup_complete:
+            return
+        if self.log_apt is not None:
+            self.log_apt.info('Starting cleanup')
+
+        safe_off_error = None
+        try:
+            self.safe_outputs_off()
+        except Exception as exc:
+            # Still close handles and reset shared buffers; report the safety
+            # failure after the remaining cleanup has had a chance to run.
+            safe_off_error = exc
+
+        # An exception before the normal finalization path must also stop the
+        # detector before buffers can be reused by another sample.
+        detector_cleanup_error = None
+        if not self._detector_joined:
+            try:
+                self._request_detector_stop()
+                join_detector_processes(self.conf, self.variables, self.detector_runtime)
+                self._detector_joined = True
+            except Exception as exc:
+                detector_cleanup_error = exc
 
         try:
             if self._vdc_active():
-                # Turn off the v_dc
-                apt_exp_control_func.command_v_dc(self.com_port_v_dc, 'F0')
                 self.com_port_v_dc.close()
         except Exception as e:
             print(e)
 
         try:
             if self._vp_active():
-                # Turn off the v_p
-                apt_exp_control_func.command_v_p(self.com_port_v_p, 'VOLT 0')
-                apt_exp_control_func.command_v_p(self.com_port_v_p, 'OUTPut OFF')
                 self.com_port_v_p.close()
-        except Exception as e:
-            print(e)
-
-        try:
-            if self._signal_generator_active():
-                # Turn off the signal generator. Pass variables so the
-                # VISA resource address comes from config; the previous
-                # hardcoded serial number silently no-op'd on every
-                # rig except the original developer machine.
-                signal_generator.turn_off_signal_generator(self.variables)
-
         except Exception as e:
             print(e)
 
@@ -956,10 +1335,36 @@ class APT_Exp_Control:
             self.t_plot,
             self.main_v_dc_plot,
         )
-        self.log_apt.info('Cleanup is finished')
+        interlock_error = None
+        if self.safety_interlock is not None:
+            try:
+                self.safety_interlock.close()
+            except Exception as exc:
+                interlock_error = exc
+        self._cleanup_complete = True
+        if self.log_apt is not None:
+            self.log_apt.info('Cleanup is finished')
+        if safe_off_error is not None:
+            raise safe_off_error
+        if interlock_error is not None:
+            raise interlock_error
+        if detector_cleanup_error is not None:
+            raise detector_cleanup_error
 
 
-def run_experiment(variables, conf, experiment_finished_event, x_plot, y_plot, t_plot, main_v_dc_plot):
+def run_experiment(
+    variables,
+    conf,
+    experiment_finished_event,
+    x_plot,
+    y_plot,
+    t_plot,
+    main_v_dc_plot,
+    run_config=None,
+    command_queue=None,
+    status_queue=None,
+    completion_queue=None,
+):
     """
     Run the main experiment.
 
@@ -988,6 +1393,18 @@ def run_experiment(variables, conf, experiment_finished_event, x_plot, y_plot, t
         # Logging setup must never block the experiment from starting.
         print(f"[apt] Could not initialise application logging: {_exc}")
 
-    apt_exp_control = APT_Exp_Control(variables, conf, experiment_finished_event, x_plot, y_plot, t_plot, main_v_dc_plot)
+    apt_exp_control = APT_Exp_Control(
+        variables,
+        conf,
+        experiment_finished_event,
+        x_plot,
+        y_plot,
+        t_plot,
+        main_v_dc_plot,
+        run_config,
+        command_queue,
+        status_queue,
+        completion_queue,
+    )
 
     apt_exp_control.run_experiment()

@@ -23,6 +23,33 @@ import numpy as np
 from adjustText import adjust_text
 from matplotlib.ticker import FuncFormatter
 
+
+def _safe_tight_layout(fig=None):
+	"""``tight_layout`` that never crashes on a corrupted mathtext parser.
+
+	Computing the layout renders the tick labels, and log-scale labels are
+	mathtext (e.g. ``$\\mathdefault{10^{1}}$``). matplotlib's mathtext parser
+	only resets pyparsing's global packrat cache *after a successful* parse, so
+	a single earlier failed parse anywhere in the session can leave that cache
+	poisoned and make every later label raise ``ValueError`` ("Expected end of
+	text, found '$'"). Reset the cache and retry once; if it still fails, skip
+	the (purely cosmetic) layout rather than break the caller.
+	"""
+	target = fig if fig is not None else plt
+	try:
+		target.tight_layout()
+		return
+	except ValueError:
+		try:
+			from pyparsing import ParserElement
+			ParserElement.reset_cache()
+		except Exception:
+			pass
+		try:
+			target.tight_layout()
+		except Exception:
+			pass  # layout is cosmetic — never let it propagate
+
 from pyccapt.calibration.path_utils import save_figure
 from pyccapt.calibration.core.mc_plot_background_helpers import (
     calculate_noise as _calculate_noise,
@@ -140,6 +167,8 @@ class AptHistPlotter:
         fig_size=(9, 5),
         plot_show=True,
         fast=False,
+        x_lim=None,
+        y_headroom=0.4,
     ):
         """
         Plot the histogram of the mc or tof data.
@@ -157,6 +186,18 @@ class AptHistPlotter:
             fig_size (tuple): The size of the figure.
             plot_show (bool): Whether to show the plot.
             fast (bool): Use np.histogram + fill_between instead of ax.hist for speed.
+            x_lim: Paper-style x-axis bound. ``None`` (default) hugs the data
+                with a tiny pad so the spectrum doesn't trail off into a wide
+                empty band (matplotlib's autoscale otherwise pads out to the
+                next round tick, e.g. data ending at 100 Da but the axis drawn
+                to 120). Pass a single number to force a sharp upper bound
+                (e.g. ``100``) or a ``(min, max)`` pair to set both ends;
+                ``None`` inside the pair keeps the hugged value for that end.
+            y_headroom (float): Extra space above the tallest bin so the top
+                peak and its rotated label aren't cramped against the frame.
+                In log scale it's added in decades (0.4 ~= a factor of 2.5);
+                in linear scale it's a multiplier (0.4 -> top = max * 1.4).
+                Set to 0 to keep matplotlib's tight autoscale.
 
         Returns:
             tuple: A tuple of the y and x values of the histogram.
@@ -239,9 +280,45 @@ class AptHistPlotter:
             self.ax.set_ylabel('Event Counts')
         if grid:
             plt.grid(True, which='both', axis='both', linestyle='--', linewidth=0.4, alpha=0.3)
+
+        # --- Paper-style axis limits -----------------------------------------
+        # matplotlib's autoscale leaves two cosmetic problems for these spectra:
+        #   1) the x-axis pads out to the next round tick, leaving a wide empty
+        #      band on the right (data ending ~100 Da but the axis drawn to 120);
+        #   2) the y-axis top sits right at the tallest bin, so the peak and its
+        #      rotated label are cramped against the frame.
+        # Hug the x-axis to the data (or to a caller-supplied bound) and raise the
+        # y-axis top by ``y_headroom``. Do this before caching ``original_x_limits``
+        # so selector/background resets restore these tighter limits, not the
+        # autoscaled ones.
+        x_lo = float(self.x[0])
+        x_hi = float(self.x[-1])
+        if x_lim is not None:
+            if np.isscalar(x_lim):
+                x_hi = float(x_lim)
+            else:
+                lo_req, hi_req = x_lim
+                if lo_req is not None:
+                    x_lo = float(lo_req)
+                if hi_req is not None:
+                    x_hi = float(hi_req)
+            self.ax.set_xlim(x_lo, x_hi)
+        else:
+            x_pad = (x_hi - x_lo) * 0.01
+            self.ax.set_xlim(x_lo - x_pad, x_hi + x_pad)
+
+        y_max = float(np.max(self.y)) if self.y.size else 0.0
+        if y_max > 0 and y_headroom and y_headroom > 0:
+            cur_bottom, _ = self.ax.get_ylim()
+            if log:
+                # Add headroom in decades; keep matplotlib's autoscaled bottom.
+                self.ax.set_ylim(cur_bottom, 10 ** (np.log10(y_max) + y_headroom))
+            else:
+                self.ax.set_ylim(cur_bottom, y_max * (1.0 + y_headroom))
+
         if self.original_x_limits is None:
             self.original_x_limits = self.ax.get_xlim()  # Store the original x-axis limits
-        plt.tight_layout()
+        _safe_tight_layout(self.fig)
         if plot_show:
             plt.show()
         else:
@@ -464,10 +541,18 @@ class AptHistPlotter:
             elif mode == 'range':
                 y_offset = 0.0  # Adjust this value as needed
                 for i in range(len(self.variables.peaks_x_selected)):
-                    # Find the bin that contains the mc[i]
-                    bin_index = np.searchsorted(self.x, self.variables.peaks_x_selected[i])
+                    # Find the bin that CONTAINS the selected mass. self.x are
+                    # bin EDGES (len = len(self.y)+1), so use the same
+                    # ``searchsorted - 1`` + clamp convention as plot_range /
+                    # plot_peaks(mode='peaks') above. Without the -1 and the
+                    # clamp, a selection at/beyond the last edge raised
+                    # IndexError on self.y, and in-range selections read the
+                    # count of the bin to the RIGHT of the one containing it.
+                    sel = self.variables.peaks_x_selected[i]
+                    bin_index = int(np.searchsorted(self.x, sel)) - 1
+                    bin_index = min(max(bin_index, 0), len(self.y) - 1)
                     peak_height = self.y[bin_index] * (
-                        (self.variables.peaks_x_selected[i] - self.x[bin_index - 1]) / self.bin_width
+                        (sel - self.x[bin_index]) / self.bin_width
                     )
                     if self.plot_show:
                         self.peak_annotates.append(

@@ -1,5 +1,5 @@
 import sys
-import time
+from pyccapt.control.core.control_state import commanded, publish
 
 import nidaqmx
 from PyQt6 import QtCore, QtGui, QtWidgets
@@ -7,6 +7,7 @@ from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QPixmap
 
 # Local module and scripts
+from pyccapt.control.gui.responsive import make_window_responsive
 from pyccapt.control.core import runtime
 from pyccapt.control.gui import tooltips
 
@@ -22,7 +23,7 @@ class Ui_Gates(object):
         None
     """
 
-    def __init__(self, variables, conf, parent=None):
+    def __init__(self, variables, conf, parent=None, override_changed=None):
         """
         Load the GUI based on the configuration file.
 
@@ -30,6 +31,8 @@ class Ui_Gates(object):
             variables (object): Global variables
             conf (dict): Configuration file
             parent (object): Parent object
+            override_changed (callable): Optional callback receiving the
+                shared gate/pump override state.
 
         Returns:
             None
@@ -38,6 +41,7 @@ class Ui_Gates(object):
         self.variables = variables
         self.conf = conf
         self.parent = parent
+        self.override_changed = override_changed
 
     def setupUi(self, Gates):
         """
@@ -50,6 +54,7 @@ class Ui_Gates(object):
             None
         """
         Gates.setObjectName("Gates")
+        self.Gates = Gates
         Gates.resize(434, 426)
         self.gridLayout_3 = QtWidgets.QGridLayout(Gates)
         self.gridLayout_3.setObjectName("gridLayout_3")
@@ -58,6 +63,7 @@ class Ui_Gates(object):
         self.diagram = QtWidgets.QLabel(parent=Gates)
         self.diagram.setMinimumSize(QtCore.QSize(378, 246))
         self.diagram.setMaximumSize(QtCore.QSize(16777215, 16777215))
+        self.diagram.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.diagram.setStyleSheet(
             "QWidget{\n"
             "                                            border: 2px solid gray;\n"
@@ -72,12 +78,6 @@ class Ui_Gates(object):
         self.gridLayout.setObjectName("gridLayout")
         self.verticalLayout_3 = QtWidgets.QVBoxLayout()
         self.verticalLayout_3.setObjectName("verticalLayout_3")
-        self.led_cryo = QtWidgets.QLabel(parent=Gates)
-        self.led_cryo.setMinimumSize(QtCore.QSize(50, 50))
-        self.led_cryo.setMaximumSize(QtCore.QSize(50, 50))
-        self.led_cryo.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.led_cryo.setObjectName("led_cryo")
-        self.verticalLayout_3.addWidget(self.led_cryo, 0, QtCore.Qt.AlignmentFlag.AlignHCenter)
         self.cryo_switch = QtWidgets.QPushButton(parent=Gates)
         self.cryo_switch.setMinimumSize(QtCore.QSize(0, 25))
         self.cryo_switch.setStyleSheet(
@@ -88,15 +88,11 @@ class Ui_Gates(object):
         )
         self.cryo_switch.setObjectName("cryo_switch")
         self.verticalLayout_3.addWidget(self.cryo_switch)
-        self.gridLayout.addLayout(self.verticalLayout_3, 0, 2, 1, 1)
+        # Gate controls follow the physical chamber order from left to right:
+        # Cryo, Main Chamber, Load Lock. The diagram is the state indicator.
+        self.gridLayout.addLayout(self.verticalLayout_3, 0, 0, 1, 1)
         self.verticalLayout = QtWidgets.QVBoxLayout()
         self.verticalLayout.setObjectName("verticalLayout")
-        self.led_main_chamber = QtWidgets.QLabel(parent=Gates)
-        self.led_main_chamber.setMinimumSize(QtCore.QSize(50, 50))
-        self.led_main_chamber.setMaximumSize(QtCore.QSize(50, 50))
-        self.led_main_chamber.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.led_main_chamber.setObjectName("led_main_chamber")
-        self.verticalLayout.addWidget(self.led_main_chamber, 0, QtCore.Qt.AlignmentFlag.AlignHCenter)
         self.main_chamber_switch = QtWidgets.QPushButton(parent=Gates)
         self.main_chamber_switch.setMinimumSize(QtCore.QSize(0, 25))
         self.main_chamber_switch.setStyleSheet(
@@ -107,15 +103,9 @@ class Ui_Gates(object):
         )
         self.main_chamber_switch.setObjectName("main_chamber_switch")
         self.verticalLayout.addWidget(self.main_chamber_switch)
-        self.gridLayout.addLayout(self.verticalLayout, 0, 0, 1, 1)
+        self.gridLayout.addLayout(self.verticalLayout, 0, 1, 1, 1)
         self.verticalLayout_2 = QtWidgets.QVBoxLayout()
         self.verticalLayout_2.setObjectName("verticalLayout_2")
-        self.led_load_lock = QtWidgets.QLabel(parent=Gates)
-        self.led_load_lock.setMinimumSize(QtCore.QSize(50, 50))
-        self.led_load_lock.setMaximumSize(QtCore.QSize(50, 50))
-        self.led_load_lock.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.led_load_lock.setObjectName("led_load_lock")
-        self.verticalLayout_2.addWidget(self.led_load_lock, 0, QtCore.Qt.AlignmentFlag.AlignHCenter)
         self.load_lock_switch = QtWidgets.QPushButton(parent=Gates)
         self.load_lock_switch.setMinimumSize(QtCore.QSize(0, 25))
         self.load_lock_switch.setStyleSheet(
@@ -126,7 +116,7 @@ class Ui_Gates(object):
         )
         self.load_lock_switch.setObjectName("load_lock_switch")
         self.verticalLayout_2.addWidget(self.load_lock_switch)
-        self.gridLayout.addLayout(self.verticalLayout_2, 0, 1, 1, 1)
+        self.gridLayout.addLayout(self.verticalLayout_2, 0, 2, 1, 1)
         self.verticalLayout_4.addLayout(self.gridLayout)
         self.gridLayout_2 = QtWidgets.QGridLayout()
         self.gridLayout_2.setObjectName("gridLayout_2")
@@ -170,24 +160,20 @@ class Ui_Gates(object):
 
         self.retranslateUi(Gates)
         QtCore.QMetaObject.connectSlotsByName(Gates)
+        make_window_responsive(Gates)
         tooltips.apply_tooltips(self, tooltips.GATES_TOOLTIPS)
 
-        # Diagram and LEDs ##############
-        self.diagram_close_all = QPixmap('./files/close_all.png')
-        self.diagram_main_open = QPixmap('./files/main_open.png')
-        self.diagram_load_open = QPixmap('./files/load_open.png')
-        self.diagram_cryo_open = QPixmap('./files/cryo_open.png')
-        self.diagram_load_main_open = QPixmap('./files/load_main_open.png')
-        self.diagram_cryo_main_open = QPixmap('./files/cryo_main_open.png')
-        self.diagram_cryo_load_open = QPixmap('./files/cryo_load_open.png')
-        self.diagram_all_open = QPixmap('./files/cryo_load_main_open.png')
-        self.led_red = QPixmap('./files/led-red-on.png')
-        self.led_green = QPixmap('./files/green-led-on.png')
+        # Four pressure backgrounds x eight gate combinations cover all 32
+        # possible states without maintaining 32 near-identical bitmaps.
+        self._diagram_backgrounds = {
+            (False, False): self._load_gate_background('gates-v4-vacuum.png'),
+            (True, False): self._load_gate_background('gates-v4-cryo-vented.png'),
+            (False, True): self._load_gate_background('gates-v4-load-vented.png'),
+            (True, True): self._load_gate_background('gates-v4-both-vented.png'),
+        }
+        self._diagram_state = None
 
-        self.diagram.setPixmap(self.diagram_close_all)
-        self.led_main_chamber.setPixmap(self.led_red)
-        self.led_load_lock.setPixmap(self.led_red)
-        self.led_cryo.setPixmap(self.led_red)
+        self._refresh_gate_diagram(force=True)
 
         ###
         self.main_chamber_switch.clicked.connect(lambda: self.gates(1))
@@ -198,8 +184,137 @@ class Ui_Gates(object):
         # Create a QTimer to hide the warning message after 8 seconds
         self.timer = QTimer(self.parent)
         self.timer.timeout.connect(self.hideMessage)
+        self.diagram_timer = QTimer(self.parent)
+        self.diagram_timer.timeout.connect(self._refresh_gate_diagram)
+        self.diagram_timer.start(250)
 
         self.original_button_style = self.superuser.styleSheet()
+
+    def attach_load_lock_temperature_controls(self, pumps_ui):
+        """Place the Pumps UI's LL temperature controls below Override Access.
+
+        The widgets are moved, not duplicated, so their existing signal
+        connections and baking logic continue to be handled by ``pumps_ui``.
+        """
+        if hasattr(self, "load_lock_temperature_group"):
+            return
+
+        group = QtWidgets.QGroupBox("Load Lock temperature", parent=self.Gates)
+        group.setObjectName("load_lock_temperature_group")
+        group.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Maximum
+        )
+        group.setMaximumHeight(155)
+        group.setStyleSheet(
+            "QGroupBox{font-weight: bold; border: 1px solid rgb(145,145,145); "
+            "border-radius: 5px; margin-top: 8px; padding-top: 5px;}"
+            "QGroupBox::title{subcontrol-origin: margin; left: 8px; padding: 0 4px;}"
+        )
+        layout = QtWidgets.QGridLayout(group)
+        layout.setContentsMargins(8, 10, 8, 7)
+        layout.setHorizontalSpacing(8)
+        layout.setVerticalSpacing(5)
+
+        pumps_ui.temp_ll.setFixedSize(QtCore.QSize(150, 45))
+        pumps_ui.target_tempreature_ll.setFixedSize(QtCore.QSize(150, 25))
+        pumps_ui.set_temperature_ll.setFixedSize(QtCore.QSize(190, 25))
+        pumps_ui.ll_baking_time.setFixedSize(QtCore.QSize(150, 25))
+
+        layout.addWidget(pumps_ui.label_219, 0, 0)
+        layout.addWidget(pumps_ui.temp_ll, 0, 1)
+        layout.addWidget(pumps_ui.label_220, 1, 0)
+        layout.addWidget(pumps_ui.ll_baking_time, 1, 1)
+        layout.addWidget(pumps_ui.set_temperature_ll, 2, 0)
+        layout.addWidget(pumps_ui.target_tempreature_ll, 2, 1)
+        layout.setColumnStretch(0, 1)
+
+        self.load_lock_temperature_group = group
+        # Put the group immediately under Override Access. Move the status
+        # label below it so an empty status row cannot create a large gap.
+        self.gridLayout_2.addWidget(group, 1, 0, 1, 3)
+        self.gridLayout_2.addWidget(self.Error, 2, 0, 1, 3)
+
+    @staticmethod
+    def _load_gate_background(filename):
+        """Load one high-resolution pressure-state background."""
+        return QPixmap(str(runtime.project_path('files', filename)))
+
+    @staticmethod
+    def _draw_gate_status(painter, center, is_open, vertical_pipe=False):
+        """Draw an accessible valve symbol aligned with its connecting pipe."""
+        fill = QtGui.QColor('#159A38' if is_open else '#E31B23')
+        outline = QtGui.QColor('#0B6725' if is_open else '#991018')
+        painter.setBrush(fill)
+        painter.setPen(QtGui.QPen(outline, 6))
+        painter.drawEllipse(QtCore.QPointF(*center), 42, 42)
+
+        # The white stroke follows flow when open and blocks it when closed.
+        line_is_vertical = is_open if vertical_pipe else not is_open
+        painter.setPen(
+            QtGui.QPen(
+                QtGui.QColor('white'),
+                14,
+                QtCore.Qt.PenStyle.SolidLine,
+                QtCore.Qt.PenCapStyle.RoundCap,
+            )
+        )
+        x, y = center
+        if line_is_vertical:
+            painter.drawLine(QtCore.QPointF(x, y - 27), QtCore.QPointF(x, y + 27))
+        else:
+            painter.drawLine(QtCore.QPointF(x - 27, y), QtCore.QPointF(x + 27, y))
+
+    def _vent_state(self):
+        """Return ``(cryo_vented, load_vented)`` from shared pump state."""
+        cryo_vented = (
+            not bool(getattr(self.variables, 'flag_pump_cryo_load_lock', True))
+            or bool(getattr(self.variables, 'flag_vent_cryo_load_lock_partial', False))
+        )
+        load_vented = not bool(getattr(self.variables, 'flag_pump_load_lock', True))
+        return cryo_vented, load_vented
+
+    def _refresh_gate_access(self):
+        """Disable opening controls while either load lock is vented.
+
+        A button for an already-open gate stays enabled so the operator can
+        always close it. Override Access deliberately bypasses this lock.
+        """
+        vented = any(self._vent_state())
+        for button, gate_is_open in (
+            (self.main_chamber_switch, self.variables.flag_main_gate),
+            (self.load_lock_switch, self.variables.flag_load_gate),
+            (self.cryo_switch, self.variables.flag_cryo_gate),
+        ):
+            button.setEnabled(self.flag_super_user or not vented or bool(gate_is_open))
+
+    def _refresh_gate_diagram(self, force=False):
+        """Render the current three-gate/two-vent state (32 combinations)."""
+        cryo_vented, load_vented = self._vent_state()
+        self._refresh_gate_access()
+        state = (
+            bool(self.variables.flag_cryo_gate),
+            bool(self.variables.flag_main_gate),
+            bool(self.variables.flag_load_gate),
+            cryo_vented,
+            load_vented,
+        )
+        if not force and state == self._diagram_state:
+            return
+        self._diagram_state = state
+
+        pixmap = self._diagram_backgrounds[(cryo_vented, load_vented)].copy()
+        painter = QtGui.QPainter(pixmap)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        self._draw_gate_status(painter, (462, 735), state[0])
+        self._draw_gate_status(painter, (760, 439), state[1], vertical_pipe=True)
+        self._draw_gate_status(painter, (1056, 735), state[2])
+        painter.end()
+        self.diagram.setPixmap(pixmap.scaled(
+            378,
+            246,
+            QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+            QtCore.Qt.TransformationMode.SmoothTransformation,
+        ))
 
     def retranslateUi(self, Gates):
         """
@@ -215,11 +330,8 @@ class Ui_Gates(object):
         Gates.setWindowTitle(_translate("Ui_Gates", "PyCCAPT Gates Control"))
         Gates.setWindowIcon(QtGui.QIcon('./files/logo.png'))
         ###
-        self.led_cryo.setText(_translate("Gates", "Cryo"))
         self.cryo_switch.setText(_translate("Gates", "Cryo"))
-        self.led_main_chamber.setText(_translate("Gates", "Main"))
         self.main_chamber_switch.setText(_translate("Gates", "Main Chamber"))
-        self.led_load_lock.setText(_translate("Gates", "Load"))
         self.load_lock_switch.setText(_translate("Gates", "Load Lock"))
         self.superuser.setText(_translate("Gates", "Override Access"))
         self.Error.setText(_translate("Gates", "<html><head/><body><p><br/></p></body></html>"))
@@ -238,8 +350,8 @@ class Ui_Gates(object):
             warning = QtWidgets.QMessageBox(parent=self.superuser)
             warning.setIcon(QtWidgets.QMessageBox.Icon.Warning)
             warning.setWindowTitle("Confirm Access Override")
-            warning.setText("Gate override can bypass interlocks and may be dangerous.")
-            warning.setInformativeText("Only continue if you really want to override gate access.")
+            warning.setText("Gate and vacuum override can bypass safety interlocks.")
+            warning.setInformativeText("Only continue if you really want to override gate and vacuum access.")
             warning.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No)
             warning.setDefaultButton(QtWidgets.QMessageBox.StandardButton.No)
             if warning.exec() != QtWidgets.QMessageBox.StandardButton.Yes:
@@ -254,6 +366,73 @@ class Ui_Gates(object):
             self.superuser.setStyleSheet(self.original_button_style)
             self.error_message("!!! Override Access deactivated !!!")
             self.timer.start(8000)
+        if self.override_changed is not None:
+            self.override_changed(self.flag_super_user)
+        self._refresh_gate_access()
+
+    def _vacuum_ok_to_open(self, gate_label, sides):
+        """Confirm the vacuum is safe before opening a gate.
+
+        A gate connects two chambers; opening it equalises their pressure.
+        If either chamber is not pumped down to its safe threshold, opening
+        can spoil a good vacuum (or worse). This pops a confirmation dialog
+        naming the offending chamber(s) and lets the operator decide.
+
+        Args:
+            gate_label: Human-readable gate name for the dialog.
+            sides: list of ``(chamber_label, pressure, threshold)`` for the
+                two chambers the gate connects. ``pressure`` and
+                ``threshold`` are in mBar (lower = better vacuum).
+
+        Returns:
+            True if it is safe to proceed (every side is within its
+            threshold) or the operator confirmed the override; False if the
+            operator cancelled.
+        """
+        # No gauges -> no pressure data to validate against; don't block.
+        if self.conf.get('gauges', 'off') == 'off':
+            return True
+
+        unsafe = []
+        for label, pressure, threshold in sides:
+            try:
+                pressure = float(pressure)
+            except (TypeError, ValueError):
+                pressure = -1.0
+            if pressure <= 0:
+                # -1 = gauge read error, 0 = no reading yet -> cannot
+                # confirm the chamber is safe, so warn to be cautious.
+                unsafe.append(
+                    f"- {label}: pressure unknown (no valid gauge reading); "
+                    f"should be ≤ {threshold:.1e} mBar"
+                )
+            elif pressure > threshold:
+                unsafe.append(
+                    f"- {label}: {pressure:.2e} mBar "
+                    f"(should be ≤ {threshold:.1e} mBar)"
+                )
+
+        if not unsafe:
+            return True
+
+        parent = self.parent if isinstance(self.parent, QtWidgets.QWidget) else self.superuser
+        warning = QtWidgets.QMessageBox(parent=parent)
+        warning.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+        warning.setWindowTitle("Unsafe vacuum - confirm gate opening")
+        warning.setText(
+            f"The vacuum is NOT at a safe level to open the {gate_label}.\n"
+            "Opening it now may spoil the vacuum in the adjoining chamber."
+        )
+        warning.setInformativeText(
+            "The following chamber(s) are outside the safe range:\n"
+            + "\n".join(unsafe)
+            + "\n\nDo you still want to open the gate?"
+        )
+        warning.setStandardButtons(
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
+        )
+        warning.setDefaultButton(QtWidgets.QMessageBox.StandardButton.No)
+        return warning.exec() == QtWidgets.QMessageBox.StandardButton.Yes
 
     def gates(self, gate_num):
         """
@@ -287,10 +466,14 @@ class Ui_Gates(object):
             # several seconds of UI lockup. Schedule the low write via
             # QTimer.singleShot so the Qt event loop stays responsive.
             task = nidaqmx.Task()
+            resource = {0: "gate_main", 1: "gate_main", 2: "gate_load",
+                        3: "gate_load", 4: "gate_cryo", 5: "gate_cryo"}[num]
             try:
-                task.do_channels.add_do_chan(self.conf["COM_PORT_gates"] + 'line%s' % num)
-                task.start()
-                task.write([True])
+                with commanded(self.variables, resource, "main",
+                               "open" if num % 2 == 0 else "closed") as command:
+                    task.do_channels.add_do_chan(self.conf["COM_PORT_gates"] + 'line%s' % num)
+                    task.start()
+                    task.write([True])
             except Exception:
                 # Ensure the task is closed if the high-write blew up.
                 try:
@@ -302,6 +485,10 @@ class Ui_Gates(object):
             def _finish_gate_pulse():
                 try:
                     task.write([False])
+                except Exception as exc:
+                    publish(self.variables, resource, "main", "fault", fault=str(exc), fail_command=True,
+                            command_id=command.command_id if command is not None else None)
+                    raise
                 finally:
                     try:
                         task.close()
@@ -326,6 +513,36 @@ class Ui_Gates(object):
                 self.error_message("!!! Close the previous opened gate first !!!")
             self.timer.start(8000)
 
+        gate_is_open = {
+            1: bool(self.variables.flag_main_gate),
+            2: bool(self.variables.flag_load_gate),
+            3: bool(self.variables.flag_cryo_gate),
+        }.get(gate_num)
+        if gate_is_open is False and any(self._vent_state()) and not self.flag_super_user:
+            self.error_message(
+                "!!! Gate opening disabled while the LL or CLL is vented. "
+                "Use Override Access only if it is safe. !!!"
+            )
+            self.timer.start(8000)
+            self._refresh_gate_access()
+            return
+
+        # A safety interlock must never trap an open gate. Closing is always
+        # allowed, including while a load lock is vented or an experiment is
+        # running. Only the opening path below is interlocked.
+        if gate_is_open is True:
+            close_line = {1: 1, 2: 3, 3: 5}.get(gate_num)
+            if close_line is not None and self.conf["gates"] == "on":
+                switch_gate(close_line)
+            if gate_num == 1:
+                self.variables.flag_main_gate = False
+            elif gate_num == 2:
+                self.variables.flag_load_gate = False
+            elif gate_num == 3:
+                self.variables.flag_cryo_gate = False
+            self._refresh_gate_diagram(force=True)
+            return
+
         # Main gate
         if gate_num == 1:
             if (
@@ -337,14 +554,21 @@ class Ui_Gates(object):
                 )
             ) or self.flag_super_user:
                 if not self.variables.flag_main_gate:  # Open the main gate
+                    # Override Access explicitly bypasses the vacuum interlock.
+                    if not self.flag_super_user and not self._vacuum_ok_to_open(
+                        "main-chamber gate",
+                        [
+                            ("Main chamber", self.variables.vacuum_main, float(self.conf['vacuum_threshold_main'])),
+                            ("Buffer chamber", self.variables.vacuum_buffer, float(self.conf['vacuum_threshold_buffer'])),
+                        ],
+                    ):
+                        return  # operator cancelled - leave the gate closed
                     if self.conf["gates"] == "on":
                         switch_gate(0)
-                    self.led_main_chamber.setPixmap(self.led_green)
                     self.variables.flag_main_gate = True
                 elif self.variables.flag_main_gate:  # Close the main gate
                     if self.conf["gates"] == "on":
                         switch_gate(1)
-                    self.led_main_chamber.setPixmap(self.led_red)
                     self.variables.flag_main_gate = False
             else:
                 error_gate()
@@ -358,15 +582,21 @@ class Ui_Gates(object):
                     and self.variables.flag_pump_load_lock
                 )
             ) or self.flag_super_user:
-                if not self.variables.flag_load_gate:  # Open the main gate
+                if not self.variables.flag_load_gate:  # Open the load-lock gate
+                    if not self.flag_super_user and not self._vacuum_ok_to_open(
+                        "load-lock gate",
+                        [
+                            ("Load lock", self.variables.vacuum_load_lock, float(self.conf['vacuum_threshold_load_lock'])),
+                            ("Buffer chamber", self.variables.vacuum_buffer, float(self.conf['vacuum_threshold_buffer'])),
+                        ],
+                    ):
+                        return  # operator cancelled - leave the gate closed
                     if self.conf["gates"] == "on":
                         switch_gate(2)
-                    self.led_load_lock.setPixmap(self.led_green)
                     self.variables.flag_load_gate = True
                 elif self.variables.flag_load_gate:  # Close the main gate
                     if self.conf["gates"] == "on":
                         switch_gate(3)
-                    self.led_load_lock.setPixmap(self.led_red)
                     self.variables.flag_load_gate = False
             else:
                 error_gate()
@@ -380,15 +610,25 @@ class Ui_Gates(object):
                     and self.variables.flag_pump_load_lock
                 )
             ) or self.flag_super_user:
-                if not self.variables.flag_cryo_gate:  # Open the main gate
+                if not self.variables.flag_cryo_gate:  # Open the cryo gate
+                    if not self.flag_super_user and not self._vacuum_ok_to_open(
+                        "cryo gate",
+                        [
+                            (
+                                "Cryo load lock",
+                                self.variables.vacuum_cryo_load_lock,
+                                float(self.conf['vacuum_threshold_cryo_load_lock']),
+                            ),
+                            ("Buffer chamber", self.variables.vacuum_buffer, float(self.conf['vacuum_threshold_buffer'])),
+                        ],
+                    ):
+                        return  # operator cancelled - leave the gate closed
                     if self.conf["gates"] == "on":
                         switch_gate(4)
-                    self.led_cryo.setPixmap(self.led_green)
                     self.variables.flag_cryo_gate = True
                 elif self.variables.flag_cryo_gate:  # Close the main gate
                     if self.conf["gates"] == "on":
                         switch_gate(5)
-                    self.led_cryo.setPixmap(self.led_red)
                     self.variables.flag_cryo_gate = False
             else:
                 error_gate()
@@ -396,23 +636,7 @@ class Ui_Gates(object):
         else:
             print('The gate number is not correct')
 
-        # change the diagram and the LEDs
-        if self.variables.flag_main_gate and self.variables.flag_load_gate and self.variables.flag_cryo_gate:
-            self.diagram.setPixmap(self.diagram_all_open)
-        elif self.variables.flag_main_gate and self.variables.flag_load_gate and not self.variables.flag_cryo_gate:
-            self.diagram.setPixmap(self.diagram_load_main_open)
-        elif self.variables.flag_main_gate and not self.variables.flag_load_gate and self.variables.flag_cryo_gate:
-            self.diagram.setPixmap(self.diagram_cryo_main_open)
-        elif not self.variables.flag_main_gate and self.variables.flag_load_gate and self.variables.flag_cryo_gate:
-            self.diagram.setPixmap(self.diagram_cryo_load_open)
-        elif not self.variables.flag_main_gate and not self.variables.flag_load_gate and self.variables.flag_cryo_gate:
-            self.diagram.setPixmap(self.diagram_cryo_open)
-        elif not self.variables.flag_main_gate and self.variables.flag_load_gate and not self.variables.flag_cryo_gate:
-            self.diagram.setPixmap(self.diagram_load_open)
-        elif self.variables.flag_main_gate and not self.variables.flag_load_gate and not self.variables.flag_cryo_gate:
-            self.diagram.setPixmap(self.diagram_main_open)
-        else:
-            self.diagram.setPixmap(self.diagram_close_all)
+        self._refresh_gate_diagram()
 
     def error_message(self, message):
         """
@@ -430,6 +654,8 @@ class Ui_Gates(object):
                 "OXCART", "<html><head/><body><p><span style=\" color:#ff0000;\">" + message + "</span></p></body></html>"
             )
         )
+        # Auto-hide the warning after 8 seconds so every message clears itself
+        self.timer.start(8000)
 
     def hideMessage(self):
         """
@@ -459,8 +685,8 @@ class Ui_Gates(object):
         Returns:
             None
         """
-        # Add any additional cleanup code here
-        pass
+        self.timer.stop()
+        self.diagram_timer.stop()
 
 
 class GatesWindow(QtWidgets.QWidget):

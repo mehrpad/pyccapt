@@ -75,66 +75,79 @@ class DRS:
         self.drs_lib.Drs_delete_drs_ox(self.obj)
 
 
-def experiment_measure(variables):
+def experiment_measure(variables, x_plot=None, y_plot=None, t_plot=None, main_v_dc_plot=None, stop_event=None):
     """
     Continuously reads the DRS data and puts it into the queues.
 
     Args:
         variables: Variables object
     """
-    drs_ox = DRS(trigger=0, test=1, delay=0, sample_frequency=2)
+    drs_ox = None
+    try:
+        drs_ox = DRS(trigger=0, test=1, delay=0, sample_frequency=2)
 
-    while True:
-        # Stop check at the top so the user's Stop click does not
-        # always cost one extra acquisition.
-        if variables.flag_stop_tdc:
-            print('DRS loop is break in child process')
-            break
+        while True:
+            # Both the shared flag and backend event are supported so all
+            # detector implementations obey the same lifecycle contract.
+            if variables.flag_stop_tdc or variables.stop_flag or (stop_event is not None and stop_event.is_set()):
+                print('DRS loop is break in child process')
+                break
 
-        try:
-            returnVale = np.array(drs_ox.reader())
-            data = returnVale.reshape(8, 1024)
-        except Exception as exc:
-            # Don't kill the worker silently on a single bad read
-            # (USB hiccup, board reset, unexpected shape). Log and
-            # let the next iteration retry.
-            print(f"DRS read failed: {exc}")
-            time.sleep(0.1)
-            continue
+            try:
+                return_value = np.array(drs_ox.reader())
+                data = return_value.reshape(8, 1024)
+            except Exception as exc:
+                print(f"DRS read failed: {exc}")
+                time.sleep(0.1)
+                continue
 
-        ch0_time = data[0, :]
-        ch0_wave = data[1, :]
-        ch1_time = data[2, :]
-        ch1_wave = data[3, :]
-        ch2_time = data[4, :]
-        ch2_wave = data[5, :]
-        ch3_time = data[6, :]
-        ch3_wave = data[7, :]
+            ch0_time = data[0, :]
+            ch0_wave = data[1, :]
+            ch1_time = data[2, :]
+            ch1_wave = data[3, :]
+            ch2_time = data[4, :]
+            ch2_wave = data[5, :]
+            ch3_time = data[6, :]
+            ch3_wave = data[7, :]
 
-        variables.extend_to('ch0_time', ch0_time.tolist())
-        variables.extend_to('ch0_wave', ch0_wave.tolist())
-        variables.extend_to('ch1_time', ch1_time.tolist())
-        variables.extend_to('ch1_wave', ch1_wave.tolist())
-        variables.extend_to('ch2_time', ch2_time.tolist())
-        variables.extend_to('ch2_wave', ch2_wave.tolist())
-        variables.extend_to('ch3_time', ch3_time.tolist())
-        variables.extend_to('ch3_wave', ch3_wave.tolist())
+            variables.extend_to('ch0_time', ch0_time.tolist())
+            variables.extend_to('ch0_wave', ch0_wave.tolist())
+            variables.extend_to('ch1_time', ch1_time.tolist())
+            variables.extend_to('ch1_wave', ch1_wave.tolist())
+            variables.extend_to('ch2_time', ch2_time.tolist())
+            variables.extend_to('ch2_wave', ch2_wave.tolist())
+            variables.extend_to('ch3_time', ch3_time.tolist())
+            variables.extend_to('ch3_wave', ch3_wave.tolist())
 
         # One DC / pulse voltage reading per acquisition (per waveform),
         # not one per sample. The previous code tiled both to 1024 copies
         # which bloated the HDF5 by 1024x and only "worked" because every
         # downstream reader implicitly assumed N=1024 samples per event.
-        variables.extend_to('main_v_dc_drs', [float(variables.specimen_voltage)])
-        variables.extend_to('main_v_p_drs', [float(variables.pulse_voltage)])
+            variables.extend_to('main_v_dc_drs', [float(variables.specimen_voltage)])
+            variables.extend_to('main_v_p_drs', [float(variables.pulse_voltage)])
+            variables.total_raw_signals = int(variables.total_raw_signals) + 1
+            variables.total_ions = int(variables.total_ions) + 1
 
         # Plot stream: one scalar per acquisition, matching the new
         # per-event voltage shape. (x_plot/y_plot/t_plot still feed the
         # raw waveform time array as a placeholder — proper hit
         # reconstruction from the waves is a separate task.)
-        variables.extend_to('main_v_dc_plot', [float(variables.specimen_voltage)])
-        # we have to calculate x and y from the wave data here
-        variables.extend_to('x_plot', ch0_time.tolist())
-        variables.extend_to('y_plot', ch0_time.tolist())
-        variables.extend_to('t_plot', ch0_time.tolist())
-
-    drs_ox.delete_drs_ox()
+            if main_v_dc_plot is not None:
+                main_v_dc_plot.write([float(variables.specimen_voltage)])
+            if x_plot is not None:
+                x_plot.write(ch0_time)
+            if y_plot is not None:
+                y_plot.write(ch0_wave)
+            if t_plot is not None:
+                t_plot.write(ch0_time)
+    except Exception as exc:
+        variables.flag_tdc_failure = True
+        variables.detector_error = f"{exc.__class__.__name__}: {exc}"
+        print(f"DRS worker failed: {variables.detector_error}")
+    finally:
+        if drs_ox is not None:
+            try:
+                drs_ox.delete_drs_ox()
+            except Exception as exc:
+                print(f"DRS cleanup failed: {exc}")
+        variables.flag_finished_tdc = True

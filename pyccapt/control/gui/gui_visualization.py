@@ -1,4 +1,5 @@
 import sys
+from pyccapt.control.core.control_state import observe
 import time
 
 import numpy as np
@@ -9,12 +10,14 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import QTimer
 
 # Local module and scripts
+from pyccapt.control.gui.responsive import make_window_responsive
+from pyccapt.control.gui.visualization_layout import VisualizationLayoutMixin
 from pyccapt.control.core import live_calibration, runtime, tof2mc_simple
 from pyccapt.control.devices import initialize_devices
 from pyccapt.control.gui import tooltips
 
 
-class Ui_Visualization(object):
+class Ui_Visualization(VisualizationLayoutMixin):
     def __init__(self, variables, conf, x_plot, y_plot, t_plot, main_v_dc_plot):
         """
         Constructor for the Visualization UI class.
@@ -45,6 +48,13 @@ class Ui_Visualization(object):
         self.last_100_thousand_v = np.array([])
         self.last_100_thousand_det_x = np.array([])
         self.last_100_thousand_det_y = np.array([])
+        # Per-ion-aligned leftover from the ring-buffer drain, carried to
+        # the next tick so no events are dropped when a read lands while the
+        # producer is mid-write (see update_graphs_helper).
+        self._carry_x = np.array([])
+        self._carry_y = np.array([])
+        self._carry_t = np.array([])
+        self._carry_v = np.array([])
         self.length_events = 0
         self.styles = None
         self.num_event_mc_tof = None
@@ -136,7 +146,7 @@ class Ui_Visualization(object):
         None
         """
         Visualization.setObjectName("Visualization")
-        Visualization.resize(822, 647)
+        Visualization.resize(980, 570)
         self.gridLayout_6 = QtWidgets.QGridLayout(Visualization)
         self.gridLayout_6.setObjectName("gridLayout_6")
         self.gridLayout_5 = QtWidgets.QGridLayout()
@@ -178,7 +188,7 @@ class Ui_Visualization(object):
         sizePolicy.setVerticalStretch(1)
         sizePolicy.setHeightForWidth(self.vdc_time.sizePolicy().hasHeightForWidth())
         self.vdc_time.setSizePolicy(sizePolicy)
-        self.vdc_time.setMinimumSize(QtCore.QSize(250, 250))
+        self.vdc_time.setMinimumSize(QtCore.QSize(220, 220))
         self.vdc_time.setStyleSheet(
             "QWidget{\n"
             "                                                    border: 0.5px solid gray;\n"
@@ -251,7 +261,7 @@ class Ui_Visualization(object):
         sizePolicy.setVerticalStretch(1)
         sizePolicy.setHeightForWidth(self.detection_rate_viz.sizePolicy().hasHeightForWidth())
         self.detection_rate_viz.setSizePolicy(sizePolicy)
-        self.detection_rate_viz.setMinimumSize(QtCore.QSize(250, 250))
+        self.detection_rate_viz.setMinimumSize(QtCore.QSize(220, 220))
         self.detection_rate_viz.setStyleSheet(
             "QWidget{\n"
             "                                            border: 0.5px solid gray;\n"
@@ -303,7 +313,7 @@ class Ui_Visualization(object):
         sizePolicy.setVerticalStretch(1)
         sizePolicy.setHeightForWidth(self.detector_heatmap.sizePolicy().hasHeightForWidth())
         self.detector_heatmap.setSizePolicy(sizePolicy)
-        self.detector_heatmap.setMinimumSize(QtCore.QSize(250, 250))
+        self.detector_heatmap.setMinimumSize(QtCore.QSize(220, 220))
         self.detector_heatmap.setStyleSheet(
             "QWidget{\n"
             "                                            border: 0.5px solid gray;\n"
@@ -388,6 +398,20 @@ class Ui_Visualization(object):
             1,
             1,
         )
+        # Experiment-state indicator in the top-right corner.  The existing
+        # graph refresh timer keeps it synchronized with the shared
+        # ``start_flag`` used by the acquisition process.
+        self.experiment_status_row = QtWidgets.QHBoxLayout()
+        self.experiment_status_row.setSpacing(5)
+        self.experiment_status_led = QtWidgets.QLabel(parent=Visualization)
+        self.experiment_status_led.setFixedSize(QtCore.QSize(16, 16))
+        self.experiment_status_led.setObjectName("experiment_status_led")
+        self.experiment_status_led.setAccessibleName("Experiment status")
+        self.experiment_status_text = QtWidgets.QLabel(parent=Visualization)
+        self.experiment_status_text.setObjectName("experiment_status_text")
+        self.experiment_status_row.addWidget(self.experiment_status_led)
+        self.experiment_status_row.addWidget(self.experiment_status_text)
+        self.gridLayout_3b.addLayout(self.experiment_status_row, 0, 3, 1, 1)
 
         self.detector_fdm = pg.PlotWidget(parent=Visualization)
         self.detector_fdm.setBackground('w')
@@ -395,10 +419,10 @@ class Ui_Visualization(object):
         sp.setHorizontalStretch(1)
         sp.setVerticalStretch(1)
         self.detector_fdm.setSizePolicy(sp)
-        self.detector_fdm.setMinimumSize(QtCore.QSize(250, 250))
+        self.detector_fdm.setMinimumSize(QtCore.QSize(220, 220))
         self.detector_fdm.setStyleSheet("QWidget{border: 0.5px solid gray;}")
         self.detector_fdm.setObjectName("detector_fdm")
-        self.gridLayout_3b.addWidget(self.detector_fdm, 1, 0, 1, 3)
+        self.gridLayout_3b.addWidget(self.detector_fdm, 1, 0, 1, 4)
 
         # Bottom row: [Last Events toggle] [N input]
         # When the toggle is OFF (default), the FDM accumulates ions
@@ -418,7 +442,7 @@ class Ui_Visualization(object):
         self.fdm_max_ions.setText("1000000")
         self.fdm_max_ions.setObjectName("fdm_max_ions")
         self.fdm_bottom_row.addWidget(self.fdm_max_ions)
-        self.gridLayout_3b.addLayout(self.fdm_bottom_row, 2, 0, 1, 3)
+        self.gridLayout_3b.addLayout(self.fdm_bottom_row, 2, 0, 1, 4)
 
         self.gridLayout_5.addLayout(self.gridLayout_3b, 0, 3, 1, 1)
         self.gridLayout_2 = QtWidgets.QGridLayout()
@@ -440,7 +464,7 @@ class Ui_Visualization(object):
         sizePolicy.setVerticalStretch(1)
         sizePolicy.setHeightForWidth(self.histogram.sizePolicy().hasHeightForWidth())
         self.histogram.setSizePolicy(sizePolicy)
-        self.histogram.setMinimumSize(QtCore.QSize(750, 150))
+        self.histogram.setMinimumSize(QtCore.QSize(640, 150))
         self.histogram.setStyleSheet(
             "QWidget{\n"
             "                                            border: 0.5px solid gray;\n"
@@ -571,7 +595,9 @@ class Ui_Visualization(object):
         self.gridLayout_6.addLayout(self.gridLayout_5, 0, 0, 1, 1)
 
         self.retranslateUi(Visualization)
+        self._setup_compact_visualization_layout(Visualization)
         QtCore.QMetaObject.connectSlotsByName(Visualization)
+        make_window_responsive(Visualization)
         tooltips.apply_tooltips(self, tooltips.VISUALIZATION_TOOLTIPS)
         Visualization.setTabOrder(self.voltage, self.detection_rate)
         Visualization.setTabOrder(self.detection_rate, self.hitmap_count)
@@ -638,7 +664,9 @@ class Ui_Visualization(object):
 
         # detector heatmep #####################
         self.scatter = pg.ScatterPlotItem(size=self.hitmap_plot_size.value(), brush='black')
-        self.detector_circle = QtWidgets.QGraphicsEllipseItem(-40, -40, 80, 80)  # x, y, width, height
+        detector_diameter = float(self.conf['detector_diameter'])
+        self.detector_circle = QtWidgets.QGraphicsEllipseItem(-detector_diameter/2, -detector_diameter/2,
+                                                              detector_diameter, detector_diameter)
         self.detector_circle.setPen(pg.mkPen(color=(255, 0, 0), width=2))
         self.detector_heatmap.addItem(self.detector_circle)
         self.detector_heatmap.setLabel("left", "X_det", units='mm', **self.styles)
@@ -646,7 +674,8 @@ class Ui_Visualization(object):
 
         # FDM panel - one detector circle per plot (Qt items can't be
         # shared between two PlotWidgets) plus matching axis labels.
-        self.detector_circle_fdm = QtWidgets.QGraphicsEllipseItem(-40, -40, 80, 80)
+        self.detector_circle_fdm = QtWidgets.QGraphicsEllipseItem(-detector_diameter/2, -detector_diameter/2,
+                                                                  detector_diameter, detector_diameter)
         self.detector_circle_fdm.setPen(pg.mkPen(color=(255, 0, 0), width=2))
         self.detector_fdm.addItem(self.detector_circle_fdm)
         self.detector_fdm.setLabel("left", "X_det", units='mm', **self.styles)
@@ -656,15 +685,24 @@ class Ui_Visualization(object):
         # the Last-Events toggle is a pure display swap that never loses
         # data — you can flip between the entire map and the last-N map
         # without either resetting:
-        #   * entire : _fdm_hist_all accumulates every ion forever, and
-        #              _fdm_count_all is the running total ion count.
-        #   * window : _fdm_window_x/y hold the most recent fdm_max_ions
-        #              hits, and the map is rebuilt from them each tick.
+        #   * entire : _fdm_hist_all accumulates every ion forever as raw
+        #              counts (log10 is applied once at display time - see
+        #              _draw_fdm_display - not per tick, otherwise summing
+        #              log10(tick_count+1) every tick makes hot pixels grow
+        #              unboundedly and washes out the rest of the map under
+        #              autoscale), and _fdm_count_all is the running total
+        #              ion count.
+        #   * window : a circular buffer stores the bin of each recent ion;
+        #              its histogram is updated by adding new bins and
+        #              subtracting only the bins that leave the window.
         self._fdm_hist_all = np.zeros_like(self.hist_fdm)
         self._fdm_count_all = 0
         self._fdm_use_last_events = False
-        self._fdm_window_x = np.array([], dtype=np.float32)
-        self._fdm_window_y = np.array([], dtype=np.float32)
+        self._fdm_window_capacity = 0
+        self._fdm_window_bins = np.empty(0, dtype=np.int32)
+        self._fdm_window_start = 0
+        self._fdm_window_count = 0
+        self._fdm_window_hist = np.zeros_like(self.hist_fdm)
         self._original_fdm_button_style = self.fdm_last_events_switch.styleSheet()
         self.fdm_last_events_switch.clicked.connect(self._fdm_last_events_toggle)
 
@@ -729,6 +767,28 @@ class Ui_Visualization(object):
         self.hitmap_plot_size.setValue(1.0)
         self.hitmap_plot_size.setSingleStep(0.1)
         self.hitmap_plot_size.setDecimals(1)
+        self._experiment_status_running = None
+        self._update_experiment_status_indicator()
+
+    def _update_experiment_status_indicator(self):
+        """Show green while an experiment runs and red while it is stopped."""
+        running = bool(self.variables.start_flag)
+        if running == self._experiment_status_running:
+            return
+
+        self._experiment_status_running = running
+        observe(self.variables, "visualization", "viz", "running" if running else "stopped")
+        color = "#22a447" if running else "#d32f2f"
+        state = "Running" if running else "Stopped"
+        self.experiment_status_led.setStyleSheet(
+            "QLabel {"
+            f"background-color: {color};"
+            "border: 1px solid #555;"
+            "border-radius: 8px;"
+            "}"
+        )
+        self.experiment_status_led.setToolTip(f"Experiment {state.lower()}")
+        self.experiment_status_text.setText(state)
 
     def retranslateUi(self, Visualization):
         """
@@ -747,8 +807,8 @@ class Ui_Visualization(object):
         ###
         self.label_200.setText(_translate("Visualization", "Voltage"))
         self.voltage.setText(_translate("Visualization", "0"))
-        self.dc_hold.setText(_translate("Visualization", "Hold DC Voltage"))
-        self.set_dc_voltage.setText(_translate("Visualization", "Set DC Voltage"))
+        self.dc_hold.setText(_translate("Visualization", "Hold DC"))
+        self.set_dc_voltage.setText(_translate("Visualization", "Set DC"))
         self.set_dc_voltage_value.setText(_translate("Visualization", str(int(self.conf.get('default_vdc_min', 500)))))
         self.label_201.setText(_translate("Visualization", "Detection Rate"))
         self.detection_rate.setText(_translate("Visualization", "0"))
@@ -774,6 +834,26 @@ class Ui_Visualization(object):
         self.max_tof.setText(_translate("Visualization", "5000"))
         self.Error.setText(_translate("Visualization", "<html><head/><body><p><br/></p></body></html>"))
 
+    def _update_alignment_overlay(self):
+        locked = bool(self.variables.automatic_alignment_enabled)
+        self.dc_hold.setEnabled(not locked)
+        if locked:
+            self._set_dc_voltage_controls_enabled(False)
+        if not hasattr(self, 'alignment_circle'):
+            self.alignment_circle = QtWidgets.QGraphicsEllipseItem()
+            self.alignment_circle.setPen(pg.mkPen(color=(0, 170, 60), width=2))
+        if self.alignment_circle.scene() is None:
+            self.detector_heatmap.addItem(self.alignment_circle)
+        status = self.variables.alignment_status
+        fit = status.get('footprint', {})
+        visible = locked and bool(fit.get('valid', False))
+        self.alignment_circle.setVisible(visible)
+        if visible:
+            x, y = fit['centre_mm']
+            r = fit['radius_mm']
+            self.alignment_circle.setRect(x-r, y-r, 2*r, 2*r)
+            self.alignment_circle.setToolTip(f"Alignment: {status.get('phase', '')}, area {fit['area_fraction']:.1%}")
+
     def dc_hold_clicked(self):
         """
         Hold the DC voltage
@@ -784,6 +864,8 @@ class Ui_Visualization(object):
         Return:
             None
         """
+        if self.variables.automatic_alignment_enabled:
+            return
         if self.variables.start_flag or self.variables.last_screen_shot:
             if not self.variables.vdc_hold:
                 self.variables.vdc_hold = True
@@ -797,11 +879,12 @@ class Ui_Visualization(object):
     def _dc_voltage_limits(self):
         """(min, max) DC voltage the Set field allows, from config.toml."""
         lo = int(self.conf.get('default_vdc_min', 500))
-        hi = int(self.conf.get('default_vdc_max', 4000))
+        hi = int(self.conf.get('default_vdc_max', 9000))
         return (lo, hi) if lo <= hi else (hi, lo)
 
     def _set_dc_voltage_controls_enabled(self, enabled):
         """Enable the Set-DC-voltage field + button only while DC is held."""
+        enabled = enabled and not self.variables.automatic_alignment_enabled
         self.set_dc_voltage_value.setEnabled(enabled)
         self.set_dc_voltage.setEnabled(enabled)
         if enabled:
@@ -833,6 +916,8 @@ class Ui_Visualization(object):
         same path the old main-GUI 'Set' button used, just with a
         user-entered value instead of the Min. Voltage field).
         """
+        if self.variables.automatic_alignment_enabled:
+            return
         if not self.variables.vdc_hold:
             self.error_message("Hold the DC voltage first")
             return
@@ -871,9 +956,12 @@ class Ui_Visualization(object):
         """
         self._fdm_use_last_events = self.fdm_last_events_switch.isChecked()
         if self._fdm_use_last_events:
+            self._seed_fdm_window_from_retained_events()
             self.fdm_last_events_switch.setStyleSheet("QPushButton{background: rgb(0, 255, 26)}")
         else:
             self.fdm_last_events_switch.setStyleSheet(self._original_fdm_button_style)
+        # Keep the toggle responsive after the experiment has stopped.
+        self._redraw_if_stopped()
 
     def reset_heatmap(self):
         """
@@ -887,6 +975,8 @@ class Ui_Visualization(object):
         # with self.variables.lock_setup_parameters:
         if not self.variables.reset_heatmap:
             self.variables.reset_heatmap = True
+        # Apply the reset immediately if the experiment is already stopped.
+        self._redraw_if_stopped()
 
     def detection_rate_range(self):
         """
@@ -907,6 +997,7 @@ class Ui_Visualization(object):
 
     def update_graphs_helper(
         self,
+        final_drain=False,
     ):
         """
         Update the graphs
@@ -926,7 +1017,13 @@ class Ui_Visualization(object):
             self.hitmap_count.setText(str(0))
         self.variables.elapsed_time = time.time() - self.start_time
         # with self.variables.lock_statistics:
-        if self.index_wait_on_plot_start <= 16:
+        if final_drain:
+            # Final export must not inherit the live view's short startup
+            # delay; the producer is stopped and all available hits should be
+            # consumed now, even for a very short/aborted experiment.
+            self.counter_source = self.variables.counter_source
+            self.index_wait_on_plot_start = max(self.index_wait_on_plot_start, 17)
+        elif self.index_wait_on_plot_start <= 16:
             if self.index_wait_on_plot_start == 0:
                 self.counter_source = self.variables.counter_source
             self.index_wait_on_plot_start += 1
@@ -986,16 +1083,27 @@ class Ui_Visualization(object):
         # mass spectrum
 
         if self.counter_source == 'TDC' and self.variables.total_ions > 0 and self.index_wait_on_plot_start > 16:
-            # Drain all four ring buffers in one shot (zero-copy NumPy
-            # slices, no IPC).  Each call returns every sample produced
-            # since the last call and trims the four arrays to the
-            # minimum length so they remain aligned per-ion if one buffer
-            # happens to lag the others by a tick.
-            xx = self.x_plot.read_all()
-            yy = self.y_plot.read_all()
-            tt = self.t_plot.read_all()
-            main_v_dc_dld = self.main_v_dc_plot.read_all()
+            # Drain all four ring buffers (zero-copy NumPy slices, no IPC).
+            # The producer writes x -> y -> t -> v in sequence, so a read
+            # that lands mid-write sees a longer x/y/t than v. We keep only
+            # the per-ion-aligned prefix (min length) this tick AND carry
+            # the unmatched tail over to the next tick instead of dropping
+            # it. Dropping it (the old behaviour) permanently lost those
+            # events, so the viz total drifted below total_ions — visibly
+            # so for the final events after the experiment stopped.
+            xx = np.concatenate((self._carry_x, self.x_plot.read_all()))
+            yy = np.concatenate((self._carry_y, self.y_plot.read_all()))
+            tt = np.concatenate((self._carry_t, self.t_plot.read_all()))
+            main_v_dc_dld = np.concatenate((self._carry_v, self.main_v_dc_plot.read_all()))
             n = min(len(xx), len(yy), len(tt), len(main_v_dc_dld))
+            # Stash the leftover tail of each buffer (everything past the
+            # aligned prefix) for next tick. When the producer has finished
+            # all four indices are equal, so the tails are empty and the
+            # final drain matches every remaining event.
+            self._carry_x = xx[n:]
+            self._carry_y = yy[n:]
+            self._carry_t = tt[n:]
+            self._carry_v = main_v_dc_dld[n:]
             if n == 0:
                 xx = np.array([])
                 yy = np.array([])
@@ -1040,10 +1148,7 @@ class Ui_Visualization(object):
                     self.last_100_thousand_t = self.last_100_thousand_t[-100000:]
 
             try:
-                if self.variables.pulse_mode == 'Voltage':
-                    t_0 = self.conf["t_0_voltage"]
-                elif self.variables.pulse_mode == 'Laser' or self.variables.pulse_mode == 'VoltageLaser':
-                    t_0 = self.conf["t_0_laser"]
+                t_0 = self._t_0()
 
                 # Apply any pending live-calibration updates (parameter
                 # swaps + accumulator resets) here on the GUI thread,
@@ -1053,19 +1158,7 @@ class Ui_Visualization(object):
 
                 # "Last events" view: re-bin only the most recent N events
                 # for whichever single view is currently displayed.
-                if self.mc_tof_last_events_flag:
-                    t_le = self.last_100_thousand_t[-self.num_event_mc_tof :]
-                    v_le = self.last_100_thousand_v[-self.num_event_mc_tof :]
-                    x_le = self.last_100_thousand_det_x[-self.num_event_mc_tof :]
-                    y_le = self.last_100_thousand_det_y[-self.num_event_mc_tof :]
-                    if self.conf["visualization"] == "tof":
-                        params = None if self.uncalibrated_mode else self._calib_params_tof
-                        vals = self._apply_axis(params, "tof", t_le, v_le, x_le, y_le, t_0)
-                        hist_tof_last_events, _ = np.histogram(vals, bins=self.bins_tof)
-                    else:  # "mc"
-                        params = None if self.uncalibrated_mode else self._calib_params_mc
-                        vals = self._apply_axis(params, "mc", t_le, v_le, x_le, y_le, t_0)
-                        hist_mc_last_events, _ = np.histogram(vals, bins=self.bins_mc)
+                le_hist = self._last_events_spectrum_hist(t_0) if self.mc_tof_last_events_flag else None
 
                 # Four cumulative spectra, every one updated each tick so
                 # switching the displayed view is a pure swap that never
@@ -1094,66 +1187,8 @@ class Ui_Visualization(object):
                 self.hist_tof += np.histogram(tof_cal, bins=self.bins_tof)[0]
                 self.hist_mc += np.histogram(mc_cal, bins=self.bins_mc)[0]
 
-                # Pick which cumulative series to display this tick.
-                cumul_hist_tof = self.hist_tof_uncalib if self.uncalibrated_mode else self.hist_tof
-                cumul_hist_mc = self.hist_mc_uncalib if self.uncalibrated_mode else self.hist_mc
-
-                self.histogram.clear()
-                if self.conf["visualization"] == "tof" and not self.mc_tof_last_events_flag:
-                    hist = np.copy(cumul_hist_tof[: self.index_hist_tof])
-                    hist[hist == 0] = 1  # Avoid log(0) error
-                    bins = self.bins_tof[: self.index_hist_tof + 1]
-                    self.histogram.plot(
-                        bins,
-                        hist,
-                        stepMode="center",
-                        fillLevel=0,
-                        fillOutline=True,
-                        brush='black',
-                        name="num events: %s" % self.length_events,
-                    )
-                elif self.conf["visualization"] == "mc" and not self.mc_tof_last_events_flag:
-                    hist = np.copy(cumul_hist_mc[: self.index_hist_mc])
-                    hist[hist == 0] = 1  # Avoid log(0) error
-                    bins = self.bins_mc[: self.index_hist_mc + 1]
-                    self.histogram.plot(
-                        bins,
-                        hist,
-                        stepMode="center",
-                        fillLevel=0,
-                        fillOutline=True,
-                        brush='black',
-                        name="num events: %s" % self.length_events,
-                    )
-                elif self.conf["visualization"] == "tof" and self.mc_tof_last_events_flag:
-                    # remobe the bins bigger than the max_tof
-                    hist = np.copy(hist_tof_last_events[: self.index_hist_tof])
-                    hist[hist == 0] = 1  # Avoid log(0) error
-                    bins = self.bins_tof[: self.index_hist_tof + 1]
-                    self.histogram.plot(
-                        bins,
-                        hist,
-                        stepMode="center",
-                        fillLevel=0,
-                        fillOutline=True,
-                        brush='black',
-                        name="num events: %s" % self.length_events,
-                    )
-                elif self.conf["visualization"] == "mc" and self.mc_tof_last_events_flag:
-                    # remobe the bins bigger than the max_mc
-                    hist = np.copy(hist_mc_last_events[: self.index_hist_mc])
-                    hist[hist == 0] = 1  # Avoid log(0) error
-                    bins = self.bins_mc[: self.index_hist_mc + 1]
-                    self.histogram.plot(
-                        bins,
-                        hist,
-                        stepMode="center",
-                        fillLevel=0,
-                        fillOutline=True,
-                        brush='black',
-                        name="num events: %s" % self.length_events,
-                    )
-
+                # Draw the active spectrum from the freshly updated buffers.
+                self._draw_spectrum(le_hist)
             except Exception as e:
                 print(
                     f"{initialize_devices.bcolors.FAIL}Error: Cannot plot Histogram correctly{initialize_devices.bcolors.ENDC}"
@@ -1170,21 +1205,7 @@ class Ui_Visualization(object):
             )
 
             # --- Hitmap (left panel) -------------------------------------
-            if self.variables.reset_heatmap:
-                self.variables.reset_heatmap = False
-                self.last_100_thousand_det_x_heatmap = np.array([])
-                self.last_100_thousand_det_y_heatmap = np.array([])
-            x_last_events = self.last_100_thousand_det_x_heatmap[:]
-            y_last_events = self.last_100_thousand_det_y_heatmap[:]
-            self.scatter.setSize(self.hitmap_plot_size.value())
-            x = (x_last_events * 10)[-self.num_hit_display :]
-            y = (y_last_events * 10)[-self.num_hit_display :]
-            self.hitmap_count.setText(str(len(x)))
-            self.scatter.clear()
-            self.scatter.setData(x=x, y=y)
-            self.detector_heatmap.clear()
-            self.detector_heatmap.addItem(self.scatter)
-            self.detector_heatmap.addItem(self.detector_circle)
+            self._draw_hitmap()
 
             # --- FDM (right panel) ---------------------------------------
             # Both FDMs are updated every tick so the Last Events toggle is
@@ -1198,48 +1219,359 @@ class Ui_Visualization(object):
                 fdm_max = 1_000_000
             new_events = int(np.sum(hist))
 
-            # Entire FDM: accumulate forever.
-            self._fdm_hist_all += np.log10(hist + 1)
+            # Entire FDM: accumulate raw counts forever (log10 is applied
+            # once at display time in _draw_fdm_display).
+            self._fdm_hist_all += hist
             self._fdm_count_all += new_events
 
-            # Last-events FDM: keep the sliding window current every tick,
-            # trimmed to the most recent fdm_max hits.
-            self._fdm_window_x = np.concatenate((self._fdm_window_x, (xx * 10).astype(np.float32)))[-fdm_max:]
-            self._fdm_window_y = np.concatenate((self._fdm_window_y, (yy * 10).astype(np.float32)))[-fdm_max:]
+            # Maintain the last-events histogram incrementally. This adds
+            # only this tick's ions and subtracts only expired ions.
+            self._update_fdm_window(xx * 10, yy * 10, fdm_max)
 
-            # Display whichever map the toggle selects.
-            if self._fdm_use_last_events:
-                win_hist, _, _ = np.histogram2d(
-                    self._fdm_window_x,
-                    self._fdm_window_y,
-                    bins=self.bins_detector,
-                    range=self.range,
-                )
-                self.hist_fdm = np.log10(win_hist + 1)
+            # Display whichever map the toggle selects (no new accumulation).
+            self._draw_fdm_display()
+
+    # ------------------------------------------------------------------ render
+    # The rendering of the spectrum, hitmap and FDM is factored into the
+    # helpers below so it can be reused both from the live update tick and
+    # from _render_static_views (which redraws from the retained buffers
+    # after the experiment has stopped, keeping the view buttons working).
+
+    def _t_0(self):
+        """Return the t_0 constant for the active pulse mode (s)."""
+        if self.variables.pulse_mode in ('Laser', 'VoltageLaser'):
+            return self.conf["t_0_laser"]
+        return self.conf["t_0_voltage"]
+
+    def _last_events_spectrum_hist(self, t_0):
+        """Histogram of the most recent ``num_event_mc_tof`` events for the
+        currently displayed axis (mc or tof), calibrated or raw per the
+        active view. Reads only the retained ring buffer, so it works the
+        same whether the experiment is running or stopped."""
+        t_le = self.last_100_thousand_t[-self.num_event_mc_tof:]
+        v_le = self.last_100_thousand_v[-self.num_event_mc_tof:]
+        x_le = self.last_100_thousand_det_x[-self.num_event_mc_tof:]
+        y_le = self.last_100_thousand_det_y[-self.num_event_mc_tof:]
+        if self.conf["visualization"] == "tof":
+            params = None if self.uncalibrated_mode else self._calib_params_tof
+            vals = self._apply_axis(params, "tof", t_le, v_le, x_le, y_le, t_0)
+            return np.histogram(vals, bins=self.bins_tof)[0]
+        params = None if self.uncalibrated_mode else self._calib_params_mc
+        vals = self._apply_axis(params, "mc", t_le, v_le, x_le, y_le, t_0)
+        return np.histogram(vals, bins=self.bins_mc)[0]
+
+    def _plot_spectrum_hist(self, hist, bins):
+        """Plot a single spectrum histogram with the standard styling."""
+        hist = np.copy(hist)
+        hist[hist == 0] = 1  # Avoid log(0) error
+        self.histogram.plot(
+            bins,
+            hist,
+            stepMode="center",
+            fillLevel=0,
+            fillOutline=True,
+            brush='black',
+            name="num events: %s" % self.length_events,
+        )
+
+    def _draw_spectrum(self, le_hist=None):
+        """Render the active spectrum.
+
+        ``le_hist`` is the precomputed last-events histogram for the active
+        view (from _last_events_spectrum_hist) when "Last Events" is on, or
+        None to draw the cumulative accumulator instead.
+        """
+        self.histogram.clear()
+        if self.conf["visualization"] == "tof":
+            if self.mc_tof_last_events_flag and le_hist is not None:
+                src = le_hist
             else:
-                self.hist_fdm = self._fdm_hist_all
+                src = self.hist_tof_uncalib if self.uncalibrated_mode else self.hist_tof
+            self._plot_spectrum_hist(src[: self.index_hist_tof], self.bins_tof[: self.index_hist_tof + 1])
+        else:  # "mc"
+            if self.mc_tof_last_events_flag and le_hist is not None:
+                src = le_hist
+            else:
+                src = self.hist_mc_uncalib if self.uncalibrated_mode else self.hist_mc
+            self._plot_spectrum_hist(src[: self.index_hist_mc], self.bins_mc[: self.index_hist_mc + 1])
 
-            # The ion counter is the cumulative total detected and keeps
-            # growing every tick regardless of mode, so toggling Last Events
-            # only swaps which map is drawn — it never changes the number.
-            self.fdm_count.setText(str(self._fdm_count_all))
+    def _draw_hitmap(self):
+        """Redraw the detector hitmap scatter from the retained heatmap
+        buffer. Honours a pending Reset request."""
+        if self.variables.reset_heatmap:
+            self.variables.reset_heatmap = False
+            self.last_100_thousand_det_x_heatmap = np.array([])
+            self.last_100_thousand_det_y_heatmap = np.array([])
+        x_last_events = self.last_100_thousand_det_x_heatmap[:]
+        y_last_events = self.last_100_thousand_det_y_heatmap[:]
+        self.scatter.setSize(self.hitmap_plot_size.value())
+        x = (x_last_events * 10)[-self.num_hit_display:]
+        y = (y_last_events * 10)[-self.num_hit_display:]
+        self.hitmap_count.setText(str(len(x)))
+        self.scatter.clear()
+        self.scatter.setData(x=x, y=y)
+        self.detector_heatmap.clear()
+        self.detector_heatmap.addItem(self.scatter)
+        self.detector_heatmap.addItem(self.detector_circle)
+        self._update_alignment_overlay()
 
-            img_fdm = pg.ImageItem()
-            img_fdm.setImage(np.copy(self.hist_fdm))
-            img_fdm.setRect(
-                QtCore.QRectF(
-                    xedges[0],
-                    yedges[0],
-                    xedges[-1] - xedges[0],
-                    yedges[-1] - yedges[0],
-                )
+    def _fdm_flat_bins(self, x, y):
+        """Map detector coordinates to flat histogram bins; discard outliers."""
+        x = np.asarray(x)
+        y = np.asarray(y)
+        nx, ny = self.bins_detector
+        xmin, xmax = self.range[0]
+        ymin, ymax = self.range[1]
+        valid = (x >= xmin) & (x <= xmax) & (y >= ymin) & (y <= ymax)
+        if not np.any(valid):
+            return np.empty(0, dtype=np.int32)
+        xi = np.minimum(((x[valid] - xmin) * nx / (xmax - xmin)).astype(np.int64), nx - 1)
+        yi = np.minimum(((y[valid] - ymin) * ny / (ymax - ymin)).astype(np.int64), ny - 1)
+        return (xi * ny + yi).astype(np.int32, copy=False)
+
+    def _seed_fdm_window_from_retained_events(self):
+        """Immediately build last-N state from ions already retained by the GUI."""
+        try:
+            capacity = max(1, int(float(self.fdm_max_ions.text())))
+        except (ValueError, AttributeError):
+            capacity = 1_000_000
+        x = self.last_100_thousand_det_x_heatmap[-capacity:] * 10
+        y = self.last_100_thousand_det_y_heatmap[-capacity:] * 10
+        bins = self._fdm_flat_bins(x, y)
+        self._fdm_window_capacity = capacity
+        self._fdm_window_bins = np.empty(capacity, dtype=np.int32)
+        self._fdm_window_start = 0
+        self._fdm_window_count = min(len(bins), capacity)
+        if self._fdm_window_count:
+            bins = bins[-self._fdm_window_count:]
+            self._fdm_window_bins[:self._fdm_window_count] = bins
+        counts = np.bincount(
+            bins if self._fdm_window_count else np.empty(0, dtype=np.int32),
+            minlength=self.hist_fdm.size,
+        )
+        self._fdm_window_hist = counts.reshape(self.hist_fdm.shape).astype(float, copy=False)
+
+    def _update_fdm_window(self, x, y, capacity):
+        """Slide the last-N FDM using O(new + expired) work, without rebinning N."""
+        if capacity != self._fdm_window_capacity:
+            # The retained arrays already include this tick, so seeding is
+            # sufficient and adding x/y again would duplicate those ions.
+            self._seed_fdm_window_from_retained_events()
+            return
+        incoming = self._fdm_flat_bins(x, y)
+        if not len(incoming):
+            return
+        if len(incoming) >= capacity:
+            incoming = incoming[-capacity:]
+            self._fdm_window_bins[:] = incoming
+            self._fdm_window_start = 0
+            self._fdm_window_count = capacity
+            self._fdm_window_hist = np.bincount(
+                incoming, minlength=self.hist_fdm.size
+            ).reshape(self.hist_fdm.shape).astype(float, copy=False)
+            return
+
+        expired = max(0, self._fdm_window_count + len(incoming) - capacity)
+        if expired:
+            positions = (self._fdm_window_start + np.arange(expired)) % capacity
+            outgoing = self._fdm_window_bins[positions]
+            self._fdm_window_hist -= np.bincount(
+                outgoing, minlength=self.hist_fdm.size
+            ).reshape(self.hist_fdm.shape)
+            self._fdm_window_start = (self._fdm_window_start + expired) % capacity
+            self._fdm_window_count -= expired
+
+        end = (self._fdm_window_start + self._fdm_window_count) % capacity
+        first = min(len(incoming), capacity - end)
+        self._fdm_window_bins[end:end + first] = incoming[:first]
+        if first < len(incoming):
+            self._fdm_window_bins[:len(incoming) - first] = incoming[first:]
+        self._fdm_window_count += len(incoming)
+        self._fdm_window_hist += np.bincount(
+            incoming, minlength=self.hist_fdm.size
+        ).reshape(self.hist_fdm.shape)
+
+    def _draw_fdm_display(self):
+        """Render the FDM panel from the existing accumulators (entire map
+        or last-events window). Performs no accumulation, so it is safe to
+        call both live and after the experiment has stopped."""
+        try:
+            fdm_max = max(1, int(float(self.fdm_max_ions.text())))
+        except (ValueError, AttributeError):
+            fdm_max = 1_000_000
+        if self._fdm_use_last_events:
+            if fdm_max != self._fdm_window_capacity:
+                self._seed_fdm_window_from_retained_events()
+            self.hist_fdm = np.log10(self._fdm_window_hist + 1)
+        else:
+            self.hist_fdm = np.log10(self._fdm_hist_all + 1)
+        displayed_count = self._fdm_window_count if self._fdm_use_last_events else self._fdm_count_all
+        self.fdm_count.setText(str(displayed_count))
+        # Detector-plane edges are fixed by the configured range, so they
+        # can be derived without re-histogramming this tick's events.
+        xedges = np.linspace(self.range[0][0], self.range[0][1], self.bins_detector[0] + 1)
+        yedges = np.linspace(self.range[1][0], self.range[1][1], self.bins_detector[1] + 1)
+        img_fdm = pg.ImageItem()
+        img_fdm.setImage(np.copy(self.hist_fdm))
+        img_fdm.setRect(
+            QtCore.QRectF(
+                xedges[0],
+                yedges[0],
+                xedges[-1] - xedges[0],
+                yedges[-1] - yedges[0],
             )
-            lut = pg.colormap.get('viridis').getLookupTable(start=0.0, stop=1.0, nPts=256)
-            img_fdm.setLookupTable(lut)
-            self.detector_fdm.clear()
-            self.detector_fdm.addItem(img_fdm)
-            self.detector_fdm.addItem(self.detector_circle_fdm)
-            self.detector_fdm.getViewBox().setAspectLocked(True)
+        )
+        lut = pg.colormap.get('viridis').getLookupTable(start=0.0, stop=1.0, nPts=256)
+        img_fdm.setLookupTable(lut)
+        self.detector_fdm.clear()
+        self.detector_fdm.addItem(img_fdm)
+        self.detector_fdm.addItem(self.detector_circle_fdm)
+        self.detector_fdm.getViewBox().setAspectLocked(True)
+
+    def _render_static_views(self):
+        """Re-render the spectrum, hitmap and FDM from the retained buffers.
+
+        Called when a view button is used after the experiment has stopped
+        so the controls stay interactive (e.g. show the last 10000 events on
+        the FDM / mass spectrum). Reads no new ring-buffer data and never
+        touches the V_dc / detection-rate time series — those stay frozen at
+        their final values. The next experiment start clears everything via
+        ``plot_clear_flag`` in update_graphs.
+        """
+        try:
+            t_0 = self._t_0()
+            self._drain_calib_updates()
+            le_hist = self._last_events_spectrum_hist(t_0) if self.mc_tof_last_events_flag else None
+            self._draw_spectrum(le_hist)
+            self._draw_hitmap()
+            self._draw_fdm_display()
+        except Exception as e:
+            print(
+                f"{initialize_devices.bcolors.FAIL}Error: Cannot redraw stopped views{initialize_devices.bcolors.ENDC}"
+            )
+            print(e)
+
+    def _redraw_if_stopped(self):
+        """Redraw the static views when the experiment is not running.
+
+        While an experiment runs the live timer redraws every tick, so this
+        is a no-op then. After a stop the timer no longer renders, so the
+        view buttons call this to reflect their change immediately.
+        """
+        if not self.variables.start_flag and self.length_events > 0:
+            self._render_static_views()
+
+    def _disable_last_event_views_for_final_export(self):
+        """Select the cumulative 1D spectrum and 2D FDM for final metadata.
+
+        Change both controls directly instead of clicking them: click handlers
+        can trigger an intermediate stopped-view redraw before the remaining
+        detector buffers have been drained. The caller performs exactly one
+        final ``update_graphs_helper`` pass after this state change.
+        """
+        self.mc_tof_last_events_flag = False
+        self.spectrum_last_events_switch.setStyleSheet(self.original_button_style)
+
+        self._fdm_use_last_events = False
+        self.fdm_last_events_switch.setChecked(False)
+        self.fdm_last_events_switch.setStyleSheet(self._original_fdm_button_style)
+
+    def _export_all_plots(self, path_meta, suffix, *, render_window_offscreen=False):
+        """Export every Visualization plot (+ a full-window grab) to PNGs.
+
+        ``suffix`` is appended to each filename, e.g. ``'email'`` for the
+        interim-notification snapshot. Mirrors the periodic / final export
+        blocks below so the e-mail attachment looks like the saved metadata.
+        """
+        targets = (
+            (self.vdc_time.plotItem, 'visualization_v_dc_p'),
+            (self.detection_rate_viz.plotItem, 'visualization_detection_rate'),
+            (self.detector_heatmap.plotItem, 'visualization_detector_hitmap'),
+            (self.detector_fdm.plotItem, 'visualization_detector_fdm'),
+            (self.histogram.plotItem, 'visualization_mc_tof'),
+        )
+        for plot_item, name in targets:
+            exporter = pg.exporters.ImageExporter(plot_item)
+            exporter.params['width'] = 1000
+            exporter.params['height'] = 800
+            exporter.export('%s/%s_%s.png' % (path_meta, name, suffix))
+
+        if render_window_offscreen:
+            # Render directly into a pixmap. This captures the temporary
+            # cumulative plot state without repainting it onto the operator's
+            # visible window or requiring an event-loop turn.
+            screenshot = QtGui.QPixmap(self.visualization_window.size())
+            screenshot.fill(QtCore.Qt.GlobalColor.transparent)
+            self.visualization_window.render(screenshot)
+        else:
+            screenshot = QtWidgets.QApplication.primaryScreen().grabWindow(
+                self.visualization_window.winId()
+            )
+        screenshot.save('%s/visualization_screenshot_%s.png' % (path_meta, suffix), 'png')
+
+    def _export_interval_snapshots(self, path_meta, suffix):
+        """Export Last Events and cumulative plots without changing the live view.
+
+        Plot items and controls are switched only for synchronous exporters and
+        off-screen renders, then immediately restored to the user's selections.
+        No event processing occurs while temporary states are active, so the
+        visible GUI does not flicker.
+        """
+        spectrum_last_events = self.mc_tof_last_events_flag
+        fdm_last_events = self._fdm_use_last_events
+        fdm_checked = self.fdm_last_events_switch.isChecked()
+
+        try:
+            # Additional interval set: both histogram views limited to their
+            # configured Last Events windows.
+            self.mc_tof_last_events_flag = True
+            self._fdm_use_last_events = True
+            self.fdm_last_events_switch.setChecked(True)
+            self.spectrum_last_events_switch.setStyleSheet(
+                "QPushButton{background: rgb(0, 255, 26)}"
+            )
+            self.fdm_last_events_switch.setStyleSheet(
+                "QPushButton{background: rgb(0, 255, 26)}"
+            )
+            self._draw_spectrum(self._last_events_spectrum_hist(self._t_0()))
+            self._draw_fdm_display()
+            self._export_all_plots(
+                path_meta,
+                f"last_events_{suffix}",
+                render_window_offscreen=True,
+            )
+
+            # Existing interval set: complete cumulative experiment.
+            self.mc_tof_last_events_flag = False
+            self._fdm_use_last_events = False
+            self.fdm_last_events_switch.setChecked(False)
+            self.spectrum_last_events_switch.setStyleSheet(self.original_button_style)
+            self.fdm_last_events_switch.setStyleSheet(self._original_fdm_button_style)
+            self._draw_spectrum(None)
+            self._draw_fdm_display()
+            self._export_all_plots(
+                path_meta,
+                suffix,
+                render_window_offscreen=True,
+            )
+        finally:
+            self.mc_tof_last_events_flag = spectrum_last_events
+            self._fdm_use_last_events = fdm_last_events
+            self.fdm_last_events_switch.setChecked(fdm_checked)
+            self.spectrum_last_events_switch.setStyleSheet(
+                "QPushButton{background: rgb(0, 255, 26)}"
+                if spectrum_last_events else self.original_button_style
+            )
+            self.fdm_last_events_switch.setStyleSheet(
+                "QPushButton{background: rgb(0, 255, 26)}"
+                if fdm_last_events else self._original_fdm_button_style
+            )
+            le_hist = (
+                self._last_events_spectrum_hist(self._t_0())
+                if spectrum_last_events else None
+            )
+            self._draw_spectrum(le_hist)
+            self._draw_fdm_display()
 
     def update_graphs(
         self,
@@ -1252,6 +1584,9 @@ class Ui_Visualization(object):
         Return:
             None
         """
+
+        self._update_experiment_status_indicator()
+        self._update_alignment_overlay()
 
         if self.variables.plot_clear_flag:
             self.x_vdc = [i * 0.5 for i in range(200)]  # 100 time points
@@ -1279,8 +1614,11 @@ class Ui_Visualization(object):
             self.detector_fdm.addItem(self.detector_circle_fdm)
             self._fdm_hist_all[:] = 0.0
             self._fdm_count_all = 0
-            self._fdm_window_x = np.array([], dtype=np.float32)
-            self._fdm_window_y = np.array([], dtype=np.float32)
+            self._fdm_window_capacity = 0
+            self._fdm_window_bins = np.empty(0, dtype=np.int32)
+            self._fdm_window_start = 0
+            self._fdm_window_count = 0
+            self._fdm_window_hist = np.zeros_like(self.hist_fdm)
             self.fdm_count.setText("0")
             self.variables.plot_clear_flag = False
             self.index_plot = 0
@@ -1295,12 +1633,19 @@ class Ui_Visualization(object):
             self.last_100_thousand_det_y = np.array([])
             self.last_100_thousand_t = np.array([])
             self.last_100_thousand_v = np.array([])
+            self._carry_x = np.array([])
+            self._carry_y = np.array([])
+            self._carry_t = np.array([])
+            self._carry_v = np.array([])
             self.length_events = 0
             self.hist_fdm, xedges, yedges = np.histogram2d([], [], bins=self.bins_detector, range=self.range)
             self._fdm_hist_all = np.zeros_like(self.hist_fdm)
             self._fdm_count_all = 0
-            self._fdm_window_x = np.array([], dtype=np.float32)
-            self._fdm_window_y = np.array([], dtype=np.float32)
+            self._fdm_window_capacity = 0
+            self._fdm_window_bins = np.empty(0, dtype=np.int32)
+            self._fdm_window_start = 0
+            self._fdm_window_count = 0
+            self._fdm_window_hist = np.zeros_like(self.hist_fdm)
             self.fdm_count.setText("0")
             self.hist_mc = np.zeros(len(self.bins_mc) - 1)
             self.hist_tof = np.zeros(len(self.bins_tof) - 1)
@@ -1316,6 +1661,24 @@ class Ui_Visualization(object):
             self.detector_heatmap.enableAutoRange(axis='y')
             self.index_auto_scale_graph = 0
 
+        # Fresh snapshot requested by the experiment process for an interim
+        # notification e-mail. Export the live plots + a full-window grab to
+        # fixed '*_email.png' names so email_send can attach the newest one,
+        # then clear the flag to signal the experiment loop we are done.
+        if self.variables.flag_save_email_screenshot:
+            try:
+                path_meta = self.variables.path_meta
+                if path_meta:
+                    self._export_all_plots(path_meta, 'email')
+            except Exception as e:
+                print(
+                    f"{initialize_devices.bcolors.WARNING}Warning: Could not save e-mail "
+                    f"screenshot{initialize_devices.bcolors.ENDC}"
+                )
+                print(e)
+            finally:
+                self.variables.flag_save_email_screenshot = False
+
         # with self.variables.lock_statistics and self.variables.lock_setup_parameters:
         if self.variables.start_flag and self.variables.flag_visualization_start:
             self.index_auto_scale_graph += 1
@@ -1324,30 +1687,10 @@ class Ui_Visualization(object):
             # save plots to the file
             if time.time() - self.start_time_metadata >= self.variables.save_meta_interval_visualization:
                 self.path_meta = self.variables.path_meta
-                exporter = pg.exporters.ImageExporter(self.vdc_time.plotItem)
-                exporter.params['width'] = 1000  # Set the width of the image
-                exporter.params['height'] = 800  # Set the height of the image
-                exporter.export(self.variables.path_meta + '/visualization_v_dc_p_%s.png' % self.index_plot_save)
-                exporter = pg.exporters.ImageExporter(self.detection_rate_viz.plotItem)
-                exporter.params['width'] = 1000  # Set the width of the image
-                exporter.params['height'] = 800  # Set the height of the image
-                exporter.export(self.path_meta + '/visualization_detection_rate_%s.png' % self.index_plot_save)
-                # Hitmap and FDM are now separate panels - export both.
-                exporter = pg.exporters.ImageExporter(self.detector_heatmap.plotItem)
-                exporter.params['width'] = 1000
-                exporter.params['height'] = 800
-                exporter.export(self.path_meta + '/visualization_detector_hitmap_%s.png' % self.index_plot_save)
-                exporter = pg.exporters.ImageExporter(self.detector_fdm.plotItem)
-                exporter.params['width'] = 1000
-                exporter.params['height'] = 800
-                exporter.export(self.path_meta + '/visualization_detector_fdm_%s.png' % self.index_plot_save)
-                exporter = pg.exporters.ImageExporter(self.histogram.plotItem)
-                exporter.params['width'] = 1000  # Set the width of the image
-                exporter.params['height'] = 800  # Set the height of the image
-                exporter.export(self.path_meta + '/visualization_mc_tof_%s.png' % self.index_plot_save)
-
-                screenshot = QtWidgets.QApplication.primaryScreen().grabWindow(self.visualization_window.winId())
-                screenshot.save(self.path_meta + '/visualization_screenshot_%s.png' % self.index_plot_save, 'png')
+                self._export_interval_snapshots(
+                    self.path_meta,
+                    str(self.index_plot_save),
+                )
                 self.start_time_metadata = time.time()
                 # Increase the index
                 self.index_plot_save += 1
@@ -1358,8 +1701,9 @@ class Ui_Visualization(object):
                 self.dc_hold.click()
             # (No more heatmap_fdm_switch click - both views are always
             # rendered into their own panels.)
-            if self.mc_tof_last_events_flag:
-                self.spectrum_last_events_switch.click()
+            # Final metadata must show the complete cumulative experiment,
+            # regardless of the operator's live Last Events selections.
+            self._disable_last_event_views_for_final_export()
             if self.change_detection_rate_range:
                 self.detection_rate_range_switch.click()
             if self.conf["visualization"] == "tof":
@@ -1367,7 +1711,11 @@ class Ui_Visualization(object):
                 # keeping the current calibrated/raw choice.
                 self._select_spectrum_view("mc", self.uncalibrated_mode)
 
-            self.update_graphs_helper()
+            # The producer has stopped by this point. Drain all remaining
+            # detector events and redraw once with both Last Events filters
+            # disabled before any plot or full-window screenshot is saved.
+            self.update_graphs_helper(final_drain=True)
+            QtWidgets.QApplication.processEvents()
 
             exporter = pg.exporters.ImageExporter(self.vdc_time.plotItem)
             exporter.params['width'] = 1000  # Set the width of the image
@@ -1413,6 +1761,8 @@ class Ui_Visualization(object):
         else:
             self.histogram.setLabel("bottom", "m/c", units='Da', **self.styles)
         self._highlight_active_view_button()
+        # Keep the view switch responsive after the experiment has stopped.
+        self._redraw_if_stopped()
 
     def _highlight_active_view_button(self):
         """Paint the active view button green, the other three default."""
@@ -1566,27 +1916,53 @@ class Ui_Visualization(object):
             return "raw (no fit)"
         return f"R²={params.fit_quality:.2f} n={params.num_events_used}"
 
+    def _rebuild_calibrated_hist(self, axis):
+        """Rebuild the "tof" or "mc" calibrated accumulator from retained events.
+
+        Called right after a calibration on/off transition instead of
+        zeroing the accumulator, so ions seen before the transition are
+        re-binned under the new params (or the raw fallback) instead of
+        vanishing. Limited to the last-100k retained raw events - anything
+        older than that window is still lost.
+        """
+        try:
+            with self._buffer_lock:
+                t = self.last_100_thousand_t
+                v = self.last_100_thousand_v
+                x = self.last_100_thousand_det_x
+                y = self.last_100_thousand_det_y
+            t_0 = self._t_0()
+            params = self._calib_params_tof if axis == "tof" else self._calib_params_mc
+            values = self._apply_axis(params, axis, t, v, x, y, t_0)
+            bins = self.bins_tof if axis == "tof" else self.bins_mc
+            hist = np.histogram(values, bins=bins)[0].astype(float)
+            if axis == "tof":
+                self.hist_tof = hist
+            else:
+                self.hist_mc = hist
+        except Exception:
+            pass
+
     def _drain_calib_updates(self):
         """Apply pending live-calibration updates on the GUI thread.
 
-        Zeroing a calibrated accumulator (its old bins were binned under
-        now-superseded params) and updating the status banner happen here
-        so the histogram arrays and Qt widgets are only ever touched from
-        the GUI thread. The raw accumulators never reset — their bin
-        meanings don't depend on any fit.
+        A calibrated accumulator's old bins were binned under
+        now-superseded params, so they no longer mean the right thing on
+        the new axis. Rather than zeroing them outright (which threw away
+        every ion seen before calibration turned on/off), rebuild the
+        accumulator from the retained last-100k raw event buffer under the
+        new params - so events before the transition still show up,
+        limited only by that 100k retention window. Updating the status
+        banner happens here too so the histogram arrays and Qt widgets are
+        only ever touched from the GUI thread. The raw accumulators never
+        reset — their bin meanings don't depend on any fit.
         """
         if self._calib_reset_tof:
             self._calib_reset_tof = False
-            try:
-                self.hist_tof.fill(0)
-            except Exception:
-                pass
+            self._rebuild_calibrated_hist("tof")
         if self._calib_reset_mc:
             self._calib_reset_mc = False
-            try:
-                self.hist_mc.fill(0)
-            except Exception:
-                pass
+            self._rebuild_calibrated_hist("mc")
         if self._calib_status_dirty:
             self._calib_status_dirty = False
             try:
@@ -1626,6 +2002,8 @@ class Ui_Visualization(object):
             self.spectrum_last_events_switch.setStyleSheet("QPushButton{\nbackground: rgb(0, 255, 26)\n}")
         else:
             self.spectrum_last_events_switch.setStyleSheet(self.original_button_style)
+        # Keep the toggle responsive after the experiment has stopped.
+        self._redraw_if_stopped()
 
     def parameters_changes(self):
         """
@@ -1670,6 +2048,10 @@ class Ui_Visualization(object):
                 self.hit_displayed.setText(_translate("PyCCAPT", "100000"))
             else:
                 self.num_hit_display = int(float(self.hit_displayed.text()))
+
+        # Keep the fields responsive after the experiment has stopped so the
+        # operator can still re-window the spectrum / hitmap (e.g. last 10000).
+        self._redraw_if_stopped()
 
     def error_message(self, message):
         """

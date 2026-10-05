@@ -1,12 +1,21 @@
 import logging
 import sys
 import threading
+import time
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
+from pyccapt.control.gui.responsive import make_window_responsive
 from pyccapt.control.core import runtime
+from pyccapt.control.core.control_state import Connection, Evidence, commanded, complete, publish
 from pyccapt.control.gui import tooltips
+from pyccapt.control.gui.stage_control_widgets import (
+    JOG_GROUP_STYLE,
+    SpeedSelector,
+    make_jog_button,
+)
 from pyccapt.control.smaract_mcs2 import mcs2_stage
+from pyccapt.control.devices.alignment_stage import AlignmentStageService
 
 # GUI session logger (lands in meta_data/files/logs/gui/). Used so a silent
 # SmarAct connection failure - which leaves the specimen-stage position at 0
@@ -47,22 +56,11 @@ def _make_lcd(parent):
     lcd = QtWidgets.QLCDNumber(parent=parent)
     lcd.setDigitCount(5)
     lcd.setSegmentStyle(QtWidgets.QLCDNumber.SegmentStyle.Flat)
-    lcd.setMinimumSize(QtCore.QSize(60, 28))
+    lcd.setFixedSize(QtCore.QSize(64, 28))
     lcd.setStyleSheet(
         "QLCDNumber{background: rgb(220,235,245);color: rgb(0,30,80);border: 1px solid rgb(120,160,200);border-radius: 4px;}"
     )
     return lcd
-
-
-def _make_axis_slider(parent, lo, hi, default):
-    slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal, parent=parent)
-    slider.setMinimum(lo)
-    slider.setMaximum(hi)
-    slider.setValue(default)
-    slider.setTickPosition(QtWidgets.QSlider.TickPosition.TicksBelow)
-    slider.setTickInterval(1)
-    slider.setMinimumWidth(160)
-    return slider
 
 
 class Ui_Stage_Control(object):
@@ -85,7 +83,9 @@ class Ui_Stage_Control(object):
         self._speed_max_mm_s = float(self.conf.get('stage_speed_max_mm_s', 1.0))
         self._speed_max_level = int(self.conf.get('stage_speed_level_max', 11))
         self._speed_min_level = int(self.conf.get('stage_speed_level_min', 1))
-        self._speed_default = int(self.conf.get('stage_speed_level_default', 5))
+        # Level 3 in the default table is 0.004 mm/s. With the default
+        # 0.2-second jog cadence this advances exactly 0.8 µm per interval.
+        self._speed_default = int(self.conf.get('stage_speed_level_default', 3))
         self._click_duration_s = float(self.conf.get('stage_click_duration_s', 0.2))
         self._speed_table = self.conf.get('stage_speed_table_mm_s') or None
         self._home_target_m = (
@@ -100,17 +100,25 @@ class Ui_Stage_Control(object):
         self._reference_timeout_s = float(self.conf.get('stage_reference_timeout_s', 120))
         self._reference_velocity_m_s = float(self.conf.get('stage_reference_velocity_mm_s', 5.0)) * 1e-3
         self._home_velocity_m_s = float(self.conf.get('stage_home_velocity_mm_s', 1.0)) * 1e-3
+        self.alignment_service = AlignmentStageService(variables, lambda: self.stage_device)
+        self._alignment_locked = False
 
     # ------------------------------------------------------------------- ui
 
     def setupUi(self, Stage_Control):
+        self._alignment_timer = QtCore.QTimer(Stage_Control)
+        self._alignment_timer.timeout.connect(self._alignment_tick)
+        self._alignment_timer.start(100)
         Stage_Control.setObjectName("Stage_Control")
-        Stage_Control.resize(1020, 230)
+        Stage_Control.resize(880, 220)
         self.gridLayout_5 = QtWidgets.QGridLayout(Stage_Control)
+        self.gridLayout_5.setContentsMargins(8, 8, 8, 8)
         self.gridLayout_3 = QtWidgets.QGridLayout()
+        self.gridLayout_3.setSpacing(8)
 
         # --- Position panel: header + 3 axes x (label, mm, um, nm) ---------
         self.gridLayout_4 = QtWidgets.QGridLayout()
+        self.gridLayout_4.setSpacing(4)
         header_font = QtGui.QFont()
         header_font.setBold(True)
         header_font.setPointSize(8)
@@ -158,15 +166,22 @@ class Ui_Stage_Control(object):
             self.gridLayout_4.addWidget(mm, row, 1, 1, 1)
             self.gridLayout_4.addWidget(um, row, 2, 1, 1)
             self.gridLayout_4.addWidget(nm, row, 3, 1, 1)
-        self.gridLayout_3.addLayout(self.gridLayout_4, 0, 0, 1, 1)
+        self.gridLayout_3.addLayout(self.gridLayout_4, 0, 0, 1, 1,
+                                   alignment=QtCore.Qt.AlignmentFlag.AlignTop)
 
-        # --- Per-axis speed sliders (X, Y, Z) ------------------------------
+        # --- Per-axis exact speed presets (X, Y, Z) ------------------------
         self.gridLayout_2 = QtWidgets.QGridLayout()
-        # Header
-        header_label = QtWidgets.QLabel("Speed", parent=Stage_Control)
+        self.gridLayout_2.setSpacing(4)
+        header_label = QtWidgets.QLabel("Speed preset", parent=Stage_Control)
         header_label.setFont(bold)
         header_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.gridLayout_2.addWidget(header_label, 0, 1, 1, 1)
+        jog_header = QtWidgets.QLabel(
+            f"Jog / {self._click_duration_s:g} s", parent=Stage_Control
+        )
+        jog_header.setFont(bold)
+        jog_header.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.gridLayout_2.addWidget(jog_header, 0, 2, 1, 1)
 
         self.label_speed_x = QtWidgets.QLabel("X", parent=Stage_Control)
         self.label_speed_x.setFont(bold)
@@ -175,22 +190,40 @@ class Ui_Stage_Control(object):
         self.label_speed_z = QtWidgets.QLabel("Z", parent=Stage_Control)
         self.label_speed_z.setFont(bold)
 
-        self.stage_speed_x = _make_axis_slider(
-            Stage_Control, self._speed_min_level, self._speed_max_level, self._speed_default
+        self.stage_speed_x = SpeedSelector(
+            Stage_Control,
+            self._speed_min_level,
+            self._speed_max_level,
+            self._speed_default,
+            self._speed_max_mm_s,
+            self._speed_table,
         )
-        self.stage_speed_y = _make_axis_slider(
-            Stage_Control, self._speed_min_level, self._speed_max_level, self._speed_default
+        self.stage_speed_y = SpeedSelector(
+            Stage_Control,
+            self._speed_min_level,
+            self._speed_max_level,
+            self._speed_default,
+            self._speed_max_mm_s,
+            self._speed_table,
         )
-        self.stage_speed_z = _make_axis_slider(
-            Stage_Control, self._speed_min_level, self._speed_max_level, self._speed_default
+        self.stage_speed_z = SpeedSelector(
+            Stage_Control,
+            self._speed_min_level,
+            self._speed_max_level,
+            self._speed_default,
+            self._speed_max_mm_s,
+            self._speed_table,
         )
 
         self.stage_speed_x_label = QtWidgets.QLabel(parent=Stage_Control)
-        self.stage_speed_x_label.setMinimumWidth(230)
         self.stage_speed_y_label = QtWidgets.QLabel(parent=Stage_Control)
-        self.stage_speed_y_label.setMinimumWidth(230)
         self.stage_speed_z_label = QtWidgets.QLabel(parent=Stage_Control)
-        self.stage_speed_z_label.setMinimumWidth(230)
+        # Fit every configured preset instead of stretching the selectors to
+        # consume spare window width. Keep full values readable for custom tables.
+        for selector in (self.stage_speed_x, self.stage_speed_y, self.stage_speed_z):
+            widest_text = max(selector.fontMetrics().horizontalAdvance(selector.itemText(index))
+                              for index in range(selector.count()))
+            selector.setFixedWidth(max(132, widest_text + 42))
 
         for row, (lbl, sl, val) in enumerate(
             (
@@ -209,72 +242,55 @@ class Ui_Stage_Control(object):
         self.stage_speed_ud = self.stage_speed_y
         self.stage_speed_fb = self.stage_speed_z
 
-        self.gridLayout_3.addLayout(self.gridLayout_2, 0, 1, 1, 1)
+        self.gridLayout_3.addLayout(self.gridLayout_2, 0, 1, 1, 1,
+                                   alignment=QtCore.Qt.AlignmentFlag.AlignTop)
 
-        # --- Direction buttons (X/Y plane) ---------------------------------
-        self.gridLayout = QtWidgets.QGridLayout()
-        self.gridLayout.addItem(
-            QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum),
-            0,
-            0,
-            1,
-            1,
-        )
-        self.stage_up = QtWidgets.QPushButton("up", parent=Stage_Control)
-        self.stage_up.setMinimumSize(QtCore.QSize(50, 25))
-        self.gridLayout.addWidget(self.stage_up, 0, 1, 1, 1)
-        self.gridLayout.addItem(
-            QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum),
-            0,
-            2,
-            1,
-            1,
-        )
-        self.stage_left = QtWidgets.QPushButton("Left", parent=Stage_Control)
-        self.stage_left.setMinimumSize(QtCore.QSize(50, 25))
-        self.gridLayout.addWidget(self.stage_left, 1, 0, 1, 1)
-        self.gridLayout.addItem(
-            QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum),
-            1,
-            1,
-            1,
-            1,
-        )
-        self.stage_right = QtWidgets.QPushButton("Right", parent=Stage_Control)
-        self.stage_right.setMinimumSize(QtCore.QSize(50, 25))
-        self.gridLayout.addWidget(self.stage_right, 1, 2, 1, 1)
-        self.gridLayout.addItem(
-            QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum),
-            2,
-            0,
-            1,
-            1,
-        )
-        self.stage_down = QtWidgets.QPushButton("Down", parent=Stage_Control)
-        self.stage_down.setMinimumSize(QtCore.QSize(50, 25))
-        self.gridLayout.addWidget(self.stage_down, 2, 1, 1, 1)
-        self.gridLayout.addItem(
-            QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum),
-            2,
-            2,
-            1,
-            1,
-        )
-        self.gridLayout_3.addLayout(self.gridLayout, 0, 2, 1, 1)
+        # --- Standard three-axis jog controls ------------------------------
+        # X/Y use the familiar D-pad convention; Z has a separate rocker so
+        # depth motion cannot be confused with movement in the image plane.
+        self.xy_jog_group = QtWidgets.QGroupBox("X / Y Jog", parent=Stage_Control)
+        self.xy_jog_group.setStyleSheet(JOG_GROUP_STYLE)
+        self.gridLayout = QtWidgets.QGridLayout(self.xy_jog_group)
+        self.gridLayout.setContentsMargins(7, 11, 7, 7)
+        self.gridLayout.setHorizontalSpacing(4)
+        self.gridLayout.setVerticalSpacing(4)
 
-        # --- Forward / backward (Z) ----------------------------------------
-        self.verticalLayout = QtWidgets.QVBoxLayout()
-        self.stage_forward = QtWidgets.QPushButton("Forward", parent=Stage_Control)
+        self.stage_up = make_jog_button(self.xy_jog_group, "Y+\n▲")
+        self.stage_left = make_jog_button(self.xy_jog_group, "◀  X−")
+        self.stage_right = make_jog_button(self.xy_jog_group, "X+  ▶")
+        self.stage_down = make_jog_button(self.xy_jog_group, "▼\nY−")
+        xy_center = QtWidgets.QLabel("X / Y", parent=self.xy_jog_group)
+        xy_center.setFixedSize(QtCore.QSize(58, 42))
+        xy_center.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        xy_center.setStyleSheet(
+            "QLabel{background:#f5f7f9;color:#526b7c;border:1px solid #c4ced6;"
+            "border-radius:7px;font-weight:bold;}"
+        )
+
+        self.gridLayout.addWidget(self.stage_up, 0, 1)
+        self.gridLayout.addWidget(self.stage_left, 1, 0)
+        self.gridLayout.addWidget(xy_center, 1, 1)
+        self.gridLayout.addWidget(self.stage_right, 1, 2)
+        self.gridLayout.addWidget(self.stage_down, 2, 1)
+        self.gridLayout_3.addWidget(self.xy_jog_group, 0, 2, 1, 1)
+
+        self.z_jog_group = QtWidgets.QGroupBox("Z Jog", parent=Stage_Control)
+        self.z_jog_group.setStyleSheet(JOG_GROUP_STYLE)
+        self.verticalLayout = QtWidgets.QVBoxLayout(self.z_jog_group)
+        self.verticalLayout.setContentsMargins(7, 11, 7, 7)
+        self.verticalLayout.setSpacing(4)
+        self.verticalLayout.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
+        self.stage_forward = make_jog_button(self.z_jog_group, "Z+\nForward", width=76)
+        self.stage_backward = make_jog_button(self.z_jog_group, "Z−\nBackward", width=76)
         self.verticalLayout.addWidget(self.stage_forward)
-        self.verticalLayout.addItem(
-            QtWidgets.QSpacerItem(17, 24, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
-        )
-        self.stage_backward = QtWidgets.QPushButton("Backward", parent=Stage_Control)
         self.verticalLayout.addWidget(self.stage_backward)
-        self.gridLayout_3.addLayout(self.verticalLayout, 0, 3, 1, 1)
+        self.gridLayout_3.addWidget(self.z_jog_group, 0, 3, 1, 1,
+                                   alignment=QtCore.Qt.AlignmentFlag.AlignTop)
 
         # --- Home / Reference / Stop / Override ----------------------------
         home_layout = QtWidgets.QVBoxLayout()
+        home_layout.setSpacing(4)
+        home_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
         self.stage_home = QtWidgets.QPushButton("Home", parent=Stage_Control)
         home_layout.addWidget(self.stage_home)
         self.stage_reference = QtWidgets.QPushButton("Reference", parent=Stage_Control)
@@ -290,7 +306,11 @@ class Ui_Stage_Control(object):
         self.superuser.setStyleSheet("QPushButton{background: rgb(193, 193, 193)}")
         self._original_superuser_style = self.superuser.styleSheet()
         home_layout.addWidget(self.superuser)
-        self.gridLayout_3.addLayout(home_layout, 0, 4, 1, 1)
+        for button in (self.stage_home, self.stage_reference, self.stage_stop, self.superuser):
+            button.setFixedWidth(max(105, button.fontMetrics().horizontalAdvance(button.text()) + 20))
+            button.setMinimumHeight(25)
+        self.gridLayout_3.addLayout(home_layout, 0, 4, 1, 1,
+                                   alignment=QtCore.Qt.AlignmentFlag.AlignTop)
 
         # --- Status / error label ------------------------------------------
         self.Error = QtWidgets.QLabel(parent=Stage_Control)
@@ -307,11 +327,12 @@ class Ui_Stage_Control(object):
 
         self.retranslateUi(Stage_Control)
         QtCore.QMetaObject.connectSlotsByName(Stage_Control)
+        make_window_responsive(Stage_Control)
         tooltips.apply_tooltips(self, tooltips.STAGE_TOOLTIPS)
 
         self._connect_signals()
-        for sl in (self.stage_speed_x, self.stage_speed_y, self.stage_speed_z):
-            self._update_speed_label(sl)
+        for selector in (self.stage_speed_x, self.stage_speed_y, self.stage_speed_z):
+            self._update_speed_label(selector)
         self._connect_device()
 
     def retranslateUi(self, Stage_Control):
@@ -330,7 +351,7 @@ class Ui_Stage_Control(object):
         # button. pressed starts a timer that fires _jog_axis every
         # click_duration_s seconds (the same step the old single-click
         # jog used), so consecutive steps chain back-to-back into
-        # smooth motion at the slider-selected velocity. released
+        # smooth motion at the selected velocity. released
         # stops the timer and sends a Stop to truncate any in-flight
         # step so motion ends within one click_duration.
         for button, axis, sign in (
@@ -351,8 +372,11 @@ class Ui_Stage_Control(object):
         self.superuser.clicked.connect(self._super_user_access)
 
     def _connect_device(self):
+        publish(self.variables, "sample_stage", "main", "connection", connection=Connection.CONNECTING)
         if not self._locator:
             self._connect_error = "No SmarAct stage locator configured (stage_smartact_main in config.toml)."
+            publish(self.variables, "sample_stage", "main", "connection", connection=Connection.DISCONNECTED)
+            publish(self.variables, "sample_stage", "main", "fault", fault=self._connect_error)
             self._set_error(self._connect_error)
             self._set_movement_enabled(False)
             _log.warning(
@@ -368,6 +392,8 @@ class Ui_Stage_Control(object):
         except Exception as exc:
             self.stage_device = None
             self._connect_error = str(exc)
+            publish(self.variables, "sample_stage", "main", "connection", connection=Connection.DISCONNECTED)
+            publish(self.variables, "sample_stage", "main", "fault", fault=str(exc))
             self._set_error(self._connect_error)
             self._set_movement_enabled(False)
             _log.warning(
@@ -378,6 +404,7 @@ class Ui_Stage_Control(object):
             )
             return
         self._set_error("")
+        publish(self.variables, "sample_stage", "main", "connection", connection=Connection.CONNECTED)
         self._set_movement_enabled(True)
         _log.info(
 	        "Stage Control: connected to SmarAct main stage '%s'; publishing "
@@ -448,16 +475,16 @@ class Ui_Stage_Control(object):
     # --------------------------------------------------------------- handlers
 
     def _axis_velocity_m_s(self, axis):
-        slider = (self.stage_speed_x, self.stage_speed_y, self.stage_speed_z)[axis]
+        selector = (self.stage_speed_x, self.stage_speed_y, self.stage_speed_z)[axis]
         return mcs2_stage.speed_level_to_m_s(
-            slider.value(),
+            selector.value(),
             self._speed_max_level,
             self._speed_max_mm_s,
             table=self._speed_table,
         )
 
-    def _update_speed_label(self, slider):
-        level = slider.value()
+    def _update_speed_label(self, selector):
+        level = selector.value()
         v_m_s = mcs2_stage.speed_level_to_m_s(
             level,
             self._speed_max_level,
@@ -467,27 +494,30 @@ class Ui_Stage_Control(object):
         step_m = mcs2_stage.click_step_m(v_m_s, self._click_duration_s)
         step_um = step_m * 1e6
         step_text = f"{step_um:.0f}" if step_um >= 10 else f"{step_um:.2f}"
-        text = f"L{level}  {v_m_s * 1000:.3f} mm/s, step {step_text} µm"
+        text = f"{step_text} µm"
         mapping = {
             self.stage_speed_x: self.stage_speed_x_label,
             self.stage_speed_y: self.stage_speed_y_label,
             self.stage_speed_z: self.stage_speed_z_label,
         }
-        mapping[slider].setText(text)
+        mapping[selector].setText(text)
 
     def _jog_axis(self, axis, sign):
+        if self.variables.automatic_alignment_enabled:
+            return
         if self.stage_device is None:
             self._set_error(self._connect_error or "Stage not connected.")
             return
         vel = self._axis_velocity_m_s(axis)
         step_m = mcs2_stage.click_step_m(vel, self._click_duration_s)
         try:
-            self.stage_device.move_relative_axis(
-                axis=axis,
-                delta_m=sign * step_m,
-                velocity_m_s=vel,
-                wait=False,
-            )
+            with commanded(self.variables, "sample_stage", "main", "jog"):
+                self.stage_device.move_relative_axis(
+                    axis=axis,
+                    delta_m=sign * step_m,
+                    velocity_m_s=vel,
+                    wait=False,
+                )
         except mcs2_stage.SmarActStageError as exc:
             self._set_error(f"Move failed: {exc}")
 
@@ -495,7 +525,7 @@ class Ui_Stage_Control(object):
         """Begin firing single-step jogs at the click cadence.
 
         Each tick is just a normal ``_jog_axis`` call, so the velocity
-        the user picked with the speed slider is still honoured and a
+        the user picked with the speed selector is still honoured and a
         per-step error gets reported in the status banner. Tick period
         equals ``_click_duration_s`` (typically 200 ms) so consecutive
         steps butt up against each other and the user perceives the
@@ -549,26 +579,31 @@ class Ui_Stage_Control(object):
         self._continuous_jog_sign = 0
 
     def _go_home(self):
+        if self.variables.automatic_alignment_enabled:
+            return
         if self.stage_device is None:
             self._set_error(self._connect_error or "Stage not connected.")
             return
         x_m, y_m, z_m = self._home_target_m
         # Home uses a dedicated velocity (stage_home_velocity_mm_s in
-        # config.toml) instead of whatever per-axis slider happens to be
-        # set right now - otherwise a Home click with the X slider at
+        # config.toml) instead of whatever per-axis speed preset happens to
+        # be selected - otherwise a Home click with X at
         # level 1 (a few um/s) takes minutes to complete.
         try:
-            self.stage_device.move_absolute(
-                x_m=x_m,
-                y_m=y_m,
-                z_m=z_m,
-                velocity_m_s=self._home_velocity_m_s,
-                wait=False,
-            )
+            with commanded(self.variables, "sample_stage", "main", "home"):
+                self.stage_device.move_absolute(
+                    x_m=x_m,
+                    y_m=y_m,
+                    z_m=z_m,
+                    velocity_m_s=self._home_velocity_m_s,
+                    wait=False,
+                )
         except mcs2_stage.SmarActStageError as exc:
             self._set_error(f"Home failed: {exc}")
 
     def _reference(self):
+        if self.variables.automatic_alignment_enabled:
+            return
         if self.stage_device is None:
             self._set_error(self._connect_error or "Stage not connected.")
             return
@@ -588,24 +623,26 @@ class Ui_Stage_Control(object):
             self._set_error("Reference canceled - confirm there is no specimen on the stage.")
             return
 
-        self._reference_cancel = threading.Event()
-        self._reference_worker = _ReferenceWorker(
-            self.stage_device,
-            self._reference_cancel,
-            self._referencing_options,
-            self._reference_timeout_s,
-            self._reference_velocity_m_s,
-        )
-        self._reference_worker.finished_ok.connect(self._on_reference_done)
-        self._reference_worker.finished_with_error.connect(self._on_reference_failed)
-        # Lock the movement controls for the duration of the search - the
-        # controller will refuse jogs while channels are busy and the
-        # resulting error spam isn't useful.  STOP stays enabled so the
-        # user can always abort.
-        self._set_jog_enabled(False)
-        self.stage_reference.setEnabled(False)
-        self._set_error("Referencing - keep the path clear; press STOP to abort.")
-        self._reference_worker.start()
+        with commanded(self.variables, "sample_stage", "main", "referencing", confirmation="referenced") as state:
+            reference_id = state.command_id if state is not None else None
+            self._reference_cancel = threading.Event()
+            self._reference_worker = _ReferenceWorker(
+                self.stage_device,
+                self._reference_cancel,
+                self._referencing_options,
+                self._reference_timeout_s,
+                self._reference_velocity_m_s,
+            )
+            self._reference_worker.finished_ok.connect(lambda: self._on_reference_done(reference_id))
+            self._reference_worker.finished_with_error.connect(lambda message: self._on_reference_failed(message, reference_id))
+            # Lock the movement controls for the duration of the search - the
+            # controller will refuse jogs while channels are busy and the
+            # resulting error spam isn't useful.  STOP stays enabled so the
+            # user can always abort.
+            self._set_jog_enabled(False)
+            self.stage_reference.setEnabled(False)
+            self._set_error("Referencing - keep the path clear; press STOP to abort.")
+            self._reference_worker.start()
 
     def _confirm_reference_no_sample(self):
         """Show a red Critical-icon dialog confirming the stage is empty.
@@ -641,7 +678,9 @@ class Ui_Stage_Control(object):
         warning.setEscapeButton(QtWidgets.QMessageBox.StandardButton.No)
         return warning.exec() == QtWidgets.QMessageBox.StandardButton.Yes
 
-    def _on_reference_done(self):
+    def _on_reference_done(self, command_id=None):
+        complete(self.variables, "sample_stage", "main", "referenced", evidence=Evidence.READBACK,
+                 expected="referencing", command_id=command_id)
         self._reference_worker = None
         self._reference_cancel = None
         self._set_jog_enabled(True)
@@ -652,7 +691,9 @@ class Ui_Stage_Control(object):
         self._consecutive_position_errors = 0
         self._set_error("Reference complete.")
 
-    def _on_reference_failed(self, message):
+    def _on_reference_failed(self, message, command_id=None):
+        publish(self.variables, "sample_stage", "main", "fault", fault=str(message), fail_command=True,
+                command_id=command_id)
         self._reference_worker = None
         self._reference_cancel = None
         self._set_jog_enabled(True)
@@ -673,13 +714,27 @@ class Ui_Stage_Control(object):
             btn.setEnabled(enabled and self.stage_device is not None)
 
     def _stop_stage(self):
+        if self.variables.automatic_alignment_enabled:
+            self.variables.alignment_cancel_motion = True
+            self.variables.stop_flag = True
+            self.alignment_service.cancel('Operator pressed Stage Stop')
         # Abort an in-flight reference search FIRST, then stop the axes.
         # This is the only call path that can interrupt referencing.
         if self._reference_cancel is not None:
             self._reference_cancel.set()
         if self.stage_device is None:
             return
-        self.stage_device.stop()
+        with commanded(self.variables, "sample_stage", "main", "stopped"):
+            self.stage_device.stop()
+
+    def _alignment_tick(self):
+        locked = bool(self.variables.automatic_alignment_enabled)
+        if locked != self._alignment_locked:
+            if locked:
+                self._stop_continuous_jog()
+            self._alignment_locked = locked
+            self._set_movement_enabled(not locked and self.stage_device is not None)
+        self.alignment_service.tick()
 
     def _refresh_position(self):
         if self.stage_device is None:
@@ -688,6 +743,7 @@ class Ui_Stage_Control(object):
             pos = self.stage_device.get_position()
         except mcs2_stage.SmarActStageError as exc:
             # Same error repeating every poll? Show it once then go quiet
+            publish(self.variables, "sample_stage", "main", "fault", fault=str(exc))
             # until the condition clears, otherwise the user's screen
             # fills with identical red text.  After 4 repeats we also
             # slow the timer down so we stop hammering the controller.
@@ -717,6 +773,11 @@ class Ui_Stage_Control(object):
 	        self.variables.stage_pos_x = float(pos['x'])
 	        self.variables.stage_pos_y = float(pos['y'])
 	        self.variables.stage_pos_z = float(pos['z'])
+	        updated_at = time.monotonic()
+	        self.variables.stage_pos_updated_at = updated_at
+	        self.variables.stage_position_snapshot = (
+	            float(pos['x']), float(pos['y']), float(pos['z']), updated_at,
+	        )
         except Exception:
 	        pass
 
@@ -761,6 +822,8 @@ class Ui_Stage_Control(object):
             except Exception:
                 pass
             self.stage_device = None
+
+        publish(self.variables, "sample_stage", "main", "connection", connection=Connection.DISCONNECTED)
 
 
 class StageControlWindow(QtWidgets.QWidget):

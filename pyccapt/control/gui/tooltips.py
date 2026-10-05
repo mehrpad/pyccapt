@@ -58,8 +58,7 @@ def apply_tooltips(ui_object, tooltips: Mapping[str, str]) -> None:
 
 MAIN_TOOLTIPS = {
     # --- Sub-window launcher buttons --------------------------------------
-    "gates_control": "Open the Gates Control window (open/close cryo, main and load-lock gate valves).",
-    "pumps_vaccum": "Open the Pumps & Vacuum window (chamber pressures, load-lock pumping, cryo / load-lock temperatures).",
+    "pumps_vaccum": "Open the combined Gates & Pumps window (gate valves, chamber pressures, pumping and temperatures).",
     "camears": "Open the Cameras & Alignment window (live side / top / angle camera streams, light, exposure).",
     "laser_control": "Open the Laser Control window (NKT laser settings, AOM, and the laser focusing stage).",
     "stage_control": "Open the Stage Control window (sample / specimen stage, SmarAct MCS2).",
@@ -118,7 +117,9 @@ MAIN_TOOLTIPS = {
     "vdc_steps_up": "K_p gain for upward DC steps (controller's proportional gain when raising voltage).",
     "vdc_steps_down": "K_p gain for downward DC steps (proportional gain when lowering voltage).",
     "counter_source": "Where ion counts are read from (TDC, DRS, Counter, etc.).",
-    "parameters_source": "Where setup parameters are loaded from (file vs. live GUI values).",
+    "parameters_source": "Choose TextBox for a single run or TOML Plan for a reusable experiment queue.",
+    "advanced_settings_button": "Open detection mode, control algorithm, refresh frequency, pulse-voltage limits and K_p settings in one dialog. Changes apply as you edit; use the plan row editor for TOML experiments.",
+    "plan_table": "Experiments run from top to bottom. Double-click a row to inspect or edit its settings; sample IDs map to saved Cameras positions when Automatic Alignment is enabled.",
     # --- Live experiment statistics --------------------------------------
     "elapsed_time": "Live elapsed seconds since the experiment started.",
     "total_ions": "Live cumulative detected-ion count.",
@@ -127,6 +128,9 @@ MAIN_TOOLTIPS = {
     "Disabled until device checks pass (or override is "
     "active).",
     "stop_button": "Stop the running experiment cleanly (closes data files, ramps voltages down).",
+    "electrode_button": "Mark the electrode in or out. Experiments and Flat Test require it to be in.",
+    "flat_test_button": "Run a flat test after the sample stage reaches its home position.",
+    "automatic_alignment_button": "Enable alignment setup checks when starting an experiment.",
     "superuser": "Override Access - bypasses device-availability "
     "checks and other safety interlocks.  Click for a "
     "warning dialog; the button turns green while active.",
@@ -151,26 +155,20 @@ STAGE_TOOLTIPS = {
     "stage_z_mm": "Z-axis position, millimetres digit.",
     "stage_z_um": "Z-axis position, micrometres digit.",
     "stage_z_nm": "Z-axis position, nanometres digit.",
-    # --- Speed sliders ----------------------------------------------------
-    "stage_speed_x": "Speed level for the X axis (1=slowest, 11=fastest, "
-    "matches the MCS2 hand-control display).  Each level "
-    "maps to a velocity defined in stage_speed_table_mm_s "
-    "in config.toml.  Drag to change; the per-click jog "
-    "distance is also derived from this level.",
-    "stage_speed_y": "Speed level for the Y axis (1=slowest, 11=fastest). See stage_speed_table_mm_s in config.toml.",
-    "stage_speed_z": "Speed level for the Z axis (1=slowest, 11=fastest). See stage_speed_table_mm_s in config.toml.",
-    "stage_speed_x_label": "Live readout of the X-axis velocity (mm/s) and per-click jog distance (µm) at the current level.",
-    "stage_speed_y_label": "Live readout of the Y-axis velocity (mm/s) and per-click jog distance (µm).",
-    "stage_speed_z_label": "Live readout of the Z-axis velocity (mm/s) and per-click jog distance (µm).",
+    # --- Speed presets ----------------------------------------------------
+    "stage_speed_x": "Exact X-axis speed preset in mm/s. The default 0.004 mm/s moves 0.8 µm per 0.2-second jog interval.",
+    "stage_speed_y": "Exact Y-axis speed preset in mm/s. Values come from stage_speed_table_mm_s in config.toml.",
+    "stage_speed_z": "Exact Z-axis speed preset in mm/s. Values come from stage_speed_table_mm_s in config.toml.",
+    "stage_speed_x_label": "X-axis distance moved during each jog interval at the selected speed.",
+    "stage_speed_y_label": "Y-axis distance moved during each jog interval at the selected speed.",
+    "stage_speed_z_label": "Z-axis distance moved during each jog interval at the selected speed.",
     # --- Direction buttons ------------------------------------------------
-    "stage_up": "Jog Y axis +1 step.  Step distance = velocity × "
-    "stage_click_duration_s (config.toml), so faster "
-    "Y slider = larger jump per click.",
-    "stage_down": "Jog Y axis -1 step.",
-    "stage_left": "Jog X axis -1 step.",
-    "stage_right": "Jog X axis +1 step.",
-    "stage_forward": "Jog Z axis +1 step.",
-    "stage_backward": "Jog Z axis -1 step.",
+    "stage_up": "Hold to jog the Y axis in the positive direction.  Release to stop.",
+    "stage_down": "Hold to jog the Y axis in the negative direction.  Release to stop.",
+    "stage_left": "Hold to jog the X axis in the negative direction.  Release to stop.",
+    "stage_right": "Hold to jog the X axis in the positive direction.  Release to stop.",
+    "stage_forward": "Hold to jog forward along Z+; release to stop.",
+    "stage_backward": "Hold to jog backward along Z−; release to stop.",
     # --- Home / Reference / Stop / Override -------------------------------
     "stage_home": "Move all three axes to the home position set in "
     "config.toml (stage_home_x_mm, stage_home_y_mm, "
@@ -202,22 +200,21 @@ LASER_TOOLTIPS = {
     "laser_wavelegnth": "Output wavelength.  IR is the fundamental, Green "
     "is frequency-doubled, DUV is frequency-quadrupled.  "
     "Cannot be changed while the laser is emitting.",
-    "laser_power": "Average output power, milliwatts.  Capped by "
-    "max_laser_power in config.toml.  Type a number "
-    "or use the spin arrows; sent to the laser "
-    "immediately.",
-    "laser_rate": "Base pulse-repetition frequency (Hz).  Above "
-    "100 kHz the per-pulse energy decreases linearly "
-    "with rate.  Effective rate at the sample = "
-    "rate / Division Factor.",
-    "laser_divition_factor": "Pulse division factor (integer).  Effective "
-    "rate = base rate / this value.  Use to "
-    "drop from MHz down to a few kHz without "
-    "changing the base oscillator.",
+    "laser_power": "Relative IR AOM setting (%), converted to e_power 0..4000. "
+    "This is not a power setpoint in watts. Requires internal control mode. "
+    "Capped by laser_aom_max_percent in config.toml.",
+    "laser_rate": "Base repetition rate (kHz), read from the laser's factory frequency table. "
+    "Change only in Listen or Standby, outside an experiment (manual p122). "
+    "The nominal operating rate need not be the maximum supported rate. "
+    "Output rate = base rate / divider.",
+    "laser_divition_factor": "Integer divider, 1..10,000,000. Output rate = base rate / divider. "
+    "Can change while the laser is on (manual p123); locked during experiments. "
+    "For example, 400 kHz / 4 = 100 kHz. Firmware readback confirms the accepted value.",
     # --- Mode buttons + LEDs ---------------------------------------------
     "laser_listen": "Put the laser into Listen mode (lowest activity, safe).  No emission, ready to receive commands.",
-    "laser_standby": "Bring the laser to Standby - powered, warmed up, but not emitting.  Required before Laser On.",
-    "laser_on": "Start laser emission.  Only works from Standby.  Wavelength becomes locked while On.",
+    "laser_standby": "Warm up in Standby. Residual seed emission remains Class 4 (manual p116).",
+    "laser_on": "From Standby: enables emission and opens output (manual pp116-117). "
+    "From Output Enabled: closes the output gate while leaving the amplifier on.",
     "laser_enable": "Enable / disable the AOM output gate.  "
     "Toggles the actual output at the sample "
     "without changing the laser's emission "
@@ -227,9 +224,10 @@ LASER_TOOLTIPS = {
     "led_laser_on": "Emission indicator.  Green = laser is emitting, orange = transitioning.",
     "led_laser_enable": "Output-enable indicator.  Green = AOM open.",
     # --- Live readouts ---------------------------------------------------
-    "laser_power_disp": "Live measured average power (mW) read back from the laser.",
-    "laser_pulse_energy_disp": "Live per-pulse energy (nJ) read back from the laser.",
-    "laser_repetion_rate_disp": "Effective pulse rate at the sample (kHz), accounting for the division factor.",
+    "laser_power_disp": "Selected output internal-monitor power (W). Unknown readings show dashes.",
+    "laser_pulse_energy_disp": "Selected output pulse energy (microjoules). Internal-monitor estimate, not specimen energy.",
+    "laser_repetion_rate_disp": "Laser output repetition rate (kHz), computed from actual base rate / divider. "
+    "External gating can reduce the rate delivered to the sample.",
     # --- Scan / Focus mode -----------------------------------------------
     "laser_scan_mode5": "Scanning pattern selector.  Currently only 'Standard' is implemented.",
     "laser_focus_mode": "Focus-mode selector.  Currently only 'Standard' is implemented.",
@@ -251,24 +249,20 @@ LASER_TOOLTIPS = {
     "laser_z_mm": "Laser-stage Z position, millimetres digit.",
     "laser_z_um": "Laser-stage Z position, micrometres digit.",
     "laser_z_nm": "Laser-stage Z position, nanometres digit.",
-    # --- Laser-stage speed sliders ---------------------------------------
-    "laser_speed_x": "Speed level for the laser stage X axis (1=slowest, "
-    "11=fastest).  Velocity per level set by "
-    "stage_speed_table_mm_s in config.toml; per-click "
-    "step is derived from velocity × "
-    "stage_click_duration_s.",
-    "laser_speed_y": "Speed level for the laser stage Y axis (1=slowest, 11=fastest).",
-    "laser_speed_z": "Speed level for the laser stage Z axis (1=slowest, 11=fastest).",
-    "laser_speed_x_label": "Live readout of the laser-stage X velocity (mm/s) and per-click jog distance (µm).",
-    "laser_speed_y_label": "Live readout of the laser-stage Y velocity (mm/s) and per-click jog distance (µm).",
-    "laser_speed_z_label": "Live readout of the laser-stage Z velocity (mm/s) and per-click jog distance (µm).",
+    # --- Laser-stage speed presets ---------------------------------------
+    "laser_speed_x": "Exact laser-stage X speed preset in mm/s. The default 0.004 mm/s moves 0.8 µm per 0.2-second jog interval.",
+    "laser_speed_y": "Exact laser-stage Y speed preset in mm/s. Values come from stage_speed_table_mm_s in config.toml.",
+    "laser_speed_z": "Exact laser-stage Z speed preset in mm/s. Values come from stage_speed_table_mm_s in config.toml.",
+    "laser_speed_x_label": "Laser-stage X distance moved during each jog interval at the selected speed.",
+    "laser_speed_y_label": "Laser-stage Y distance moved during each jog interval at the selected speed.",
+    "laser_speed_z_label": "Laser-stage Z distance moved during each jog interval at the selected speed.",
     # --- Laser-stage direction buttons -----------------------------------
-    "laser_up": "Jog laser stage Y axis +1 step.",
-    "laser_down": "Jog laser stage Y axis -1 step.",
-    "laser_left": "Jog laser stage X axis -1 step.",
-    "leser_right": "Jog laser stage X axis +1 step.  (Original typo preserved as the widget name.)",
-    "laser_forward": "Jog laser stage Z axis +1 step.",
-    "laser_backward": "Jog laser stage Z axis -1 step.",
+    "laser_up": "Hold to jog the laser stage along Y+; release to stop.",
+    "laser_down": "Hold to jog the laser stage along Y−; release to stop.",
+    "laser_left": "Hold to jog the laser stage along X−; release to stop.",
+    "leser_right": "Hold to jog the laser stage along X+; release to stop.",
+    "laser_forward": "Hold to jog the laser stage forward along Z+; release to stop.",
+    "laser_backward": "Hold to jog the laser stage backward along Z−; release to stop.",
     # --- Home / Reference / Stop / Override ------------------------------
     "laser_home": "Move the laser stage to the home position set in config.toml (laser_stage_home_x_mm, _y_mm, _z_mm).",
     "laser_stage_reference": "Run the SmarAct reference search on the "
@@ -291,16 +285,14 @@ LASER_TOOLTIPS = {
 # ===========================================================================
 
 GATES_TOOLTIPS = {
+    "diagram": "Live chamber state: pale blue = vented. Gate symbols follow the pipe direction; green = open flow, red = closed barrier.",
     "main_chamber_switch": "Open / close the main-chamber gate valve.  "
     "Interlocked: cannot open if vacuum levels "
-    "are wrong.  Bypass via Override Access.",
-    "load_lock_switch": "Open / close the load-lock gate valve.",
-    "cryo_switch": "Open / close the cryo gate valve.",
-    "led_main_chamber": "Main-chamber gate state indicator.  Green = open, red = closed.",
-    "led_load_lock": "Load-lock gate state indicator.",
-    "led_cryo": "Cryo gate state indicator.",
-    "superuser": "Override Access - bypass the gate-vacuum "
-    "interlocks.  Click for a warning dialog; "
+    "are wrong or either load lock is vented. Bypass via Override Access.",
+    "load_lock_switch": "Open / close the load-lock gate valve. Opening is disabled while LL or CLL is vented.",
+    "cryo_switch": "Open / close the cryo gate valve. Opening is disabled while LL or CLL is vented.",
+    "superuser": "Override Access - bypass the gate and pump/vacuum "
+    "interlocks. Click for a warning dialog; "
     "button turns green while active.  USE WITH "
     "CARE: opening a gate against the wrong "
     "vacuum can damage hardware.",
@@ -321,10 +313,14 @@ PUMPS_TOOLTIPS = {
     "vacuum_cryo_load_lock": "Cryo load-lock chamber pressure (mBar).",
     "vacuum_cryo_load_lock_back": "Cryo load-lock backing-line pressure (mBar).",
     # --- Pump switches ---------------------------------------------------
-    "pump_load_lock_switch": "Vent / pump the load lock.  Click to toggle.  Interlocked behind Override Access.",
-    "pump_cryo_load_lock_switch": "Vent / pump the cryo load lock.",
-    "led_pump_load_lock": "Load-lock pump state.  Green = pumping, red = vented.",
-    "led_pump_cryo_load_lock": "Cryo load-lock pump state.",
+    "pump_load_lock_switch": "Vent / pump the load lock.  Click to toggle; green means venting is active.  "
+                              "Interlocked behind Override Access.",
+    "pump_cryo_load_lock_switch": "Fully vent / pump the cryo load lock.  Interlocked behind Override Access.  "
+                                  "Green means fully vented.  Cryo head vacuum depends on the CLL backing pump - "
+                                  "check everything before venting.",
+    "vent_cryo_load_lock_partial_switch": "Partially vent the cryo load lock for fast sample/cryo exchange "
+                                          "(drives a 3-valve sequence).  Blocked during an experiment or with a "
+                                          "gate open unless Override Access is active.  Green means active.",
     # --- Temperatures ---------------------------------------------------
     "temp_cryo_head": "Cryo head temperature (K) - live reading.",
     "temp_cryo_head_inside": "Cryo head inside temperature (K).",
@@ -336,10 +332,7 @@ PUMPS_TOOLTIPS = {
     "target_tempreature_ll": "Load-lock target temperature (°C).",
     # --- Baking ---------------------------------------------------------
     "ll_baking_time": "Load-lock bake-out duration (minutes).  Type an integer, then start the bake from the Baking window.",
-    # --- Override / status ----------------------------------------------
-    "superuser": "Override Access - bypass pump / vacuum safety "
-    "interlocks.  Click for a warning dialog; button turns "
-    "green while active.",
+    # --- Status ---------------------------------------------------------
     "Error": "Status / error messages from the pump and gauge controllers.",
 }
 
@@ -355,19 +348,25 @@ CAMERAS_TOOLTIPS = {
     "cam_b_d": "Camera Top - detail view (zoomed in).",
     "cam_angle_o": "Camera Angle - overview view.",
     "cam_angle_d": "Camera Angle - detail view.",
+    # --- Override / illumination ----------------------------------------
+    "superuser": "Override Access unlocks illumination and camera exposure controls after confirmation.",
+    "light": "Turn the Arduino-controlled NeoPixel light on or off. Disabled until Override Access is granted.",
+    "led_light": "Illumination state: green = on, red = off.",
+    "illumination_percent": "NeoPixel dimming level, 0 to 100 percent. Disabled until Override Access is granted.",
     # --- Exposure controls ----------------------------------------------
     "exposure_time_cam_1": "Exposure time for the side camera, microseconds.  Increase if the image is too dark.",
     "exposure_time_cam_2": "Exposure time for the top camera (µs).",
     "exposure_time_cam_3": "Exposure time for the angle camera (µs).",
+    "exposure_slider_side": "Logarithmic Side exposure adjustment from 100 µs to 2 seconds.",
+    "exposure_slider_top": "Logarithmic Top exposure adjustment from 100 µs to 2 seconds.",
+    "exposure_slider_angle": "Logarithmic Angle exposure adjustment from 100 µs to 2 seconds.",
     "auto_exposure_time": (
-        "Toggle automatic exposure for all cameras. Cameras start in auto "
-        "(green LED to the left); click to switch to manual (red LED)."
+        "Toggle automatic exposure for all cameras. Disabled until Override Access is granted."
     ),
     "led_auto_exposure": "Auto-exposure indicator: green = on (Continuous), red = off (manual).",
-    "default_exposure_time": "Reset exposure time to the default values for all cameras.",
-    # --- Light + status -------------------------------------------------
-    "light": "Toggle the alignment light (USB switch).",
-    "led_light": "Light state indicator.  Green = on.",
+    "default_exposure_time": "Enable/disable manual camera exposure entry. Disabled until Override Access is granted.",
+    "instrument_monitor_box": "Compact live MC, BC, LL and CLL pressure plus stage-temperature monitor.",
+    # --- Status ----------------------------------------------------------
     "Error": "Status / error messages from the camera controller.",
 }
 

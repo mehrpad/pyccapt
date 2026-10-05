@@ -10,15 +10,14 @@ There are two layers:
      Files rotate at 5 MiB, with 10 backups kept. The intent is that this log
      captures everything the operator needs to diagnose what happened in a
      given day, without growing without bound.
-   - A console handler that mirrors records to stderr at INFO level (so the
-     operator still sees the same kind of output that ``print`` was producing
-     before).
+   - Split console handlers: routine records go to stdout, while warnings and
+     errors go to stderr (and therefore appear red in IDE consoles).
    - ``logging.captureWarnings(True)`` so Python warnings land in the log.
    - A ``sys.excepthook`` replacement so otherwise-uncaught exceptions are
      written to the log with a full traceback before propagating.
-   - An optional ``sys.stdout`` / ``sys.stderr`` mirror: every ``print`` call
-     in the GUI process is duplicated into the log without losing console
-     output.
+   - An optional ``sys.stdout`` / ``sys.stderr`` redirect: every ``print`` call
+     is converted into one formatted log record instead of being printed a
+     second time as an unformatted console line.
 
 2. Per-experiment logging — :func:`logger_creator` returns a logger whose
    own dedicated file lives in the experiment's ``meta_data`` folder
@@ -76,6 +75,17 @@ def _has_handler(logger: logging.Logger, predicate) -> bool:
     return any(predicate(h) for h in logger.handlers)
 
 
+class _BelowLevelFilter(logging.Filter):
+    """Allow records strictly below *exclusive_maximum*."""
+
+    def __init__(self, exclusive_maximum: int) -> None:
+        super().__init__()
+        self.exclusive_maximum = exclusive_maximum
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.levelno < self.exclusive_maximum
+
+
 def setup_application_logging(
     project_root: os.PathLike[str] | str,
     *,
@@ -93,8 +103,8 @@ def setup_application_logging(
                     records ``file_level`` and below regardless of console level.
             file_level: Verbosity for the rotating file. Defaults to DEBUG so the
                     log file always contains the most detail available.
-            mirror_stdio: When True (the default), ``print`` output is also
-                    recorded in the log. Console output is preserved.
+            mirror_stdio: When True (the default), ``print`` output is converted
+                    to a formatted log record and recorded once.
 
     Returns:
             The ``pyccapt.gui`` logger. Returning a child logger here, rather than
@@ -148,24 +158,30 @@ def setup_application_logging(
             # Console-only fallback rather than crashing the GUI.
             print(f"[loggi] Could not open log file {log_file}: {exc}", file=sys.__stderr__ or sys.stderr)
 
-    # Console handler — at most one. We deliberately use sys.__stderr__ so
-    # that subsequent stdio mirroring (below) does not feed records back into
-    # the logger, which would otherwise cause unbounded recursion.
-    def _is_our_console_handler(h: logging.Handler) -> bool:
+    # Use original streams so the stdio redirect below cannot feed handler
+    # output back into the logger. INFO and other routine output stays white
+    # in IDE consoles; only genuine WARNING+ records use stderr/red.
+    def _is_our_console_handler(h: logging.Handler, role: str) -> bool:
         return (
             isinstance(h, logging.StreamHandler)
             and not isinstance(h, logging.FileHandler)
-            and getattr(h, "_pyccapt_console", False)
+            and getattr(h, "_pyccapt_console_role", None) == role
         )
 
-    if not _has_handler(root, _is_our_console_handler):
-        console_stream = sys.__stderr__ or sys.stderr
-        sh = logging.StreamHandler(console_stream)
-        sh.setLevel(console_level)
-        sh.setFormatter(formatter)
-        # Mark so we can detect it on subsequent calls.
-        setattr(sh, "_pyccapt_console", True)
-        root.addHandler(sh)
+    if not _has_handler(root, lambda h: _is_our_console_handler(h, "stdout")):
+        stdout_handler = logging.StreamHandler(sys.__stdout__ or sys.stdout)
+        stdout_handler.setLevel(console_level)
+        stdout_handler.addFilter(_BelowLevelFilter(logging.WARNING))
+        stdout_handler.setFormatter(formatter)
+        setattr(stdout_handler, "_pyccapt_console_role", "stdout")
+        root.addHandler(stdout_handler)
+
+    if not _has_handler(root, lambda h: _is_our_console_handler(h, "stderr")):
+        stderr_handler = logging.StreamHandler(sys.__stderr__ or sys.stderr)
+        stderr_handler.setLevel(max(console_level, logging.WARNING))
+        stderr_handler.setFormatter(formatter)
+        setattr(stderr_handler, "_pyccapt_console_role", "stderr")
+        root.addHandler(stderr_handler)
 
     # One-time wiring — captureWarnings, excepthook, stdio mirror.
     if not _excepthook_installed:
@@ -226,11 +242,6 @@ class _StreamToLogger:
         self._lock = threading.Lock()
 
     def write(self, text: str) -> int:
-        if self._original is not None:
-            try:
-                self._original.write(text)
-            except Exception:
-                pass
         if not text:
             return 0
         with self._lock:

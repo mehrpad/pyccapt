@@ -2,6 +2,8 @@ import time
 
 import pyvisa
 
+from pyccapt.control.core.control_state import commanded
+
 
 def _open_session(device_resource):
     """Open a pyvisa session as a context manager.
@@ -42,45 +44,47 @@ def initialize_signal_generator(variables, freq):
     freq2_command = 'C2:BSWV FRQ,%s' % (freq * 1000)
 
     device_resource = variables.COM_PORT_signal_generator
-    resources, wave_generator = _open_session(device_resource)
-    try:
-        wave_generator.write('C1:OUTP OFF')  # Turn off channel 1
-        time.sleep(0.01)
-        wave_generator.write(freq1_command)  # Set output frequency on channel 1
-        time.sleep(0.01)
-        wave_generator.write('C1:BSWV DUTY,1')  # Set 30% duty cycle on channel 1
-        time.sleep(0.01)
-        wave_generator.write('C1:BSWV RISE,0.000000002')  # Set 0.2ns rising edge on channel 1
-        time.sleep(0.01)
-        wave_generator.write('C1:BSWV DLY,0')  # Set 0 second delay on channel 1
-        time.sleep(0.01)
-        wave_generator.write('C1:BSWV HLEV,5')  # Set 5v high level on channel 1
-        time.sleep(0.01)
-        wave_generator.write('C1:BSWV LLEV,0')  # Set 0v low level on channel 1
-        time.sleep(0.01)
-        wave_generator.write('C1:OUTP LOAD,50')  # Set 50 ohm load on channel 1
-        time.sleep(0.01)
-        wave_generator.write('C1:OUTP ON')  # Turn on channel 1
+    with commanded(variables, "signal_generator", "exp", "outputs_on",
+                   details={"frequency_hz": freq*1000, "channels": [1, 2]}):
+        resources, wave_generator = _open_session(device_resource)
+        try:
+            wave_generator.write('C1:OUTP OFF')  # Turn off channel 1
+            time.sleep(0.01)
+            wave_generator.write(freq1_command)  # Set output frequency on channel 1
+            time.sleep(0.01)
+            wave_generator.write('C1:BSWV DUTY,1')  # Set 30% duty cycle on channel 1
+            time.sleep(0.01)
+            wave_generator.write('C1:BSWV RISE,0.000000002')  # Set 0.2ns rising edge on channel 1
+            time.sleep(0.01)
+            wave_generator.write('C1:BSWV DLY,0')  # Set 0 second delay on channel 1
+            time.sleep(0.01)
+            wave_generator.write('C1:BSWV HLEV,5')  # Set 5v high level on channel 1
+            time.sleep(0.01)
+            wave_generator.write('C1:BSWV LLEV,0')  # Set 0v low level on channel 1
+            time.sleep(0.01)
+            wave_generator.write('C1:OUTP LOAD,50')  # Set 50 ohm load on channel 1
+            time.sleep(0.01)
+            wave_generator.write('C1:OUTP ON')  # Turn on channel 1
 
-        wave_generator.write('C2:OUTP OFF')  # Turn off channel 2
-        time.sleep(0.01)
-        wave_generator.write(freq2_command)  # Set output frequency on channel 2
-        time.sleep(0.01)
-        wave_generator.write('C2:BSWV DUTY,1')  # Set 30% duty cycle on channel 2
-        time.sleep(0.01)
-        wave_generator.write('C2:BSWV RISE,0.000000002')  # Set 0.2ns rising edge on channel 2
-        time.sleep(0.01)
-        wave_generator.write('C2:BSWV DLY,0')  # Set 0 second delay on channel 2
-        time.sleep(0.01)
-        wave_generator.write('C2:BSWV HLEV,5')  # Set 5v high level on channel 2
-        time.sleep(0.01)
-        wave_generator.write('C2:BSWV LLEV,0')  # Set 0v low level on channel 2
-        time.sleep(0.01)
-        wave_generator.write('C2:OUTP LOAD,50')  # Set 50 ohm load on channel 2
-        time.sleep(0.01)
-        wave_generator.write('C2:OUTP ON')  # Turn on channel 2
-    finally:
-        _close_session(resources, wave_generator)
+            wave_generator.write('C2:OUTP OFF')  # Turn off channel 2
+            time.sleep(0.01)
+            wave_generator.write(freq2_command)  # Set output frequency on channel 2
+            time.sleep(0.01)
+            wave_generator.write('C2:BSWV DUTY,1')  # Set 30% duty cycle on channel 2
+            time.sleep(0.01)
+            wave_generator.write('C2:BSWV RISE,0.000000002')  # Set 0.2ns rising edge on channel 2
+            time.sleep(0.01)
+            wave_generator.write('C2:BSWV DLY,0')  # Set 0 second delay on channel 2
+            time.sleep(0.01)
+            wave_generator.write('C2:BSWV HLEV,5')  # Set 5v high level on channel 2
+            time.sleep(0.01)
+            wave_generator.write('C2:BSWV LLEV,0')  # Set 0v low level on channel 2
+            time.sleep(0.01)
+            wave_generator.write('C2:OUTP LOAD,50')  # Set 50 ohm load on channel 2
+            time.sleep(0.01)
+            wave_generator.write('C2:OUTP ON')  # Turn on channel 2
+        finally:
+            _close_session(resources, wave_generator)
 
 
 def change_frequency_signal_generator(variables, freq):
@@ -98,15 +102,17 @@ def change_frequency_signal_generator(variables, freq):
     freq2_command = 'C2:BSWV FRQ,%s' % (freq * 1000)
 
     device_resource = variables.COM_PORT_signal_generator
-    resources, wave_generator = _open_session(device_resource)
-    try:
-        wave_generator.write(freq1_command)  # Set output frequency on channel 1
-        time.sleep(0.01)
-        wave_generator.write(freq2_command)  # Set output frequency on channel 2
-        time.sleep(0.01)
-        print(f"Frequency changed to {freq} kHz")
-    finally:
-        _close_session(resources, wave_generator)
+    with commanded(variables, "signal_generator_settings", "exp", "frequency_set",
+                   details={"frequency_hz": freq*1000, "channels": [1, 2]}):
+        resources, wave_generator = _open_session(device_resource)
+        try:
+            wave_generator.write(freq1_command)  # Set output frequency on channel 1
+            time.sleep(0.01)
+            wave_generator.write(freq2_command)  # Set output frequency on channel 2
+            time.sleep(0.01)
+            print(f"Frequency changed to {freq} kHz")
+        finally:
+            _close_session(resources, wave_generator)
 
 
 def turn_off_signal_generator(variables=None):
@@ -135,11 +141,12 @@ def turn_off_signal_generator(variables=None):
         return
 
     device_resource = variables.COM_PORT_signal_generator
-    resources, wave_generator = _open_session(device_resource)
-    try:
-        wave_generator.write('C2:OUTP OFF')  # Turn off channel 2
-        time.sleep(0.01)
-        wave_generator.write('C1:OUTP OFF')  # Turn off channel 1
-        time.sleep(0.01)
-    finally:
-        _close_session(resources, wave_generator)
+    with commanded(variables, "signal_generator", "exp", "outputs_off"):
+        resources, wave_generator = _open_session(device_resource)
+        try:
+            wave_generator.write('C2:OUTP OFF')  # Turn off channel 2
+            time.sleep(0.01)
+            wave_generator.write('C1:OUTP OFF')  # Turn off channel 1
+            time.sleep(0.01)
+        finally:
+            _close_session(resources, wave_generator)

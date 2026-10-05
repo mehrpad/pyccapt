@@ -2,12 +2,26 @@
 
 This document describes the expected structure of control-side HDF5 output.
 
+Laser alignment also writes `meta_data/laser_alignment.jsonl` with per-session
+settings, stage targets, settled observations, DC retries and outcomes. HDF5
+`provenance` attributes `laser_alignment_run_json` and
+`laser_alignment_final_status_json` retain the last session configuration/origin
+and final status; `laser_alignment_enabled` and `laser_alignment_tracking` record
+the automatic-start and tracking selections. See [LASER_ALIGNMENT.md](LASER_ALIGNMENT.md).
+
 Notation:
 
 - `(n,)`: one-dimensional array with `n` samples
 - units are listed in parentheses
 - datatype is listed as NumPy/HDF5 type
 - `N/A` means dimensionless or not directly unit-bearing
+
+## Group `provenance`
+
+Schema 2.0 files record `schema_version`, `pyccapt_version`, creation time, platform and Python versions, the normalized
+control configuration plus its SHA-256, the chunk-manifest SHA-256, excluded-row count, and serialized calibration-model
+provenance. Every numeric dataset also carries a `units` attribute (`1` for dimensionless quantities). These attributes
+are checked by `pyccapt validate-hdf5` and let downstream tools distinguish schema evolution from data corruption.
 
 ## Group `apt`
 
@@ -23,6 +37,22 @@ Control-loop metadata recorded each iteration.
   (SmarAct MCS2 `stage_smartact_main`), one sample per control-loop iteration
 - `laser_x`, `laser_y`, `laser_z` `(n,)` (`m`, `float64`): laser-focusing-stage
   position (SmarAct MCS2 `stage_smartact_laser`), one sample per control-loop iteration
+
+Laser telemetry recorded per control iteration uses additional `apt/laser_*`
+datasets: `output_power_mw`, `ir_power_mw` (mW), `pulse_energy_nj` (nJ),
+`base_frequency_hz`, `output_frequency_hz` (Hz), `divider`, `wavelength_index`,
+`wavelength_nm` (nominal nm), `aom_percent` (%), `status_code`, and `valid`.
+Each suffix is prefixed with `laser_`, e.g. `apt/laser_output_power_mw`.
+Missing/stale telemetry is NaN, with `valid=0`. Values come from the laser's
+internal monitor; they are not calibrated specimen-delivered energy.
+`meta_data/laser_readings.jsonl` stores timestamped readbacks, source commands,
+explicit returned units and the device frequency table during the run.
+
+**Laser unit correction:** files with provenance `laser_readback_revision =
+unit-aware-1` convert the GUI's nJ energy to pJ before writing `dld/laser_pulse`
+and `tdc/laser_pulse`. Earlier code wrote nJ numbers under pJ labels and assumed
+`e_mlp` was always mW; old recordings cannot be repaired reliably by applying
+one scale factor without checking their original monitor responses/wavelength.
 
 > Stage/laser positions are in **meters**. They are published by the Stage Control
 > and Laser Control GUIs' poll timers and read by the experiment loop each

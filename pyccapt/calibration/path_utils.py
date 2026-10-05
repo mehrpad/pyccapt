@@ -60,6 +60,7 @@ def save_figure(
     stem: str,
     formats: Iterable[str] = ("png", "pdf"),
     dpi: int = 600,
+    tidy_axes: bool = True,
     **savefig_kwargs,
 ) -> list[Path]:
     """Save a matplotlib figure in one or more formats and return output paths.
@@ -67,9 +68,22 @@ def save_figure(
     PDF outputs are rendered with Arial 7pt fonts (text stays editable via
     TrueType embedding); PNG and other formats use whatever fonts the figure
     was built with.
+
+    When ``tidy_axes`` is True (default), linear plot axes are snapped to
+    round-number limits with ticks at both ends (paper styling) before saving;
+    map/image, equal-aspect and log axes are left untouched. Pass
+    ``tidy_axes=False`` to save the figure exactly as drawn.
     """
     if not stem or not stem.strip():
         raise ValueError("stem must be a non-empty string")
+
+    if tidy_axes:
+        try:
+            from pyccapt.calibration.core import plot_style
+            plot_style.finalize_figure(figure)
+        except Exception:
+            # Styling is cosmetic and must never prevent a save.
+            pass
 
     output_paths: list[Path] = []
     for extension in formats:

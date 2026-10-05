@@ -1,18 +1,50 @@
+import os
 import sys
+from pyccapt.control.core.control_state import commanded, observe
 import threading
 import time
+from datetime import datetime, timedelta
+import json
+import math
 
+import numpy as np
+import pandas as pd
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import QTimer, pyqtSignal, QObject
-from PyQt6.QtGui import QFont, QPixmap
+from PyQt6.QtGui import QFont
+
+# Qt requires WebEngineWidgets to be imported before QApplication is created.
+# This module is loaded during GUI startup, so resolve the optional dependency
+# here rather than lazily inside setupUi().
+try:
+    from PyQt6.QtWebEngineWidgets import QWebEngineView
+except ImportError as exc:
+    QWebEngineView = None
+    WEBENGINE_IMPORT_ERROR = exc
+else:
+    WEBENGINE_IMPORT_ERROR = None
 
 # Local module and scripts
+from pyccapt.control.gui.responsive import make_window_responsive
 from pyccapt.control.core import runtime
 from pyccapt.control.devices import initialize_devices
 from pyccapt.control.gui import tooltips
+from pyccapt.control.gui.vacuum_history import VACUUM_CHANNELS, VacuumHistory
+from pyccapt.control.gui.pump_layout import PumpLayoutMixin
 
 
-class Ui_Pumps_Vacuum(object):
+VACUUM_WINDOWS = {
+    "1 min": 60,
+    "30 min": 30 * 60,
+    "1 h": 60 * 60,
+    "6 h": 6 * 60 * 60,
+    "12 h": 12 * 60 * 60,
+    "24 h": 24 * 60 * 60,
+    "1 week": 7 * 24 * 60 * 60,
+}
+
+
+class Ui_Pumps_Vacuum(PumpLayoutMixin):
     def __init__(self, variables, conf, SignalEmitter, parent=None):
         """
         Constructor for the Pumps and Vacuum UI class.
@@ -26,12 +58,31 @@ class Ui_Pumps_Vacuum(object):
         Return:
                         None
         """
-        self.flag_super_user = None
+        self.flag_super_user = False
         self.default_color = None
         self.variables = variables
         self.conf = conf
         self.parent = parent
         self.emitter = SignalEmitter
+
+        # --- "Vent CLL" partial-vent state ---
+        # Whether the fast CLL vent (sample/cryo exchange) is currently active,
+        # and the persistent NI task that holds the vent-valve relay line high
+        # while venting (see vent_cryo_load_lock_partial / _set_vent_valve).
+        self.flag_vent_cll_partial = False
+        self.variables.flag_vent_cryo_load_lock_partial = False
+        self._vent_valve_task = None
+
+        # --- LL baking log state ---
+        # Latest LL temperature (deg C) seen on the temp_ll signal; cached so
+        # the periodic log row always has a value even between signal updates.
+        self._latest_temp_ll = None
+        # DataFrame holding the current baking run (None when not baking).
+        self.ll_baking_log_data = None
+        self.ll_baking_log_file = None
+        self.ll_baking_log_start = None
+        self.vacuum_history = VacuumHistory()
+        self._vacuum_plot_ready = False
 
     def setupUi(self, Pumps_Vacuum):
         """
@@ -43,7 +94,7 @@ class Ui_Pumps_Vacuum(object):
                 None
         """
         Pumps_Vacuum.setObjectName("Pumps_Vacuum")
-        Pumps_Vacuum.resize(757, 385)
+        Pumps_Vacuum.resize(840, 720)
         self.gridLayout_9 = QtWidgets.QGridLayout(Pumps_Vacuum)
         self.gridLayout_9.setObjectName("gridLayout_9")
         self.verticalLayout = QtWidgets.QVBoxLayout()
@@ -64,7 +115,7 @@ class Ui_Pumps_Vacuum(object):
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.vacuum_main.sizePolicy().hasHeightForWidth())
         self.vacuum_main.setSizePolicy(sizePolicy)
-        self.vacuum_main.setMinimumSize(QtCore.QSize(200, 50))
+        self.vacuum_main.setFixedSize(QtCore.QSize(220, 55))
         font = QtGui.QFont()
         font.setPointSize(9)
         self.vacuum_main.setFont(font)
@@ -151,14 +202,6 @@ class Ui_Pumps_Vacuum(object):
         self.vacuum_load_lock.setObjectName("vacuum_load_lock")
         self.gridLayout.addWidget(self.vacuum_load_lock, 3, 2, 1, 1)
         self.gridLayout_4.addLayout(self.gridLayout, 0, 0, 2, 1)
-        spacerItem = QtWidgets.QSpacerItem(
-            40, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum
-        )
-        self.gridLayout_4.addItem(spacerItem, 0, 1, 1, 1)
-        spacerItem1 = QtWidgets.QSpacerItem(
-            20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding
-        )
-        self.gridLayout_4.addItem(spacerItem1, 0, 2, 1, 1)
         self.gridLayout_2 = QtWidgets.QGridLayout()
         self.gridLayout_2.setObjectName("gridLayout_2")
         self.label_214 = QtWidgets.QLabel(parent=Pumps_Vacuum)
@@ -233,24 +276,38 @@ class Ui_Pumps_Vacuum(object):
         )
         self.vacuum_load_lock_back.setObjectName("vacuum_load_lock_back")
         self.gridLayout_2.addWidget(self.vacuum_load_lock_back, 2, 1, 1, 1)
+        # Keep the three chamber gauges and their three backing/pre-vacuum
+        # gauges visually identical even when the neighboring controls change.
+        for vacuum_lcd in (
+            self.vacuum_buffer,
+            self.vacuum_cryo_load_lock,
+            self.vacuum_load_lock,
+            self.vacuum_buffer_back,
+            self.vacuum_cryo_load_lock_back,
+            self.vacuum_load_lock_back,
+        ):
+            vacuum_lcd.setFixedSize(QtCore.QSize(150, 50))
         self.gridLayout_4.addLayout(self.gridLayout_2, 1, 1, 1, 2)
         self.gridLayout_3 = QtWidgets.QGridLayout()
         self.gridLayout_3.setObjectName("gridLayout_3")
-        self.superuser = QtWidgets.QPushButton(parent=Pumps_Vacuum)
+        # "Vent CLL" - partial vent of the cryo load lock for fast sample/cryo
+        # exchange (drives a 3-valve sequence). Sits between "Fully Vent CLL"
+        # and "Vent LL".
+        self.vent_cryo_load_lock_partial_switch = QtWidgets.QPushButton(parent=Pumps_Vacuum)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Fixed)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
-        sizePolicy.setHeightForWidth(self.superuser.sizePolicy().hasHeightForWidth())
-        self.superuser.setSizePolicy(sizePolicy)
-        self.superuser.setMinimumSize(QtCore.QSize(0, 25))
-        self.superuser.setStyleSheet(
+        sizePolicy.setHeightForWidth(self.vent_cryo_load_lock_partial_switch.sizePolicy().hasHeightForWidth())
+        self.vent_cryo_load_lock_partial_switch.setSizePolicy(sizePolicy)
+        self.vent_cryo_load_lock_partial_switch.setMinimumSize(QtCore.QSize(0, 25))
+        self.vent_cryo_load_lock_partial_switch.setStyleSheet(
             "QPushButton{\n"
-            "                                    background: rgb(193, 193, 193)\n"
-            "                                    }\n"
-            "                                "
+            "                                            background: rgb(193, 193, 193)\n"
+            "                                            }\n"
+            "                                        "
         )
-        self.superuser.setObjectName("superuser")
-        self.gridLayout_3.addWidget(self.superuser, 0, 0, 1, 2)
+        self.vent_cryo_load_lock_partial_switch.setObjectName("vent_cryo_load_lock_partial_switch")
+        self.gridLayout_3.addWidget(self.vent_cryo_load_lock_partial_switch, 2, 0, 1, 2)
         self.pump_cryo_load_lock_switch = QtWidgets.QPushButton(parent=Pumps_Vacuum)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Fixed)
         sizePolicy.setHorizontalStretch(0)
@@ -265,13 +322,7 @@ class Ui_Pumps_Vacuum(object):
             "                                        "
         )
         self.pump_cryo_load_lock_switch.setObjectName("pump_cryo_load_lock_switch")
-        self.gridLayout_3.addWidget(self.pump_cryo_load_lock_switch, 1, 0, 1, 1)
-        self.led_pump_cryo_load_lock = QtWidgets.QLabel(parent=Pumps_Vacuum)
-        self.led_pump_cryo_load_lock.setMinimumSize(QtCore.QSize(50, 50))
-        self.led_pump_cryo_load_lock.setMaximumSize(QtCore.QSize(50, 50))
-        self.led_pump_cryo_load_lock.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.led_pump_cryo_load_lock.setObjectName("led_pump_cryo_load_lock")
-        self.gridLayout_3.addWidget(self.led_pump_cryo_load_lock, 1, 1, 1, 1)
+        self.gridLayout_3.addWidget(self.pump_cryo_load_lock_switch, 1, 0, 1, 2)
         self.pump_load_lock_switch = QtWidgets.QPushButton(parent=Pumps_Vacuum)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Fixed)
         sizePolicy.setHorizontalStretch(0)
@@ -286,15 +337,10 @@ class Ui_Pumps_Vacuum(object):
             "                                        "
         )
         self.pump_load_lock_switch.setObjectName("pump_load_lock_switch")
-        self.gridLayout_3.addWidget(self.pump_load_lock_switch, 2, 0, 1, 1)
-        self.led_pump_load_lock = QtWidgets.QLabel(parent=Pumps_Vacuum)
-        self.led_pump_load_lock.setMinimumSize(QtCore.QSize(50, 50))
-        self.led_pump_load_lock.setMaximumSize(QtCore.QSize(50, 50))
-        self.led_pump_load_lock.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.led_pump_load_lock.setObjectName("led_pump_load_lock")
-        self.gridLayout_3.addWidget(self.led_pump_load_lock, 2, 1, 1, 1)
+        self.gridLayout_3.addWidget(self.pump_load_lock_switch, 3, 0, 1, 2)
         self.gridLayout_4.addLayout(self.gridLayout_3, 1, 3, 1, 1)
         self.verticalLayout.addLayout(self.gridLayout_4)
+        self._setup_vacuum_history_plot(Pumps_Vacuum)
         self.gridLayout_8 = QtWidgets.QGridLayout()
         self.gridLayout_8.setObjectName("gridLayout_8")
         self.gridLayout_6 = QtWidgets.QGridLayout()
@@ -304,7 +350,7 @@ class Ui_Pumps_Vacuum(object):
         font.setBold(True)
         self.label_215.setFont(font)
         self.label_215.setObjectName("label_215")
-        self.gridLayout_6.addWidget(self.label_215, 0, 0, 1, 1)
+        self.gridLayout_6.addWidget(self.label_215, 0, 0, 2, 1)
         self.temp_stage = QtWidgets.QLCDNumber(parent=Pumps_Vacuum)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
@@ -321,7 +367,8 @@ class Ui_Pumps_Vacuum(object):
             "                                        "
         )
         self.temp_stage.setObjectName("temp_stage")
-        self.gridLayout_6.addWidget(self.temp_stage, 0, 1, 1, 2)
+        self.temp_stage.setFixedSize(QtCore.QSize(150, 50))
+        self.gridLayout_6.addWidget(self.temp_stage, 0, 1, 2, 1)
         self.set_temperature_cryo = QtWidgets.QPushButton(parent=Pumps_Vacuum)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Fixed)
         sizePolicy.setHorizontalStretch(0)
@@ -336,10 +383,10 @@ class Ui_Pumps_Vacuum(object):
             "                                "
         )
         self.set_temperature_cryo.setObjectName("set_temperature_cryo")
-        self.gridLayout_6.addWidget(self.set_temperature_cryo, 1, 0, 1, 2)
+        self.set_temperature_cryo.setFixedWidth(125)
+        self.gridLayout_6.addWidget(self.set_temperature_cryo, 1, 2, 1, 1)
         self.target_tempreature_cryo = QtWidgets.QSpinBox(parent=Pumps_Vacuum)
-        self.target_tempreature_cryo.setMinimumSize(QtCore.QSize(150, 0))
-        self.target_tempreature_cryo.setMaximumSize(QtCore.QSize(70, 16777215))
+        self.target_tempreature_cryo.setFixedWidth(125)
         self.target_tempreature_cryo.setStyleSheet(
             "QSpinBox{\n"
             "                                    background: rgb(223,223,233)\n"
@@ -347,8 +394,10 @@ class Ui_Pumps_Vacuum(object):
             "                                "
         )
         self.target_tempreature_cryo.setObjectName("target_tempreature_cryo")
-        self.gridLayout_6.addWidget(self.target_tempreature_cryo, 1, 2, 1, 1)
-        self.gridLayout_8.addLayout(self.gridLayout_6, 0, 0, 1, 1)
+        self.gridLayout_6.addWidget(self.target_tempreature_cryo, 0, 2, 1, 1)
+        # Stage temperature is monitored beside the Main Chamber gauge. The
+        # target field sits to its right with Set T Cryo directly underneath.
+        self.gridLayout_4.addLayout(self.gridLayout_6, 0, 1, 1, 3)
         self.gridLayout_5 = QtWidgets.QGridLayout()
         self.gridLayout_5.setObjectName("gridLayout_5")
         self.label_219 = QtWidgets.QLabel(parent=Pumps_Vacuum)
@@ -400,22 +449,26 @@ class Ui_Pumps_Vacuum(object):
         )
         self.target_tempreature_ll.setObjectName("target_tempreature_ll")
         self.gridLayout_5.addWidget(self.target_tempreature_ll, 1, 2, 1, 1)
+        # With Stage temperature moved to the top row, keep the remaining
+        # temperature blocks together without an empty first column.
         self.gridLayout_8.addLayout(self.gridLayout_5, 0, 1, 1, 1)
         self.gridLayout_7 = QtWidgets.QGridLayout()
         self.gridLayout_7.setObjectName("gridLayout_7")
         self.label_218 = QtWidgets.QLabel(parent=Pumps_Vacuum)
         font = QtGui.QFont()
+        font.setPointSize(8)
         font.setBold(True)
         self.label_218.setFont(font)
+        self.label_218.setMaximumWidth(125)
         self.label_218.setObjectName("label_218")
-        self.gridLayout_7.addWidget(self.label_218, 0, 0, 1, 1)
+        self.gridLayout_6.addWidget(self.label_218, 0, 3, 1, 1)
         self.temp_cryo_head = QtWidgets.QLCDNumber(parent=Pumps_Vacuum)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.temp_cryo_head.sizePolicy().hasHeightForWidth())
         self.temp_cryo_head.setSizePolicy(sizePolicy)
-        self.temp_cryo_head.setMinimumSize(QtCore.QSize(150, 50))
+        self.temp_cryo_head.setFixedSize(QtCore.QSize(110, 40))
         self.temp_cryo_head.setStyleSheet(
             "QLCDNumber{\n"
             "                                            border: 2px solid orange;\n"
@@ -425,31 +478,33 @@ class Ui_Pumps_Vacuum(object):
             "                                        "
         )
         self.temp_cryo_head.setObjectName("temp_cryo_head")
-        self.gridLayout_7.addWidget(self.temp_cryo_head, 0, 1, 1, 1)
+        self.gridLayout_6.addWidget(self.temp_cryo_head, 0, 4, 1, 1)
         self.label_221 = QtWidgets.QLabel(parent=Pumps_Vacuum)
         font = QtGui.QFont()
+        font.setPointSize(8)
         font.setBold(True)
         self.label_221.setFont(font)
+        self.label_221.setMaximumWidth(125)
         self.label_221.setObjectName("label_221")
-        self.gridLayout_7.addWidget(self.label_221, 1, 0, 1, 1)
+        self.gridLayout_6.addWidget(self.label_221, 1, 3, 1, 1)
         self.temp_cryo_head_inside = QtWidgets.QLCDNumber(parent=Pumps_Vacuum)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.temp_cryo_head_inside.sizePolicy().hasHeightForWidth())
         self.temp_cryo_head_inside.setSizePolicy(sizePolicy)
-        self.temp_cryo_head_inside.setMinimumSize(QtCore.QSize(150, 50))
+        self.temp_cryo_head_inside.setFixedSize(QtCore.QSize(110, 40))
         self.temp_cryo_head_inside.setStyleSheet(
             "QLCDNumber{\n    border: 2px solid orange;\n    border-radius: 10px;\n    padding: 0 8px;\n    }\n"
         )
         self.temp_cryo_head_inside.setObjectName("temp_cryo_head_inside")
-        self.gridLayout_7.addWidget(self.temp_cryo_head_inside, 1, 1, 1, 1)
+        self.gridLayout_6.addWidget(self.temp_cryo_head_inside, 1, 4, 1, 1)
         self.label_220 = QtWidgets.QLabel(parent=Pumps_Vacuum)
         font = QtGui.QFont()
         font.setBold(True)
         self.label_220.setFont(font)
         self.label_220.setObjectName("label_220")
-        self.gridLayout_7.addWidget(self.label_220, 2, 0, 1, 1)
+        self.gridLayout_7.addWidget(self.label_220, 0, 0, 1, 1)
         self.ll_baking_time = QtWidgets.QLineEdit(parent=Pumps_Vacuum)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Minimum)
         sizePolicy.setHorizontalStretch(0)
@@ -464,8 +519,8 @@ class Ui_Pumps_Vacuum(object):
             "                                "
         )
         self.ll_baking_time.setObjectName("ll_baking_time")
-        self.gridLayout_7.addWidget(self.ll_baking_time, 2, 1, 1, 1)
-        self.gridLayout_8.addLayout(self.gridLayout_7, 0, 2, 1, 1)
+        self.gridLayout_7.addWidget(self.ll_baking_time, 0, 1, 1, 1)
+        self.gridLayout_8.addLayout(self.gridLayout_7, 0, 0, 1, 1)
         self.Error = QtWidgets.QLabel(parent=Pumps_Vacuum)
         self.Error.setMinimumSize(QtCore.QSize(600, 30))
         font = QtGui.QFont()
@@ -481,24 +536,35 @@ class Ui_Pumps_Vacuum(object):
         self.verticalLayout.addLayout(self.gridLayout_8)
         self.gridLayout_9.addLayout(self.verticalLayout, 0, 0, 1, 1)
 
+        self._setup_compact_pump_layout(Pumps_Vacuum)
         self.retranslateUi(Pumps_Vacuum)
         QtCore.QMetaObject.connectSlotsByName(Pumps_Vacuum)
+        make_window_responsive(Pumps_Vacuum)
         tooltips.apply_tooltips(self, tooltips.PUMPS_TOOLTIPS)
         Pumps_Vacuum.setTabOrder(self.set_temperature_cryo, self.target_tempreature_cryo)
         Pumps_Vacuum.setTabOrder(self.target_tempreature_cryo, self.set_temperature_ll)
         Pumps_Vacuum.setTabOrder(self.set_temperature_ll, self.target_tempreature_ll)
         Pumps_Vacuum.setTabOrder(self.target_tempreature_ll, self.ll_baking_time)
         Pumps_Vacuum.setTabOrder(self.ll_baking_time, self.pump_load_lock_switch)
-        Pumps_Vacuum.setTabOrder(self.pump_load_lock_switch, self.pump_cryo_load_lock_switch)
-        Pumps_Vacuum.setTabOrder(self.pump_cryo_load_lock_switch, self.superuser)
+        Pumps_Vacuum.setTabOrder(self.pump_load_lock_switch, self.vent_cryo_load_lock_partial_switch)
+        Pumps_Vacuum.setTabOrder(self.vent_cryo_load_lock_partial_switch, self.pump_cryo_load_lock_switch)
 
-        ###
-        self.led_red = QPixmap('./files/led-red-on.png')
-        self.led_green = QPixmap('./files/green-led-on.png')
-        self.led_pump_load_lock.setPixmap(self.led_green)
-        self.led_pump_cryo_load_lock.setPixmap(self.led_green)
         self.pump_load_lock_switch.clicked.connect(self.pump_switch_ll)
         self.pump_cryo_load_lock_switch.clicked.connect(self.pump_switch_cryo_ll)
+        self.vent_cryo_load_lock_partial_switch.clicked.connect(self.vent_cryo_load_lock_partial)
+        # The buttons themselves replace the old LED icons as state indicators.
+        # Green means the corresponding vent action is active.
+        self.vent_partial_default_style = self.vent_cryo_load_lock_partial_switch.styleSheet()
+        self.pump_load_lock_default_style = self.pump_load_lock_switch.styleSheet()
+        self.pump_cryo_load_lock_default_style = self.pump_cryo_load_lock_switch.styleSheet()
+        self._sync_pump_action_styles()
+        # Full CLL venting is unlocked by the shared Gates override.
+        self.pump_cryo_load_lock_switch.setEnabled(False)
+        # Initialise the CLL vent valve CLOSED and HOLD the line low. The
+        # USB-6501 output floats HIGH via its pull-up when undriven, which would
+        # leave the active-high vent relay energised (CLL venting) at startup.
+        # Driving it low here opens a held task so the CLL starts un-vented.
+        self._set_vent_valve(True)  # True = closed, False = open
         # Set 8 digits for each LCD to show
         self.vacuum_main.setDigitCount(8)
         self.vacuum_buffer.setDigitCount(8)
@@ -562,13 +628,211 @@ class Ui_Pumps_Vacuum(object):
         self.baking_timer = QTimer(self.parent)
         self.baking_timer.timeout.connect(self.update_target_temperature_ll)
 
+        # Timer that samples LL temperature & vacuum into the baking CSV while
+        # a baking run is active.
+        self.ll_baking_log_timer = QTimer(self.parent)
+        self.ll_baking_log_timer.timeout.connect(self._log_ll_baking_row)
+
         self.original_button_style = self.set_temperature_cryo.styleSheet()
+
+        self.vacuum_history_timer = QTimer(Pumps_Vacuum)
+        self.vacuum_history_timer.timeout.connect(self._sample_vacuum_history)
+        self.vacuum_history_timer.start(2000)
 
         # default Qlcd color
         self.default_color = self.vacuum_buffer_back.style().standardPalette().color(QtGui.QPalette.ColorRole.WindowText)
 
-        self.superuser.clicked.connect(self.super_user_access)
-        self.original_button_style = self.superuser.styleSheet()
+    def _setup_vacuum_history_plot(self, parent):
+        """Add the compact Plotly panel between vacuum and temperature LCDs."""
+        panel = QtWidgets.QFrame(parent=parent)
+        panel.setObjectName("vacuum_history_frame")
+        panel.setMinimumWidth(800)
+        panel.setStyleSheet(
+            "QFrame#vacuum_history_frame{border: 0.5px solid gray;}"
+        )
+        layout = QtWidgets.QVBoxLayout(panel)
+        layout.setContentsMargins(5, 5, 5, 5)
+        toolbar = QtWidgets.QHBoxLayout()
+        toolbar.addStretch()
+        toolbar.addWidget(QtWidgets.QLabel("Window:", parent=panel))
+        self.vacuum_window = QtWidgets.QComboBox(parent=panel)
+        self.vacuum_window.addItems(VACUUM_WINDOWS)
+        self.vacuum_window.setCurrentText("1 h")
+        self.vacuum_window.currentTextChanged.connect(self._render_vacuum_history)
+        toolbar.addWidget(self.vacuum_window)
+        layout.addLayout(toolbar)
+
+        try:
+            if QWebEngineView is None:
+                raise WEBENGINE_IMPORT_ERROR
+            import plotly.graph_objects as go
+            from plotly.subplots import make_subplots
+        except ImportError as exc:
+            print(f"Plotly vacuum history unavailable: {exc}")
+            self.vacuum_plot = QtWidgets.QLabel(
+                "Plotly vacuum history could not start.\n"
+                f"{type(exc).__name__}: {exc}",
+                parent=panel,
+            )
+            self.vacuum_plot.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            self.vacuum_plot.setWordWrap(True)
+            self.vacuum_plot.setToolTip(
+                "Restart the Python process after installing Plotly and PyQt6-WebEngine."
+            )
+            layout.addWidget(self.vacuum_plot)
+        else:
+            self.vacuum_plot = QWebEngineView(parent=panel)
+            self.vacuum_plot.setMinimumSize(QtCore.QSize(780, 250))
+            self.vacuum_plot.setMaximumHeight(320)
+            colors = ("#2ca02c", "#8c564b", "#1f77b4", "#d627a8")
+            names = ("Main", "Buffer", "LL", "CLL")
+            figure = make_subplots(
+                rows=1,
+                cols=4,
+                shared_xaxes=False,
+                shared_yaxes=False,
+                horizontal_spacing=0.09,
+                subplot_titles=names,
+            )
+            for column, (channel, name, color) in enumerate(zip(VACUUM_CHANNELS, names, colors), start=1):
+                figure.add_trace(
+                    go.Scatter(x=[], y=[], mode="lines", name=name, line={"color": color, "width": 1.7}),
+                    row=1,
+                    col=column,
+                )
+                figure.update_xaxes(
+                    showline=True,
+                    mirror=True,
+                    linewidth=1,
+                    linecolor=color,
+                    gridcolor="#eeeeee",
+                    tickfont={"size": 10},
+                    showticklabels=True,
+                    row=1,
+                    col=column,
+                )
+                figure.update_yaxes(
+                    type="log",
+                    autorange=True,
+                    dtick=1,
+                    exponentformat="power",
+                    showexponent="all",
+                    showline=True,
+                    mirror=True,
+                    linewidth=1,
+                    linecolor=color,
+                    gridcolor="#dddddd",
+                    tickfont={"size": 12},
+                    showticklabels=True,
+                    automargin=True,
+                    row=1,
+                    col=column,
+                )
+            figure.update_layout(
+                template="plotly_white", autosize=True, height=285,
+                margin={"l": 58, "r": 14, "t": 30, "b": 52},
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                showlegend=False,
+            )
+            for annotation, color in zip(figure.layout.annotations, colors):
+                annotation.font = {"size": 11, "color": color}
+            # Plotly's inline JavaScript is larger than QWebEngineView.setHtml's
+            # data-URL limit (about 2 MB), which otherwise produces a blank
+            # white panel. Load the self-contained page from a temporary local
+            # file instead; QTemporaryDir keeps it alive for this UI instance.
+            self._vacuum_plot_temp_dir = QtCore.QTemporaryDir()
+            plot_path = self._vacuum_plot_temp_dir.filePath("vacuum_history.html")
+            figure.write_html(
+                plot_path,
+                include_plotlyjs=True,
+                full_html=True,
+                div_id="vacuum-history",
+                config={"displayModeBar": False, "responsive": True},
+            )
+            self.vacuum_plot.loadFinished.connect(self._vacuum_plot_loaded)
+            self.vacuum_plot.load(QtCore.QUrl.fromLocalFile(plot_path))
+            layout.addWidget(self.vacuum_plot)
+        self.verticalLayout.addWidget(panel)
+
+    def _vacuum_plot_loaded(self, ok):
+        self._vacuum_plot_ready = bool(ok)
+        if ok:
+            self.vacuum_plot.page().runJavaScript(
+                "document.documentElement.style.overflow='hidden';"
+                "document.body.style.margin='0';"
+                "document.body.style.overflow='hidden';"
+                "Plotly.Plots.resize(document.getElementById('vacuum-history'));"
+            )
+            self._render_vacuum_history()
+
+    def _sample_vacuum_history(self):
+        values = (
+            self.variables.vacuum_main,
+            self.variables.vacuum_buffer,
+            self.variables.vacuum_load_lock,
+            self.variables.vacuum_cryo_load_lock,
+        )
+        # Negative values are device-error sentinels and cannot be shown on a log axis.
+        cleaned = [value if isinstance(value, (int, float)) and value > 0 else float("nan") for value in values]
+        self.vacuum_history.add(datetime.now(), cleaned)
+        self._render_vacuum_history()
+
+    def _render_vacuum_history(self):
+        if not self._vacuum_plot_ready:
+            return
+        samples = self.vacuum_history.window(VACUUM_WINDOWS[self.vacuum_window.currentText()])
+        window_end = datetime.now()
+        window_start = window_end - timedelta(seconds=VACUUM_WINDOWS[self.vacuum_window.currentText()])
+        fixed_range = [
+            window_start.isoformat(timespec="seconds"),
+            window_end.isoformat(timespec="seconds"),
+        ]
+        x = [sample.timestamp.isoformat(timespec="seconds") for sample in samples]
+        data = []
+        y_axis_updates = {}
+        names = ("Main", "Buffer", "LL", "CLL")
+        colors = ("#2ca02c", "#8c564b", "#1f77b4", "#d627a8")
+        for axis_number, (channel, name, color) in enumerate(zip(VACUUM_CHANNELS, names, colors), start=1):
+            y = [getattr(sample, channel) for sample in samples]
+            axis_suffix = "" if axis_number == 1 else str(axis_number)
+            data.append({"x": x, "y": y, "type": "scatter", "mode": "lines", "name": name,
+                         "xaxis": f"x{axis_suffix}", "yaxis": f"y{axis_suffix}",
+                         "showlegend": False, "line": {"color": color, "width": 1.7}})
+            positive_values = [value for value in y if math.isfinite(value) and value > 0]
+            if positive_values:
+                low_exp = math.floor(math.log10(min(positive_values)))
+                high_exp = math.ceil(math.log10(max(positive_values)))
+                if low_exp == high_exp:
+                    low_exp -= 1
+                    high_exp += 1
+                tick_step = max(1, math.ceil((high_exp - low_exp) / 6))
+                exponents = list(range(low_exp, high_exp + 1, tick_step))
+                if exponents[-1] != high_exp:
+                    exponents.append(high_exp)
+                y_axis_name = f"yaxis{axis_suffix}"
+                y_axis_updates[f"{y_axis_name}.autorange"] = False
+                y_axis_updates[f"{y_axis_name}.range"] = [low_exp - 0.15, high_exp + 0.15]
+                y_axis_updates[f"{y_axis_name}.tickmode"] = "array"
+                y_axis_updates[f"{y_axis_name}.tickvals"] = [10 ** exponent for exponent in exponents]
+                y_axis_updates[f"{y_axis_name}.ticktext"] = [
+                    f"10<sup>{exponent}</sup>" for exponent in exponents
+                ]
+        axis_updates = {}
+        selected_seconds = VACUUM_WINDOWS[self.vacuum_window.currentText()]
+        time_tick_format = "%H:%M:%S" if selected_seconds <= 60 else "%H:%M"
+        for axis_number in range(1, 5):
+            axis_suffix = "" if axis_number == 1 else str(axis_number)
+            axis_updates[f"xaxis{axis_suffix}.range"] = fixed_range
+            axis_updates[f"xaxis{axis_suffix}.autorange"] = False
+            axis_updates[f"xaxis{axis_suffix}.tickformat"] = time_tick_format
+        axis_updates.update(y_axis_updates)
+        script = (
+            "(function(){const plot=document.getElementById('vacuum-history');"
+            "Plotly.react(plot, %s, Object.assign({}, plot.layout))"
+            ".then(() => Plotly.relayout(plot, %s));})()"
+        ) % (json.dumps(data), json.dumps(axis_updates))
+        self.vacuum_plot.page().runJavaScript(script)
+
 
     def retranslateUi(self, Pumps_Vacuum):
         """
@@ -592,11 +856,9 @@ class Ui_Pumps_Vacuum(object):
         self.label_214.setText(_translate("Pumps_Vacuum", "Buffer Chamber Pre (mBar)"))
         self.label_217.setText(_translate("Pumps_Vacuum", "CryoLoad Lock Pre(mBar)"))
         self.label_213.setText(_translate("Pumps_Vacuum", "Load Lock Pre(mBar)"))
-        self.superuser.setText(_translate("Pumps_Vacuum", "Override Access"))
-        self.pump_cryo_load_lock_switch.setText(_translate("Pumps_Vacuum", "Vent CLL"))
-        self.led_pump_cryo_load_lock.setText(_translate("Pumps_Vacuum", "pump"))
+        self.pump_cryo_load_lock_switch.setText(_translate("Pumps_Vacuum", "Fully Vent CLL"))
+        self.vent_cryo_load_lock_partial_switch.setText(_translate("Pumps_Vacuum", "Vent CLL"))
         self.pump_load_lock_switch.setText(_translate("Pumps_Vacuum", "Vent LL"))
-        self.led_pump_load_lock.setText(_translate("Pumps_Vacuum", "pump"))
         # Cryo sensor labels driven by config.toml cryo_sensor_X keys
         _s1 = self.conf.get('cryo_sensor_1', 'cryo_head_outside').replace('_', ' ').title()
         _s2 = self.conf.get('cryo_sensor_2', 'cryo_head_inside').replace('_', ' ').title()
@@ -608,7 +870,7 @@ class Ui_Pumps_Vacuum(object):
         self.set_temperature_ll.setText(_translate("Pumps_Vacuum", "Set T LL (°C)"))
         self.label_218.setText(_translate("Pumps_Vacuum", f"Temp. {_s1} (K)"))
         self.label_221.setText(_translate("Pumps_Vacuum", f"Temp. {_s2} (K)"))
-        self.label_220.setText(_translate("Pumps_Vacuum", "LL Baking Time (min)"))
+        self.label_220.setText(_translate("Pumps_Vacuum", "LL Baking Duration (min.)"))
         self.ll_baking_time.setText(_translate("Pumps_Vacuum", "60"))
         self.Error.setText(_translate("Pumps_Vacuum", "<html><head/><body><p><br/></p></body></html>"))
 
@@ -670,6 +932,8 @@ class Ui_Pumps_Vacuum(object):
             self.temp_ll.display('Error')
         else:
             self.temp_ll.display(round(value, 2))
+            # Cache for the baking log (vacuum is read from variables directly).
+            self._latest_temp_ll = round(value, 2)
 
     def update_target_temperature_cryo(
         self,
@@ -722,12 +986,76 @@ class Ui_Pumps_Vacuum(object):
                 self.variables.set_temperature_ll = self.target_tempreature_ll.value()
                 # Start the timer for baking which is min * 60000
                 self.baking_timer.start(int(self.ll_baking_time.text()) * 60000)
+                # Begin logging LL temperature & vacuum for this baking run.
+                self._start_ll_baking_log()
             elif self.variables.set_temperature_flag_ll:
                 self.baking_timer.stop()
                 self.ll_baking_time.setEnabled(True)
                 self.target_tempreature_ll.setEnabled(True)
                 self.variables.set_temperature_flag_ll = False
                 self.set_temperature_ll.setStyleSheet(self.original_button_style)
+                # Baking finished -- either the duration elapsed (this slot is
+                # also fired by baking_timer) or the user deselected the button.
+                self._stop_ll_baking_log()
+
+    def _start_ll_baking_log(self):
+        """Create a CSV and start sampling LL temperature & vacuum.
+
+        Called when the "Set T LL" button starts a baking run. Logging stops
+        in :meth:`_stop_ll_baking_log` once the baking duration elapses or the
+        user deselects the button.
+        """
+        observe(self.variables, "load_lock_baking", "main", "heating_requested")
+        try:
+            now = datetime.now()
+            now_time = now.strftime("%d-%m-%Y_%H-%M-%S")
+            save_path = runtime.project_path("files", "logs", "ll_baking", now_time)
+            os.makedirs(save_path, mode=0o777, exist_ok=True)
+            self.ll_baking_log_file = str(save_path / f'll_baking_{now_time}.csv')
+            self.ll_baking_log_data = pd.DataFrame(
+                columns=['Date', 'Time', 'Elapsed_s', 'Target_T_LL_C', 'Temp_LL_C', 'Vacuum_LL_mBar']
+            )
+            self.ll_baking_log_start = time.perf_counter()
+            # Sample once per second.
+            self.ll_baking_log_timer.start(1000)
+            # Write an initial row immediately so the file is never empty.
+            self._log_ll_baking_row()
+        except Exception as e:
+            print(f'Cannot start LL baking log: {e}')
+
+    def _log_ll_baking_row(self):
+        """Append one sample (temperature + vacuum) and flush to disk."""
+        if self.ll_baking_log_data is None:
+            return
+        now = datetime.now()
+        elapsed = round(time.perf_counter() - self.ll_baking_log_start, 1)
+        temp = self._latest_temp_ll if self._latest_temp_ll is not None else np.nan
+        vacuum = self.variables.vacuum_load_lock
+        self.ll_baking_log_data.loc[len(self.ll_baking_log_data)] = [
+            now.strftime("%d-%m-%Y"),
+            now.strftime('%H:%M:%S'),
+            elapsed,
+            self.variables.set_temperature_ll,
+            temp,
+            vacuum,
+        ]
+        try:
+            self.ll_baking_log_data.to_csv(self.ll_baking_log_file, sep=';', index=False)
+        except Exception as e:
+            print(f'LL baking csv cannot be saved (close the file): {e}')
+
+    def _stop_ll_baking_log(self):
+        """Stop sampling, write a final row, and release the log buffer."""
+        if self.ll_baking_log_data is not None:
+            observe(self.variables, "load_lock_baking", "main", "logging_stopped")
+        if self.ll_baking_log_timer.isActive():
+            self.ll_baking_log_timer.stop()
+        if self.ll_baking_log_data is not None:
+            # Capture a final sample so the CSV records the end state.
+            self._log_ll_baking_row()
+        self.ll_baking_log_data = None
+        self.ll_baking_log_file = None
+        self.ll_baking_log_start = None
 
     def _update_gauge(self, display_widget, label_widget, value, threshold_key):
         """Show *value* on a gauge LCD and colour its label by threshold."""
@@ -755,43 +1083,23 @@ class Ui_Pumps_Vacuum(object):
 
     def update_vacuum_load(self, value):
         self._update_gauge(self.vacuum_load_lock, self.label_210, value, 'vacuum_threshold_load_lock')
+        self._sync_pump_action_styles()
 
     def update_vacuum_cryo_load_lock(self, value):
         self._update_gauge(self.vacuum_cryo_load_lock, self.label_216, value, 'vacuum_threshold_cryo_load_lock')
+        self._sync_pump_action_styles()
 
     def update_vacuum_cryo_load_lock_back(self, value):
         self._update_gauge(self.vacuum_cryo_load_lock_back, self.label_217, value, 'vacuum_threshold_cryo_load_lock_back')
 
-    def super_user_access(self):
-        """
-        The function for override access
-
-        Args:
-                None
-
-        Returns:
-                None
-        """
-        if not self.flag_super_user:
-            warning = QtWidgets.QMessageBox(parent=self.superuser)
-            warning.setIcon(QtWidgets.QMessageBox.Icon.Warning)
-            warning.setWindowTitle("Confirm Access Override")
-            warning.setText("Pump and vacuum override can bypass safety interlocks.")
-            warning.setInformativeText("Only continue if you really want to override access.")
-            warning.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No)
-            warning.setDefaultButton(QtWidgets.QMessageBox.StandardButton.No)
-            if warning.exec() != QtWidgets.QMessageBox.StandardButton.Yes:
-                self.error_message("Override Access canceled.")
-                self.timer.start(8000)
-                return
-            self.flag_super_user = True
-            self.superuser.setStyleSheet("QPushButton{\nbackground: rgb(0, 255, 26)\n}")
-            self.error_message("!!! Override Access Granted !!!")
-        elif self.flag_super_user:
-            self.flag_super_user = False
-            self.superuser.setStyleSheet(self.original_button_style)
-            self.error_message("!!! Override Access deactivated !!!")
-            self.timer.start(8000)
+    def set_access_override(self, enabled):
+        """Apply the shared Gates override to pump and vacuum controls."""
+        self.flag_super_user = bool(enabled)
+        self.pump_cryo_load_lock_switch.setEnabled(self.flag_super_user)
+        if self.flag_super_user:
+            self.error_message("!!! Gate and Vacuum Override Access Granted !!!")
+        else:
+            self.error_message("!!! Gate and Vacuum Override Access deactivated !!!")
 
     def hideMessage(self):
         """
@@ -810,6 +1118,27 @@ class Ui_Pumps_Vacuum(object):
 
         self.timer.stop()
 
+    @staticmethod
+    def _set_action_button_active(button, active, default_style):
+        """Show an active toggle action with the same green used by Set T."""
+        if active:
+            button.setStyleSheet("QPushButton{\nbackground: rgb(0, 255, 26)\n}")
+        else:
+            button.setStyleSheet(default_style)
+
+    def _sync_pump_action_styles(self):
+        """Synchronize vent button colors with the confirmed pump states."""
+        self._set_action_button_active(
+            self.pump_load_lock_switch,
+            not bool(self.variables.flag_pump_load_lock),
+            self.pump_load_lock_default_style,
+        )
+        self._set_action_button_active(
+            self.pump_cryo_load_lock_switch,
+            not bool(self.variables.flag_pump_cryo_load_lock),
+            self.pump_cryo_load_lock_default_style,
+        )
+
     def pump_switch_ll(self):
         """
         Switch the pump on or off
@@ -827,17 +1156,20 @@ class Ui_Pumps_Vacuum(object):
                 and not self.variables.flag_load_gate
             ):
                 if self.variables.flag_pump_load_lock:
+                    self._set_action_button_active(
+                        self.pump_load_lock_switch, True, self.pump_load_lock_default_style
+                    )
                     self.variables.flag_pump_load_lock_click = True
-                    self.led_pump_load_lock.setPixmap(self.led_red)
                     self.pump_load_lock_switch.setEnabled(False)
-                    time.sleep(1)
-                    self.pump_load_lock_switch.setEnabled(True)
+                    QTimer.singleShot(1000, lambda: self.pump_load_lock_switch.setEnabled(True))
                 elif not self.variables.flag_pump_load_lock:
+                    self._set_action_button_active(
+                        self.pump_load_lock_switch, False, self.pump_load_lock_default_style
+                    )
                     self.variables.flag_pump_load_lock_click = True
-                    self.led_pump_load_lock.setPixmap(self.led_green)
                     self.pump_load_lock_switch.setEnabled(False)
-                    time.sleep(1)
-                    self.pump_load_lock_switch.setEnabled(True)
+                    QTimer.singleShot(1000, lambda: self.pump_load_lock_switch.setEnabled(True))
+                self._sync_pump_action_styles()
             else:  # SHow error message in the GUI
                 if self.variables.start_flag:
                     self.error_message("!!! An experiment is running !!!")
@@ -868,17 +1200,28 @@ class Ui_Pumps_Vacuum(object):
                 and not self.variables.flag_load_gate
             ):
                 if self.variables.flag_pump_cryo_load_lock:
+                    # About to fully vent the CLL (stop the backing pump).
+                    # Make the operator confirm first - see warning text.
+                    if not self._confirm_full_vent_cll():
+                        return
+                    self._set_action_button_active(
+                        self.pump_cryo_load_lock_switch, True, self.pump_cryo_load_lock_default_style
+                    )
                     self.variables.flag_pump_cryo_load_lock_click = True
-                    self.led_pump_cryo_load_lock.setPixmap(self.led_red)
                     self.pump_cryo_load_lock_switch.setEnabled(False)
-                    time.sleep(1)
-                    self.pump_cryo_load_lock_switch.setEnabled(True)
+                    QTimer.singleShot(
+                        1000, lambda: self.pump_cryo_load_lock_switch.setEnabled(self.flag_super_user)
+                    )
                 elif not self.variables.flag_pump_cryo_load_lock:
+                    self._set_action_button_active(
+                        self.pump_cryo_load_lock_switch, False, self.pump_cryo_load_lock_default_style
+                    )
                     self.variables.flag_pump_cryo_load_lock_click = True
-                    self.led_pump_cryo_load_lock.setPixmap(self.led_green)
                     self.pump_cryo_load_lock_switch.setEnabled(False)
-                    time.sleep(1)
-                    self.pump_cryo_load_lock_switch.setEnabled(True)
+                    QTimer.singleShot(
+                        1000, lambda: self.pump_cryo_load_lock_switch.setEnabled(self.flag_super_user)
+                    )
+                self._sync_pump_action_styles()
             else:  # SHow error message in the GUI
                 if self.variables.start_flag:
                     self.error_message("!!! An experiment is running !!!")
@@ -890,6 +1233,255 @@ class Ui_Pumps_Vacuum(object):
             print('Error in pump_switch function')
             print(e)
             pass
+
+    def _confirm_full_vent_cll(self):
+        """Confirm the operator really wants to fully vent the cryo load lock.
+
+        The cryo head vacuum depends on the CLL backing pump; fully venting
+        the CLL stops that backing and will spoil the cryo head vacuum. Warn
+        the operator so they can check everything before venting.
+
+        Args:
+                None
+
+        Return:
+                True if the operator confirmed the vent, False if cancelled.
+        """
+        warning = QtWidgets.QMessageBox(parent=self.pump_cryo_load_lock_switch)
+        warning.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+        warning.setWindowTitle("Confirm full CLL vent")
+        warning.setText("You are about to fully vent the cryo load lock (CLL).")
+        warning.setInformativeText(
+            "The cryo head vacuum depends on the CLL backing pump. Fully "
+            "venting the CLL stops that backing and will spoil the cryo head "
+            "vacuum.\n\nCheck everything before venting the CLL.\n\n"
+            "Do you want to continue?"
+        )
+        warning.setStandardButtons(
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
+        )
+        warning.setDefaultButton(QtWidgets.QMessageBox.StandardButton.No)
+        return warning.exec() == QtWidgets.QMessageBox.StandardButton.Yes
+
+    def vent_cryo_load_lock_partial(self):
+        """Toggle a fast partial vent of the cryo load lock (CLL).
+
+        Sequences the three CLL exchange valves for a fast sample/cryo swap.
+        See config.toml (the ``cll_*`` keys) for the valve wiring and the full
+        state table.
+
+        Starting a vent is interlocked: it is refused while an experiment is
+        running or any gate is open, unless the shared Gates override is
+        active. Stopping a vent is always allowed.
+
+        Press (start venting):
+                - CLL backing valve OFF and CLL Turbo valve OFF (immediately)
+                - CLL vent valve ON after ``cll_vent_on_delay`` s (default 2 s)
+        Deselect (stop venting / restore pumping):
+                - CLL vent valve OFF and CLL backing valve ON (immediately)
+                - CLL backing valve OFF again after ``cll_backing_off_delay`` s (default 90 s)
+                - CLL Turbo valve ON after ``cll_turbo_on_delay`` s (default 90 s)
+
+        The delayed steps are guarded by ``flag_vent_cll_partial`` so a quick
+        press/deselect within the delay window cancels the pending action.
+
+        All three valves are level-controlled and energise-to-open. The
+        backing/Turbo valves are single SSR channels on the gates NI
+        (Dev2/USB-6525), which latches its output; the vent valve is held on a
+        separate NI USB-6501. Long waits use QTimer.singleShot so the GUI stays
+        responsive.
+
+        Args:
+                None
+
+        Return:
+                None
+        """
+        try:
+            if not self.flag_vent_cll_partial:
+                # ---- start venting (sample/cryo exchange) ----
+                # Interlock: opening the CLL to atmosphere is only allowed when
+                # no experiment is running and every gate is closed. The
+                # shared Gates override bypasses this interlock.
+                if not (
+                    self.flag_super_user
+                    or (
+                        not self.variables.start_flag
+                        and not self.variables.flag_main_gate
+                        and not self.variables.flag_cryo_gate
+                        and not self.variables.flag_load_gate
+                    )
+                ):
+                    if self.variables.start_flag:
+                        self.error_message("!!! An experiment is running !!!")
+                    else:
+                        self.error_message("!!! First Close all the Gates !!!")
+                    self.timer.start(8000)
+                    return
+                self.flag_vent_cll_partial = True
+                self._set_action_button_active(
+                    self.vent_cryo_load_lock_partial_switch, True, self.vent_partial_default_style
+                )
+                # Backing and Turbo valves off immediately.
+                self._set_cll_valve_6525(self.conf['cll_backing_valve_line'], False)
+                self._set_cll_valve_6525(self.conf['cll_turbo_valve_line'], False)
+                # Vent valve on after a short delay (then held on).
+                delay_ms = int(float(self.conf.get('cll_vent_on_delay', 2)) * 1000)
+                QTimer.singleShot(delay_ms, self._vent_cll_press_delayed)
+                self.error_message("!!! Venting CLL for sample/cryo exchange !!!")
+            else:
+                # ---- stop venting / restore pumping ----
+                # Always allowed - restoring the pumps is the safe direction.
+                self.flag_vent_cll_partial = False
+                self._set_action_button_active(
+                    self.vent_cryo_load_lock_partial_switch, False, self.vent_partial_default_style
+                )
+                # Close the vent valve and re-open the backing valve immediately.
+                self._set_vent_valve(True)  # True = closed, False = open
+                self.variables.flag_vent_cryo_load_lock_partial = False
+                self._set_cll_valve_6525(self.conf['cll_backing_valve_line'], True)
+                # Backing valve closes again after a delay; Turbo valve opens
+                # after a longer delay (protects the turbo). Both are guarded
+                # against a re-press within the delay window.
+                backing_off_ms = int(float(self.conf.get('cll_backing_off_delay', 90)) * 1000)
+                QTimer.singleShot(backing_off_ms, self._vent_cll_deselect_backing_off)
+                turbo_on_ms = int(float(self.conf.get('cll_turbo_on_delay', 90)) * 1000)
+                QTimer.singleShot(turbo_on_ms, self._vent_cll_deselect_turbo_on)
+                self.error_message("!!! CLL vent closed - restoring pumps !!!")
+        except Exception as e:
+            print('Error in vent_cryo_load_lock_partial function')
+            print(e)
+
+    def _vent_cll_press_delayed(self):
+        """Delayed part of the "Vent CLL" press sequence: open the vent valve.
+
+        Guarded by ``flag_vent_cll_partial`` so a quick deselect within the
+        delay window cancels it (leaves the vent valve closed).
+
+        Args:
+                None
+
+        Return:
+                None
+        """
+        if self.flag_vent_cll_partial:
+            self._set_vent_valve(False) # True = closed, False = open
+            self.variables.flag_vent_cryo_load_lock_partial = True
+
+    def _vent_cll_deselect_backing_off(self):
+        """Delayed part of the "Vent CLL" deselect sequence: close the backing valve.
+
+        On deselect the backing valve opens immediately and then closes again
+        after ``cll_backing_off_delay`` s. Guarded by ``flag_vent_cll_partial``
+        so a quick re-press within the delay window cancels it.
+
+        Args:
+                None
+
+        Return:
+                None
+        """
+        if not self.flag_vent_cll_partial:
+            self._set_cll_valve_6525(self.conf['cll_backing_valve_line'], False)
+
+    def _vent_cll_deselect_turbo_on(self):
+        """Delayed part of the "Vent CLL" deselect sequence: open the Turbo valve.
+
+        Guarded by ``flag_vent_cll_partial`` so a quick re-press within the
+        delay window cancels it (leaves the Turbo valve closed while venting).
+
+        Args:
+                None
+
+        Return:
+                None
+        """
+        if not self.flag_vent_cll_partial:
+            self._set_cll_valve_6525(self.conf['cll_turbo_valve_line'], True)
+
+    def _set_cll_valve_6525(self, line_num, state):
+        """Set one CLL SSR valve (Dev2 / USB-6525) open or closed and hold it.
+
+        The CLL backing/Turbo valves are single solid-state-relay channels on
+        the gates NI (``COM_PORT_gates`` -> Dev2, a USB-6525). They are
+        level-controlled and energise-to-open: line HIGH = SSR closed = valve
+        powered/OPEN, line LOW = valve closed. The USB-6525 latches its output
+        state after the task closes (until reprogrammed or powered off), so a
+        single momentary write holds the valve - no persistent task is kept,
+        which also avoids colliding with the gates' tasks on the same port.
+
+        Only the requested line is placed in the task, so writing it never
+        disturbs the gate lines (line0..5). Errors are logged, not raised.
+
+        Args:
+                line_num: SSR channel / DO line on ``COM_PORT_gates`` (Dev2).
+                          Must be a CLL valve line (6 or 7), never a gate line.
+                state: True to open (energise) the valve, False to close it.
+
+        Return:
+                None
+        """
+        import nidaqmx
+        try:
+            task = nidaqmx.Task()
+        except Exception as e:
+            print('Error creating NI task for CLL valve')
+            print(e)
+            return
+        try:
+            task.do_channels.add_do_chan(self.conf['COM_PORT_gates'] + 'line%s' % line_num)
+            task.start()
+            with commanded(self.variables, ("valve_cll_backing" if line_num == self.conf.get("cll_backing_valve_line") else "valve_cll_turbo"), "main", "line_high" if state else "line_low"):
+                task.write([bool(state)])
+        except Exception as e:
+            print('Error setting CLL valve line %s' % line_num)
+            print(e)
+        finally:
+            # Close the task immediately; the USB-6525 latches the value.
+            try:
+                task.close()
+            except Exception:
+                pass
+
+    def _set_vent_valve(self, state):
+        """Drive the CLL vent-valve relay on/off and HOLD the line.
+
+        The vent valve is a level-controlled relay on the NI USB-6501
+        (``COM_PORT_cll_vent_valve``). The 6501 DIO lines are open-collector
+        with a weak on-board 4.7 kOhm pull-up, so a line that is NOT actively
+        driven floats HIGH (~5 V) and leaves an active-high relay stuck ON.
+        The DAQmx task is therefore kept OPEN for the life of the panel and
+        just writes the level:
+                True  -> relay ON  (vent open)   - line released/high
+                False -> relay OFF (vent closed)  - line actively driven LOW
+        The task is NOT closed on the off-path: closing it would release the
+        line back to the pull-up and re-energise the relay (this was the bug
+        where the vent could never be switched off).
+
+        Args:
+                state: True to open (vent), False to close the vent valve.
+
+        Return:
+                None
+        """
+        import nidaqmx
+        try:
+            if self._vent_valve_task is None:
+                self._vent_valve_task = nidaqmx.Task()
+                self._vent_valve_task.do_channels.add_do_chan(self.conf['COM_PORT_cll_vent_valve'])
+                self._vent_valve_task.start()
+            with commanded(self.variables, "valve_cll_vent", "main", "line_high" if state else "line_low"):
+                self._vent_valve_task.write([bool(state)])
+        except Exception as e:
+            print('Error setting CLL vent valve')
+            print(e)
+            # Best-effort cleanup so a half-open task does not wedge the line.
+            try:
+                if self._vent_valve_task is not None:
+                    self._vent_valve_task.close()
+            except Exception:
+                pass
+            self._vent_valve_task = None
 
     def error_message(self, message):
         """
@@ -906,6 +1498,8 @@ class Ui_Pumps_Vacuum(object):
                 "OXCART", "<html><head/><body><p><span style=\" color:#ff0000;\">" + message + "</span></p></body></html>"
             )
         )
+        # Auto-hide the warning after 8 seconds so every message clears itself
+        self.timer.start(8000)
 
     def stop(self):
         """
@@ -918,6 +1512,17 @@ class Ui_Pumps_Vacuum(object):
         """
         # Stop any background processes, timers, or threads here
         self.timer.stop()  # If you want to stop this timer when closing
+        if hasattr(self, 'vacuum_history_timer'):
+            self.vacuum_history_timer.stop()
+        # Flush and stop the LL baking log if a run is in progress.
+        self._stop_ll_baking_log()
+        # The backing/Turbo valves are on the USB-6525, which latches its
+        # output, so their state is preserved across a software restart with no
+        # action here. The vent valve is on the USB-6501, whose line floats
+        # HIGH via its pull-up once the process releases it on exit - i.e. the
+        # vent relay energises (CLL vents) on shutdown. This is a hardware trait
+        # of the 6501 that software cannot prevent; use the relay NC contact or
+        # an active-drive + pull-down if a fail-safe-closed vent is required.
 
 
 class SignalEmitter(QObject):

@@ -1,4 +1,5 @@
 import csv
+import math
 import os
 import time
 from datetime import datetime
@@ -6,6 +7,7 @@ from datetime import datetime
 import serial.tools.list_ports
 
 from pyccapt.control.core import runtime
+from pyccapt.control.core.control_state import Connection, Evidence, commanded, observe, publish
 from pyccapt.control.devices.edwards_tic import EdwardsAGC
 from pyccapt.control.devices.pfeiffer_gauges import TPG362
 
@@ -122,16 +124,18 @@ def command_edwards(conf, variables, cmd, E_AGC, status=None):
     try:
         if variables.flag_pump_load_lock_click and variables.flag_pump_load_lock and status == 'load_lock':
             if conf['pump_ll'] == "on":
-                E_AGC.comm('!C910 0')
-                E_AGC.comm('!C904 0')
+                with commanded(variables, "pump_load_lock", "pump", "stopped"):
+                    E_AGC.comm('!C910 0')
+                    E_AGC.comm('!C904 0')
             variables.flag_pump_load_lock_click = False
             variables.flag_pump_load_lock = False
             variables.flag_pump_load_lock_led = False
             time.sleep(1)
         elif variables.flag_pump_load_lock_click and not variables.flag_pump_load_lock and status == 'load_lock':
             if conf['pump_ll'] == "on":
-                E_AGC.comm('!C910 1')
-                E_AGC.comm('!C904 1')
+                with commanded(variables, "pump_load_lock", "pump", "pumping"):
+                    E_AGC.comm('!C910 1')
+                    E_AGC.comm('!C904 1')
             variables.flag_pump_load_lock_click = False
             variables.flag_pump_load_lock = True
             variables.flag_pump_load_lock_led = True
@@ -139,8 +143,9 @@ def command_edwards(conf, variables, cmd, E_AGC, status=None):
 
         if variables.flag_pump_cryo_load_lock_click and variables.flag_pump_cryo_load_lock and status == 'cryo_load_lock':
             if conf['pump_cll'] == "on":
-                E_AGC.comm('!C910 0')
-                E_AGC.comm('!C904 0')
+                with commanded(variables, "pump_cryo_load_lock", "pump", "stopped"):
+                    E_AGC.comm('!C910 0')
+                    E_AGC.comm('!C904 0')
             variables.flag_pump_cryo_load_lock_click = False
             variables.flag_pump_cryo_load_lock = False
             variables.flag_pump_cryo_load_lock_led = False
@@ -149,8 +154,9 @@ def command_edwards(conf, variables, cmd, E_AGC, status=None):
             variables.flag_pump_cryo_load_lock_click and not variables.flag_pump_cryo_load_lock and status == 'cryo_load_lock'
         ):
             if conf['pump_cll'] == "on":
-                E_AGC.comm('!C910 1')
-                E_AGC.comm('!C904 1')
+                with commanded(variables, "pump_cryo_load_lock", "pump", "pumping"):
+                    E_AGC.comm('!C910 1')
+                    E_AGC.comm('!C904 1')
             variables.flag_pump_cryo_load_lock_click = False
             variables.flag_pump_cryo_load_lock = True
             variables.flag_pump_cryo_load_lock_led = True
@@ -160,6 +166,14 @@ def command_edwards(conf, variables, cmd, E_AGC, status=None):
             if cmd == 'pressure':
                 response_tmp = E_AGC.comm('?V911')
                 response_tmp = float(response_tmp.replace(';', ' ').split()[1])
+                if status in {'load_lock', 'cryo_load_lock'}:
+                    speed_valid = math.isfinite(response_tmp) and response_tmp >= 0
+                    observe(variables, f"pump_{status}", "pump",
+                            ("at_speed" if response_tmp >= 90 else "below_speed") if speed_valid else "unavailable",
+                            evidence=Evidence.READBACK, valid=speed_valid,
+                            fault="" if speed_valid else "No valid pump speed readback",
+                            connection=Connection.CONNECTED, details={"controller_speed": response_tmp,
+                                                                    "at_speed_threshold": 90})
 
                 if response_tmp < 90 and status == 'load_lock':
                     variables.flag_pump_load_lock_led = False
@@ -172,7 +186,9 @@ def command_edwards(conf, variables, cmd, E_AGC, status=None):
                 response = E_AGC.comm('?V940')
             else:
                 print('Unknown command for Edwards TIC Load Lock')
-    except Exception:
+    except Exception as exc:
+        if status in {'load_lock', 'cryo_load_lock'}:
+            publish(variables, f"pump_{status}", "pump", "fault", fault=str(exc))
         response = -1  # Set response to -1 indicate an error
 
     return response
@@ -314,6 +330,10 @@ def state_update(conf, variables, emitter, stop_event=None):
     reported_runtime_issues: set[str] = set()
 
     def report_once(issue_key: str, message: str) -> None:
+        if issue_key.startswith("vacuum_"):
+            publish(variables, "gauge_"+issue_key.removeprefix("vacuum_"), "pump", "fault", fault=message)
+        elif issue_key.startswith("cryovac"):
+            publish(variables, "cryo", "pump", "fault", fault=message)
         if issue_key not in reported_runtime_issues:
             print(message)
             reported_runtime_issues.add(issue_key)
@@ -326,6 +346,10 @@ def state_update(conf, variables, emitter, stop_event=None):
             try:
                 tpg = TPG362(port=variables.COM_PORT_gauge_mc)
             except Exception as e:
+                publish(variables, "gauge_main", "pump", "connection", connection=Connection.DISCONNECTED)
+                publish(variables, "gauge_main", "pump", "fault", fault=str(e))
+                publish(variables, "gauge_buffer", "pump", "connection", connection=Connection.DISCONNECTED)
+                publish(variables, "gauge_buffer", "pump", "fault", fault=str(e))
                 print(
                     f"{bcolors.FAIL}"
                     f"{_format_port_error('Analysis chamber gauge', variables.COM_PORT_gauge_mc, e)}"
@@ -337,6 +361,8 @@ def state_update(conf, variables, emitter, stop_event=None):
             try:
                 E_AGC_bc = EdwardsAGC(variables.COM_PORT_gauge_bc, variables)
             except Exception as e:
+                publish(variables, "gauge_buffer_backing", "pump", "connection", connection=Connection.DISCONNECTED)
+                publish(variables, "gauge_buffer_backing", "pump", "fault", fault=str(e))
                 print(
                     f"{bcolors.FAIL}{_format_port_error('Buffer chamber gauge', variables.COM_PORT_gauge_bc, e)}{bcolors.ENDC}"
                 )
@@ -346,6 +372,12 @@ def state_update(conf, variables, emitter, stop_event=None):
             try:
                 E_AGC_ll = EdwardsAGC(variables.COM_PORT_gauge_ll, variables)
             except Exception as e:
+                publish(variables, "gauge_load_lock", "pump", "connection", connection=Connection.DISCONNECTED)
+                publish(variables, "gauge_load_lock", "pump", "fault", fault=str(e))
+                publish(variables, "gauge_load_lock_backing", "pump", "connection", connection=Connection.DISCONNECTED)
+                publish(variables, "gauge_load_lock_backing", "pump", "fault", fault=str(e))
+                publish(variables, "pump_load_lock", "pump", "connection", connection=Connection.DISCONNECTED)
+                publish(variables, "pump_load_lock", "pump", "fault", fault=str(e))
                 print(f"{bcolors.FAIL}{_format_port_error('Load-lock gauge', variables.COM_PORT_gauge_ll, e)}{bcolors.ENDC}")
                 E_AGC_ll = None
 
@@ -353,6 +385,12 @@ def state_update(conf, variables, emitter, stop_event=None):
             try:
                 E_AGC_cll = EdwardsAGC(variables.COM_PORT_gauge_cll, variables)
             except Exception as e:
+                publish(variables, "gauge_cryo_load_lock", "pump", "connection", connection=Connection.DISCONNECTED)
+                publish(variables, "gauge_cryo_load_lock", "pump", "fault", fault=str(e))
+                publish(variables, "gauge_cryo_load_lock_backing", "pump", "connection", connection=Connection.DISCONNECTED)
+                publish(variables, "gauge_cryo_load_lock_backing", "pump", "fault", fault=str(e))
+                publish(variables, "pump_cryo_load_lock", "pump", "connection", connection=Connection.DISCONNECTED)
+                publish(variables, "pump_cryo_load_lock", "pump", "fault", fault=str(e))
                 print(
                     f"{bcolors.FAIL}"
                     f"{_format_port_error('Cryo load-lock gauge', variables.COM_PORT_gauge_cll, e)}"
@@ -367,6 +405,12 @@ def state_update(conf, variables, emitter, stop_event=None):
             com_port_cryovac = _open_cryovac_serial(variables.COM_PORT_cryo)
             initialize_cryovac(com_port_cryovac, variables)
         except Exception as e:
+            publish(variables, "cryo", "pump", "connection", connection=Connection.DISCONNECTED)
+            publish(variables, "cryo", "pump", "fault", fault=str(e))
+            publish(variables, "heater_cryo", "pump", "connection", connection=Connection.DISCONNECTED)
+            publish(variables, "heater_cryo", "pump", "fault", fault=str(e))
+            publish(variables, "heater_load_lock", "pump", "connection", connection=Connection.DISCONNECTED)
+            publish(variables, "heater_load_lock", "pump", "fault", fault=str(e))
             com_port_cryovac = None
             print(_format_port_error('Cryovac', variables.COM_PORT_cryo, e))
 
@@ -382,8 +426,12 @@ def state_update(conf, variables, emitter, stop_event=None):
         vacuum_load_lock_backing = -1.0
         vacuum_cryo_load_lock = -1.0
         vacuum_cryo_load_lock_backing = -1.0
-        set_temperature_tmp_cryo = 0
-        set_temperature_tmp_ll = 0
+        # Last setpoint actually written to the controller. ``None`` means
+        # "nothing sent yet", so the first request -- and the first request
+        # after a stop -- is always pushed even if it equals a previous
+        # target (e.g. baking twice in a row at the same temperature).
+        set_temperature_tmp_cryo = None
+        set_temperature_tmp_ll = None
         # Loop until either an external stop_event is set OR the
         # legacy emitter flag goes False. The flag remains supported
         # for backward compatibility but is unreliable (it's a pyqtSignal,
@@ -409,6 +457,12 @@ def state_update(conf, variables, emitter, stop_event=None):
                             clear_issue("cryovac_reconnect")
                             print(f"Cryovac reconnected on {variables.COM_PORT_cryo}")
                         except Exception as e:
+                            publish(variables, "cryo", "pump", "connection", connection=Connection.DISCONNECTED)
+                            publish(variables, "cryo", "pump", "fault", fault=str(e))
+                            publish(variables, "heater_cryo", "pump", "connection", connection=Connection.DISCONNECTED)
+                            publish(variables, "heater_cryo", "pump", "fault", fault=str(e))
+                            publish(variables, "heater_load_lock", "pump", "connection", connection=Connection.DISCONNECTED)
+                            publish(variables, "heater_load_lock", "pump", "fault", fault=str(e))
                             com_port_cryovac = None
                             report_once(
                                 "cryovac_reconnect",
@@ -438,6 +492,7 @@ def state_update(conf, variables, emitter, stop_event=None):
                     temperature_cryo_head = -1
                     temperature_cryo_head_inside = -1
                     temperature_stage = -1
+                    temperature_ll = -1
                     print(e)
                     # Handle the case where response is not a valid float
                     temperature = -1
@@ -450,7 +505,8 @@ def state_update(conf, variables, emitter, stop_event=None):
                 if variables.set_temperature_flag_cryo:
                     if variables.set_temperature_cryo != set_temperature_tmp_cryo:
                         try:
-                            res = command_cryovac(f'Out1Cryo.PID.Setpoint {variables.set_temperature_cryo}', com_port_cryovac)
+                            with commanded(variables, "heater_cryo", "pump", "regulating"):
+                                res = command_cryovac(f'Out1Cryo.PID.Setpoint {variables.set_temperature_cryo}', com_port_cryovac)
                             print(res)
                             set_temperature_tmp_cryo = variables.set_temperature_cryo
                         except Exception as e:
@@ -458,7 +514,11 @@ def state_update(conf, variables, emitter, stop_event=None):
                             print("cannot set the cryo temperature")
                 elif variables.set_temperature_flag_cryo == False:
                     variables.set_temperature_cryo = 0
-                    res = command_cryovac(f'Out1Cryo.PID.Setpoint {variables.set_temperature_cryo}', com_port_cryovac)
+                    with commanded(variables, "heater_cryo", "pump", "off"):
+                        res = command_cryovac(f'Out1Cryo.PID.Setpoint {variables.set_temperature_cryo}', com_port_cryovac)
+                    # Forget the last-written value so the next request is
+                    # re-sent even at the same setpoint as before.
+                    set_temperature_tmp_cryo = None
                     variables.set_temperature_flag_cryo = None
 
                 if variables.set_temperature_flag_ll:
@@ -466,7 +526,8 @@ def state_update(conf, variables, emitter, stop_event=None):
                         try:
                             # convert from celcius to kelvin
                             set_temperature_ll = variables.set_temperature_ll + 273.15
-                            res = command_cryovac(f'Out2LL.PID.Setpoint {set_temperature_ll}', com_port_cryovac)
+                            with commanded(variables, "heater_load_lock", "pump", "regulating"):
+                                res = command_cryovac(f'Out2LL.PID.Setpoint {set_temperature_ll}', com_port_cryovac)
                             print(res)
                             set_temperature_tmp_ll = variables.set_temperature_ll
                         except Exception as e:
@@ -474,7 +535,17 @@ def state_update(conf, variables, emitter, stop_event=None):
                             print("cannot set the load lock temperature")
                 elif variables.set_temperature_flag_ll == False:
                     variables.set_temperature_ll = 0
-                    res = command_cryovac(f'Out2LL.PID.Setpoint {variables.set_temperature_ll}', com_port_cryovac)
+                    # Drive the heater off by commanding the controller's
+                    # MINIMUM valid setpoint (Kelvin). A raw 0 means 0 K, which
+                    # is below the TIC 500's allowed LL range -> the controller
+                    # rejects it and keeps the previous baking setpoint, so the
+                    # heater stays pinned at full output (the "still 2 W after
+                    # deselect" bug). min_temperature_ll is already in Kelvin.
+                    with commanded(variables, "heater_load_lock", "pump", "off"):
+                        res = command_cryovac(f"Out2LL.PID.Setpoint {conf['min_temperature_ll']}", com_port_cryovac)
+                    # Forget the last-written value so the next bake re-sends
+                    # the setpoint even at the same temperature as before.
+                    set_temperature_tmp_ll = None
                     variables.set_temperature_flag_ll = None
             if conf['COM_PORT_gauge_mc'] != "off" and tpg is not None:
                 value, _ = tpg.pressure_gauge(2)

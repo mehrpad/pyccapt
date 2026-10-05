@@ -4,6 +4,13 @@
 Submodules
 ----------
 
+pyccapt.control.core.experiment_plan module
+------------------------------------------------------------
+
+.. automodule:: pyccapt.control.core.experiment_plan
+   :members:
+   :show-inheritance:
+
 pyccapt.control.core.baking\_loging module
 ---------------------------------------------
 

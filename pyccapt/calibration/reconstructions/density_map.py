@@ -79,13 +79,17 @@ def plot_density_map(
     """
     if range_sequence or range_mc or range_detx or range_dety or range_x or range_y or range_z:
         if range_sequence:
-            if range_sequence is list:
-                mask_sequence = np.zeros_like(len(x), dtype=bool)
+            if isinstance(range_sequence, (list, tuple)):
+                # ``range_sequence is list`` was an identity check against the
+                # type object (always False), so a real list fell through to the
+                # scalar branch where ``len(x) * range_sequence`` repeats the
+                # list and ``int(list)`` raised TypeError. Also build a proper
+                # length-N mask (np.zeros, not np.zeros_like(len(x)) which is 0-d).
+                mask_sequence = np.zeros(len(x), dtype=bool)
                 if range_sequence[0] < 1 and range_sequence[1] < 1:
                     mask_sequence[int(len(x) * range_sequence[0]) : int(len(x) * range_sequence[1])] = True
                 else:
-                    mask_sequence[range_sequence[0] : range_sequence[1]] = True
-                mask_sequence[range_sequence[0] : range_sequence[1]] = True
+                    mask_sequence[int(range_sequence[0]) : int(range_sequence[1])] = True
             else:
                 mask_sequence = np.zeros(len(x), dtype=bool)
                 mask_sequence[: int(len(x) * range_sequence)] = True
@@ -161,15 +165,26 @@ def plot_density_map(
 
     x = x[mask]
     y = y[mask]
-    # Check if the bin is a list
-    if isinstance(bins, list):
-        print('bins:', bins)
+    # Accept a float/int bin SIZE (nm), a (nx, ny) tuple of bin COUNTS, or a
+    # list of edges. The previous code raised "Bins should be a tuple" for
+    # anything that was not a list, so even the documented default tuple
+    # ``(256, 256)`` and a float bin size were rejected.
+    if isinstance(bins, bool):
+        raise ValueError("bins must be a float bin size, a (nx, ny) tuple, or a list of edges")
+    elif isinstance(bins, (int, float)):
+        bin_size = float(bins)
+        x_edges = np.arange(x.min(), x.max() + bin_size, bin_size)
+        y_edges = np.arange(y.min(), y.max() + bin_size, bin_size)
+        bins = [x_edges, y_edges]
+    elif isinstance(bins, (list, tuple)):
         if len(bins) == 1:
-            x_edges = np.arange(x.min(), x.max() + bins, bins)
-            y_edges = np.arange(y.min(), y.max() + bins, bins)
+            bin_size = float(bins[0])
+            x_edges = np.arange(x.min(), x.max() + bin_size, bin_size)
+            y_edges = np.arange(y.min(), y.max() + bin_size, bin_size)
             bins = [x_edges, y_edges]
+        # (nx, ny) bin counts or [x_edges, y_edges] pass straight to histogram2d
     else:
-        raise ValueError("Bins should be a tuple")
+        raise ValueError("bins must be a float bin size, a (nx, ny) tuple, or a list of edges")
 
     if z_weigth is False:
         FDM, xedges, yedges = np.histogram2d(x, y, bins=bins)

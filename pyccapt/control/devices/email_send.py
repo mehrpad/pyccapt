@@ -135,6 +135,30 @@ def _resolve_logo() -> Path | None:
     return None
 
 
+def _resolve_viz_image(variables) -> Path | None:
+    """Newest Visualization full-window snapshot for this experiment.
+
+    The Visualization process writes ``visualization_screenshot_<suffix>.png``
+    into the experiment's ``meta_data`` folder — periodically (numeric
+    suffix), at the end of the run (``_final``) and on demand for interim
+    e-mails (``_email``). We attach the most recently written one so the
+    e-mail carries a current picture of the detector / spectra. Returns
+    None if no snapshot exists yet.
+    """
+    folder = _experiment_folder(variables)
+    if folder is None:
+        return None
+    meta = folder / "meta_data"
+    if not meta.is_dir():
+        return None
+    shots = list(meta.glob("visualization_screenshot_*.png"))
+    if not shots:
+        return None
+    # Newest by modification time — the interim '_email' / final '_final'
+    # shot is whatever was written last.
+    return max(shots, key=lambda p: p.stat().st_mtime)
+
+
 def _experiment_folder(variables) -> Path | None:
     path_value = getattr(variables, "path", None)
     if not path_value:
@@ -143,19 +167,49 @@ def _experiment_folder(variables) -> Path | None:
     return folder if folder.is_dir() else None
 
 
-def _attach_experiment_files(msg: MIMEMultipart, variables) -> list[str]:
-    """Attach apt.log and parameters.txt if they exist. Returns names attached."""
+def _experiment_id(variables) -> str:
+    """Best-effort experiment identifier for the attachment filename.
+
+    Prefers ``exp_name`` (``<counter>_<date>_<name>``, set in
+    experiment_state.prepare_experiment_output_paths), then the experiment
+    folder name, then ``hdf5_data_name``.
+    """
+    for attr in ("exp_name", "hdf5_data_name"):
+        value = str(getattr(variables, attr, "") or "").strip()
+        if value:
+            return value
+    folder = _experiment_folder(variables)
+    if folder is not None:
+        return folder.name
+    return "experiment"
+
+
+def _attach_experiment_files(msg: MIMEMultipart, variables, interim: bool = False) -> list[str]:
+    """Attach the Visualization snapshot (+ the details txt for final mails).
+
+    The apt.log is never attached — the full run report is already in the
+    e-mail body. For the final end-of-experiment e-mail (``interim=False``)
+    the experiment-details text file (parameters.txt, delivered as
+    ``experiment_details_<id>.txt``) is attached alongside the snapshot.
+    Interim progress e-mails carry only the snapshot. Returns the names
+    attached.
+    """
     attached: list[str] = []
     folder = _experiment_folder(variables)
     if folder is None:
         return attached
 
-    candidates = [
-        folder / "parameters.txt",
-        folder / "meta_data" / "apt.log",
-    ]
+    # On-disk name -> attachment (download) name.
+    candidates = []
+    if not interim:
+        # Final report: include the experiment-details txt (not the log).
+        details_name = f"experiment_details_{_experiment_id(variables)}.txt"
+        candidates.append((folder / "parameters.txt", details_name))
+    viz_path = _resolve_viz_image(variables)
+    if viz_path is not None:
+        candidates.append((viz_path, f"visualization_{_experiment_id(variables)}.png"))
 
-    for path in candidates:
+    for path, attach_name in candidates:
         try:
             if not path.is_file():
                 continue
@@ -171,13 +225,14 @@ def _attach_experiment_files(msg: MIMEMultipart, variables) -> list[str]:
             maintype, subtype = (ctype or "application/octet-stream").split("/", 1)
             with open(path, "rb") as fh:
                 part = MIMEApplication(fh.read(), _subtype=subtype)
+            filename = attach_name or path.name
             part.add_header(
                 "Content-Disposition",
                 "attachment",
-                filename=path.name,
+                filename=filename,
             )
             msg.attach(part)
-            attached.append(path.name)
+            attached.append(filename)
         except Exception as exc:  # never let an attachment failure kill the email
             _log.warning("Could not attach %s: %s", path, exc)
     return attached
@@ -189,6 +244,7 @@ def _build_message(
     body_text: str,
     config: dict,
     variables=None,
+    interim: bool = False,
 ) -> tuple[MIMEMultipart, list[str], list[str]]:
     """Compose the MIME message. Returns (msg, all_recipients, attached_names)."""
     from_address = config["sender_email"]
@@ -225,6 +281,27 @@ def _build_message(
         except Exception as exc:
             _log.warning("Could not embed logo %s: %s", logo_path, exc)
 
+    # Inline the latest Visualization snapshot (detector + spectra) so the
+    # recipient sees the current state of the experiment in the body, and
+    # keep the file as an attachment for full resolution.
+    viz_html = ""
+    viz_path = _resolve_viz_image(variables) if variables is not None else None
+    if viz_path is not None:
+        try:
+            with open(viz_path, "rb") as fh:
+                viz_data = fh.read()
+            viz_part = MIMEImage(viz_data, _subtype="png", name=viz_path.name)
+            viz_part.add_header("Content-ID", "<pyccapt_viz>")
+            viz_part.add_header("Content-Disposition", "inline", filename=viz_path.name)
+            msg.attach(viz_part)
+            viz_html = (
+                '<p style="margin:8px 0 4px 0;font-weight:bold">Visualization snapshot</p>'
+                '<img src="cid:pyccapt_viz" alt="Visualization snapshot" '
+                'style="max-width:640px;border:1px solid #ccc"/><br/>'
+            )
+        except Exception as exc:
+            _log.warning("Could not embed visualization image %s: %s", viz_path, exc)
+
     # Multipart/alternative inside the related container so clients pick the
     # best representation. Plain text is the source of truth; HTML is just a
     # nicer rendering.
@@ -236,6 +313,7 @@ def _build_message(
         "<pre style='font-family:Consolas,Menlo,monospace;font-size:12px'>"
         f"{body_text}"
         "</pre>"
+        f"{viz_html}"
         "</body></html>"
     )
     alternative.attach(MIMEText(html_body, "html", _charset="utf-8"))
@@ -243,21 +321,23 @@ def _build_message(
 
     attached_names: list[str] = []
     if config.get("attach_experiment_files", True) and variables is not None:
-        attached_names = _attach_experiment_files(msg, variables)
+        attached_names = _attach_experiment_files(msg, variables, interim=interim)
 
     all_recipients = [recipient] + cc_list
     return msg, all_recipients, attached_names
 
 
-def send_email(email: str, subject: str, message: str, variables=None) -> list[str]:
-    """Send the experiment-finished email.
+def send_email(email: str, subject: str, message: str, variables=None, interim: bool = False) -> list[str]:
+    """Send the experiment notification email.
 
     Args:
             email: Recipient address (the operator's address from the GUI).
             subject: Email subject.
             message: Plain-text body.
             variables: Optional shared experiment variables; if provided, the
-                    experiment's ``apt.log`` and ``parameters.txt`` are attached.
+                    latest Visualization snapshot is inlined/attached.
+            interim: True for a mid-run progress e-mail (snapshot only); False
+                    for the final report (snapshot + experiment-details txt).
 
     Returns:
             List of attached filenames (may be empty).
@@ -272,7 +352,9 @@ def send_email(email: str, subject: str, message: str, variables=None) -> list[s
         raise ValueError(f"No valid recipient address: {email!r}")
 
     config = _load_credentials()
-    msg, all_recipients, attached = _build_message(recipient, subject, message, config, variables=variables)
+    msg, all_recipients, attached = _build_message(
+        recipient, subject, message, config, variables=variables, interim=interim
+    )
 
     port = int(config["smtp_port"])
     server_name = config["smtp_server"]
@@ -286,13 +368,17 @@ def send_email(email: str, subject: str, message: str, variables=None) -> list[s
 
         def smtp_cls():
             s = smtplib.SMTP(server_name, port, timeout=30)
-            s.ehlo()
             try:
+                s.ehlo()
                 s.starttls(context=context)
                 s.ehlo()
-            except smtplib.SMTPException:
-                # Server may be plain SMTP without TLS — still OK in trusted lab nets.
-                _log.warning("STARTTLS not available on %s:%s", server_name, port)
+            except Exception:
+                # Never transmit SMTP credentials or experiment metadata after
+                # a failed TLS upgrade. Close the plaintext connection first.
+                try:
+                    s.close()
+                finally:
+                    raise
             return s
 
     with smtp_cls() as server:

@@ -25,37 +25,22 @@ def _build_valid_event_flags(sorted_channels):
 
 
 def _normalize_sequence(current_sequence, ch, time):
-    sc = current_sequence.copy()
-    length = len(current_sequence)
-    if length <= 4:
-        sorted_channels, sorted_time, sorted_start_counter = _sort_sequence_by_channel(sc, ch, time)
-        valid_event = _build_valid_event_flags(sorted_channels)
-        return sorted_channels, sorted_time, sorted_start_counter, valid_event
+    if not (len(current_sequence) == len(ch) == len(time)):
+        raise ValueError("start-counter, channel, and time sequences must have equal lengths")
 
-    ch_sorted = []
-    index = []
-    k = 0
-    j = 0
-    while len(ch) != len(ch_sorted):
-        if j == len(ch):
-            j = 0
-            k = k + 1
-            if k == 4:
-                k = 0
-
-        if ch[j] == k:
-            if j not in index:
-                index.append(j)
-                ch_sorted.append(ch[index[-1]])
-                k = k + 1
-                if k == 4:
-                    k = 0
-                j = 0
-                continue
-        j = j + 1
-
+    # Interleave the first occurrence of each channel, then the second, etc.
+    # This preserves acquisition order within a channel and always terminates,
+    # even for incomplete/invalid groups such as [0, 1, 2, 0, 1].
+    occurrence = {}
+    ranked_indices = []
+    for idx, channel_value in enumerate(ch):
+        rank = occurrence.get(channel_value, 0)
+        occurrence[channel_value] = rank + 1
+        ranked_indices.append((rank, channel_value, idx))
+    index = [idx for _, _, idx in sorted(ranked_indices)]
+    ch_sorted = [ch[idx] for idx in index]
     sorted_time = [time[idx] for idx in index]
-    sorted_start_counter = [sc[idx] for idx in index]
+    sorted_start_counter = [current_sequence[idx] for idx in index]
     valid_event = _build_valid_event_flags(ch_sorted)
     return ch_sorted, sorted_time, sorted_start_counter, valid_event
 
@@ -85,6 +70,20 @@ def find_consecutive_sequences_seperatly(start_counter, channel, time_data, high
     result_1_invalid = []
     result_other_odd = []
     result_other_even = []
+
+    lengths = {len(start_counter), len(channel), len(time_data), len(high_voltage), len(pulse)}
+    if len(lengths) != 1:
+        raise ValueError("All Surface Concept input arrays must have equal lengths")
+    if len(start_counter) == 0:
+        return (
+            result_4,
+            result_4_invalid,
+            result_3_invalid,
+            result_2_invalid,
+            result_1_invalid,
+            result_other_odd,
+            result_other_even,
+        )
 
     current_sequence = []
     ch = []
@@ -488,6 +487,9 @@ def iter_consecutive_sequences(start_counter, channel, time_data, high_voltage, 
     so peak memory is O(1) records rather than O(N).  The yielded dicts have
     the same schema as ``find_consecutive_sequences`` returns.
     """
+    lengths = {len(start_counter), len(channel), len(time_data), len(high_voltage), len(pulse)}
+    if len(lengths) != 1:
+        raise ValueError("All Surface Concept input arrays must have equal lengths")
     n = len(start_counter)
     if n == 0:
         return

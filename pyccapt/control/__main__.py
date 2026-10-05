@@ -2,35 +2,10 @@ import multiprocessing
 import signal
 import sys
 
-from PyQt6 import QtGui, QtWidgets
-
 from pyccapt.control.core import loggi, runtime
-from pyccapt.control.gui import gui_main
 
 
-def _set_windows_app_id(app_id: str = "OXCART.PyCCAPT.Control.1") -> None:
-    """Register an explicit Windows Application User Model ID.
-
-    Windows groups taskbar buttons by a process's AppUserModelID. A Python
-    GUI launched via ``python``/``pythonw`` inherits the interpreter's id,
-    so the taskbar shows the Python icon even though the window's title-bar
-    icon is set. Declaring our own id makes Windows treat PyCCAPT as a
-    distinct application and use the window icon in the taskbar. No-op on
-    non-Windows platforms.
-    """
-    if sys.platform != "win32":
-        return
-    try:
-        import ctypes
-
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
-    except Exception:
-        # Older Windows or a locked-down environment; the taskbar just
-        # falls back to the interpreter icon -- not worth failing startup.
-        pass
-
-
-def main():
+def main(argv=None):
     """
     Load the GUI based on the configuration file.
 
@@ -43,6 +18,24 @@ def main():
     Returns:
             None
     """
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] in {
+        "validate-config", "validate-hdf", "validate-hdf5",
+        "recover-chunks", "recover-run",
+    }:
+        from pyccapt.control.core.data_integrity import main as data_main
+
+        return data_main(argv, prog="pyccapt")
+
+    try:
+        from PyQt6 import QtWidgets
+        from pyccapt.control.gui import app_icon, gui_main
+    except ImportError as exc:
+        raise SystemExit(
+            "PyCCAPT control dependencies are not installed. "
+            "Install them with: pip install 'pyccapt[control]'"
+        ) from exc
+
     # Put this process in a kill-on-close Job Object so every worker
     # subprocess (camera, visualization, experiment, Manager) is terminated
     # if the GUI dies WITHOUT running cleanup() - e.g. PyCharm's red Stop
@@ -71,18 +64,11 @@ def main():
 
     # Set the Windows taskbar app id BEFORE the QApplication is created so
     # the taskbar uses the PyCCAPT logo instead of the Python icon.
-    _set_windows_app_id()
+    app_icon.set_windows_app_user_model_id()
 
     app = QtWidgets.QApplication(sys.argv)
     app.setStyle('Fusion')
-    # Application-level icon: Qt uses this as the default for every
-    # top-level window (title bar) and, together with the app id above,
-    # for the taskbar button. The main window also sets it explicitly in
-    # retranslateUi, so this is the belt-and-suspenders default.
-    try:
-        app.setWindowIcon(QtGui.QIcon(str(runtime.project_path("files", "logo.png"))))
-    except Exception as exc:
-        print(f"Could not load application icon (non-fatal): {exc}")
+    app_icon.apply_application_icon(app)
     window = gui_main.MyPyCCAPT(
         shared.variables,
         conf,

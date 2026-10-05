@@ -18,12 +18,50 @@ log_time_time_interval = 15
 save_meta_interval_visualization = 300
 save_meta_interval_camera = 300
 
+# Interim e-mail notifications. When the "Email every ..." checkbox next to
+# the e-mail field in the main GUI is ticked, the experiment sends a progress
+# e-mail (with a fresh Visualization snapshot attached) every this many
+# detected ions. Set to 0 to disable the periodic e-mail entirely.
+email_interval_events = 1000000
+
 # Limits and control defaults
-max_vdc = 14000
+max_vdc = 10000
 min_vp = 328
 max_vp = 3281
 pulse_amp_per_supply_voltage = 21.875
 max_laser_power = 5.2
+# Legacy max_laser_power was ambiguous (W vs mW vs nJ); it is no longer used
+# for the laser GUI. Modern e_power is an AOM relative setting, not watts.
+laser_aom_max_percent = 100.0 # e_power 0..4000 displayed as 0..100% (manual p120)
+
+# Laser optics alignment. Values below are commissioning defaults, not calibrated
+# beam motion. Measure referenced stage bounds and allowable travel before enabling.
+laser_alignment_calibrated = false
+laser_alignment_bounds_mm = [] # [xmin,xmax,ymin,ymax,zmin,zmax], referenced laser stage
+laser_alignment_travel_um = [] # maximum +/- [x,y,z] from alignment starting position
+laser_alignment_coarse_range_um = 5.0
+laser_alignment_coarse_step_um = 2.5
+laser_alignment_fine_range_um = 1.0
+laser_alignment_fine_step_um = 0.5
+laser_alignment_focus_range_um = 1.0
+laser_alignment_focus_step_um = 0.5
+laser_alignment_xy_speed_um_s = 1.0
+laser_alignment_z_speed_um_s = 0.25
+laser_alignment_voltage_increment = 50.0 # editable in Laser GUI, after unsuccessful coarse scan
+laser_alignment_max_voltage = 6000.0 # also bounded by experiment/system maximum
+laser_alignment_ramp_v_s = 20.0
+laser_alignment_settle_s = 1.0
+laser_alignment_dwell_s = 1.5
+laser_alignment_min_rate_percent = 0.01 # absolute detection %, NOT fraction of target
+laser_alignment_background_rate_percent = 0.0 # measure detector dark-count rate before use
+laser_alignment_min_events = 30
+laser_alignment_max_rate_multiple = 2.0 # stop if rate exceeds this multiple of target while scanning
+laser_alignment_max_recoveries = 2 # each recovery follows three unsuccessful fine scans
+laser_alignment_max_duration_s = 1800.0 # per initial search / tracking recovery
+laser_alignment_tracking_interval_s = 60.0
+laser_alignment_tracking_step_um = 0.1
+laser_alignment_quality_peak_ns = [] # optional isolated TOF peak [low,high] for focus quality checks
+laser_alignment_quality_min_events = 200
 pulse_fraction_max = 20
 
 # Initial values populated into the main GUI's experiment-parameter fields
@@ -32,10 +70,11 @@ pulse_fraction_max = 20
 # back to the hardcoded values inside the GUI source.
 #
 # Note: ``default_vdc_max`` is the *experiment-target* upper bound shown in
-# the GUI (e.g. 4000 V), separate from ``max_vdc`` above which is the
-# system *safety* cap (e.g. 14000 V) the firmware will never exceed.
+# the GUI, separate from ``max_vdc`` above which is the system *safety* cap
+# the firmware will never exceed.
 default_vdc_min = 500
-default_vdc_max = 4000
+default_vdc_max = 9000
+default_criteria_vdc = true
 default_max_ions = 2000000
 default_ex_time_s = 3600
 default_ex_freq_hz = 5
@@ -115,7 +154,10 @@ live_calibration_ema_window = 3
 # a warning for a given gauge.
 vacuum_threshold_main = 1e-9
 vacuum_threshold_buffer = 1e-9
-vacuum_threshold_buffer_back = 1e-2
+# Display-only warning used by the compact monitor in the Cameras GUI.
+# Kept separate from vacuum_threshold_buffer, which also protects gate interlocks.
+camera_warning_threshold_buffer = 1e-8
+vacuum_threshold_buffer_back = 1e-1
 vacuum_threshold_load_lock = 1e-5
 vacuum_threshold_load_lock_back = 1e-1
 vacuum_threshold_cryo_load_lock = 1e-5
@@ -163,7 +205,8 @@ gauges = "enabled"
 stage = "enabled"
 laser = "enabled"
 DAQ = "enabled"
-usb_lamp_switch = "enabled"
+usb_lamp_switch = "disabled" # Replaced by the Arduino NeoPixel illumination controller.
+camera_illumination = "enabled"
 thorlab_motor = "disabled"
 baking = "enabled"
 
@@ -171,6 +214,74 @@ baking = "enabled"
 COM_PORT_laser = "COM9"
 COM_PORT_gates = "Dev2/port0/"
 COM_PORT_cryo = "COM7"
+
+# Camera-alignment NeoPixel illumination (Arduino Nano, 48 LEDs on D6).
+# The connected Nano is the CH340 USB-serial device on COM12.
+# Set this to "auto" only if this COM assignment changes; auto searches
+# Arduino/CH340/CP210 serial devices for the PyCCAPT sketch.
+COM_PORT_camera_illumination = "COM12"
+# A dim, diffuse green field is the initial alignment baseline. Green uses
+# the most densely sampled Bayer channel on colour cameras, allowing lower
+# LED output than blue/white; final colour and geometry must still be tuned
+# on the instrument to avoid a specular reflection from the electrode.
+camera_illumination_color = "green" # RGB (0, 255, 0); supported: green, red, blue, white
+camera_illumination_percent = 25
+# Light-on manual/preset exposure (microseconds), ordered side / top / angle.
+# The light-off preset remains unchanged in camera.py: 2 s / 1 s / 2 s.
+camera_exposure_light_side_us = 20000
+camera_exposure_light_top_us = 10000
+camera_exposure_light_angle_us = 20000
+# Basler ExposureAuto brightness target (0..1). GainAuto stays disabled so
+# exposure time is the only automatic brightness adjustment.
+camera_auto_target_brightness = 0.5
+# Basler's recommended moderate PGI pairing. Higher sharpness can create
+# halos, while excessive noise reduction removes fine structure.
+camera_noise_reduction = 0.2
+camera_sharpness_enhancement = 1.0
+# Requested maximum stream rate. Actual rate can be lower due to exposure,
+# ROI, camera model, or USB bandwidth.
+camera_alignment_frame_rate_hz = 30.0
+
+# ===================== CLL fast-vent valves ("Vent CLL" button) =====================
+# The "Vent CLL" button (Pumps & Vacuum panel) does a fast sample/cryo exchange
+# in the cryo load lock (CLL) by sequencing three valves:
+#
+#   State                     backing valve             Turbo valve         vent valve
+#   -----------------------   -----------------------   -----------------   ----------------
+#   "Vent CLL" pressed        OFF                       OFF                 ON  (after 2 s)
+#   "Vent CLL" deselected     ON, then OFF after 29 s   ON  (after 30 s)    OFF
+#
+# --- CLL backing & Turbo valves ---
+# On the SAME NI as the gates (COM_PORT_gates -> Dev2, an 8-channel USB-6525
+# solid-state-relay module). Each valve is ONE SSR channel, level-controlled
+# and energise-to-open: line HIGH = SSR closed = valve powered/OPEN,
+# line LOW = valve closed. The USB-6525 latches its output state after the
+# task closes (until reprogrammed or powered off), so a single write holds the
+# valve and no line is left reserved.
+# Physical screw-terminal wiring on the USB-6525 (each SSR channel P0.x has two
+# terminals P0.xA / P0.xB that the valve is wired across):
+#   backing valve -> pins 13/14 = P0.6A / P0.6B -> Dev2/port0/line6
+#   Turbo valve   -> pins 15/16 = P0.7A / P0.7B -> Dev2/port0/line7
+# WARNING: the gates use line0..line5 on this SAME device. Only line6 and line7
+# are free - never point these at line0..5 or you will drive a gate.
+cll_backing_valve_line = 6
+cll_turbo_valve_line = 7
+#
+# --- CLL vent valve ---
+# On a SEPARATE NI USB-6501. The relay SIG line was identified empirically
+# (devices_test/cll_vent_valve_blink.py + voltmeter) as DAQmx channel
+# Dev3/port1/line7 (= P1.7). Wire the relay: SIG -> that terminal, VCC -> +5V,
+# GND -> GND. This valve is level-controlled: line HIGH = valve ON (venting),
+# line LOW = valve OFF. Confirm the device name ("Dev3") in NI MAX.
+# NOTE: the 6501 outputs are open-collector with a pull-up, so an UNDRIVEN line
+# floats HIGH (relay ON). The GUI holds a task on this line and drives it LOW at
+# startup and on deselect to keep the vent closed.
+COM_PORT_cll_vent_valve = "Dev3/port1/line7"
+#
+# --- Sequencing delays (seconds) ---
+cll_vent_on_delay = 2       # on press: wait this long, then open the vent valve
+cll_backing_off_delay = 90  # on deselect: backing opens now, then closes after this
+cll_turbo_on_delay = 90     # on deselect: wait this long, then open the Turbo valve
 
 # Cryo sensor mapping: label and which output word index (0-based) comes from the device
 # Change cryo_sensor_X_index to remap which physical output position feeds that display slot.
@@ -209,9 +320,9 @@ stage_smartact_laser = "network:sn:MCS2-00017939"
 # Values are in millimetres.  The Home button moves all three axes to these
 # coordinates after referencing has run (or immediately if the controller
 # already knows its reference).
-stage_home_x_mm = 1.615
-stage_home_y_mm = 2.235
-stage_home_z_mm = -7.124
+stage_home_x_mm = 1.726001
+stage_home_y_mm = 2.235000
+stage_home_z_mm = -9.082072
 laser_stage_home_x_mm = 0.0
 laser_stage_home_y_mm = 0.0
 laser_stage_home_z_mm = 0.0
@@ -277,18 +388,18 @@ ro_detector_width_mm = 80
 # Detector usable half-width (cm).  Same convention as the SC entry.
 ro_detector_limit_cm = 4.0
 
-# Speed slider range for both GUIs.  Mirrors the "Simple Mode" levels shown on
+# Speed preset range for the stage GUI. Mirrors the "Simple Mode" levels shown on
 # the SmarAct MCS2 hand-control display (1 = slowest, 11 = fastest).  Each
 # level is mapped to an actual MOVE_VELOCITY by stage_smartact_speed_mm_s
 # below (level^2 * factor in mm/s, capped at the max).
 stage_speed_level_min = 1
 stage_speed_level_max = 11
-stage_speed_level_default = 5
-# Velocity (mm/s) corresponding to slider level 11.  Only used when
+stage_speed_level_default = 3
+# Velocity (mm/s) corresponding to preset level 11. Only used when
 # stage_speed_table_mm_s below is empty.  Lower levels are then scaled
-# quadratically so the slider feels exponential-ish.
+# quadratically across the preset list.
 stage_speed_max_mm_s = 1.0
-# Per-level velocity table (mm/s), one entry per slider level.  When set,
+# Per-level velocity table (mm/s), one entry per preset level. When set,
 # this takes precedence over stage_speed_max_mm_s and lets you make the
 # GUI levels match the MCS2 hand-control display exactly: step the
 # controller through Simple Mode levels 1..11, read off the velocity each
@@ -296,13 +407,13 @@ stage_speed_max_mm_s = 1.0
 # power-of-2 table from 1 µm/s to ~1 mm/s, safe for atom-probe positioning.
 stage_speed_table_mm_s = [0.001, 0.002, 0.004, 0.008, 0.016, 0.032, 0.064, 0.128, 0.256, 0.512, 1.024]
 # Effective "joystick deflection time" (seconds): the per-click jog distance
-# is computed as velocity * this value, so faster slider settings produce
+# is computed as velocity * this value, so faster presets produce
 # proportionally larger jogs - just like the MCS2 hand-control where only
 # speed is set and the distance follows from how long the knob is deflected.
 stage_click_duration_s = 0.2
 # Velocity (mm/s) used by the Home button.  Decoupled from the per-axis
-# sliders because Home should be fast and predictable regardless of what
-# slider the user happens to have moved last.  Default 1 mm/s = the
+# selectors because Home should be fast and predictable regardless of what
+# preset the user happens to have selected. Default 1 mm/s = the
 # table top-end; lower if your stage is fragile.
 stage_home_velocity_mm_s = 1.0
 
@@ -335,3 +446,76 @@ control_pid_kd = 0.05
 # Hard cap on the per-iteration PID voltage step (V), applied symmetrically
 # (-cap .. +cap).  Mirrors the 40 V cap on the Proportional branch.
 control_pid_max_step_v = 40.0
+
+# ---------------------------------------------------------------------------
+# Physical safety boundary and deterministic dry-run detector.
+# Keep the interlock backend disabled only on legacy rigs or for simulation.
+# A production NI-DAQ installation should set the exact digital channels.
+# ---------------------------------------------------------------------------
+safety_interlock_backend = "none" # "none", "simulator", or "nidaq"
+safety_estop_input_channel = ""
+safety_watchdog_output_channel = ""
+safety_estop_safe_when_high = true
+
+# Used when tdc_model = "Simulator".  Set fail_after_batches to a positive
+# value only in fault-injection tests.
+simulator_seed = 42
+simulator_batch_size = 128
+simulator_interval_s = 0.02
+simulator_fail_after_batches = 0
+
+# Automatic alignment: fixed-DC neighbour contrast, then fine XY/Z.
+alignment_start_voltage = 1500.0     # GUI default, V DC
+alignment_voltage_increment = 100.0 # GUI default, V per completed XY search
+alignment_coarse_dwell_s = 1.0       # fixed-DC observations when enough fresh hits exist
+alignment_coarse_max_dwell_s = 3.0   # upper wait per coarse/semi/confirmation point
+alignment_search_min_events = 200   # minimum fresh paired hits for coherent density and contrast
+alignment_jump_ratio = 1.5          # repeatable rate increase relative to a neighbouring position
+alignment_jump_sigma = 3.0          # count-noise significance; candidates are separately rechecked
+alignment_fine_loss_ratio = 0.25    # loss relative to verified fine-entry signal, not requested rate
+alignment_max_voltage = 6000.0
+alignment_ramp_v_s = 100.0
+alignment_finish_fraction = 0.80
+alignment_stable_s = 3.0
+alignment_loss_s = 3.0
+alignment_dwell_s = 10.0
+alignment_timeout_s = 1800.0
+alignment_max_attempts = 1          # fine entries per voltage before retracting and increasing DC
+alignment_window_ions = 2000
+alignment_window_max_age_s = 10.0
+alignment_acquisition_guard_s = 0.5
+alignment_centre_tolerance = 0.02     # fraction of detector radius
+alignment_area_target = 0.90         # fraction of detector area
+
+# Operator-provided limits and transfer position. Do not infer electrode clearance
+# from detector events or the aperture diameter.
+# bounds_mm = [[xmin,xmax], [ymin,ymax], [zmin,zmax]] in referenced stage coordinates.
+# These are absolute travel bounds. Separately verify each sample's local
+# search/approach envelope and the transfer path through transfer_z_mm are clear.
+# Operator-provided bounds: X [-2, +6], Y [-3, +7], Z [-10, +7] mm.
+# Stage +X shifts the footprint left; +Y shifts it up. Fine XY movement is
+# evaluated from fresh detector events at each position; no fixed scale is used.
+# Increasing Z approaches the electrode; -4 mm is the transfer position.
+alignment_motion_calibrated = true
+alignment_bounds_mm = [[-2.0, 6.0], [-3.0, 7.0], [-10.0, 7.0]]
+alignment_xy_range_um = [50.0, 50.0] # +/- X and Y about each saved rough position
+alignment_semi_xy_range_um = 15.0   # second pass, also <= one third of the coarse range
+alignment_fine_xy_range_um = 5.0    # final detector-feedback range around the second-pass result
+alignment_xy_boundary_margin_um = 0.2 # inset XY targets; measured limits remain unchanged
+alignment_xy_jacobian_mm_per_um = [] # [[d(detX)/dX,d(detX)/dY],[d(detY)/dX,d(detY)/dY]]
+alignment_z_direction = 1           # increasing Z moves toward the electrode
+alignment_transfer_z_mm = -4.0       # retract before sideways movement between samples
+alignment_approach_enabled = true   # fine only, after XY centring and circular-footprint validation
+alignment_z_max_advance_um = 20.0   # maximum total approach from each saved Z, in micrometres
+# Candidate commissioning settings; validate before enabling movement.
+alignment_xy_step_um = 10.0 # cap on inner semi-coarse probe spacing; broad probes derive from XY range
+alignment_fine_xy_step_um = 0.1
+alignment_fine_probe_step_um = 1.0
+alignment_xy_speed_um_s = 100.0     # coarse XY: 0.1 mm/s
+alignment_fine_xy_speed_um_s = 16.0 # fine XY: 0.016 mm/s
+alignment_z_step_um = 0.05
+alignment_z_speed_um_s = 0.1
+alignment_transfer_speed_um_s = 300.0 # 0.3 mm/s for retract, XY transfer and saved-Z positioning
+alignment_position_tolerance_um = 0.02
+alignment_settle_s = 0.5
+alignment_move_timeout_s = 180.0

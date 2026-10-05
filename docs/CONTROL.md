@@ -247,6 +247,11 @@ readback, and failed or disallowed requests are cancelled rather than replayed.
 Listen is available immediately after Standby is requested. Listen and Standby
 remain available while Laser On is pending; pending Output Enable exposes an
 explicit Close Output request so cancellation cannot replay an enable toggle.
+The rate dropdown shows **Base rate (kHz)** from the device's factory table;
+the LCD shows **Output rate (kHz)**, equal to base rate divided by the readback
+divider. Base rate can change only in Listen or Standby (vendor manual p122).
+The divider can change while the laser is on (p123), outside an experiment.
+Both remain locked during acquisition. Internal telemetry stays in Hz.
 
 The experiment has validated lifecycle transitions through initializing,
 running, stopping, safe-off and finalization. Alignment has bounded command and

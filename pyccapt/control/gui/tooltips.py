@@ -203,14 +203,13 @@ LASER_TOOLTIPS = {
     "laser_power": "Relative IR AOM setting (%), converted to e_power 0..4000. "
     "This is not a power setpoint in watts. Requires internal control mode. "
     "Capped by laser_aom_max_percent in config.toml.",
-    "laser_rate": "Base pulse-repetition frequency (Hz).  Above "
-    "100 kHz the per-pulse energy decreases linearly "
-    "with rate.  Effective rate at the sample = "
-    "rate / Division Factor.",
-    "laser_divition_factor": "Pulse division factor (integer).  Effective "
-    "rate = base rate / this value.  Use to "
-    "drop from MHz down to a few kHz without "
-    "changing the base oscillator.",
+    "laser_rate": "Base repetition rate (kHz), read from the laser's factory frequency table. "
+    "Change only in Listen or Standby, outside an experiment (manual p122). "
+    "The nominal operating rate need not be the maximum supported rate. "
+    "Output rate = base rate / divider.",
+    "laser_divition_factor": "Integer divider, 1..10,000,000. Output rate = base rate / divider. "
+    "Can change while the laser is on (manual p123); locked during experiments. "
+    "For example, 400 kHz / 4 = 100 kHz. Firmware readback confirms the accepted value.",
     # --- Mode buttons + LEDs ---------------------------------------------
     "laser_listen": "Put the laser into Listen mode (lowest activity, safe).  No emission, ready to receive commands.",
     "laser_standby": "Warm up in Standby. Residual seed emission remains Class 4 (manual p116).",
@@ -227,7 +226,8 @@ LASER_TOOLTIPS = {
     # --- Live readouts ---------------------------------------------------
     "laser_power_disp": "Selected output internal-monitor power (W). Unknown readings show dashes.",
     "laser_pulse_energy_disp": "Selected output pulse energy (microjoules). Internal-monitor estimate, not specimen energy.",
-    "laser_repetion_rate_disp": "Effective pulse rate at the sample (kHz), accounting for the division factor.",
+    "laser_repetion_rate_disp": "Laser output repetition rate (kHz), computed from actual base rate / divider. "
+    "External gating can reduce the rate delivered to the sample.",
     # --- Scan / Focus mode -----------------------------------------------
     "laser_scan_mode5": "Scanning pattern selector.  Currently only 'Standard' is implemented.",
     "laser_focus_mode": "Focus-mode selector.  Currently only 'Standard' is implemented.",

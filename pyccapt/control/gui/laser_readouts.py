@@ -31,7 +31,7 @@ class LaserReadoutMixin:
                 self.laser_rate.blockSignals(True)
                 self.laser_rate.clear()
                 for index, hz in sorted(self._frequency_table.items()):
-                    self.laser_rate.addItem(f'{hz:g}', index)
+                    self.laser_rate.addItem(f'{hz/1000:g}', index)
                 self.laser_rate.blockSignals(False)
             for key, method in (('e_freq', device.FreqRead), ('e_div', device.DivRead),
                                 ('e_power', device.AOMRead), ('ls_wavelength', device.wavelength_read)):

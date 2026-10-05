@@ -86,6 +86,38 @@ Those 2023 measurements are reference values, not live readings. At the report's
 rounded 1.33 µJ entry. The report's “IR power set to 4.65 W” is an operating
 condition; it does not establish the units of a CLI command.
 
+## Base frequency, divider and displayed units
+
+The main manual, **800-621-01 page 122**, requires Listen or Standby for changing
+the base frequency using `e_freq`. **Page 123** explicitly permits changing the
+divider `e_div` during laser operation. The GUI therefore keeps the base-rate
+dropdown locked while on and permits divider edits in stable on states outside
+an experiment. Both controls remain locked during acquisition to preserve run
+timing; that acquisition restriction is PyCCAPT policy, not a vendor prohibition
+on changing the divider while emitting.
+
+The specific SN4906 factory report, **page 13**, lists 400 kHz as the nominal IR
+rate and adjustable rates of approximately 400, 500, 580, 721, 800, 899 and
+1000 kHz. The read-only `e_freq_available?` reply recorded on 2026-10-05 provides
+their exact factory values: 400000, 500000, 579710, 720720, 800000, 898876 and
+1000000 Hz. Thus 400 kHz is not this laser's maximum supported base rate. No
+frequency was changed to obtain that evidence.
+
+The dropdown is labelled **Base rate (kHz)** and displays the device's rates
+divided by 1000. Its stored item data remains the factory command index, and
+telemetry/calculations remain in Hz. The optical LCD is labelled **Output rate
+(kHz)** and shows the actual readback base rate divided by the actual divider.
+For example, base 400 kHz and divider 4 produce output 100 kHz. External gating
+can further reduce the rate delivered to the specimen. Hardcoded GUI frequency
+options have been removed; the list comes only from device readback.
+
+An error containing only `e_div=4\r\n` indicates an echo-only setter response,
+not a reported laser fault or proof that the divider change was refused. The
+corrected driver returns from that setter and the GUI reads `e_div?` to obtain
+the accepted value. Restart the entire Python/application process to replace
+an older driver still loaded in memory; reopening a GUI from the same Python
+console may retain imported modules.
+
 ## Remaining instrument verification
 
 The supplied general manual predates some FHG-specific details. Its `e_mlp`

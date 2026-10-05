@@ -79,6 +79,10 @@ requests are cancelled rather than replayed after recovery or warmup. Settings
 permissions use status read **after** a requested transition; wavelength and
 frequency edits cannot slip through using the preceding Standby status after
 Laser On has been sent. Settings are blocked while state is unstable.
+The base rate (`e_freq`) requires Listen or Standby. The divider (`e_div`) can
+be edited in stable on states outside an experiment. During acquisition both
+remain locked. Base and output rates are displayed in kHz; device command
+indexes and stored Hz telemetry retain their existing meaning.
 
 Serial I/O still runs synchronously on the laser GUI thread with a re-entry
 guard and bounded individual transactions. A device owner running I/O outside

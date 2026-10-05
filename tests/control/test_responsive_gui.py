@@ -491,6 +491,8 @@ def test_laser_compact_layout_preserves_controls_and_readouts(instrument_window,
     assert not ui.switch_to_cli_button.isEnabled()
     assert ui.label_9.text() == 'Selected output (W)'
     assert ui.label_10.text() == 'Pulse energy (µJ)'
+    assert ui.label_2.text() == 'Base rate (kHz)'
+    assert ui.label_11.text() == 'Output rate (kHz)'
     for suffix in ('range_um', 'step_um'):
         fields = [ui.laser_alignment_fields[f'{mode}_{suffix}'] for mode in ('coarse', 'fine', 'focus')]
         for top, bottom in zip(fields, fields[1:]):

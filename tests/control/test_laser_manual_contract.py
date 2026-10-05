@@ -156,6 +156,20 @@ def test_silent_setter_still_fails(monkeypatch):
         device.Listen()
 
 
+def test_echo_only_divider_setter_is_confirmed_by_separate_readback(monkeypatch):
+    device = fragmented_device(monkeypatch, [])
+    port = device.ser
+    def write(command):
+        port.commands.append(command)
+        port.chunks = [command]
+        if command == b'e_div?\r\n':
+            port.chunks.append(b'Notice: Division factor for PCAOM is 4\n')
+    port.write = write
+    assert device.Div(4) == ''
+    assert readback.scalar(device.DivRead()) == 4
+    assert port.commands == [b'e_div=4\r\n', b'e_div?\r\n']
+
+
 @pytest.mark.parametrize('reply,expected', [
     (b'ly_oxp2_dev_status?\nly_oxp2_dev_status 9\n', True),
     (b'ly_oxp2_dev_status?\n', False),
@@ -240,6 +254,9 @@ def test_actual_harmonic_frequency_divider_and_power_are_displayed(laser_gui):
     assert ui.laser_power_disp.value() == .53
     assert ui.laser_pulse_energy_disp.value() == 13.25
     assert ui.laser_rate.itemData(1) == 6
+    assert ui.laser_rate.itemText(0) == '400'
+    assert ui.laser_rate.itemText(1) == '579.71'
+    assert data['base_frequency_hz'] == 400000.
     assert not ui.laser_device.calls
 
 
@@ -279,6 +296,33 @@ def test_frequency_changes_are_blocked_during_experiment(laser_gui):
     ui._apply_laser_settings(33)
     assert not ui.laser_device.calls
     assert len(ui.errors) == 3
+
+
+@pytest.mark.parametrize('code', [65, 129])
+def test_divider_edit_is_allowed_while_on_but_base_rate_is_blocked(laser_gui, code):
+    ui = laser_gui
+    ui.laser_device.code = code
+    ui._sync_controls_from_device(initial=True)
+    assert ui.laser_divition_factor.isEnabled()
+    assert not ui.laser_rate.isEnabled()
+    ui.laser_divition_factor.setValue(4)
+    ui.change_laser_divition_factor = True
+    ui.change_laser_rate = True
+    ui.check_laser_status()
+    assert ui.laser_device.calls == [('Div', 4)]
+    assert any('Listen or Standby' in error for error in ui.errors)
+
+
+def test_khz_dropdown_preserves_factory_indexes_and_one_mhz_option(laser_gui):
+    ui = laser_gui
+    ui.laser_device.freq_avaliable = lambda: 'e_freq=4 --> 400000 Hz\ne_freq=10 --> 1000000 Hz'
+    ui._sync_controls_from_device(initial=True)
+    assert [ui.laser_rate.itemText(i) for i in range(2)] == ['400', '1000']
+    assert [ui.laser_rate.itemData(i) for i in range(2)] == [4, 10]
+    ui.laser_rate.setCurrentIndex(1)
+    ui.change_laser_rate = True
+    ui._apply_laser_settings(33)
+    assert ui.laser_device.calls == [('Freq', 10)]
 
 
 def test_listen_cancels_pending_emission_request(laser_gui):

@@ -59,6 +59,14 @@ as approaching the electrode. The three transfer moves still retract and return 
 
 Each movement requires stopped axes and the commanded axes within 0.02 µm
 (20 nm) of target continuously for 0.5 s. The per-move timeout is 180 s.
+If Z readback drifts outside that tolerance between the completed retreat and
+the lateral command, XY waits without issuing any movement. Z must return
+within tolerance and settle again before XY starts; this wait consumes the
+same command timeout and respects Stop, interlocks and output shutdown.
+`clearance_wait` records preserve the observed Z error in the transfer journal.
+Restarting a transfer permits current-Z readback differences within the existing
+20 nm tolerance around clearance. The saved target must still be on the
+permitted approach side; tolerance is not used to admit an unsafe saved position.
 The measured approach and XY search envelopes are checked before and throughout
 motion, allowing only that 20 nm positioning tolerance beyond their nominal limits.
 The target inset does not enlarge these measured limits. A true boundary,

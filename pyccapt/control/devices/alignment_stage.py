@@ -15,6 +15,7 @@ class AlignmentStageService:
         self.v = variables
         self.device_getter = device_getter
         self.active = None
+        self.waiting_clearance = None
         self.last_id = None
         self.settled_since = None
         self.last_snapshot_at = float('-inf')
@@ -56,8 +57,8 @@ class AlignmentStageService:
         device = self.device_getter()
         if device is not None:
             device.stop()
-        if self.active is not None:
-            if self.active[3] == 'transfer':
+        if self.active is not None or self.waiting_clearance is not None:
+            if self.waiting_clearance is not None or self.active[3] == 'transfer':
                 try:
                     transfer_event(self.v, 'motion_cancelled', id=self.last_id, reason=reason,
                                    status=self.v.alignment_move_status)
@@ -65,6 +66,7 @@ class AlignmentStageService:
                     logging.getLogger('pyccapt.gui').exception('Could not record transfer cancellation')
             self._reply('error', reason)
         self.active = None
+        self.waiting_clearance = None
         self.settled_since = None
 
     def _check_interlocks(self, kind, now):
@@ -88,18 +90,20 @@ class AlignmentStageService:
         now = time.monotonic() if now is None else now
         self.v.alignment_stage_heartbeat = now
         if not self.v.automatic_alignment_enabled:
-            if self.active is not None:
+            if self.active is not None or self.waiting_clearance is not None:
                 self.cancel()
             return
         if self.v.alignment_cancel_motion or self.v.stop_flag:
-            if self.active is not None:
+            if self.active is not None or self.waiting_clearance is not None:
                 self.cancel()
             return
         device = self.device_getter()
         request = self.v.alignment_move_request
         try:
-            if request and request.get('id') != self.last_id:
+            if request and (request.get('id') != self.last_id or self.waiting_clearance is not None):
                 if self.active is not None:
+                    raise ValueError('Concurrent automatic stage commands are not permitted.')
+                if self.waiting_clearance is not None and request['id'] != self.last_id:
                     raise ValueError('Concurrent automatic stage commands are not permitted.')
                 self.last_id = request['id']
                 if device is None:
@@ -108,7 +112,7 @@ class AlignmentStageService:
                 cfg = AlignmentConfig.from_snapshot(self.v.alignment_settings)
                 cfg.validate_motion([self.v.alignment_sample_position])
                 checked_at = time.monotonic() if live_clock else now
-                if not 0 <= checked_at-float(request['issued']) <= 2:
+                if self.waiting_clearance is None and not 0 <= checked_at-float(request['issued']) <= 2:
                     raise ValueError('Expired automatic stage command.')
                 self._check_interlocks(request['kind'], checked_at)
                 target = np.asarray(request['target_m'], dtype=float)
@@ -124,9 +128,35 @@ class AlignmentStageService:
                 if changed[2] and changed[:2].any():
                     raise ValueError('Automatic Z and lateral movement must be separate.')
                 origin = np.asarray(self.v.alignment_sample_position, dtype=float)
+                started = now if self.waiting_clearance is None else self.waiting_clearance
                 if request['kind'] == 'transfer':
-                    if changed[:2].any() and abs(position[2]-cfg.transfer_z_mm*1e-3) > cfg.position_tolerance_um*1e-6:
-                        raise ValueError('Lateral sample transfer requires the calibrated clearance Z.')
+                    if changed[:2].any():
+                        if device.is_moving():
+                            raise ValueError('Stage is already moving before an automatic command.')
+                        z_error_um = (position[2]-cfg.transfer_z_mm*1e-3)*1e6
+                        if self.waiting_clearance is not None and now-started > cfg.move_timeout_s:
+                            raise ValueError('Lateral sample transfer timed out waiting for clearance Z: '
+                                             f'Z error {z_error_um:g} µm, tolerance {cfg.position_tolerance_um:g} µm.')
+                        if abs(z_error_um) > cfg.position_tolerance_um:
+                            self.waiting_clearance = started
+                            self.settled_since = None
+                            self._reply('waiting', wait_reason='waiting for clearance Z',
+                                        commanded_axes=('x', 'y'), clearance_z_error_um=float(z_error_um))
+                            if (self.last_transfer_detail != 'waiting for clearance Z'
+                                    or now-self.last_transfer_log_at >= 1.):
+                                transfer_event(self.v, 'clearance_wait', request=request,
+                                               position_m=tuple(position), z_error_um=float(z_error_um),
+                                               tolerance_um=cfg.position_tolerance_um)
+                                self.last_transfer_detail = 'waiting for clearance Z'
+                                self.last_transfer_log_at = now
+                            return  # No axis is commanded until clearance qualifies again.
+                        if self.waiting_clearance is not None:
+                            if self.settled_since is None:
+                                self.settled_since = now
+                            if now-self.settled_since < cfg.settle_s:
+                                self._reply('waiting', wait_reason='settling at clearance Z',
+                                            commanded_axes=('x', 'y'), clearance_z_error_um=float(z_error_um))
+                                return
                     if changed[2]:
                         retract_target = abs(target[2]-cfg.transfer_z_mm*1e-3) <= cfg.position_tolerance_um*1e-6
                         sample_target = (abs(target[2]-origin[2]) <= cfg.position_tolerance_um*1e-6
@@ -159,7 +189,8 @@ class AlignmentStageService:
                     raise ValueError('Automatic stage velocity exceeds calibrated limit.')
                 if device.is_moving():
                     raise ValueError('Stage is already moving before an automatic command.')
-                self.active = (target, now, cfg, request['kind'], changed.copy())
+                self.waiting_clearance = None
+                self.active = (target, started, cfg, request['kind'], changed.copy())
                 self.settled_since = None
                 self._reply('moving')
                 if request['kind'] == 'transfer':
@@ -234,6 +265,7 @@ class AlignmentStageService:
                     pass  # Publish the fault even if controller communication failed.
             self._reply('error', str(exc))
             self.active = None
+            self.waiting_clearance = None
             self.v.alignment_cancel_motion = True
 
 
@@ -242,7 +274,8 @@ def transfer_waypoints(current, target, cfg):
     cfg.check_position(current)
     cfg.check_position(target)
     z = cfg.transfer_z_mm*1e-3
-    if cfg.z_direction*(z-current[2]) > 0 or cfg.z_direction*(z-target[2]) > 0:
+    if (cfg.z_direction*(z-current[2]) > cfg.position_tolerance_um*1e-6
+            or cfg.z_direction*(z-target[2]) > 0):
         raise ValueError('Configured transfer Z does not retract from both positions.')
     points = [(current[0], current[1], z), (target[0], target[1], z), tuple(target)]
     for point in points:

@@ -651,6 +651,69 @@ def test_transfer_retracts_traverses_then_approaches_saved_position():
     assert points == [(0, 0, -.5e-3), (target[0], target[1], -.5e-3), target]
 
 
+@pytest.mark.parametrize('direction', [-1, 1])
+def test_transfer_restart_accepts_clearance_readback_within_tolerance(direction):
+    cfg = settings(z_direction=direction, transfer_z_mm=-direction*.5)
+    clearance = cfg.transfer_z_mm*1e-3
+    current = (0., 0., clearance-direction*10e-9)
+    assert transfer_waypoints(current, (0., 0., 0.), cfg)[0][2] == clearance
+    with pytest.raises(ValueError, match='retract'):
+        transfer_waypoints((0., 0., clearance-direction*30e-9), (0., 0., 0.), cfg)
+    # Saved targets on the wrong side must still fail, even by only 10 nm.
+    with pytest.raises(ValueError, match='retract'):
+        transfer_waypoints(current, (0., 0., clearance-direction*10e-9), cfg)
+
+
+def clearance_wait_rig(tmp_path, **changes):
+    cfg = settings(**changes)
+    v = state(cfg, tmp_path)
+    v.hardware_safe = True
+    v.alignment_move_request = dict(id='lateral', axes=('x', 'y'),
+                                   target_m=(.5e-6, 0., cfg.transfer_z_mm*1e-3),
+                                   speed_um_s=cfg.transfer_speed_um_s, kind='transfer', issued=0.)
+    motor = Motor()
+    motor.position['z'] = cfg.transfer_z_mm*1e-3+27.343e-9
+    return cfg, v, motor, AlignmentStageService(v, lambda: motor)
+
+
+def test_lateral_transfer_waits_for_clearance_then_settles_without_moving_z(tmp_path):
+    cfg, v, motor, service = clearance_wait_rig(tmp_path)
+    service.tick(now=0.)
+    assert v.alignment_move_status['state'] == 'waiting'
+    assert v.alignment_move_status['clearance_z_error_um'] == pytest.approx(.027343)
+    assert not motor.moves and not v.alignment_cancel_motion
+    service.tick(now=3.)  # Accepted pending command may wait beyond the 2 s freshness gate.
+    motor.position['z'] = cfg.transfer_z_mm*1e-3+5e-9
+    service.tick(now=3.1)
+    service.tick(now=3.4)
+    assert not motor.moves
+    service.tick(now=3.7)
+    assert len(motor.moves) == 1 and motor.moves[0]['z_m'] is None
+    assert motor.moves[0]['x_m'] == .5e-6
+    assert service.active[1] == 0.  # Waiting consumes the original command time budget.
+    service.tick(now=4.3)
+    assert v.alignment_move_status['state'] == 'done'
+    assert not motor.stopped and not v.alignment_cancel_motion
+
+
+@pytest.mark.parametrize('fault', ['timeout', 'interlock', 'shutdown', 'stop'])
+def test_clearance_wait_remains_bounded_and_cancellable(tmp_path, fault):
+    cfg, v, motor, service = clearance_wait_rig(tmp_path, move_timeout_s=1.)
+    service.tick(now=0.)
+    if fault == 'interlock':
+        v.physical_estop_ok = False
+    elif fault == 'shutdown':
+        v.hardware_safe = False
+    elif fault == 'stop':
+        v.stop_flag = True
+    service.tick(now=1.1)
+    assert v.alignment_move_status['state'] == 'error'
+    assert not motor.moves and motor.stopped
+    assert service.waiting_clearance is None
+    if fault == 'timeout':
+        assert 'clearance Z' in v.alignment_move_status['error']
+
+
 def test_all_rejected_feedback_directions_recover_instead_of_repeating(tmp_path):
     rig = Rig(tmp_path, settings(xy_jacobian_mm_per_um=(), xy_range_um=(50., 50.)),
               Footprint(True, 'unchanged centre', (2., 2.), 10.))

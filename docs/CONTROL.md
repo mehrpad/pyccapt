@@ -252,6 +252,9 @@ the LCD shows **Output rate (kHz)**, equal to base rate divided by the readback
 divider. Base rate can change only in Listen or Standby (vendor manual p122).
 The divider can change while the laser is on (p123), outside an experiment.
 Both remain locked during acquisition. Internal telemetry stays in Hz.
+Optical power/energy dashes mean unavailable, rather than zero. Hover over
+either LCD for the diagnostic and raw monitor reply; changed failures are also
+recorded in the GUI log. Pulse energy cannot be calculated from frequency alone.
 
 The experiment has validated lifecycle transitions through initializing,
 running, stopping, safe-off and finalization. Alignment has bounded command and

@@ -1,5 +1,6 @@
 """Verified Origami settings and unit-aware readouts for the laser GUI."""
 import datetime
+import logging
 import math
 import time
 
@@ -17,6 +18,17 @@ class LaserReadoutMixin:
         for widget in (self.laser_power_disp, self.laser_pulse_energy_disp, self.laser_repetion_rate_disp):
             widget.display('-----')
         self._update_wavelength_nm_label()
+        self._report_optical_readback_error(str(reason))
+        self._recompute_derived_readouts()
+
+    def _report_optical_readback_error(self, reason):
+        """Log a changed diagnostic once, without repeating it every poll."""
+        previous = getattr(self, '_last_optical_readback_error', '')
+        self._last_optical_readback_error = reason
+        if reason and reason != previous:
+            logging.getLogger('pyccapt.laser').warning('Laser optical readback unavailable: %s', reason)
+        elif previous and not reason:
+            logging.getLogger('pyccapt.laser').info('Laser optical readback restored')
 
     def _sync_controls_from_device(self, *, initial=False):
         if self.laser_device is None:
@@ -46,9 +58,12 @@ class LaserReadoutMixin:
             # e_mlp is the IR monitor. Never relabel it as Green/DUV output.
             raw['e_mlp'] = device.read_average_power()
             ir_mw, ir_nj = readback.optical_values(raw['e_mlp'], output_hz)
+            optical_error = ''
             if wl == 0:
                 mw, nj = ir_mw, ir_nj
                 source = 'e_mlp (IR monitor; explicit reply unit)'
+                if not math.isfinite(mw) or not math.isfinite(nj):
+                    optical_error = f"IR monitor has no usable unit-bearing reading; e_mlp? reply: {raw['e_mlp'][:256]!r}"
             else:
                 raw['ls_output_power'] = device.power_read_dv_green()
                 measured = readback.quantity(raw['ls_output_power'])
@@ -56,11 +71,17 @@ class LaserReadoutMixin:
                 # units only; unsupported FHG replies remain unknown.
                 if measured is None or not measured[1].endswith('W'):
                     mw = nj = math.nan
+                    optical_error = (
+                        f"{readback.WAVELENGTHS[wl][0]} monitor returned an unsupported or ambiguous power reading; "
+                        f"ls_output_power? reply: {raw['ls_output_power'][:256]!r}"
+                    )
                 else:
                     mw, nj = readback.optical_values(raw['ls_output_power'], output_hz)
                 source = 'ls_output_power (selected harmonic monitor)'
             raw['status'] = device.StatusRead()
             code = readback.scalar(raw['status'])
+            if code not in (9, 33, 65, 129):
+                optical_error = f'Laser state {code} is not stable; optical readings unavailable. '+optical_error
             valid = code in (9, 33, 65, 129) and math.isfinite(mw) and math.isfinite(nj)
             snapshot = dict(monotonic=time.monotonic(), utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 valid=valid, raw=raw, source=source, wavelength=readback.WAVELENGTHS[wl][0],
@@ -71,7 +92,10 @@ class LaserReadoutMixin:
                 pulse_energy_nj=nj if valid else math.nan, status_code=code,
                 location='laser internal monitor; not calibrated energy delivered to specimen',
                 frequency_table=dict(self._frequency_table))
+            if optical_error:
+                snapshot['error'] = optical_error
             self.variables.laser_telemetry = snapshot
+            self._report_optical_readback_error(optical_error)
             self.variables.laser_average_power = snapshot['output_power_mw']
             self.variables.laser_pulse_energy = snapshot['pulse_energy_nj']  # nJ; detector writer converts to pJ.
             self.variables.laser_intensity = snapshot['pulse_energy_nj']
@@ -108,6 +132,10 @@ class LaserReadoutMixin:
             widget.display(value*scale if math.isfinite(value) else '-----')
         tooltip = ('Source: '+data.get('source', 'unavailable')+
                    '. Internal monitor estimate; not energy at the specimen. Missing readings show dashes.')
+        if data.get('error'):
+            tooltip += '\n'+data['error']+'\nPulse energy is unavailable without a valid selected-output power/energy reading.'
+        if not data:
+            tooltip += '\nNo fresh optical readback is available.'
         self.laser_power_disp.setToolTip(tooltip)
         self.laser_pulse_energy_disp.setToolTip(tooltip)
 

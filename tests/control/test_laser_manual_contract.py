@@ -271,12 +271,38 @@ def test_rejected_divider_uses_actual_readback_and_does_not_open_aom(laser_gui):
     assert ui.laser_device.calls == [('Div', 20)]
 
 
-def test_unsupported_harmonic_monitor_never_substitutes_ir_power(laser_gui):
+def test_unsupported_harmonic_monitor_never_substitutes_ir_power(laser_gui, caplog):
     ui = laser_gui
     ui.laser_device.harmonic = 'Unknown command'
     ui._sync_controls_from_device(initial=True)
     assert not ui.variables.laser_telemetry['valid']
     assert math.isnan(ui.variables.laser_average_power)
+    assert 'Unknown command' in ui.variables.laser_telemetry['error']
+    assert 'DUV monitor' in ui.laser_power_disp.toolTip()
+    assert 'ls_output_power?' in ui.laser_power_disp.toolTip()
+    assert 'Pulse energy is unavailable' in ui.laser_pulse_energy_disp.toolTip()
+    assert ui.laser_repetion_rate_disp.value() == 40.
+    assert ui.variables.laser_telemetry['raw']['ls_output_power'] == 'Unknown command'
+    assert len([record for record in caplog.records if 'optical readback unavailable' in record.message]) == 1
+    ui._sync_controls_from_device()
+    assert len([record for record in caplog.records if 'optical readback unavailable' in record.message]) == 1
+    ui.laser_device.harmonic = 'NKT FHG Output power=0.53W'
+    ui._sync_controls_from_device()
+    assert ui.variables.laser_telemetry['valid']
+    assert 'error' not in ui.variables.laser_telemetry
+    assert 'Unknown command' not in ui.laser_power_disp.toolTip()
+
+
+def test_true_zero_harmonic_reading_is_distinct_from_missing_monitor(laser_gui):
+    ui = laser_gui
+    ui.laser_device.harmonic = 'NKT FHG Output power=0.00W'
+    ui._sync_controls_from_device(initial=True)
+    assert ui.variables.laser_telemetry['valid']
+    assert ui.variables.laser_average_power == 0.
+    assert ui.variables.laser_pulse_energy == 0.
+    assert ui.laser_power_disp.value() == 0.
+    assert ui.laser_pulse_energy_disp.value() == 0.
+    assert 'error' not in ui.variables.laser_telemetry
 
 
 def test_laser_on_tracks_output_enabled_without_full_power_write(laser_gui):

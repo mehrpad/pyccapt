@@ -132,6 +132,22 @@ Capture actual read-only replies for `e_freq_available?`, `e_freq?`, `e_div?`,
 the installed firmware dialect and FHG monitor availability. No connection or
 emission changes were made to obtain those replies in this audit.
 
+For DUV, a working frequency readout alongside dashes for optical power/energy
+means the selected harmonic monitor has no usable reading; dashes are **not
+zero watts**. The general manual's `ls_output_power?` description (pp139–140)
+names Green/UV and does not establish support for this newer FHG/DUV firmware.
+The real DUV reply is needed before deciding whether to extend the parser.
+An attempted read-only diagnostic on 2026-10-05 could not open COM9 because it
+was already owned by another process; no live DUV reply was captured.
+
+The optical LCD tooltips now show the reason and a bounded raw monitor reply.
+`laser_telemetry.error` preserves the diagnostic alongside the existing raw
+replies, and the GUI log records changed failures once and subsequent recovery.
+Pulse energy requires a valid selected-output power/energy reading; knowing
+frequency alone is insufficient. A valid `0.00W` reply displays numeric zero;
+unsupported, ambiguous or missing monitor readings display dashes. IR monitor
+values retain their IR meaning and are not presented as measured DUV output.
+
 The local `Oxcart Laser Safty Turn On.docx` describes the external curtain,
 cover/key/arm interlocks and physical shutter. Software status is not a readback
 of those external interlocks; this audit does not claim they are instrumented.

@@ -581,3 +581,25 @@ same-source restoration and mismatch rejection. This is Python/canvas testing,
 not a live browser end-to-end claim. The full documentation build succeeded
 with 18 warnings; Ruff passed. Physical calibration/reconstruction equations
 and unsupported-evidence gates were preserved.
+
+## Guided Browse/import and crop acceptance (15 October 2026)
+
+On the screenshot dataset `data_1642_Aug-30-2023_16-05_Al_test4.h5`, automatic
+format/mode detection chose PyCCAPT raw `/dld` and imported all 12,312,996 events.
+The Python/canvas replay used the exact displayed event interval, detector circle,
+ToF `[0, 5000)` ns and voltage `[0, 20000)` V filters. Preview enabled **Accept crop**;
+acceptance applied the independently calculated 11,295,260-event mask exactly.
+Editing the radius afterwards invalidated the preview while retaining the accepted
+crop until a new preview/acceptance. The original source SHA-256 remained
+`04ac007f950c2fb3a6969d71077f40b1f1d5ffdfa7aec05ea63ef5825081b431`.
+Local reports/plots are in `analysis_outputs/1642_import_crop/`.
+
+The native picker was mocked in this replay; its existing subprocess-based Qt
+implementation is reused. Regression tests cover Browse without import, cancellation,
+picker failure, automatic exchange readers, HDF5 layout selection, explicit overrides,
+unknown/unsupported inputs, visible crop-state/error messages and preview invalidation.
+The file hint performs no reads while typing. A preview-rendering failure cannot leave
+an unreviewed crop enabled for acceptance. Crop/calibration mathematics are unchanged.
+The relevant regression run passed 152 tests, with 42 focused checks repeated
+after the final format-label and preview-error refinements. Ruff passed and the
+documentation build succeeded with 13 warnings; notebook execution was disabled.

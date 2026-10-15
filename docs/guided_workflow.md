@@ -5,7 +5,7 @@ with the calibration dependencies installed (`pip install -e ".[calibration]"`
 or the project's full environment). Run the two code cells. The panel is a
 separate, optional workflow; the original processing notebook is preserved.
 
-## If the Crop tab is missing
+## If updated controls are missing
 
 After updating PyCCAPT, choose **Kernel → Restart Kernel and Run All**. Python
 keeps imported modules in the running kernel, so rerunning an ordinary import
@@ -18,6 +18,8 @@ Range → Reconstruct → Analyze → Export**. A stale or mixed runtime stops w
 instruction to restart. If the loaded source folder differs from your checkout,
 select the kernel for that installation. Existing saved widget output may still
 show an older panel until you rerun the launch cell.
+The Import tab should include **Browse dataset**, with **Format** initially set
+to **Auto detect**. Restart the kernel if those controls still show the old version.
 
 For the raw 1891 Al file, reimport after restarting, accept your sequence/detector
 crop, then enter **110 mm**, **38 ns**, and **voltage** mode. Tick the instrument
@@ -35,9 +37,13 @@ A raw event tells us **when an ion arrived**, its detector position and the
 voltage. Calibration turns that flight time into a mass-to-charge estimate.
 You do not need an `mc` column to begin.
 
-1. **Import:** choose the HDF5 file and leave the mode on **Auto detect**. The
-   workflow recognizes raw `/dld` hits and processed `/df` tables. Raw detector
-   channel streams must first be converted into hits in the raw-data notebook.
+1. **Import:** click **Browse dataset** beside the path and select a file (or
+   paste its path). Leave **Format** and **HDF5 mode** on **Auto detect**, then
+   click **Import dataset**. HDF5 layout distinguishes raw `/dld`, processed `/df`
+   and this project's NeXus mapping; EPOS/POS/APT/ATO formats use their extension.
+   Browsing only selects a path and does not replace your current session.
+   Manual format/mode overrides remain available. Raw detector channel streams
+   must first be converted into hits in the raw-data notebook.
 2. **Inspect:** look at flight time and voltage versus event position and the
    detector map. Look for startup transients, interruptions and unwanted regions.
 3. **Crop:** open the tab; a rectangle and detector circle appear automatically.
@@ -60,6 +66,22 @@ You do not need an `mc` column to begin.
 7. **Analyze:** inspect the composition of accepted ranges and the unranged count.
 8. **Export:** save a resumable session at any time. Export accepted HDF5 when you
    want a selected-event table plus metadata, NeXus mapping and embedded session.
+
+**Accept crop is disabled until a preview succeeds.** Shapes and numeric filters
+are a draft until you click the blue **Preview crop** button beneath the drawings.
+A successful preview enables **Accept crop** and displays the selected count.
+Moving a shape or changing a filter clears that preview, so preview again. A
+failed preview shows its reason beside the buttons; fix the selection and retry.
+After accepting, the button disables again and the status says **Crop accepted**.
+Continue to **Calibrate**. The crop equations and separate review/acceptance steps
+are unchanged.
+
+The Browse dialog uses the same local Qt picker as the original notebook. If
+the dialog cannot open in your kernel environment, paste the path directly.
+The hint beside Format uses the suffix without opening or loading data while
+you type; HDF5 structure is inspected only when you click **Import dataset**.
+An unknown suffix requires an explicit format override for a renamed supported
+file. Unsupported channel streams and unrelated NeXus layouts are not guessed.
 
 **Preview** shows a proposal; **Accept** makes it current. If an earlier step
 changes, dependent results are cleared. **Undo accepted change** restores the

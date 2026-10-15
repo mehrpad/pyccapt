@@ -16,7 +16,7 @@ from pyccapt.calibration.core.guided_workflow import GuidedWorkflow, STAGES
 from pyccapt.calibration.tutorials.tutorials_helpers.guided_jobs import NotebookJob
 
 
-GUIDED_UI_API_VERSION = 4
+GUIDED_UI_API_VERSION = 5
 
 
 def show_guided_workflow(workflow=None, *, display_panel=True):
@@ -24,6 +24,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
     controller = {"workflow": workflow, "calibration_workspace": None, "calibration_session": None,
                   "reconstruction_workspace": None, "calibration_panel": None, "range_panel": None,
                   "crop_drawing": None, "restoring_crop": False,
+                  "crop_dirty": not bool(workflow and workflow.accepted.get("crop")), "crop_error": None,
                   "physical_generation": 0, "restoring_instrument": False,
                   "crop_seeded": bool(workflow and (workflow.accepted.get("crop") or workflow.preview.get("crop")))}
     job = NotebookJob()
@@ -32,7 +33,9 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
     output = widgets.Output()
     cancel, undo = widgets.Button(description="Cancel operation"), widgets.Button(description="Undo accepted change")
     path = widgets.Text(description="Dataset path:", layout=widgets.Layout(width="850px"))
-    kind = widgets.Dropdown(options=[("PyCCAPT HDF5", "pyccapt"), ("PyCCAPT NeXus mapping", "nexus"), ("LEAP epos", "leap_epos"),
+    browse = widgets.Button(description="Browse dataset", icon="folder-open")
+    format_hint = widgets.HTML()
+    kind = widgets.Dropdown(options=[("Auto detect", "auto"), ("PyCCAPT HDF5", "pyccapt"), ("PyCCAPT NeXus mapping", "nexus"), ("LEAP epos", "leap_epos"),
         ("LEAP pos", "leap_pos"), ("LEAP apt", "leap_apt"), ("ATO v6", "ato_v6")], description="Format:")
     mode = widgets.Dropdown(options=[("Auto detect", "auto"), ("Processed /df", "processed"), ("Raw /dld", "raw")], description="HDF5 mode:")
     load = widgets.Button(description="Import dataset")
@@ -51,8 +54,9 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
     crop_voltage_min, crop_voltage_max = widgets.FloatText(value=0., description="Voltage min:"), widgets.FloatText(value=20000., description="Voltage max:")
     crop_detector = widgets.Checkbox(description="Keep detector circle (cm)", indent=False)
     crop_x, crop_y, crop_radius = (widgets.FloatText(value=value, description=label) for value, label in ((0., "Center x:"), (0., "Center y:"), (4., "Radius:")))
-    preview_crop = widgets.Button(description="Preview crop")
-    accept_crop = widgets.Button(description="Accept crop")
+    preview_crop = widgets.Button(description="Preview crop", button_style="primary")
+    accept_crop = widgets.Button(description="Accept crop", button_style="success")
+    crop_state = widgets.HTML()
     reset_crop = widgets.Button(description="Preview all events")
     draw_crop = widgets.Button(description="Draw crop regions")
     update_fdm = widgets.Button(description="Update detector map")
@@ -106,7 +110,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
     export_path = widgets.Text(value="guided_result.h5", description="Result path:", layout=widgets.Layout(width="850px"))
     export = widgets.Button(description="Export accepted HDF5")
     export_nexus = widgets.Button(description="Export NeXus mapping")
-    buttons = [load, resume, find_sessions, inspect, draw_crop, update_fdm, suggest_crop, preview_crop, accept_crop, reset_crop, imported, physical, accept_cal, compare_cal, show_mass, propose_refs, configure,
+    buttons = [browse, load, resume, find_sessions, inspect, draw_crop, update_fdm, suggest_crop, preview_crop, accept_crop, reset_crop, imported, physical, accept_cal, compare_cal, show_mass, propose_refs, configure,
                capture, open_ranges, preview_recon, accept_recon, compare_recon, ratio, capture_ratio, analyze, save, export, export_nexus, undo]
     for button in (*buttons, cancel):
         button.layout.width = "auto"
@@ -118,6 +122,33 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
 
     def row(children):
         return widgets.Box(children, layout=widgets.Layout(display="flex", flex_flow="row wrap", grid_gap="6px"))
+
+    def update_format_hint(_=None):
+        from pyccapt.calibration.data_tools.dataset_formats import FORMAT_LABELS, HDF_FORMATS, format_from_path
+        inferred = format_from_path(path.value)
+        chosen = inferred if kind.value == "auto" else kind.value
+        mode.disabled = job.running or chosen not in HDF_FORMATS
+        if kind.value != "auto":
+            format_hint.value = f"Manual format: {escape(FORMAT_LABELS[kind.value])}. Choose Auto detect to infer it from the file."
+        elif not path.value.strip():
+            format_hint.value = "Browse for a dataset or paste its path. Format is detected when you import."
+        elif inferred is None:
+            format_hint.value = "Unknown extension: choose Format manually for a renamed supported dataset."
+        elif inferred in HDF_FORMATS:
+            format_hint.value = "Automatic: HDF5 container; raw /dld, processed /df or PyCCAPT NeXus layout is checked on import."
+        else:
+            format_hint.value = f"Automatic: {escape(FORMAT_LABELS[inferred])}."
+        session = controller["workflow"]
+        if kind.value == "auto" and session is not None and session.source_path and path.value.strip():
+            recorded = session.source.attrs.get('pyccapt_import_format', {})
+            if (Path(path.value).expanduser() == Path(session.source_path).expanduser() and
+                    recorded.get('data_type') in FORMAT_LABELS):
+                label = FORMAT_LABELS[recorded['data_type']]
+                detail = 'raw /dld' if recorded.get('mode') == 'raw' else 'processed'
+                format_hint.value = f"Automatic: <b>{escape(label)}</b> ({detail}) — imported."
+
+    path.observe(update_format_hint, names="value")
+    kind.observe(update_format_hint, names="value")
 
     def active():
         if controller["workflow"] is None:
@@ -134,12 +165,17 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
         status.value = "<b>Import → Inspect → Crop → Calibrate → Range → Reconstruct → Analyze → Export</b><br>" + (
             " · ".join(f"{escape(stage)}: <b>{escape(value)}</b>" for stage, value in session.status().items()) if session else "No dataset loaded")
         for button in buttons:
-            button.disabled = job.running or (session is None and button not in (load, resume, find_sessions))
+            button.disabled = job.running or (session is None and button not in (browse, load, resume, find_sessions))
+        path.disabled = kind.disabled = job.running
+        update_format_hint()
         cancel.disabled = not job.running
         drawing = controller["crop_drawing"]
         if drawing is not None:
             drawing.set_enabled(not job.running)
         update_fdm.disabled = job.running or drawing is None
+        if session is None:
+            crop_state.value = "Import a dataset before cropping."
+            accept_crop.tooltip = "Import a dataset, then preview a crop before accepting it."
         if session is not None:
             usable_mass = any(name in session.source and name not in session.source.attrs.get("pyccapt_unavailable_columns", [])
                 and np.any(np.isfinite(session.source[name]) & (session.source[name] > 0)) for name in ("mc (Da)", "mc_uc (Da)"))
@@ -148,6 +184,23 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
                 "then check the instrument settings, tick the confirmation box, click <b>Preview physical mass</b>, inspect and accept."
                 if not usable_mass else "Start from the saved mass with <b>Preview imported mass</b>, or calculate a new initial mass from raw flight times after checking the instrument settings.")
             accept_crop.disabled = job.running or "crop" not in session.preview
+            pending_crop = session.preview.get("crop")
+            if job.running:
+                crop_state.value = "Wait for the current operation to finish, then preview the selection."
+                accept_crop.tooltip = "An operation is running."
+            elif controller["crop_error"]:
+                crop_state.value = "<b>Preview failed:</b> " + escape(controller["crop_error"]) + " Adjust the selection and click <b>Preview crop</b> again."
+                accept_crop.tooltip = "Fix the preview error before accepting a crop."
+            elif pending_crop is not None:
+                count = int(pending_crop["mask"].sum())
+                crop_state.value = f"<b>Preview ready:</b> {count:,} of {session.n:,} events will stay. Review the plots below, then click <b>Accept crop</b>."
+                accept_crop.tooltip = "Apply the current reviewed preview. Earlier accepted calibration and reconstruction will be cleared."
+            elif controller["crop_dirty"] or session.accepted["crop"] is None:
+                crop_state.value = "<b>Draft selection — not applied.</b> Click <b>Preview crop</b> to check what stays and enable <b>Accept crop</b>. Moving a shape or editing a filter requires a new preview."
+                accept_crop.tooltip = "Click Preview crop first. Changing a shape or filter invalidates its previous preview."
+            else:
+                crop_state.value = "<b>Crop accepted.</b> Continue to <b>Calibrate</b>, or edit the regions and preview another crop."
+                accept_crop.tooltip = "This crop is already accepted. Preview a new selection to change it."
             if session.review is None:
                 range_box.children = ()
             open_ranges.disabled = job.running or session.accepted["calibration"] is None
@@ -197,6 +250,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
         close_drawing()
         controller["physical_generation"] += 1
         controller["crop_seeded"] = bool(session.accepted.get("crop") or session.preview.get("crop"))
+        controller.update(crop_dirty=not bool(session.accepted.get("crop")), crop_error=None)
         controller.update(workflow=session, calibration_workspace=None, calibration_session=None, reconstruction_workspace=None,
                           calibration_panel=None, range_panel=None)
         reference_windows.value = "[]"
@@ -263,6 +317,21 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
         selected = (path.value, kind.value, mode.value)
         launch(lambda cancel_event, report: GuidedWorkflow.import_file(selected[0], data_type=selected[1], mode=selected[2]), replace_workflow)
 
+    def browse_dataset():
+        from pyccapt.calibration.data_tools import file_dialog
+        if job.running:
+            raise CalibrationStateError("Wait for the current operation before choosing another dataset")
+        browse.disabled = True
+        try:
+            selected = file_dialog.choose_file_path(path.value or None, file_kind="guided_dataset")
+        finally:
+            refresh()
+        if selected:
+            kind.value = "auto"
+            mode.value = "auto"
+            path.value = selected
+            return "Dataset selected. Click Import dataset; the file format will be detected automatically."
+
     def resume_data():
         selected = session_path.value
         launch(lambda cancel_event, report: GuidedWorkflow.load(selected), replace_workflow)
@@ -318,6 +387,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
     def crop_edited(_):
         if controller["restoring_crop"]:
             return
+        controller.update(crop_dirty=True, crop_error=None)
         session = controller["workflow"]
         if session is not None and session.preview.pop("crop", None) is not None:
             crop_output.clear_output(wait=False)
@@ -428,16 +498,26 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
             tof_bounds=(crop_tof_min.value, crop_tof_max.value) if crop_tof.value else None,
             voltage_bounds=(crop_voltage_min.value, crop_voltage_max.value) if crop_voltage.value else None,
             detector_circle=(crop_x.value, crop_y.value, crop_radius.value) if crop_detector.value else None)
-        result = session.preview_crop(**criteria)
-        with crop_output:
-            crop_output.clear_output(wait=True)
-            fig = source_overview(session, session.preview["crop"]["mask"])
-            display(fig)
-            plt.close(fig)
+        session.preview.pop("crop", None)
+        controller["crop_error"] = None
+        try:
+            result = session.preview_crop(**criteria)
+            with crop_output:
+                crop_output.clear_output(wait=True)
+                fig = source_overview(session, session.preview["crop"]["mask"])
+                try:
+                    display(fig)
+                finally:
+                    plt.close(fig)
+        except Exception as error:
+            session.preview.pop("crop", None)
+            controller["crop_error"] = str(error)
+            raise
         return result
 
     def accept_selection():
         result = active().accept("crop")
+        controller.update(crop_dirty=False, crop_error=None)
         controller.update(calibration_workspace=None, calibration_session=None, reconstruction_workspace=None,
                           calibration_panel=None, range_panel=None)
         reference_windows.value = "[]"
@@ -694,7 +774,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
                   analysis_session=session.to_state(), nexus_metadata=metadata)
         return str(target.parent / (target.stem+".h5"))
 
-    actions = {load: import_data, resume: resume_data, find_sessions: search_sessions, inspect: inspect_source,
+    actions = {browse: browse_dataset, load: import_data, resume: resume_data, find_sessions: search_sessions, inspect: inspect_source,
         draw_crop: open_crop_drawing, update_fdm: refresh_fdm, suggest_crop: suggest_crop_regions,
         preview_crop: crop_preview, accept_crop: accept_selection, reset_crop: lambda: crop_preview(True),
         # Imported mass has unknown historical instrument settings unless the
@@ -721,7 +801,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
     reconstruction_tabs.set_title(0, "1. Find / tune ICF and kf")
     reconstruction_tabs.set_title(1, "2. Reconstruct and plot")
     tabs = widgets.Tab(children=[
-        widgets.VBox([path, row([kind, mode, load]), row([session_directory, session_query, find_sessions]),
+        widgets.VBox([row([browse, path]), row([kind, mode, load]), format_hint, row([session_directory, session_query, find_sessions]),
                       session_list, session_path, resume]),
         widgets.VBox([widgets.HTML("Inspect units, finite capabilities and source identity before calibration."), inspect]),
         widgets.VBox([widgets.HTML("<b>Crop with the mouse.</b> A rectangle and circle appear automatically. "
@@ -731,7 +811,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
             "Start is included; stop is excluded. Preview shows what stays. Accepting a crop clears later results; Undo restores them. "
             "The original source remains in the session so reconstruction retains the earlier evaporation history."),
             row([draw_crop, update_fdm, suggest_crop]), crop_suggestion, drawing_box,
-            row([preview_crop, accept_crop, reset_crop]), exact_crop, crop_output]),
+            crop_state, row([preview_crop, accept_crop, reset_crop]), exact_crop, crop_output]),
         widgets.VBox([widgets.HTML("<b>Preview first; accept separately.</b> Set actual instrument values; control defaults are not instrument measurements."),
             calibration_help, row([flight, t0, pulse_mode]), instrument_confirmed,
             row([imported, physical, compare_cal, accept_cal]),
@@ -751,6 +831,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
     panel.controller = controller
     panel.controls = {button.description: button for button in (*buttons, cancel)}
     panel.controls.update(path=path, kind=kind, mode=mode, session_path=session_path, export_path=export_path,
+                          format_hint=format_hint, crop_state=crop_state,
                           tabs=tabs, job=job, refresh=refresh, pulse_mode=pulse_mode, flight=flight, t0=t0,
                           progress=progress, progress_text=progress_text,
                           instrument_confirmed=instrument_confirmed, calibration_help=calibration_help,

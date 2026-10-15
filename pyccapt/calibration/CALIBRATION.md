@@ -8,6 +8,9 @@ adds accepted-state steps, resumable sessions and human-reviewed peak proposals.
 Raw hits need no mass column. Interactive cropping uses a rectangle on DC voltage
 versus event sequence and a circle on the detector density map, with a separate
 preview and acceptance step.
+The guided Import tab offers **Browse dataset** and defaults to automatic format
+and HDF5 mode detection. Crop status explains when a preview is required before
+**Accept crop** becomes available; any selection edit requires a fresh preview.
 See the [workflow guide](../../docs/guided_workflow.md) for dependencies, review
 actions, cancellation, storage and scientific limitations. The legacy processing
 notebook remains a separate entry point.

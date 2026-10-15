@@ -135,9 +135,9 @@ class CropDrawing:
         instructions = widgets.HTML(
             "<b>Adjust the starting regions:</b> drag the orange rectangle's left/right handles to choose the smooth part of the DC-voltage curve. "
             "Drag the cyan circle's center to move it, or its edge/corner handles to make it smaller or larger. "
-            "The starting circle covers the finite detector hits; adjust it to exclude unwanted edges and mouse bites. "
+            "Inspect the suggested circle and adjust it to exclude unwanted edges and mouse bites. "
             "Only the rectangle's horizontal event interval is used. Detector distances are in cm. "
-            "Escape cancels the current drag. Preview and accept the crop separately.")
+            "Escape cancels the current drag. Click Preview crop below the plots to enable Accept crop.")
         children = [instructions, self.status]
         if interactive:
             children.append(self.canvas)

@@ -39,14 +39,20 @@ def test_drawing_requires_preview_and_accept_and_keeps_sequence_semantics(drawin
     assert not panel.controls["crop_voltage"].value
     assert panel.controls["crop_detector"].value
     assert session.active_mask.all() and "crop" not in session.preview
+    assert panel.controls['Accept crop'].disabled
+    assert 'Preview crop' in panel.controls['crop_state'].value
     panel.controls["Preview crop"].click()
     expected = np.zeros(session.n, dtype=bool)
     expected[100:900] = True
     expected &= np.hypot(session.source["x_det (cm)"], session.source["y_det (cm)"]) <= .2
     np.testing.assert_array_equal(session.preview["crop"]["mask"], expected)
     assert session.active_mask.all()
+    assert not panel.controls['Accept crop'].disabled
+    assert 'Preview ready' in panel.controls['crop_state'].value
     panel.controls["Accept crop"].click()
     np.testing.assert_array_equal(session.active_mask, expected)
+    assert panel.controls['Accept crop'].disabled
+    assert 'Crop accepted' in panel.controls['crop_state'].value
 
 
 @pytest.mark.parametrize("field,value", [("crop_start", 101), ("crop_stop", 901),
@@ -60,7 +66,38 @@ def test_editing_crop_invalidates_old_preview(drawing_panel, field, value):
     panel.controls[field].value = value
     assert "crop" not in session.preview
     assert panel.controls["Accept crop"].disabled
+    assert 'Draft selection' in panel.controls['crop_state'].value
     assert session.active_mask.all()
+
+
+def test_failed_preview_shows_local_reason_and_can_be_corrected(drawing_panel):
+    panel = drawing_panel
+    session = panel.controller['workflow']
+    panel.controls['crop_start'].value = 900
+    panel.controls['crop_stop'].value = 100
+    panel.controls['Preview crop'].click()
+    assert panel.controls['Accept crop'].disabled and 'crop' not in session.preview
+    assert 'Preview failed' in panel.controls['crop_state'].value
+    assert 'start &lt; stop' in panel.controls['crop_state'].value
+    assert session.active_mask.all()
+    panel.controls['crop_start'].value = 100
+    panel.controls['crop_stop'].value = 900
+    panel.controls['Preview crop'].click()
+    assert not panel.controls['Accept crop'].disabled
+    assert 'Preview ready' in panel.controls['crop_state'].value
+
+
+def test_failed_plot_does_not_leave_an_unreviewed_crop_accept_enabled(drawing_panel, monkeypatch):
+    panel = drawing_panel
+    panel.controls['Preview crop'].click()
+    assert not panel.controls['Accept crop'].disabled
+    def fail(*a, **k):
+        raise RuntimeError('Preview plot unavailable')
+    monkeypatch.setattr(drawing_helper, 'source_overview', fail)
+    panel.controls['Preview crop'].click()
+    assert panel.controls['Accept crop'].disabled
+    assert 'crop' not in panel.controller['workflow'].preview
+    assert 'Preview plot unavailable' in panel.controls['crop_state'].value
 
 
 def test_undo_restores_fields_and_disconnects_obsolete_drawing(drawing_panel):

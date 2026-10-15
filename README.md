@@ -156,6 +156,9 @@ remains available. The guided notebook connects import, inspection, cropping, ca
 peak-by-peak ranging review, reconstruction, analysis and export. Suggestions
 require acceptance, preserve locked ranging decisions, support undo, and can be
 saved as resumable HDF5 sessions.
+Use **Browse dataset** or paste a path; **Format → Auto detect** chooses the reader
+and inspects HDF5 layout on import. After drawing/editing a crop, click **Preview
+crop** to enable **Accept crop**; the adjacent status explains draft and error states.
 
 Raw `/dld` data does not need a mass column: inspect and crop it, confirm the
 flight length/time zero/pulse mode, then preview its initial mass spectrum.

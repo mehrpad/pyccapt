@@ -5,7 +5,7 @@ import sys
 
 
 EXPECTED_STAGES = ("Import", "Inspect", "Crop", "Calibrate", "Range", "Reconstruct", "Analyze", "Export")
-GUIDED_UI_API_VERSION = 4
+GUIDED_UI_API_VERSION = 5
 
 
 def load_guided_workflow(*, repository_root=None):
@@ -30,7 +30,7 @@ def load_guided_workflow(*, repository_root=None):
             tuple(getattr(helper, "STAGES", ())) != EXPECTED_STAGES or
             getattr(helper, "GuidedWorkflow", None) is not core.GuidedWorkflow):
         raise RuntimeError(
-            "Jupyter is still using an older guided workflow. The current panel must include the Crop tab. "
+            "Jupyter is still using an older guided workflow. The current panel must include the Crop tab, Browse dataset and automatic format controls. "
             f"{restart} Rerunning an import cell alone does not refresh cached Python modules.")
     print(f"Guided workflow: {' → '.join(EXPECTED_STAGES)}")
     print(f"PyCCAPT source: {package_directory}")

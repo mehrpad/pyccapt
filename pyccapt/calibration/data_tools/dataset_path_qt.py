@@ -25,6 +25,11 @@ RANGE_FILTER = (
     "MATLAB Atom-Probe-Toolbox figure (*.fig);;"
     "All Files (*)"
 )
+GUIDED_DATASET_FILTER = (
+    "Supported datasets (*.h5 *.hdf5 *.hdf *.nxs *.nx5 *.epos *.pos *.apt *.ato);;"
+    "HDF5 / PyCCAPT NeXus (*.h5 *.hdf5 *.hdf *.nxs *.nx5);;"
+    "LEAP (*.epos *.pos *.apt);;ATO v6 (*.ato);;All Files (*)"
+)
 CAMECA_RAW_FILTER = (
     "LEAP CAMECA raw (*.rhit *.RHIT *.str *.STR *.hits *.HITS *.epos *.EPOS);;"
     "LEAP CAMECA RHIT (*.rhit *.RHIT);;"
@@ -54,6 +59,7 @@ def gui_fname(initial_directory, file_kind="any"):
     app = QApplication.instance() or QApplication([initial_directory])
     selected_filter = {
         "dataset": DATASET_FILTER,
+        "guided_dataset": GUIDED_DATASET_FILTER,
         "range": RANGE_FILTER,
         "cameca_raw": CAMECA_RAW_FILTER,
     }.get(str(file_kind).lower(), GENERIC_FILTER)

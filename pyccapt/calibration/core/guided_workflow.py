@@ -94,20 +94,12 @@ class GuidedWorkflow:
     @classmethod
     def import_file(cls, path, *, data_type="pyccapt", mode="auto", variables=None):
         from pyccapt.calibration.data_tools.data_tools import load_data
-        if data_type == "pyccapt" and mode == "auto":
-            import h5py
-            with h5py.File(Path(path).expanduser(), "r") as handle:
-                if "df" in handle:
-                    mode = "processed"
-                elif "dld" in handle:
-                    mode = "raw"
-                elif "entry" in handle:
-                    data_type, mode = "nexus", "processed"
-                else:
-                    raise CalibrationInputError("Expected processed /df or raw /dld events; convert raw detector channels into hits first")
+        from pyccapt.calibration.data_tools.dataset_formats import resolve_dataset_format
+        data_type, mode = resolve_dataset_format(path, data_type=data_type, mode=mode)
         frame = load_data(str(Path(path).expanduser()), data_type, mode=mode)
         if isinstance(frame, tuple):
             frame = frame[0]
+        frame.attrs['pyccapt_import_format'] = {'data_type': data_type, 'mode': mode}
         variables = variables or Variables()
         variables.sync_from_data(frame, update_backups=True)
         return cls(variables, source_path=path)

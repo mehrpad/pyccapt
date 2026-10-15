@@ -73,6 +73,20 @@ The original raw file and saved input session were unchanged. The script,
 report and plotted canvases are under `analysis_outputs/1891_raw_ui/drawing_check/`.
 This exercises the widget canvas and callbacks, not browser event transport.
 
+The subsequent crop-usability update opens the interactive canvas when entering
+Crop, with an event rectangle and an enclosing detector circle already visible.
+On the full 1891 raw file, these starting regions retained all **6,058,440 events**.
+Actual handle events shrank and enlarged the circle, moved its center and resized
+both rectangle edges. An illustrative selection retained **3,227,778 events**;
+its preview and accepted mask matched an independent all-row calculation exactly.
+Undo restored all events, all source columns still matched the raw file, and the
+input SHA-256 remained unchanged. The check took 25.53 s including hashing;
+its script, initial/adjusted plots and report are under
+`analysis_outputs/1891_raw_ui/automatic_selectors/`. The selected region is a
+software example, not a scientifically recommended ROI. **110 integration tests**
+passed in 33.38 s, including real mouse-handle events, crop-state preservation,
+raw calibration, save/resume and the shipped notebook's full synthetic workflow.
+
 The follow-up's combined targeted suite passed **374 tests** in 40.33 s, covering
 raw import, guided calibration/cropping, plotting events, storage, metadata and
 control-file preservation. Ruff and whitespace checks passed. The documentation

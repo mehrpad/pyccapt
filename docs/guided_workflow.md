@@ -40,13 +40,14 @@ You do not need an `mc` column to begin.
    channel streams must first be converted into hits in the raw-data notebook.
 2. **Inspect:** look at flight time and voltage versus event position and the
    detector map. Look for startup transients, interruptions and unwanted regions.
-3. **Crop:** click **Draw crop regions**. Drag a rectangle across the part of the
-   DC-voltage curve with a smooth increase. Its horizontal span fills the start
-   and stop event positions; its height does not add a voltage filter. Then draw
-   a circle inside the detector density map, avoiding sparse edges and mouse
-   bites. Check the numeric fields, click **Preview crop**, check the count and
-   plots, then **Accept crop**. These controls use event positions, not the
-   hardware start counter. Start is included; stop is excluded.
+3. **Crop:** open the tab; a rectangle and detector circle appear automatically.
+   Drag the orange rectangle's left/right handles to keep the smooth part of the
+   DC-voltage curve. Its horizontal span fills the event limits; its height does
+   not add a voltage filter. Drag the cyan circle's center to move it, or its
+   edge/corner handles to shrink or enlarge it, avoiding sparse edges and mouse
+   bites. Click **Preview crop**, check the count and plots, then **Accept crop**.
+   Exact fields are available under **Exact values and optional filters**. Event
+   limits use source positions, not the hardware counter; stop is excluded.
 4. **Calibrate:** enter the actual flight length, time zero and pulse mode. Check
    their confirmation box, click **Preview physical mass**, inspect the spectrum,
    then **Accept calibration**. This is the initial estimate. For processed data,
@@ -70,7 +71,7 @@ source in memory and in the session. Reconstruction still needs earlier events
 for its cumulative depth calculation. The exported table contains only selected
 rows; a cropped table by itself cannot supply missing acquisition history.
 
-### Drawing the crop
+### Adjusting the crop with the mouse
 
 The two drawings implement the sequence-plus-detector selection described in
 the [PyCCAPT paper, Section 2.3 and Figure 3](https://doi.org/10.1002/jemt.70011).
@@ -80,13 +81,21 @@ identify useful data, but they do not establish composition or calibration quali
 - The sequence rectangle uses the full source's event positions. Fractional
   drag bounds are rounded outward (`floor(left)`, `ceil(right)`) and clipped to
   the source length. Exact start/stop fields remain editable.
+- For a fresh source, the rectangle starts across the complete run and the
+  circle encloses the finite detector-map bounds. This starting view is not an
+  automatic choice of a smooth run interval or artifact-free detector region.
+  Both are drafts; source events and accepted calibration stay unchanged until
+  you preview and accept the crop. Existing accepted/preview crop settings are
+  restored rather than replaced with these starting regions.
 - The FDM is a logarithmic density histogram using every finite detector hit in
   the draft sequence interval. This is not a subsampled scatter plot. It shows
   that interval before the circle, optional ToF window, or optional voltage
   window is applied, so excluded edges remain visible for review.
-- Draw a box around the desired circular area; the displayed circle fits inside
-  it. Its center and radius are in cm, with equal detector-axis scaling. Reverse
-  drags work. Fine-tune the center and radius numerically if necessary.
+- Drag the circle's center or interior to move it. Drag an edge/corner handle
+  to resize it around its center; it stays a true circle with equal axis scaling
+  in cm. The initial view leaves enough room to grab its handles. You can also
+  create a new circle by dragging a box outside the existing one. Exact center
+  and radius fields remain available for fine adjustments.
 - After typing a new interval, click **Update detector map**. Drawing an interval
   updates the map automatically. Reopen **Draw crop regions** to start a new
   drawing. Keep the plot toolbar's pan/zoom tools off while selecting.

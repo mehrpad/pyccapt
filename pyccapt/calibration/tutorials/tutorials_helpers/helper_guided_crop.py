@@ -3,6 +3,21 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from pyccapt.calibration.core.exceptions import CalibrationInputError, CalibrationStateError
+from pyccapt.calibration.data_tools.selectors_data import CircleSelector
+
+
+class CropCircleSelector(CircleSelector):
+    """Keep a circle's center fixed while resizing any of its handles."""
+
+    def _onmove(self, event):
+        previous = self._state.copy()
+        if self._active_handle and self._active_handle != "C":
+            self._state.update(("square", "center"))
+        try:
+            super()._onmove(event)
+        finally:
+            self._state.clear()
+            self._state.update(previous)
 
 
 def source_overview(workflow, selection=None):
@@ -111,7 +126,6 @@ class CropDrawing:
         import ipywidgets as widgets
         from matplotlib.figure import Figure
         from matplotlib.widgets import RectangleSelector
-        from pyccapt.calibration.data_tools.selectors_data import CircleSelector
 
         self.workflow = workflow
         self.on_interval, self.on_circle = on_interval, on_circle
@@ -133,9 +147,10 @@ class CropDrawing:
         self.axes = self.figure.subplots(1, 2)
         self.status = widgets.HTML()
         instructions = widgets.HTML(
-            "<b>Draft crop:</b> drag a rectangle across the smooth part of the DC-voltage curve; "
-            "only its horizontal event interval is used. On the density map, drag a box around the desired circle; "
-            "the smaller box dimension sets its diameter. Detector distances are in cm. "
+            "<b>Adjust the starting regions:</b> drag the orange rectangle's left/right handles to choose the smooth part of the DC-voltage curve. "
+            "Drag the cyan circle's center to move it, or its edge/corner handles to make it smaller or larger. "
+            "The starting circle covers the finite detector hits; adjust it to exclude unwanted edges and mouse bites. "
+            "Only the rectangle's horizontal event interval is used. Detector distances are in cm. "
             "Escape cancels the current drag. Preview and accept the crop separately.")
         children = [instructions, self.status]
         if interactive:
@@ -150,15 +165,17 @@ class CropDrawing:
             index = np.unique(np.linspace(0, workflow.n-1, min(workflow.n, 40000), dtype=int))
             voltage = workflow.source["high_voltage (V)"].iloc[index].to_numpy(dtype=float)
             voltage_axis.plot(index, voltage, linewidth=.7)
-            voltage_axis.set(xlim=(0, workflow.n), xlabel="Original source event position", ylabel="DC voltage (V)",
+            voltage_axis.set(xlim=(-.025*workflow.n, 1.025*workflow.n), xlabel="Original source event position", ylabel="DC voltage (V)",
                 title=f"DC voltage\nDisplay at most 40,000 of {workflow.n:,} events")
             voltage_axis.title.set_fontsize(10)
         else:
             voltage_axis.text(.5, .5, "DC voltage unavailable", ha="center", transform=voltage_axis.transAxes)
         self.rectangle_selector = RectangleSelector(voltage_axis, self._rectangle_selected, button=[1],
-            interactive=True, useblit=False, props={"facecolor": "tab:orange", "edgecolor": "tab:orange", "alpha": .25})
-        self.circle_selector = CircleSelector(detector_axis, self._circle_selected, button=[1],
-            interactive=True, useblit=False, props={"facecolor": "none", "edgecolor": "cyan", "linewidth": 2., "zorder": 2})
+            interactive=True, useblit=False, drag_from_anywhere=True, grab_range=12,
+            handle_props={"markersize": 8}, props={"facecolor": "tab:orange", "edgecolor": "tab:orange", "alpha": .25})
+        self.circle_selector = CropCircleSelector(detector_axis, self._circle_selected, button=[1],
+            interactive=True, useblit=False, drag_from_anywhere=True, grab_range=12, use_data_coordinates=True,
+            handle_props={"markersize": 8}, props={"facecolor": "none", "edgecolor": "cyan", "linewidth": 2., "zorder": 2})
         self.detector_available = _available(workflow.source, ("x_det (cm)", "y_det (cm)"))
         self.detector_ready = False
         self._density_artist, self._density_colorbar = None, None
@@ -189,8 +206,13 @@ class CropDrawing:
     def _circle_selected(self, press, release):
         if self.closed or not self.enabled or self.cancelled or not self.detector_ready:
             return
-        circle = circle_from_drag(press.xdata, press.ydata, release.xdata, release.ydata)
-        if circle is not None:
+        if circle_from_drag(press.xdata, press.ydata, release.xdata, release.ydata) is not None:
+            # The selector may have resized or moved an existing circle. Publish
+            # its actual geometry rather than rederiving it from bounding edges.
+            patch = self.circle_selector._selection_artist
+            circle = (*map(float, patch.center), float(patch.radius))
+            if not np.isfinite(circle).all() or circle[2] <= 0:
+                return
             self.on_circle(*circle)
             self.status.value = f"Draft circle: center ({circle[0]:.4g}, {circle[1]:.4g}) cm; radius {circle[2]:.4g} cm."
 
@@ -233,9 +255,18 @@ class CropDrawing:
             title=f"Detector density · {count:,} finite hits\nEvents [{start:,}, {stop:,})")
         axis.title.set_fontsize(10)
         self.density_count, self.density_interval = count, (start, stop)
+        self.detector_bounds = (xedges[0], xedges[-1], yedges[0], yedges[-1])
         self.detector_ready = True
         self.circle_selector.set_active(self.enabled)
         self.canvas.draw_idle()
+
+    def initial_circle(self):
+        """Enclose the finite map bounds without choosing a scientific crop."""
+        if not self.detector_ready:
+            return None
+        x0, x1, y0, y1 = self.detector_bounds
+        radius = np.nextafter(np.hypot(x1-x0, y1-y0)/2., np.inf)
+        return (float((x0+x1)/2.), float((y0+y1)/2.), float(radius))
 
     def set_enabled(self, enabled):
         self.enabled = bool(enabled) and not self.closed
@@ -276,6 +307,14 @@ class CropDrawing:
         valid_circle = self.detector_ready and geometry is not None and geometry[2] > 0
         if valid_circle:
             x, y, radius = geometry
+            # Keep the entire initial circle and its handles inside the view.
+            axis = self.axes[1]
+            x0, x1 = axis.get_xlim()
+            y0, y1 = axis.get_ylim()
+            margin = .06*radius
+            if x-radius < x0 or x+radius > x1 or y-radius < y0 or y+radius > y1:
+                axis.set(xlim=(min(x0, x-radius-margin), max(x1, x+radius+margin)),
+                         ylim=(min(y0, y-radius-margin), max(y1, y+radius+margin)))
             overlay(self.circle_selector, (x-radius, x+radius, y-radius, y+radius))
         else:
             overlay(self.circle_selector, None)

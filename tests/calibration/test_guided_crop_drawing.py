@@ -188,3 +188,46 @@ def test_draft_overlay_sync_is_exact_silent_and_does_not_recompute_density(monke
         drawing.set_draft((1, 2), None)
     finally:
         drawing.close()
+
+
+def test_starting_circle_encloses_all_finite_hits_and_keeps_handles_visible():
+    workflow = source()
+    drawing = create_crop_drawing(workflow, on_interval=lambda *_: None, on_circle=lambda *_: None,
+                                  interactive=False)
+    try:
+        circle = drawing.initial_circle()
+        cx, cy, radius = circle
+        distance = np.hypot(workflow.source["x_det (cm)"]-cx, workflow.source["y_det (cm)"]-cy)
+        assert np.all(distance <= radius)
+        drawing.set_draft((0, workflow.n), circle)
+        x0, x1 = drawing.axes[1].get_xlim()
+        y0, y1 = drawing.axes[1].get_ylim()
+        assert x0 < cx-radius < cx+radius < x1
+        assert y0 < cy-radius < cy+radius < y1
+    finally:
+        drawing.close()
+
+
+def test_existing_circle_can_grow_shrink_and_move_using_actual_handle_events():
+    circles = []
+    drawing = create_crop_drawing(source(), on_interval=lambda *_: None,
+        on_circle=lambda *circle: circles.append(circle), interactive=False)
+    try:
+        axis = drawing.axes[1]
+        for original, target in ((.7, 1.1), (1.1, .45)):
+            drawing.set_draft((0, 100), (.25, -.2, original))
+            drawing.canvas.draw()
+            _mouse(drawing, axis, "button_press_event", .25+original, -.2)
+            _mouse(drawing, axis, "motion_notify_event", .25+target, -.2)
+            _mouse(drawing, axis, "button_release_event", .25+target, -.2)
+            np.testing.assert_allclose(circles[-1], (.25, -.2, target), atol=.025)
+            assert drawing.circle_selector._selection_artist.width == pytest.approx(
+                drawing.circle_selector._selection_artist.height)
+        drawing.set_draft((0, 100), (.25, -.2, .45))
+        drawing.canvas.draw()
+        _mouse(drawing, axis, "button_press_event", .25, -.2)
+        _mouse(drawing, axis, "motion_notify_event", .7, .3)
+        _mouse(drawing, axis, "button_release_event", .7, .3)
+        np.testing.assert_allclose(circles[-1], (.7, .3, .45), atol=.025)
+    finally:
+        drawing.close()

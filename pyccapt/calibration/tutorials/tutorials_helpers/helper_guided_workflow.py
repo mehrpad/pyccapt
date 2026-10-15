@@ -16,7 +16,7 @@ from pyccapt.calibration.core.guided_workflow import GuidedWorkflow, STAGES
 from pyccapt.calibration.tutorials.tutorials_helpers.guided_jobs import NotebookJob
 
 
-GUIDED_UI_API_VERSION = 2
+GUIDED_UI_API_VERSION = 3
 
 
 def show_guided_workflow(workflow=None, *, display_panel=True):
@@ -24,7 +24,8 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
     controller = {"workflow": workflow, "calibration_workspace": None, "calibration_session": None,
                   "reconstruction_workspace": None, "calibration_panel": None, "range_panel": None,
                   "crop_drawing": None, "restoring_crop": False,
-                  "physical_generation": 0, "restoring_instrument": False}
+                  "physical_generation": 0, "restoring_instrument": False,
+                  "crop_seeded": bool(workflow and (workflow.accepted.get("crop") or workflow.preview.get("crop")))}
     job = NotebookJob()
     status, progress_text = widgets.HTML(), widgets.Label()
     progress = widgets.FloatProgress(min=0, max=1, description="Progress:")
@@ -176,6 +177,8 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
             progress.bar_style = "warning" if outcome["failed"] else "success"
             progress_text.value = "Operation stopped; see the message below." if outcome["failed"] else "Operation complete; review the result below."
             refresh()
+            if tabs.selected_index == STAGES.index("Crop"):
+                open_crop_tab(None)
 
         progress.value, progress.bar_style = 0., ""
         progress_text.value = "Operation running…"
@@ -187,6 +190,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
     def replace_workflow(session):
         close_drawing()
         controller["physical_generation"] += 1
+        controller["crop_seeded"] = bool(session.accepted.get("crop") or session.preview.get("crop"))
         controller.update(workflow=session, calibration_workspace=None, calibration_session=None, reconstruction_workspace=None,
                           calibration_panel=None, range_panel=None)
         reference_windows.value = "[]"
@@ -336,7 +340,11 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
         def interval_selected(start, stop):
             if current():
                 crop_start.value, crop_stop.value = start, stop
-                drawing.refresh_detector()
+                try:
+                    drawing.refresh_detector()
+                except CalibrationInputError as error:
+                    drawing.status.value = str(error)
+                sync_drawing()
 
         def circle_selected(x, y, radius):
             if current():
@@ -346,8 +354,18 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
         drawing = create_crop_drawing(session, on_interval=interval_selected, on_circle=circle_selected,
                                       interval_provider=lambda: (crop_start.value, crop_stop.value))
         controller["crop_drawing"] = drawing
+        if not controller["crop_seeded"]:
+            controller["crop_seeded"] = True
+            circle = drawing.initial_circle()
+            if circle is not None and not crop_detector.value:
+                crop_x.value, crop_y.value, crop_radius.value = circle
+                crop_detector.value = True
         sync_drawing()
         drawing_box.children = (drawing.widget,)
+
+    def open_crop_tab(_):
+        if controller["workflow"] is not None and controller["crop_drawing"] is None and not job.running:
+            act(open_crop_drawing)(None)
 
     def refresh_fdm():
         drawing = controller["crop_drawing"]
@@ -636,21 +654,23 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
         export: export_accepted, export_nexus: lambda: export_accepted(True), undo: undo_accepted, cancel: job.cancel}
     for button, operation in actions.items():
         button.on_click(act(operation))
+    exact_crop = widgets.Accordion(children=[widgets.VBox([
+        row([crop_start, crop_stop]), row([crop_tof, crop_tof_min, crop_tof_max]),
+        row([crop_voltage, crop_voltage_min, crop_voltage_max]),
+        row([crop_detector, crop_x, crop_y, crop_radius])])], selected_index=None)
+    exact_crop.set_title(0, "Exact values and optional filters")
     tabs = widgets.Tab(children=[
         widgets.VBox([path, row([kind, mode, load]), row([session_directory, session_query, find_sessions]),
                       session_list, session_path, resume]),
         widgets.VBox([widgets.HTML("Inspect units, finite capabilities and source identity before calibration."), inspect]),
-        widgets.VBox([widgets.HTML("<b>Keep the useful part of the run.</b> Click <b>Draw crop regions</b>. Draw a rectangle across the smooth part of the DC-voltage curve; "
-            "its horizontal span sets the event interval (its height does not filter voltage). Then draw a circle inside the detector FDM to exclude low-intensity edges and mouse bites. "
-            "Drawing changes the draft fields only. After numeric interval edits, click <b>Update detector map</b> before drawing the circle. "
-            "You can also enter exact positions and optional raw ToF or voltage limits below. "
+        widgets.VBox([widgets.HTML("<b>Crop with the mouse.</b> A rectangle and circle appear automatically. "
+            "Drag the orange rectangle's left/right handles to select the useful voltage interval. Drag the cyan circle's center to move it and its handles to resize it. "
+            "Only the rectangle's horizontal span filters events. The initial circle covers finite detector hits; adjust it to exclude unwanted areas. "
+            "Numeric controls are under <b>Exact values and optional filters</b>. After typing an interval, click <b>Update detector map</b>. "
             "Start is included; stop is excluded. Preview shows what stays. Accepting a crop clears later results; Undo restores them. "
             "The original source remains in the session so reconstruction retains the earlier evaporation history."),
             row([draw_crop, update_fdm]), drawing_box,
-            row([crop_start, crop_stop]), row([crop_tof, crop_tof_min, crop_tof_max]),
-            row([crop_voltage, crop_voltage_min, crop_voltage_max]),
-            row([crop_detector, crop_x, crop_y, crop_radius]),
-            row([preview_crop, accept_crop, reset_crop]), crop_output]),
+            row([preview_crop, accept_crop, reset_crop]), exact_crop, crop_output]),
         widgets.VBox([widgets.HTML("<b>Preview first; accept separately.</b> Set actual instrument values; control defaults are not instrument measurements."),
             calibration_help, row([flight, t0, pulse_mode]), instrument_confirmed,
             row([imported, physical, compare_cal, accept_cal]),
@@ -665,6 +685,8 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
             widgets.HTML("Session files retain source, accepted outputs, masks, model snapshots, review history and stable event IDs. NeXus output reports its partial mapping and missing context.")])])
     for index, title in enumerate(STAGES):
         tabs.set_title(index, title)
+    tabs.observe(lambda change: open_crop_tab(change) if change["new"] == STAGES.index("Crop") else None,
+                 names="selected_index")
     panel = widgets.VBox([status, row([undo, cancel]), progress, progress_text, tabs, output])
     panel.controller = controller
     panel.controls = {button.description: button for button in (*buttons, cancel)}

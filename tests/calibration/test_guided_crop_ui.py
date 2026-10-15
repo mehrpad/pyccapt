@@ -19,6 +19,7 @@ def drawing_panel(monkeypatch):
         drawing.close = lambda: setattr(drawing, "closed", True)
         drawing.set_enabled = lambda value: setattr(drawing, "enabled", value)
         drawing.set_draft = lambda interval, circle: setattr(drawing, "draft", (interval, circle))
+        drawing.initial_circle = lambda: None
         drawing.refresh_detector = lambda: drawing.intervals.append(interval_provider())
         return drawing
     monkeypatch.setattr(drawing_helper, "create_crop_drawing", create)
@@ -114,3 +115,48 @@ def test_preview_all_resets_visible_draft_and_resume_preserves_pending_crop(draw
     assert resumed.controls["crop_stop"].value == session.n
     assert not resumed.controls["crop_detector"].value
     assert session.preview["crop"]["mask"].all()
+
+
+def test_entering_crop_tab_opens_real_selectors_with_conservative_starting_circle(monkeypatch):
+    original = drawing_helper.create_crop_drawing
+    monkeypatch.setattr(drawing_helper, "create_crop_drawing", lambda *args, **kwargs:
+                        original(*args, **kwargs, interactive=False))
+    session = workflow()
+    panel = helper.show_guided_workflow(session, display_panel=False)
+    assert panel.controller["crop_drawing"] is None
+    panel.controls["tabs"].selected_index = 2
+    drawing = panel.controller["crop_drawing"]
+    try:
+        assert drawing is not None and drawing.rectangle_selector._selection_artist.get_visible()
+        assert drawing.circle_selector._selection_artist.get_visible()
+        assert panel.controls["crop_detector"].value
+        assert session.active_mask.all() and session.accepted["crop"] is None and not session.preview
+        panel.controls["Preview crop"].click()
+        assert session.preview["crop"]["mask"].all()
+        # Reentering the tab keeps the user's geometry instead of resetting it.
+        panel.controls["crop_radius"].value /= 2
+        radius = panel.controls["crop_radius"].value
+        panel.controls["tabs"].selected_index = 1
+        panel.controls["tabs"].selected_index = 2
+        assert panel.controller["crop_drawing"] is drawing
+        assert panel.controls["crop_radius"].value == radius
+    finally:
+        drawing.close()
+
+
+def test_entering_crop_preserves_accepted_event_only_selection(monkeypatch):
+    original = drawing_helper.create_crop_drawing
+    monkeypatch.setattr(drawing_helper, "create_crop_drawing", lambda *args, **kwargs:
+                        original(*args, **kwargs, interactive=False))
+    session = workflow()
+    session.preview_crop(event_start=100, event_stop=800)
+    session.accept("crop")
+    panel = helper.show_guided_workflow(session, display_panel=False)
+    panel.controls["tabs"].selected_index = 2
+    drawing = panel.controller["crop_drawing"]
+    try:
+        assert not panel.controls["crop_detector"].value
+        assert (panel.controls["crop_start"].value, panel.controls["crop_stop"].value) == (100, 800)
+        assert session.active_mask.sum() == 700
+    finally:
+        drawing.close()

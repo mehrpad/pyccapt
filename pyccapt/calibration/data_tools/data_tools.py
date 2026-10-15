@@ -7,6 +7,7 @@ from pathlib import Path
 import warnings
 import ast
 import re
+import tempfile
 
 import h5py
 import numpy as np
@@ -263,6 +264,12 @@ def store_df_to_hdf(dataframe, key, filename, *, format: str = "fixed"):
             dataframe.to_hdf(file_path, key=str(key), mode="w", format="table")
         else:
             raise
+    identity_attrs = {key: dataframe.attrs[key] for key in ('pyccapt_source_id', 'pyccapt_unavailable_columns')
+                      if key in dataframe.attrs}
+    if identity_attrs:
+        from pyccapt.calibration.data_tools.analysis_session import canonical_json
+        with pd.HDFStore(file_path, mode='a') as store:
+            store.get_storer(str(key)).attrs.pyccapt_source_json = canonical_json(identity_attrs)
 
 
 def store_df_to_csv(data: pd.DataFrame, path: str | Path) -> None:
@@ -347,6 +354,8 @@ def save_data(
     end_index=-1,
     save_tdc=False,
     save_range=False,
+    analysis_session=None,
+    nexus_metadata=None,
 ):
     """Persist data in one or more supported export formats.
 
@@ -362,6 +371,12 @@ def save_data(
         If True and ``hdf=True`` and ``variables.range_data`` is non-empty,
         also write the current range table under ``/range`` so the calibrated,
         raw, and ranging information all live in a single h5 file.
+    analysis_session : tuple[dict, dict], optional
+        Metadata and numeric arrays from ``GuidedWorkflow.to_state()`` to embed
+        alongside the dataframe. Source masks retain their full-session scope.
+    nexus_metadata : dict, optional
+        Available experimental metadata for an explicitly partial NXapm mapping.
+        Passing an empty dictionary requests a mapping with missing context listed.
     """
     if name is not None:
         data_name = name
@@ -385,9 +400,29 @@ def save_data(
         # step after the first crashed -- no rollback, and the file path
         # downstream loaders look at was in a half-written state.
         output_h5_path = _as_path(output_h5)
-        tmp_h5_path = output_h5_path.with_suffix(output_h5_path.suffix + '.tmp')
+        output_h5_path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary_name = tempfile.mkstemp(prefix=f'.{output_h5_path.name}.', suffix='.tmp',
+                                                       dir=output_h5_path.parent)
+        os.close(descriptor)
+        tmp_h5_path = Path(temporary_name)
         try:
             store_df_to_hdf(export_data, "df", str(tmp_h5_path))
+            # Accepted optional-model mathematics/units travel with the result.
+            # The receipt describes its original source dataset; an export may
+            # be a subset, so never imply that source masks align to export rows.
+            receipt = getattr(variables, 'guided_calibration_receipt', None)
+            reconstruction_parameters = getattr(variables, 'reconstruction_parameters', None)
+            ratio_result = getattr(variables, 'reconstruction_ratio_result', None)
+            if receipt or reconstruction_parameters or ratio_result:
+                import json
+                with pd.HDFStore(tmp_h5_path, mode='a') as store:
+                    metadata = {'schema_version': 'pyccapt-analysis-1',
+                                'export_rows': len(export_data),
+                                'receipt_scope': 'original source dataset; export may be a subset',
+                                'guided_calibration': receipt or {},
+                                'reconstruction_parameters': reconstruction_parameters or {},
+                                'reconstruction_ratio_result': ratio_result or {}}
+                    store.get_storer('df').attrs.pyccapt_analysis_json = json.dumps(metadata, allow_nan=False)
             tdc_status: str | None = None
             if save_tdc:
                 tdc_full = getattr(variables, "data_tdc", None)
@@ -423,6 +458,19 @@ def save_data(
                     range_table.to_hdf(tmp_h5_path, key="range", mode="a")
                     range_status = f"{output_h5} (/range, {len(range_table)} rows)"
             # All writes succeeded -- atomically replace the target.
+            if analysis_session is not None or nexus_metadata is not None:
+                import h5py
+                with h5py.File(tmp_h5_path, 'a') as handle:
+                    if analysis_session is not None:
+                        from pyccapt.calibration.data_tools.analysis_session import write_session_group
+                        write_session_group(handle, *analysis_session)
+                    if nexus_metadata is not None:
+                        from pyccapt.calibration.data_tools.nexus_export import write_nexus_mapping
+                        write_nexus_mapping(handle, export_data, metadata=nexus_metadata,
+                                            ranges=getattr(variables, 'range_data', None),
+                                            reconstruction=getattr(variables, 'reconstruction_parameters', {}))
+            with tmp_h5_path.open('rb+') as stream:
+                os.fsync(stream.fileno())
             os.replace(tmp_h5_path, output_h5_path)
             saved_outputs["hdf"] = output_h5
             if tdc_status is not None:
@@ -521,7 +569,15 @@ def load_data(dataset_path, data_type, mode="processed", *, load_tdc=False, tdc_
                 raise last_error
             return data_loadcrop.fetch_dataset_from_dld_grp(dataset_path)
         if mode == "processed":
-            data = pd.read_hdf(dataset_path, key="df", mode="r")
+            with pd.HDFStore(dataset_path, mode='r') as store:
+                data = store['df']
+                source_json = getattr(store.get_storer('df').attrs, 'pyccapt_source_json', None)
+            if source_json is not None:
+                import json
+                source_attrs = json.loads(source_json)
+                data.attrs.update({key: source_attrs[key] for key in ('pyccapt_source_id', 'pyccapt_unavailable_columns')
+                                   if key in source_attrs})
+            unavailable = set(data.attrs.get('pyccapt_unavailable_columns', []))
             if "pulse_v (V)" not in data.columns:
                 if "pulse" in data.columns:
                     insert_at = data.columns.get_loc("pulse") + 1
@@ -540,9 +596,13 @@ def load_data(dataset_path, data_type, mode="processed", *, load_tdc=False, tdc_
                         else len(data.columns)
                     )
                     data.insert(insert_at, "pulse_v (V)", pulse_v)
+                    unavailable.add('pulse_v (V)')
             if "pulse_l (pJ)" not in data.columns:
                 pulse_l = np.zeros(len(data), dtype=float)
                 data.insert(data.columns.get_loc("pulse_v (V)") + 1, "pulse_l (pJ)", pulse_l)
+                unavailable.add('pulse_l (pJ)')
+            if unavailable:
+                data.attrs['pyccapt_unavailable_columns'] = sorted(unavailable)
             if load_tdc:
                 try:
                     tdc_df = pd.read_hdf(dataset_path, key="tdc", mode="r")
@@ -725,6 +785,15 @@ def pyccapt_raw_to_processed(data):
     data_processed["start_counter"] = data["start_counter"].to_numpy()
     if "event_group_id" in data.columns:
         data_processed["event_group_id"] = data["event_group_id"].to_numpy()
+    if 'event_id' in data.columns:
+        data_processed['event_id'] = data['event_id'].to_numpy()
+    data_processed.attrs = dict(data.attrs)
+    unavailable = set(data.attrs.get('pyccapt_unavailable_columns', []))
+    unavailable.update(('x (nm)', 'y (nm)', 'z (nm)'))
+    unavailable.update(column for column in ('mc (Da)', 't_c (ns)', 'delta_p', 'multi') if column not in data)
+    if 'mc_uc (Da)' not in data and not (n > 0 and {'t (ns)', 'high_voltage (V)', 'x_det (cm)', 'y_det (cm)'}.issubset(data)):
+        unavailable.add('mc_uc (Da)')
+    data_processed.attrs['pyccapt_unavailable_columns'] = sorted(unavailable)
     return data_processed
 
 

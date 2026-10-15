@@ -159,6 +159,7 @@ class Variables:
         "laser_alignment_command": ("main", ("exp",)),
         "laser_alignment_cancel": ("main/exp", ("main/exp",)),
         "laser_alignment_run": ("exp", ("main",)),
+        "laser_alignment_solution_cache": ("exp", ("main",)),
         "laser_alignment_status": ("exp", ("main",)),
         "laser_alignment_plot": ("exp", ("main",)),
         "laser_alignment_move_request": ("exp", ("main",)),
@@ -540,6 +541,7 @@ class Variables:
         "laser_alignment_command": {},
         "laser_alignment_cancel": True,
         "laser_alignment_run": {},
+        "laser_alignment_solution_cache": {},
         "laser_alignment_status": {},
         "laser_alignment_plot": {},
         "laser_alignment_move_request": {},
@@ -719,6 +721,30 @@ class Variables:
                 # State telemetry must never turn a successful legacy write
                 # into a failed hardware action or interrupt acquisition.
                 logging.getLogger("pyccapt.state").exception("Could not adapt shared field %s", field)
+
+    def statistics_snapshot(self, *fields: str) -> dict[str, Any]:
+        """Read selected current numeric telemetry in one RPC for one UI tick.
+
+        No cache, bulk acquisition data, setup inputs, or stop/interlock fields
+        enter this path. Locks match existing scalar writers and are acquired
+        in a fixed order; older Namespace callers retain scalar compatibility.
+        """
+        allowed = self._EXP_FIELDS | self._DATA_PLOT_FIELDS
+        if not set(fields).issubset(allowed):
+            raise ValueError('Statistics snapshots only support numeric telemetry fields')
+        if not self.lock_exp.acquire(timeout=.05):
+            raise TimeoutError('Statistics publisher is busy')
+        try:
+            if not self.lock_data_plot.acquire(timeout=.05):
+                raise TimeoutError('Plot telemetry publisher is busy')
+            try:
+                if hasattr(type(self.ns), 'read_fields'):
+                    return self.ns.read_fields(fields)
+                return {field: getattr(self.ns, field) for field in fields}
+            finally:
+                self.lock_data_plot.release()
+        finally:
+            self.lock_exp.release()
 
     @contextmanager
     def _state_transaction(self, timeout_s):

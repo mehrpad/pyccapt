@@ -318,7 +318,8 @@ class AlignmentPlotWindow(QtWidgets.QWidget):
         self.status.setText(
             f"Sample {sample} | {last['phase']} | {last['voltage']:.0f} V | "
             f"rate {last['rate_percent']:.3f}% / target {last['target_percent']:.3f}%\n"
-            f"Actual stage: X {xyz[0]:.6f}, Y {xyz[1]:.6f}, Z {xyz[2]:.6f} mm")
+            f"Actual stage: X {xyz[0]:.6f}, Y {xyz[1]:.6f}, Z {xyz[2]:.6f} mm\n"
+            + self.variables.alignment_status.get('reason', ''))
         if self.view is None:
             return
         xy_span = max(1., float(np.max(np.abs(coords[:, :2]))))

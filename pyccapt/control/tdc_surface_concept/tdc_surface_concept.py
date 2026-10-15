@@ -1,8 +1,9 @@
 import multiprocessing as mp
 import os
 import time
+import threading
 from pathlib import Path
-from queue import Empty, Queue
+from queue import Empty, Full, Queue
 
 import numpy as np
 
@@ -12,6 +13,10 @@ from pyccapt.control.core.chunk_store import atomic_write_chunk_group
 from pyccapt.control.devices import initialize_devices
 from pyccapt.control.nkt_photonics.readback import pulse_energy_pj, experiment_frequency_hz
 from pyccapt.control.tdc_surface_concept import scTDC
+from pyccapt.control.apt.detector_chunks import (
+    ChunkStream, ChunkWriter, preserve_unattributed_packet, read_event_metadata,
+)
+from pyccapt.control.core.shared_ring_buffer import publish_plot_events
 
 QUEUE_DATA = 0
 QUEUE_ENDOFMEAS = 1
@@ -73,6 +78,33 @@ class BufDataCB4(scTDC.buffered_data_callbacks_pipe):
         # records would be worse than slowing acquisition.
         self.queue = Queue(maxsize=32)
         self.end_of_meas = False
+        self._closing = threading.Event()
+        self._publication_lock = threading.Lock()
+        self.unattributed_directory = None
+        self.stream_name = 'dld' if dld_events else 'tdc'
+        self.shutdown_packets = 0
+        self.publication_error = ''
+
+    def _publish(self, item):
+        # Closing sets the event before waiting for this bounded put. Once
+        # stop_publication returns no producer can append behind the tail drain.
+        with self._publication_lock:
+            while not self._closing.is_set():
+                try:
+                    self.queue.put(item, timeout=QUEUE_GET_TIMEOUT_S)
+                    return True
+                except Full:
+                    continue
+        return False
+
+    def stop_publication(self):
+        self._closing.set()
+        with self._publication_lock:
+            pass
+
+    def close(self):
+        self.stop_publication()
+        return super().close()
 
     def on_data(self, d):
         """
@@ -93,10 +125,20 @@ class BufDataCB4(scTDC.buffered_data_callbacks_pipe):
                 dcopy[k] = d[k].copy()
             else:
                 dcopy[k] = d[k]
-        self.queue.put((QUEUE_DATA, dcopy))
+        if not self._publish((QUEUE_DATA, dcopy)):
+            # Output safe-off runs immediately when Stop is requested. A late
+            # SDK packet cannot safely inherit the now-changing voltage. Keep
+            # its raw evidence explicitly unassigned instead of dropping it.
+            try:
+                if self.unattributed_directory is None:
+                    raise RuntimeError('No directory configured for stopped callback evidence')
+                preserve_unattributed_packet(self.unattributed_directory, self.stream_name+'_shutdown', dcopy)
+                self.shutdown_packets += 1
+            except Exception as exc:
+                self.publication_error = f'{type(exc).__name__}: {exc}'
         if self.end_of_meas:
             self.end_of_meas = False
-            self.queue.put((QUEUE_ENDOFMEAS, None))
+            self._publish((QUEUE_ENDOFMEAS, None))
 
     def on_end_of_meas(self):
         """
@@ -255,385 +297,176 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
 
     bufdatacb = BufDataCB4(device.lib, device.dev_desc, DATA_FIELD_SEL, dld_events=True)
     bufdatacb_raw = BufDataCB4(device.lib, device.dev_desc, DATA_FIELD_SEL_raw, dld_events=False)
-
-    # DLD data
-    xx = []
-    yy = []
-    tt = []
-    voltage_data = []
-    voltage_pulse_data = []
-    laser_pulse_data = []
-    start_counter = []
-
-    # The binning of DLD events
-    xx_list_bin = []
-    yy_list_bin = []
-    tt_list_bin = []
-
-    # TDC data (Raw data)
-    channel_data = []
-    time_data = []
-    tdc_start_counter = []
-    voltage_data_tdc = []
-    voltage_pulse_data_tdc = []
-    laser_pulse_data_tdc = []
+    directory = Path(variables.path) / "temp_data"
+    for callback in (bufdatacb, bufdatacb_raw):
+        callback.unattributed_directory = directory
 
     retcode = bufdatacb.start_measurement(exposure_time)
     if errorcheck(device, bufdatacb, bufdatacb_raw, retcode) < 0:
-        print("Error during read:", retcode, device.lib.sc_get_err_msg(retcode))
-        print(
-            f"{initialize_devices.bcolors.FAIL}Error: Restart the TDC manually "
-            f"(Turn it On and Off){initialize_devices.bcolors.ENDC}"
-        )
         variables.flag_finished_tdc = True
-        if not getattr(variables, "access_override_enabled", False):
-            variables.flag_tdc_failure = True
-            return -1
-        print("Access Override is active. Continuing without a Surface Concept detector.")
-        variables.flag_tdc_failure = False
-        return 0
+        variables.flag_tdc_failure = not getattr(variables, "access_override_enabled", False)
+        return -1 if variables.flag_tdc_failure else 0
 
     from pyccapt.control.apt.laser_alignment_data import LaserAlignmentPublisher
-    laser_alignment_publisher = LaserAlignmentPublisher(variables)
     from pyccapt.control.apt.alignment_vision import AlignmentEventPublisher
+    laser_alignment_publisher = LaserAlignmentPublisher(variables)
     alignment_publisher = AlignmentEventPublisher(variables, _conf)
-    loop_time = 1 / variables.ex_freq
-    events_detected = 0
-    events_detected_tmp = 0
-    raw_signal_detected = 0
+    writer = None
+    events_detected = raw_signal_detected = events_detected_tmp = 0
     start_time = time.monotonic()
     pulse_frequency = experiment_frequency_hz(variables)
-    loop_counter = 0
-    loop_delay_counter = 0
+    streams = []
+    failure = None
+    try:
+        writer = ChunkWriter(directory / "chunks", stop_event=stop_event)
+        dld_types = {name: CHUNK_DTYPES[name] for name in
+                     ("x", "y", "t", "voltage", "voltage_pulse", "laser_pulse", "start_counter")}
+        dld_types.update(x_bin=np.int64, y_bin=np.int64, t_bin=np.int64)
+        dld = ChunkStream(writer, "dld", dld_types, chunk_size=CHUNK_SIZE)
+        raw = ChunkStream(writer, "tdc", {name: CHUNK_DTYPES[name] for name in
+                          ("channel", "time", "tdc_start_counter", "voltage_tdc",
+                           "voltage_pulse_tdc", "laser_pulse_tdc")}, chunk_size=CHUNK_SIZE)
+        streams = [dld, raw]
+        callbacks = (bufdatacb, bufdatacb_raw)
+        idle_index = 0
+        while not stop_event.is_set():
+            writer.check()
+            # Poll both independent streams before waiting. An empty DLD queue
+            # must not impose a 50 ms delay on every available raw packet.
+            packets = []
+            for index, callback in enumerate(callbacks):
+                try:
+                    kind, data = callback.queue.get(block=False)
+                except Empty:
+                    continue
+                if kind is not None:
+                    packets.append((index, kind, data))
+            if not packets:
+                index = idle_index
+                idle_index = 1-idle_index
+                try:
+                    kind, data = callbacks[index].queue.get(timeout=QUEUE_GET_TIMEOUT_S)
+                    if kind is not None:
+                        packets.append((index, kind, data))
+                except Empty:
+                    pass
 
-    # DLD events and raw/TDC signals are independent streams of DIFFERENT
-    # length, so they are chunked independently -- each on its own
-    # CHUNK_SIZE threshold and its own chunk-id sequence. This keeps the
-    # faster-growing raw stream flushed to disk on time instead of
-    # accumulating in RAM (OOM) and being truncated to the DLD count (data
-    # loss). The two streams write disjoint chunk stems (e.g. x_chunk_* vs
-    # channel_chunk_*), so reusing the same id counter values never collides.
-    dld_chunk_id = 0
-    tdc_chunk_id = 0
-    save_queue = mp.Queue(maxsize=8)
-    save_process = mp.Process(target=save_chunk_worker, args=(save_queue,))
-    save_process.start()
-    path = variables.path + "/temp_data/"
-    # Create folder to save the data
-    if not os.path.isdir(path):
-        os.makedirs(path, mode=0o777, exist_ok=True)
-    if not os.path.isdir(path + "chunks/"):
-        os.makedirs(path + "chunks/", mode=0o777, exist_ok=True)
+            # Process packets already removed from the queues even if Stop
+            # arrives now. Never drop a dequeued packet at a stop boundary.
+            if any(kind == QUEUE_DATA for _, kind, _ in packets):
+                try:
+                    specimen_voltage, voltage_pulse, laser_pulse = read_event_metadata(variables, pulse_energy_pj)
+                except Exception:
+                    for index, kind, data in packets:
+                        if kind == QUEUE_DATA:
+                            preserve_unattributed_packet(directory, "dld" if index == 0 else "tdc", data)
+                    raise
+            for index, kind, data in packets:
+                if kind == QUEUE_ENDOFMEAS and index == 0 and not stop_event.is_set():
+                    retcode = bufdatacb.start_measurement(exposure_time, retries=10)
+                    if retcode < 0:
+                        raise RuntimeError(f"Surface Concept measurement failed: {device.lib.sc_get_err_msg(retcode)}")
+                elif kind == QUEUE_DATA and index == 0:
+                    x_bin, y_bin, t_bin = data["dif1"], data["dif2"], data["time"]
+                    count = len(x_bin)
+                    if not count:
+                        continue
+                    x = ((x_bin-XYBINSHIFT)*XYFACTOR)*.1
+                    y = ((y_bin-XYBINSHIFT)*XYFACTOR)*.1
+                    tof = t_bin*TOFFACTOR
+                    voltage = np.full(count, specimen_voltage, dtype=np.float64)
+                    dld.append({"x": x, "y": y, "t": tof, "x_bin": x_bin,
+                                "y_bin": y_bin, "t_bin": t_bin,
+                                "voltage": voltage,
+                                "voltage_pulse": np.full(count, voltage_pulse),
+                                "laser_pulse": np.full(count, laser_pulse),
+                                "start_counter": data["start_counter"]})
+                    events_detected += count
+                    events_detected_tmp += count
+                    publish_plot_events(x_plot, y_plot, t_plot, main_v_dc_plot, x, y, tof, voltage)
+                    alignment_publisher.append(x, y)
+                    laser_alignment_publisher.append(tof)
+                elif kind == QUEUE_DATA and index == 1:
+                    count = len(data["channel"])
+                    raw.append({"channel": data["channel"], "time": data["time"],
+                                "tdc_start_counter": data["start_counter"],
+                                "voltage_tdc": np.full(count, specimen_voltage),
+                                "voltage_pulse_tdc": np.full(count, voltage_pulse),
+                                "laser_pulse_tdc": np.full(count, laser_pulse)})
+                    raw_signal_detected += count
 
-    _last_loop_warn = None  # dedup transient inner-loop errors
-    while not stop_event.is_set():
-        start_time_loop = time.time()
-
-        # Two-queue gets used to be unconditional .get() calls back to
-        # back.  Because the DLD callback fires only on completed DLD
-        # events while the raw callback fires on every TDC channel hit,
-        # the queues have very different rates - whichever lagged would
-        # block the loop indefinitely and starve stop_event polling.
-        # Now: timed gets, no-data sentinels, stop_event re-checked.
-        try:
-            eventtype, data = bufdatacb.queue.get(timeout=QUEUE_GET_TIMEOUT_S)
-        except Empty:
-            eventtype, data = None, None
-        if stop_event.is_set():
-            break
-        try:
-            eventtype_raw, data_raw = bufdatacb_raw.queue.get(timeout=QUEUE_GET_TIMEOUT_S)
-        except Empty:
-            eventtype_raw, data_raw = None, None
-        if stop_event.is_set():
-            break
-
-        try:
-            specimen_voltage = variables.specimen_voltage
-            voltage_pulse = variables.pulse_voltage
-            laser_pulse = pulse_energy_pj(variables)
-        except Exception as exc:
-            # Manager IPC can transiently fail under heavy load; skip
-            # this iteration but keep the loop alive.
-            if str(exc) != _last_loop_warn:
-                _last_loop_warn = str(exc)
-                print(f"TDC: variable read failed (non-fatal): {exc}")
-            continue
-
-        if eventtype == QUEUE_DATA:
-            # correct for binning of surface concept
-            xx_dif = data["dif1"]
-            length = len(xx_dif)
-            if length > 0:
-                events_detected_tmp += length
-                events_detected += length
-                yy_dif = data["dif2"]
-                tt_dif = data["time"]
-                start_counter.extend(data["start_counter"].tolist())
-                xx_tmp = ((xx_dif - XYBINSHIFT) * XYFACTOR) * 0.1  # from mm to in cm by dividing by 10
-                yy_tmp = ((yy_dif - XYBINSHIFT) * XYFACTOR) * 0.1  # from mm to in cm by dividing by 10
-                tt_tmp = tt_dif * TOFFACTOR  # in ns
-                dc_voltage_tmp = np.tile(specimen_voltage, len(xx_tmp))
-
-                # Push into the shared-memory ring buffers (one per signal).
-                # Append is non-blocking, bounded; the visualization
-                # subprocess drains the rings on its own cadence.
-                x_plot.write(xx_tmp)
-                y_plot.write(yy_tmp)
-                t_plot.write(tt_tmp)
-                main_v_dc_plot.write(dc_voltage_tmp)
-                alignment_publisher.append(xx_tmp, yy_tmp)
-                laser_alignment_publisher.append(tt_tmp)
-
-                # change to list
-                xx_tmp = xx_tmp.tolist()
-                yy_tmp = yy_tmp.tolist()
-                tt_tmp = tt_tmp.tolist()
-
-                # extend the main list with the new data
-                xx.extend(xx_tmp)
-                yy.extend(yy_tmp)
-                tt.extend(tt_tmp)
-                dc_voltage_tmp = dc_voltage_tmp.tolist()
-                p_voltage_tmp = np.tile(voltage_pulse, len(xx_tmp)).tolist()
-                p_laser_tmp = np.tile(laser_pulse, len(xx_tmp)).tolist()
-                voltage_data.extend(dc_voltage_tmp)
-                voltage_pulse_data.extend(p_voltage_tmp)
-                laser_pulse_data.extend(p_laser_tmp)
-
-                # The binning of DLD events
-                xx_list_bin.extend(xx_dif.tolist())
-                yy_list_bin.extend(yy_dif.tolist())
-                tt_list_bin.extend(tt_dif.tolist())
-
-        if eventtype_raw == QUEUE_DATA:
-            channel_data_tmp = data_raw["channel"].tolist()
-            if len(channel_data_tmp) > 0:
-                raw_signal_detected += len(channel_data_tmp)
-                tdc_start_counter.extend(data_raw["start_counter"].tolist())
-                time_data.extend(data_raw["time"].tolist())
-                # raw data
-                channel_data.extend(channel_data_tmp)
-                voltage_data_tdc.extend((np.tile(specimen_voltage, len(channel_data_tmp))).tolist())
-                voltage_pulse_data_tdc.extend((np.tile(voltage_pulse, len(channel_data_tmp))).tolist())
-                laser_pulse_data_tdc.extend((np.tile(laser_pulse, len(channel_data_tmp))).tolist())
-
-        if eventtype == QUEUE_ENDOFMEAS:
-            retcode = bufdatacb.start_measurement(exposure_time, retries=10)
-            if retcode < 0:
-                print("Error during read (error code: %s - error msg: %s):" % (retcode, device.lib.sc_get_err_msg(retcode)))
-                variables.flag_tdc_failure = True
-                # Clean teardown - the post-loop block at the end runs
-                # bufdatacb.close() etc.  We just break out here.
-                break
-
-        # Calculate the detection rate
-        current_time = time.monotonic()
-        elapsed_s = current_time - start_time
-        if elapsed_s >= 0.5:
-            # Re-read pulse_frequency every interval so the rate calc
-            # stays correct if the user changes it mid-run.  Guard
-            # against zero (would divide by zero on first chunk after a
-            # bad value).
+            current_time = time.monotonic()
+            elapsed_s = current_time-start_time
+            if elapsed_s >= .5:
+                try:
+                    pulse_frequency = max(experiment_frequency_hz(variables), 1.)
+                except Exception:
+                    pass
+                rate = events_detected_tmp*100/(pulse_frequency*elapsed_s)
+                variables.detection_rate_current = rate
+                variables.detection_rate_current_plot = rate
+                variables.total_ions = events_detected
+                variables.total_raw_signals = raw_signal_detected
+                events_detected_tmp = 0
+                start_time = current_time
+    except Exception as exc:
+        failure = exc
+    finally:
+        # Stop callback publication immediately, but finalize the writer before
+        # potentially blocking vendor close/deinitialize calls. No disk worker
+        # remains to race HDF finalization if the SDK needs forced termination.
+        for callback in (bufdatacb, bufdatacb_raw):
+            if hasattr(callback, 'stop_publication'):
+                callback.stop_publication()
+        queued_tail = 0
+        for index, callback in enumerate((bufdatacb, bufdatacb_raw)):
+            while True:
+                try:
+                    kind, data = callback.queue.get(block=False)
+                except Empty:
+                    break
+                if kind == QUEUE_DATA:
+                    queued_tail += 1
+                    try:
+                        preserve_unattributed_packet(directory, ('dld' if index == 0 else 'tdc')+'_shutdown', data)
+                    except Exception as exc:
+                        failure = failure or exc
+        if writer is not None:
             try:
-                live_pulse_frequency = max(experiment_frequency_hz(variables), 1.0)
-            except Exception:
-                live_pulse_frequency = pulse_frequency
-            pulse_frequency = live_pulse_frequency
-            detection_rate = events_detected_tmp * 100 / (pulse_frequency * elapsed_s)
-            variables.detection_rate_current = detection_rate
-            variables.detection_rate_current_plot = detection_rate
-            variables.total_ions = events_detected
-            variables.total_raw_signals = raw_signal_detected
-            events_detected_tmp = 0
-            start_time = current_time
-
-        # Flush the DLD stream when it reaches a full chunk. We do NOT
-        # mirror into the Manager here: the data is safe on disk under
-        # temp_data/chunks/ and hdf_creator reads the chunk files directly.
-        # (The old per-chunk extend_to shipped the whole growing list back
-        # through the Manager every flush -- O(N) IPC -- which throttled
-        # acquisition and OOM'd the Manager on large runs.)
-        if len(xx) >= CHUNK_SIZE:
-            dld_chunk_id += 1
-            dld_chunk = {
-                "x_bin": xx_list_bin[:CHUNK_SIZE],
-                "x": xx[:CHUNK_SIZE],
-                "y_bin": yy_list_bin[:CHUNK_SIZE],
-                "y": yy[:CHUNK_SIZE],
-                "t_bin": tt_list_bin[:CHUNK_SIZE],
-                "t": tt[:CHUNK_SIZE],
-                "voltage": voltage_data[:CHUNK_SIZE],
-                "voltage_pulse": voltage_pulse_data[:CHUNK_SIZE],
-                "laser_pulse": laser_pulse_data[:CHUNK_SIZE],
-                "start_counter": start_counter[:CHUNK_SIZE],
-            }
-            save_queue.put((dld_chunk_id, path, dld_chunk))
-            del xx[:CHUNK_SIZE], yy[:CHUNK_SIZE], tt[:CHUNK_SIZE]
-            del xx_list_bin[:CHUNK_SIZE], yy_list_bin[:CHUNK_SIZE], tt_list_bin[:CHUNK_SIZE]
-            del voltage_data[:CHUNK_SIZE], voltage_pulse_data[:CHUNK_SIZE], laser_pulse_data[:CHUNK_SIZE]
-            del start_counter[:CHUNK_SIZE]
-
-        # Flush the raw/TDC stream INDEPENDENTLY -- it grows much faster than
-        # the DLD stream (many raw hits per DLD event), so it reaches
-        # CHUNK_SIZE far more often. Gating this on len(xx) (the old code)
-        # under-flushed the raw lists: they grew unbounded (OOM) and only
-        # CHUNK_SIZE of the millions of raw rows were ever written per chunk.
-        if len(channel_data) >= CHUNK_SIZE:
-            tdc_chunk_id += 1
-            tdc_chunk = {
-                "channel": channel_data[:CHUNK_SIZE],
-                "time": time_data[:CHUNK_SIZE],
-                "tdc_start_counter": tdc_start_counter[:CHUNK_SIZE],
-                "voltage_tdc": voltage_data_tdc[:CHUNK_SIZE],
-                "voltage_pulse_tdc": voltage_pulse_data_tdc[:CHUNK_SIZE],
-                "laser_pulse_tdc": laser_pulse_data_tdc[:CHUNK_SIZE],
-            }
-            save_queue.put((tdc_chunk_id, path, tdc_chunk))
-            del channel_data[:CHUNK_SIZE], time_data[:CHUNK_SIZE], tdc_start_counter[:CHUNK_SIZE]
-            del voltage_data_tdc[:CHUNK_SIZE], voltage_pulse_data_tdc[:CHUNK_SIZE]
-            del laser_pulse_data_tdc[:CHUNK_SIZE]
-
-        if time.time() - start_time_loop > loop_time:
-            loop_delay_counter += 1
-        loop_counter += 1
-
-    print(
-        "TDC process: for %s times loop time took longer than %s second" % (loop_delay_counter, loop_time),
-        'out of %s iterations' % loop_counter,
-    )
-    variables.total_ions = events_detected
-    variables.total_raw_signals = raw_signal_detected
-    print("TDC Measurement stopped")
-
-    # --- Teardown instrumentation -------------------------------------
-    # Lightweight stdout logging (captured + timestamped by the parent
-    # process) so a slow or hanging shutdown can be diagnosed -- this is
-    # where the TDC subprocess "won't join". It runs AFTER the
-    # acquisition loop, so it never touches the live hot path. flush=True
-    # so each line survives even if the process is later force-joined.
-    def _tlog(msg):
-        print("[TDC teardown] %s" % msg, flush=True)
-
-    _teardown_t0 = time.time()
-    _tlog(
-        "begin: dld_chunk_id=%d (DLD residual=%d), tdc_chunk_id=%d (raw residual=%d), "
-        "stop_event=%s, tdc_failure=%s"
-        % (dld_chunk_id, len(xx), tdc_chunk_id, len(channel_data),
-           stop_event.is_set(), getattr(variables, "flag_tdc_failure", "?"))
-    )
-
-    # Final residual chunks -- whatever is still in the in-memory lists after
-    # the last in-loop flush. Each stream is flushed independently (mirroring
-    # the in-loop logic) and in FULL (no [:CHUNK_SIZE] truncation), so the
-    # faster raw stream is saved completely. A stream that already produced
-    # chunks during the run just appends its final partial chunk here.
-    if dld_chunk_id > 0 and len(xx) > 0:
-        dld_chunk_id += 1
-        save_queue.put((dld_chunk_id, path, {
-            "x_bin": xx_list_bin, "x": xx,
-            "y_bin": yy_list_bin, "y": yy,
-            "t_bin": tt_list_bin, "t": tt,
-            "voltage": voltage_data, "voltage_pulse": voltage_pulse_data,
-            "laser_pulse": laser_pulse_data, "start_counter": start_counter,
-        }))
-        _tlog("queued residual DLD chunk #%d (%d rows)" % (dld_chunk_id, len(xx)))
-    if tdc_chunk_id > 0 and len(channel_data) > 0:
-        tdc_chunk_id += 1
-        save_queue.put((tdc_chunk_id, path, {
-            "channel": channel_data, "time": time_data,
-            "tdc_start_counter": tdc_start_counter,
-            "voltage_tdc": voltage_data_tdc,
-            "voltage_pulse_tdc": voltage_pulse_data_tdc,
-            "laser_pulse_tdc": laser_pulse_data_tdc,
-        }))
-        _tlog("queued residual raw/TDC chunk #%d (%d rows)" % (tdc_chunk_id, len(channel_data)))
-
-    _tlog("waiting for save worker to drain queue (save_process.join)...")
-    _save_join_t = time.time()
-    save_queue.put(None)
-    save_process.join()
-    _tlog("save worker joined in %.1fs" % (time.time() - _save_join_t))
-    if save_process.exitcode != 0:
-        variables.flag_tdc_failure = True
-        variables.detector_error = f"Chunk save worker exited with code {save_process.exitcode}"
-        _tlog(variables.detector_error)
-
-    # Per-stream fallback for a stream that NEVER reached a single full chunk
-    # (its chunk-id is still 0): no chunk files exist for it, so hdf_creator
-    # falls back to these in-memory lists -- mirror them into the Manager and
-    # also drop a flat .npy as a manual-recovery copy. Done PER STREAM so a
-    # run that chunked the fast raw stream but not the smaller DLD stream
-    # (or vice versa) only mirrors the SMALL un-chunked stream, never the
-    # large one already on disk -- avoiding the O(N) Manager blow-up.
-    if dld_chunk_id == 0 and len(xx) > 0:
-        _tlog("DLD fallback: mirroring %d rows into Manager + flat .npy ..." % len(xx))
-        _t = time.time()
+                for stream in streams:
+                    stream.finish()
+            except Exception as exc:
+                failure = failure or exc
+            try:
+                writer.close()
+            except Exception as exc:
+                failure = failure or exc
+        for callback in (bufdatacb, bufdatacb_raw):
+            try:
+                callback.close()
+            except Exception as exc:
+                failure = failure or exc
         try:
-            variables.extend_to('x', xx)
-            variables.extend_to('y', yy)
-            variables.extend_to('t', tt)
-            variables.extend_to('dld_start_counter', start_counter)
-            variables.extend_to('main_v_dc_dld', voltage_data)
-            variables.extend_to('main_v_p_dld', voltage_pulse_data)
-            variables.extend_to('main_l_p_dld', laser_pulse_data)
+            device.deinitialize()
         except Exception as exc:
-            print(f"TDC: DLD residual extend_to failed (non-fatal): {exc}")
-        try:
-            np.save(variables.path + "/temp_data/x.npy", np.array(xx))
-            np.save(variables.path + "/temp_data/y.npy", np.array(yy))
-            np.save(variables.path + "/temp_data/t.npy", np.array(tt))
-            np.save(variables.path + "/temp_data/voltage.npy", np.array(voltage_data))
-            np.save(variables.path + "/temp_data/voltage_pulse.npy", np.array(voltage_pulse_data))
-            np.save(variables.path + "/temp_data/laser_pulse.npy", np.array(laser_pulse_data))
-            np.save(variables.path + "/temp_data/start_counter.npy", np.array(start_counter))
-            np.save(variables.path + "/temp_data/x_bin.npy", np.array(xx_list_bin))
-            np.save(variables.path + "/temp_data/y_bin.npy", np.array(yy_list_bin))
-            np.save(variables.path + "/temp_data/t_bin.npy", np.array(tt_list_bin))
-        except Exception as exc:
-            print(f"TDC: DLD single-shot .npy save failed: {exc}")
-        _tlog("DLD fallback done in %.1fs" % (time.time() - _t))
-
-    if tdc_chunk_id == 0 and len(channel_data) > 0:
-        _tlog("raw/TDC fallback: mirroring %d rows into Manager + flat .npy ..." % len(channel_data))
-        _t = time.time()
-        try:
-            variables.extend_to('channel', channel_data)
-            variables.extend_to('time_data', time_data)
-            variables.extend_to('tdc_start_counter', tdc_start_counter)
-            variables.extend_to('main_v_dc_tdc', voltage_data_tdc)
-            variables.extend_to('main_v_p_tdc', voltage_pulse_data_tdc)
-            variables.extend_to('main_l_p_tdc', laser_pulse_data_tdc)
-        except Exception as exc:
-            print(f"TDC: raw residual extend_to failed (non-fatal): {exc}")
-        try:
-            np.save(variables.path + "/temp_data/channel.npy", np.array(channel_data))
-            np.save(variables.path + "/temp_data/time.npy", np.array(time_data))
-            # Canonical name matches the chunk stem (was the misnamed
-            # "main_raw_counter.npy"; the recover script reads both).
-            np.save(variables.path + "/temp_data/tdc_start_counter.npy", np.array(tdc_start_counter))
-            np.save(variables.path + "/temp_data/voltage_tdc.npy", np.array(voltage_data_tdc))
-            np.save(variables.path + "/temp_data/voltage_pulse_tdc.npy", np.array(voltage_pulse_data_tdc))
-            np.save(variables.path + "/temp_data/laser_pulse_tdc.npy", np.array(laser_pulse_data_tdc))
-        except Exception as exc:
-            print(f"TDC: raw single-shot .npy save failed: {exc}")
-        _tlog("raw/TDC fallback done in %.1fs" % (time.time() - _t))
-
-    print("data saved in share variables")
-    time.sleep(0.1)
-    _tlog("closing data-callback buffers + deinitializing TDC device...")
-    _dev_t = time.time()
-    bufdatacb.close()
-    bufdatacb_raw.close()
-    device.deinitialize()
-    _tlog("device deinitialized in %.1fs" % (time.time() - _dev_t))
-
-    variables.flag_finished_tdc = True
-    _tlog("flag_finished_tdc set; total teardown %.1fs" % (time.time() - _teardown_t0))
-
-    return 0
+            failure = failure or exc
+        stopped_tail = queued_tail + sum(getattr(callback, 'shutdown_packets', 0)
+                                        for callback in (bufdatacb, bufdatacb_raw))
+        publication_errors = [getattr(callback, 'publication_error', '') for callback in (bufdatacb, bufdatacb_raw)]
+        if stopped_tail or any(publication_errors):
+            failure = failure or RuntimeError(
+                f'{stopped_tail} detector packet(s) at shutdown retained without voltage attribution; '
+                'inspect temp_data/unattributed' +
+                (f'; callback preservation failed: {publication_errors}' if any(publication_errors) else ''))
+        variables.total_ions = events_detected
+        variables.total_raw_signals = raw_signal_detected
+        if failure is not None:
+            variables.flag_tdc_failure = True
+            variables.detector_error = f"{type(failure).__name__}: {failure}"
+            print(f"Surface Concept acquisition failed: {variables.detector_error}")
+        variables.flag_finished_tdc = True
+    return -1 if failure is not None else 0
 
 
 def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_event):
-
-    run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_event)
+    return run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_event)

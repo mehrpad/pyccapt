@@ -1707,23 +1707,14 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             variables.residual_coarse_to_fine_top_k = 1
             _adaptive_apply_profile('old')
         else:
-            # Sequential V+Bowl (old): legacy iterative V+Bowl + adaptive
-            # residual. Coarse-to-fine top_k=1 is enabled here too because
-            # it speeds the residual ~3x on the legacy warm-start as well
-            # (the c2f trick is warm-start-agnostic: it just replaces the
-            # all-candidate Voigt scoring with fast_mrp ranking + 1-of-K
-            # Voigt verification). If quality regresses on this preset for
-            # a given dataset, unset variables.residual_coarse_to_fine_top_k
-            # before pressing Hybrid.
+            # Legacy evaluates every candidate with the full quality score.
             _reset_widgets_to_old()
             _clear_opt_in_attrs()
             variables.calibration_profile = 'old'
-            variables.residual_coarse_to_fine_top_k = 1
             _adaptive_apply_profile('old')
 
     calibration_profile.observe(_apply_profile, names='value')
-    # Initialize variables.calibration_profile (defaults to 'old' = current behavior).
-    variables.calibration_profile = 'old'
+    _apply_profile(calibration_profile.value)
 
     # User-facing summary of what each preset actually changes. Kept in sync
     # with _apply_profile above and the per-button code paths
@@ -1745,8 +1736,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             'below.</li>'
             '<li><b>Legacy adaptive residual</b>: V+Bowl &rarr; adaptive '
             'residual without the coarse-to-fine speedup. Slower but '
-            'matches the pre-2026 reference behaviour exactly if you '
-            'need bit-identical results.</li>'
+            'evaluates every residual candidate with the full score.</li>'
             '</ol></div>'
         ),
         layout=widgets.Layout(width='720px'),

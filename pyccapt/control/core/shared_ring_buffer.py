@@ -1,12 +1,13 @@
-"""Lock-free single-producer / single-consumer shared-memory ring buffer.
+"""Bounded shared-memory buffers for live plot delivery.
 
-Used by the live-data pipeline so the detector subprocess (TDC) can hand
-plot samples to the visualization subprocess without going through a
-multiprocessing.Queue (which pickles every chunk and grows without bound
-if the consumer falls behind).
+The runtime uses ``SharedEventBuffer``: all four fields of an event share one
+copy/publication lock, including during wraparound. ``SharedRingBuffer`` is
+retained for legacy scalar callers; its lock-free copy cannot guarantee a
+coherent snapshot when a producer laps an active reader. Do not use separate
+scalar rings to transport associated event fields.
 
-Design
-------
+Legacy scalar layout
+--------------------
 * One ``multiprocessing.shared_memory.SharedMemory`` block holds the data
   ring as a 1-D numpy array of fixed dtype + capacity.
 * A second small block holds two ``int64`` indices: ``write_idx`` and
@@ -39,6 +40,8 @@ memory; children only call :meth:`close`.
 
 from __future__ import annotations
 
+import multiprocessing
+import logging
 from multiprocessing import shared_memory
 
 import numpy as np
@@ -78,6 +81,8 @@ class SharedRingBuffer:
     @classmethod
     def create(cls, name: str, capacity: int, dtype="float32") -> "SharedRingBuffer":
         """Allocate the shared blocks (parent / owner only)."""
+        if int(capacity) <= 0:
+            raise ValueError("Ring capacity must be positive")
         dtype = np.dtype(dtype)
         data_shm = shared_memory.SharedMemory(
             name=f"{name}__data",
@@ -109,7 +114,7 @@ class SharedRingBuffer:
         The receiving process re-attaches via :meth:`attach`, never as
         owner - so unlinking the OS blocks remains the parent's job.
         """
-        return (_attach_for_unpickle, (self.name, self.capacity, str(self.dtype)))
+        return (_attach_for_unpickle, (self.name, self.capacity, self.dtype))
 
     # ------------------------------------------------------------------ I/O
 
@@ -117,6 +122,7 @@ class SharedRingBuffer:
         """Append samples to the ring.  Oldest are silently overwritten if full."""
         arr = np.asarray(samples, dtype=self.dtype).ravel()
         n = arr.size
+        produced = n
         if n == 0:
             return
         # If a single chunk exceeds the ring, only the last `capacity`
@@ -127,11 +133,12 @@ class SharedRingBuffer:
             n = arr.size
 
         write_idx = int(self._idx[0])
-        unread = max(0, write_idx - int(self._idx[1]))
-        overwritten = max(0, unread + n - self.capacity)
+        unread = max(0, min(self.capacity, write_idx - int(self._idx[1])))
+        overwritten = max(0, unread + produced - self.capacity)
         if overwritten:
             self._idx[2] = int(self._idx[2]) + overwritten
-        start = write_idx % self.capacity
+        # Sequence indices include incoming records discarded by truncation.
+        start = (write_idx + produced - n) % self.capacity
         end = start + n
         if end <= self.capacity:
             self._data[start:end] = arr
@@ -139,7 +146,7 @@ class SharedRingBuffer:
             split = self.capacity - start
             self._data[start:] = arr[:split]
             self._data[: end - self.capacity] = arr[split:]
-        new_write = write_idx + n
+        new_write = write_idx + produced
         # Publish the new write index LAST, after the data stores above,
         # so a consumer that observes the advanced index also sees the
         # data (store-order is preserved on x86-64 TSO; see module note).
@@ -224,3 +231,88 @@ class SharedRingBuffer:
 def _attach_for_unpickle(name: str, capacity: int, dtype: str) -> "SharedRingBuffer":
     """Module-level reconstructor invoked by ``__reduce__`` on unpickle."""
     return SharedRingBuffer.attach(name, capacity, dtype)
+
+
+_EVENT_DTYPE = np.dtype([(name, "float32") for name in ("x", "y", "t", "v")])
+
+
+class SharedEventBuffer(SharedRingBuffer):
+    """Bounded complete-event transport with one cross-process commit lock.
+
+    The lock protects both copying and publication: a producer cannot overwrite
+    an event while a reader copies it. Only plot delivery uses this lock; saved
+    acquisition data and feedback control remain independent. Spawn transfers
+    the shared lock and memory names, never the event payload.
+    """
+
+    @classmethod
+    def create(cls, name, capacity, dtype=None):
+        buffer = super().create(name, capacity, _EVENT_DTYPE)
+        buffer._lock = multiprocessing.get_context("spawn").RLock()
+        buffer.transport_error = ''
+        return buffer
+
+    def __reduce__(self):
+        return (_attach_events, (self.name, self.capacity, self._lock))
+
+    def write_events(self, x, y, t, v):
+        columns = [np.asarray(values, dtype="float32").reshape(-1) for values in (x, y, t, v)]
+        lengths = {len(values) for values in columns}
+        if len(lengths) != 1:
+            raise ValueError("Plot event columns must have equal lengths")
+        events = np.empty(len(columns[0]), dtype=_EVENT_DTYPE)
+        for name, values in zip(_EVENT_DTYPE.names, columns):
+            events[name] = values
+        if not self._acquire():
+            return False
+        try:
+            super().write(events)
+        finally:
+            self._lock.release()
+        return True
+
+    def read_events(self):
+        if not self._acquire():
+            return tuple(np.empty(0, dtype='float32') for _ in range(4))
+        try:
+            events = super().read_all()
+        finally:
+            self._lock.release()
+        return tuple(events[name] for name in _EVENT_DTYPE.names)
+
+    def reset(self):
+        if not self._acquire():
+            return
+        try:
+            super().reset()
+        finally:
+            self._lock.release()
+
+    def _acquire(self):
+        # A terminated process can abandon a Windows semaphore. Plot-only
+        # delivery must never strand acquisition/Stop. Fail closed locally:
+        # don't copy possibly half-written events and don't mutate the ring.
+        if self.transport_error:
+            return False
+        if self._lock.acquire(timeout=.05):
+            return True
+        self.transport_error = 'Plot event transport unavailable; restart the visualization context'
+        logging.getLogger('apt').error(self.transport_error)
+        return False
+
+
+def _attach_events(name, capacity, lock):
+    buffer = SharedEventBuffer.attach(name, capacity, _EVENT_DTYPE)
+    buffer._lock = lock
+    buffer.transport_error = ''
+    return buffer
+
+
+def publish_plot_events(x_plot, y_plot, t_plot, v_plot, x, y, t, v):
+    """Publish one event batch; retain legacy scalar sinks for external callers."""
+    if isinstance(x_plot, SharedEventBuffer):
+        x_plot.write_events(x, y, t, v)
+    else:
+        for sink, values in zip((x_plot, y_plot, t_plot, v_plot), (x, y, t, v)):
+            if sink is not None:
+                sink.write(values)

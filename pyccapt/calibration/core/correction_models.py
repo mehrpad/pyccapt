@@ -138,10 +138,12 @@ class EstimatorCorrectionModel(CalibrationModel):
     def provenance(self) -> dict:
         parameters = self.estimator.get_params(deep=False) if hasattr(self.estimator, "get_params") else {}
         serializable = {key: value for key, value in parameters.items() if isinstance(value, (str, int, float, bool, type(None)))}
+        from pyccapt.calibration.data_tools.model_state import export_model_state
         return {
             "model_type": type(self).__name__,
             "estimator_type": type(self.estimator).__name__,
             "parameters": serializable,
+            "learned_state": export_model_state(self.estimator),
             "valid_domain": {key: list(value) for key, value in self._valid_domain.items()},
         }
 

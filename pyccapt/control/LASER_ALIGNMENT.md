@@ -37,14 +37,14 @@ Laser pulse mode with a Surface Concept or RoentDek TDC, not Voltage + Laser/DRS
 ## Search behavior
 
 1. Hold DC and laser settings during each scan; suspend PID evaluation to avoid
-   accumulating integral corrections. Use a serpentine XY raster, then successively
+   accumulating integral corrections. The default uses a serpentine XY raster, then successively
    smaller fine scans. Scan axes are clipped to the intersection of absolute
    calibrated limits and the session's permitted travel. An optimum at a boundary
    receives an inward scan, including centre baselines, without enlarging either
    limit. Z moves and XY moves are separate.
 2. Wait for acknowledged stage position and a configured settling interval.
 3. Request a new detector epoch. Discard its first packet because it may contain
-   pre-settle events, then collect an independent count/TOF window. Visualization
+   pre-settle events, then collect an independent count window. Visualization
    ring buffers remain single-consumer and are not drained by alignment.
 4. Score actual ions per actual readback pulse frequency and elapsed time. Require
    a minimum event count and a rate more than three Poisson standard errors above
@@ -100,24 +100,25 @@ numerical range/speed defaults are editable commissioning values, not a statemen
 that those moves are safe on the connected optics. Measure beam displacement and
 focus response versus stage displacement, including the Z axis mapping.
 
-### Optional focus quality diagnostic
+## Detector-only acceleration
 
-Set `laser_alignment_quality_peak_ns = [low, high]` around one isolated TOF peak
-and configure `laser_alignment_quality_min_events`. Focus candidates must retain
-acceptable robust peak width (10th–90th percentile) and late-tail fraction relative
-to the baseline; insufficient peak statistics cause a retry rather than inventing
-a quality score. This is a relative fixed-DC diagnostic, **not calibrated mass
-resolving power**. A fixed TOF ROI must be appropriate for the voltage interval used;
-changing material or voltage may require a different ROI.
+Alignment now uses detector count/rate evidence only. Laser power, frequency and
+wavelength stay at the user's settings; changed or stale readback ends the scan.
+Focus Z selects measured response, not spectrum quality or mass resolving power.
+Legacy `quality_peak_ns`/`quality_min_events` settings do not influence motor
+decisions, and spectral arrays are no longer transferred to this optimizer.
 
-With an empty ROI, focus optimization uses ion response only and the GUI explicitly
-shows that peak quality is unavailable. No mass-resolution guarantee is inferred.
+Optional hybrid local response modelling, bounded adaptive dwell and compatible
+previous-solution reuse are documented in
+[Detector-only alignment methods](../../docs/detector_only_alignment.md).
+They default to disabled. All proposals still pass the existing physical limits,
+settling, fresh epochs, centre-drift checks and candidate remeasurement.
 
 ## Data and implementation
 
 `meta_data/laser_alignment.jsonl` records every session, settings, movement target,
-scan, DC retry, observation (position, count, uncertainty, rate, voltage and optional
-TOF quality), acceptance and termination. HDF5 provenance retains the final run
+scan, DC retry, observation (position, count, uncertainty, rate, voltage and dwell
+decision), model/fallback/reuse evidence, acceptance and termination. HDF5 provenance retains the final run
 settings/origin/status and tracking selection; normal acquisition retains stage
 positions and laser telemetry. Multiple manual alignment sessions share the JSONL
 log with distinct session IDs.
@@ -125,6 +126,8 @@ log with distinct session IDs.
 - `apt/laser_alignment.py`: deterministic scan state machine; no device I/O.
 - `apt/laser_alignment_runtime.py`: experiment integration and sole DC-owner interface.
 - `apt/laser_alignment_data.py`: independent bounded detector windows.
+- `apt/alignment_response.py`: bounded local proposals and sample coverage probes.
+- `apt/alignment_replay.py`: read-only journal comparison metrics.
 - `devices/laser_alignment_stage.py`: acknowledged motion using the existing connection.
 - `gui/laser_alignment_gui.py`, `gui/laser_alignment_plot.py`: controls and display.
 

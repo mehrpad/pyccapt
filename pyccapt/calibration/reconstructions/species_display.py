@@ -6,6 +6,8 @@ from collections.abc import Mapping
 
 import numpy as np
 
+from pyccapt.calibration.core.range_assignment import assign_intervals, range_row_definition
+
 
 UNRANGED = "unranged"
 
@@ -21,7 +23,7 @@ def is_unranged_row(elements, ion=None):
     labels = _row_elements(elements)
     if ion is not None:
         labels.append(str(ion))
-    return any(label.strip().strip("$").lower() == UNRANGED for label in labels)
+    return any(label.strip().strip("$").lower() in {UNRANGED, 'un', 'unknown'} for label in labels)
 
 
 def default_element_controls(range_data, value):
@@ -59,21 +61,21 @@ def resolve_element_controls(range_data, controls, default, unranged_default=Non
 
 
 def range_row_masks_and_unranged(mc, range_data):
-    """Return masks aligned with range rows and the inverse union of real ranges."""
+    """Return exclusive row masks using [low, high) and first-row overlap priority."""
     mc = np.asarray(mc)
-    union = np.zeros(mc.shape, dtype=bool)
-    masks = []
+    lower = np.full(len(range_data), np.nan)
+    upper = np.full(len(range_data), np.nan)
     valid_indices = []
-    ions = range_data["ion"].tolist() if "ion" in range_data else [None] * len(range_data)
     for position, (_, row) in enumerate(range_data.iterrows()):
-        if is_unranged_row(row["element"], ions[position]):
-            mask = np.zeros(mc.shape, dtype=bool)
-        else:
-            mask = (mc > float(row["mc_low"])) & (mc < float(row["mc_up"]))
-            union |= mask
-            valid_indices.append(position)
-        masks.append(mask)
-    return masks, ~union, valid_indices
+        definition = range_row_definition(row)
+        if definition is None:
+            continue
+        _, _, lo, hi = definition
+        lower[position], upper[position] = lo, hi
+        valid_indices.append(position)
+    assigned = assign_intervals(mc, lower, upper)
+    masks = [assigned == position for position in range(len(range_data))]
+    return masks, assigned < 0, valid_indices
 
 
 def _unit_value(value, label):

@@ -15,6 +15,9 @@ def test_auto_detect_reference_peaks_and_joint_refinement_run_on_synthetic_data(
     v_norm = (voltage - voltage.mean()) / voltage.std()
     r2_norm = ((x_det * 10.0) ** 2 + (y_det * 10.0) ** 2) / 6.0
     measured = true_peaks * (1.0 + 0.02 * v_norm + 0.015 * r2_norm) + rng.normal(0.0, 0.02, len(true_peaks))
+    # Unavailable features must neither poison training nor invent corrections
+    # for those otherwise usable mass events.
+    x_det[0], y_det[1], voltage[2] = np.nan, np.inf, np.nan
 
     variables.mc_calib = measured.copy()
     variables.dld_t_calib = measured.copy()
@@ -46,3 +49,4 @@ def test_auto_detect_reference_peaks_and_joint_refinement_run_on_synthetic_data(
     assert len(used_peaks) >= 3
     assert len(model["parameters"]) == 12
     assert np.isfinite(variables.mc_calib).all()
+    np.testing.assert_array_equal(variables.mc_calib[:3], measured[:3])

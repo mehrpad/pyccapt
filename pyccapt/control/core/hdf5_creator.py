@@ -16,7 +16,7 @@ import numpy as np
 import pyccapt
 
 from pyccapt.control.apt.detector_models import normalize_tdc_model
-from pyccapt.control.core import chunk_store
+from pyccapt.control.core import chunk_store, detector_hdf
 from pyccapt.control.nkt_photonics.readback import TELEMETRY_UNITS, json_safe
 
 logger = logging.getLogger("apt")
@@ -113,6 +113,9 @@ def _load_apt_from_chunks(chunk_dir: Path,
     for stem, ds_path, dtype in _APT_CHUNK_STEMS:
         files = _sorted_chunk_files(chunk_dir, stem, manifest_files)
         if not files:
+            if isinstance(manifest_files, chunk_store.ValidatedChunkIndex) and manifest_files.declares(stem):
+                result[ds_path] = np.empty(0, dtype=dtype)
+                any_found = True
             continue
         any_found = True
         target = np.dtype(dtype)
@@ -282,6 +285,8 @@ def _write_surface_concept_detector_data(hdf_file, variables, manifest_files=Non
 		chunk_files = _sorted_chunk_files(chunk_dir, chunk_stem, manifest_files) if chunk_dir_exists else []
 		if chunk_files:
 			_write_chunked_dataset(hdf_file, dataset_name, chunk_files, dtype)
+		elif isinstance(manifest_files, chunk_store.ValidatedChunkIndex) and manifest_files.declares(chunk_stem):
+			_create_dataset(hdf_file, dataset_name, [], dtype)
 		else:
 			# Lazy: only fetch the (possibly large, Manager-backed) array when
 			# this stream was NOT chunked, so a fully-chunked run never pulls
@@ -319,6 +324,15 @@ def hdf_creator(variables, conf, time_counter, time_ex):
         # validated index local to this save: every checksum is checked once,
         # rather than reopening all chunks for each metadata/detector field.
         manifest_files = chunk_store.validated_files_by_stem(chunk_dir)
+        manifest_files = detector_hdf.align_hsd_chunks(manifest_files)
+        integrity = (manifest_files.integrity_report() if manifest_files is not None else
+                     {'status': 'unverified', 'scope': 'legacy input without chunk manifests',
+                      'streams': {}, 'rejected_records': []})
+        detector_error = str(getattr(variables, 'detector_error', '') or '')
+        unattributed = sorted(path.name for path in (chunk_dir.parent / 'unattributed').glob('*.npz'))
+        if bool(getattr(variables, 'flag_tdc_failure', False)) or detector_error or unattributed:
+            integrity['status'] = 'incomplete'
+        integrity.update(detector_error=detector_error, unattributed_packets=unattributed)
         logger.info('Acquisition chunk validation completed in %.3f s; writing HDF5',
                     time.monotonic()-save_started)
         with h5py.File(tmp_path, "w") as hdf_file:
@@ -361,7 +375,13 @@ def hdf_creator(variables, conf, time_counter, time_ex):
             provenance.attrs["calibration_input_sha256"] = str(
                 getattr(calibration_dataset, "source_hash", "")
             )
-            provenance.attrs["excluded_row_count"] = int(getattr(variables, "excluded_row_count", 0))
+            excluded_events = sum(stream['excluded_rows'] for name, stream in integrity['streams'].items()
+                                  if name in {'dld', 'roentdek', 'hsd_events'})
+            provenance.attrs["excluded_row_count"] = int(getattr(variables, "excluded_row_count", 0)) + excluded_events
+            provenance.attrs['acquisition_completeness'] = integrity['status']
+            provenance.attrs['chunk_integrity_json'] = json.dumps(integrity, sort_keys=True)
+            if tdc_model == 'HSD':
+                provenance.attrs['drs_acquisition_mode'] = str(conf.get('drs_acquisition_mode', 'normal'))
             provenance.attrs["model_provenance_json"] = json.dumps(
                 getattr(variables, "calibration_model_provenance", {}), sort_keys=True, default=str
             )
@@ -405,110 +425,112 @@ def hdf_creator(variables, conf, time_counter, time_ex):
                 _write_surface_concept_detector_data(hdf_file, variables, manifest_files)
 
             elif conf["tdc"] == "on" and tdc_model == "RoentDek" and variables.counter_source == "TDC":
-                _create_dataset(hdf_file, "dld/x", variables.x, np.float64)
-                _create_dataset(hdf_file, "dld/y", variables.y, np.float64)
-                _create_dataset(hdf_file, "dld/t", variables.t, np.float64)
-                _create_dataset(hdf_file, "dld/high_voltage", variables.main_v_dc_dld, np.float64)
-                _create_dataset(hdf_file, "dld/voltage_pulse", variables.main_v_p_dld, np.float64)
-                _create_dataset(hdf_file, "dld/laser_pulse", variables.main_l_p_dld, np.float64)
-                _create_dataset(hdf_file, "dld/start_counter", variables.time_stamp, np.uint64)
-                # RoentDek raw: convert per-channel arrays ch0..ch7 (one entry
-                # per pulse trigger per channel) into the same flat
-                # (channel, time_data, start_counter, ...) layout that
-                # Surface Concept uses, so the calibration loader at
-                # data_loadcrop.fetch_dataset_from_dld_grp(extract_mode='tdc_ro')
-                # can read both detectors with one code path. Each event
-                # contributes 8 rows (one per channel); rows where the
-                # channel did not fire (raw value == 0) are kept so the
-                # per-event grouping by start_counter stays intact, but the
-                # downstream partial-hit recovery can filter them via
-                # ``time_data != 0``.
-                _ch_stack = np.column_stack(
-                    [
-                        np.asarray(variables.ch0, dtype=np.uint64).reshape(-1),
-                        np.asarray(variables.ch1, dtype=np.uint64).reshape(-1),
-                        np.asarray(variables.ch2, dtype=np.uint64).reshape(-1),
-                        np.asarray(variables.ch3, dtype=np.uint64).reshape(-1),
-                        np.asarray(variables.ch4, dtype=np.uint64).reshape(-1),
-                        np.asarray(variables.ch5, dtype=np.uint64).reshape(-1),
-                        np.asarray(variables.ch6, dtype=np.uint64).reshape(-1),
-                        np.asarray(variables.ch7, dtype=np.uint64).reshape(-1),
-                    ]
-                )  # shape (n_events, 8)
-                _n_events = _ch_stack.shape[0]
+                if not detector_hdf.write_roentdek_chunks(hdf_file, chunk_dir, manifest_files):
+                    _create_dataset(hdf_file, "dld/x", variables.x, np.float64)
+                    _create_dataset(hdf_file, "dld/y", variables.y, np.float64)
+                    _create_dataset(hdf_file, "dld/t", variables.t, np.float64)
+                    _create_dataset(hdf_file, "dld/high_voltage", variables.main_v_dc_dld, np.float64)
+                    _create_dataset(hdf_file, "dld/voltage_pulse", variables.main_v_p_dld, np.float64)
+                    _create_dataset(hdf_file, "dld/laser_pulse", variables.main_l_p_dld, np.float64)
+                    _create_dataset(hdf_file, "dld/start_counter", variables.time_stamp, np.uint64)
+                    # RoentDek raw: convert per-channel arrays ch0..ch7 (one entry
+                    # per pulse trigger per channel) into the same flat
+                    # (channel, time_data, start_counter, ...) layout that
+                    # Surface Concept uses, so the calibration loader at
+                    # data_loadcrop.fetch_dataset_from_dld_grp(extract_mode='tdc_ro')
+                    # can read both detectors with one code path. Each event
+                    # contributes 8 rows (one per channel); rows where the
+                    # channel did not fire (raw value == 0) are kept so the
+                    # per-event grouping by start_counter stays intact, but the
+                    # downstream partial-hit recovery can filter them via
+                    # ``time_data != 0``.
+                    _ch_stack = np.column_stack(
+                        [
+                            np.asarray(variables.ch0, dtype=np.uint64).reshape(-1),
+                            np.asarray(variables.ch1, dtype=np.uint64).reshape(-1),
+                            np.asarray(variables.ch2, dtype=np.uint64).reshape(-1),
+                            np.asarray(variables.ch3, dtype=np.uint64).reshape(-1),
+                            np.asarray(variables.ch4, dtype=np.uint64).reshape(-1),
+                            np.asarray(variables.ch5, dtype=np.uint64).reshape(-1),
+                            np.asarray(variables.ch6, dtype=np.uint64).reshape(-1),
+                            np.asarray(variables.ch7, dtype=np.uint64).reshape(-1),
+                        ]
+                    )  # shape (n_events, 8)
+                    _n_events = _ch_stack.shape[0]
 
-                # Validate per-event auxiliary arrays are long enough BEFORE
-                # slicing. Previously ``[:_n_events]`` silently truncated a
-                # short array, writing tdc/* groups of inconsistent length
-                # that crash the calibration reader much later. Fail loudly
-                # at write time instead.
-                _start_counter_per_event = np.asarray(variables.time_stamp, dtype=np.uint64).reshape(-1)
-                _hv_per_event = np.asarray(variables.main_v_dc_tdc, dtype=np.float64).reshape(-1)
-                _vp_per_event = np.asarray(variables.main_v_p_tdc, dtype=np.float64).reshape(-1)
-                _lp_per_event = np.asarray(variables.main_l_p_tdc, dtype=np.float64).reshape(-1)
-                for _name, _arr in (
-                    ("time_stamp", _start_counter_per_event),
-                    ("main_v_dc_tdc", _hv_per_event),
-                    ("main_v_p_tdc", _vp_per_event),
-                    ("main_l_p_tdc", _lp_per_event),
-                ):
-                    if _arr.shape[0] < _n_events:
-                        raise ValueError(
-                            f"RoentDek auxiliary array {_name!r} has length "
-                            f"{_arr.shape[0]} < {_n_events} events; cannot build "
-                            f"consistent tdc/* groups. (Did the per-event and "
-                            f"per-channel buffers desync during acquisition?)"
-                        )
+                    # Validate per-event auxiliary arrays are long enough BEFORE
+                    # slicing. Previously ``[:_n_events]`` silently truncated a
+                    # short array, writing tdc/* groups of inconsistent length
+                    # that crash the calibration reader much later. Fail loudly
+                    # at write time instead.
+                    _start_counter_per_event = np.asarray(variables.time_stamp, dtype=np.uint64).reshape(-1)
+                    _hv_per_event = np.asarray(variables.main_v_dc_tdc, dtype=np.float64).reshape(-1)
+                    _vp_per_event = np.asarray(variables.main_v_p_tdc, dtype=np.float64).reshape(-1)
+                    _lp_per_event = np.asarray(variables.main_l_p_tdc, dtype=np.float64).reshape(-1)
+                    for _name, _arr in (
+                        ("time_stamp", _start_counter_per_event),
+                        ("main_v_dc_tdc", _hv_per_event),
+                        ("main_v_p_tdc", _vp_per_event),
+                        ("main_l_p_tdc", _lp_per_event),
+                    ):
+                        if _arr.shape[0] < _n_events:
+                            raise ValueError(
+                                f"RoentDek auxiliary array {_name!r} has length "
+                                f"{_arr.shape[0]} < {_n_events} events; cannot build "
+                                f"consistent tdc/* groups. (Did the per-event and "
+                                f"per-channel buffers desync during acquisition?)"
+                            )
 
-                # MEMORY: build-write-free each flat array in turn so peak
-                # RAM is ~ _ch_stack + ONE 8*n_events flat array, not all six
-                # at once (~17 GB for 50M events with the old up-front build).
-                # tdc/time_data is a view of _ch_stack, so keep _ch_stack
-                # alive until that one is written.
-                _create_dataset(hdf_file, "tdc/time_data", _ch_stack.reshape(-1), np.uint64)
-                del _ch_stack
+                    # MEMORY: build-write-free each flat array in turn so peak
+                    # RAM is ~ _ch_stack + ONE 8*n_events flat array, not all six
+                    # at once (~17 GB for 50M events with the old up-front build).
+                    # tdc/time_data is a view of _ch_stack, so keep _ch_stack
+                    # alive until that one is written.
+                    _create_dataset(hdf_file, "tdc/time_data", _ch_stack.reshape(-1), np.uint64)
+                    del _ch_stack
 
-                _channel_flat = np.tile(np.arange(8, dtype=np.uint32), _n_events)
-                _create_dataset(hdf_file, "tdc/channel", _channel_flat, np.uint32)
-                del _channel_flat
+                    _channel_flat = np.tile(np.arange(8, dtype=np.uint32), _n_events)
+                    _create_dataset(hdf_file, "tdc/channel", _channel_flat, np.uint32)
+                    del _channel_flat
 
-                _create_dataset(
-                    hdf_file, "tdc/start_counter",
-                    np.repeat(_start_counter_per_event[:_n_events], 8), np.uint64,
-                )
-                _create_dataset(
-                    hdf_file, "tdc/high_voltage",
-                    np.repeat(_hv_per_event[:_n_events], 8), np.float64,
-                )
-                _create_dataset(
-                    hdf_file, "tdc/voltage_pulse",
-                    np.repeat(_vp_per_event[:_n_events], 8), np.float64,
-                )
-                _create_dataset(
-                    hdf_file, "tdc/laser_pulse",
-                    np.repeat(_lp_per_event[:_n_events], 8), np.float64,
-                )
+                    _create_dataset(
+                        hdf_file, "tdc/start_counter",
+                        np.repeat(_start_counter_per_event[:_n_events], 8), np.uint64,
+                    )
+                    _create_dataset(
+                        hdf_file, "tdc/high_voltage",
+                        np.repeat(_hv_per_event[:_n_events], 8), np.float64,
+                    )
+                    _create_dataset(
+                        hdf_file, "tdc/voltage_pulse",
+                        np.repeat(_vp_per_event[:_n_events], 8), np.float64,
+                    )
+                    _create_dataset(
+                        hdf_file, "tdc/laser_pulse",
+                        np.repeat(_lp_per_event[:_n_events], 8), np.float64,
+                    )
 
             elif conf["tdc"] == "on" and tdc_model == "HSD" and variables.counter_source == "HSD":
-                # DRS readout: GetTime returns ns and GetWave returns mV as
-                # C float — both are signed real values, NOT unsigned ints.
-                # Casting to uint64 (the previous behaviour) silently
-                # truncated fractional ns and wrapped negative mV samples
-                # (range ±500 mV at SetInputRange(0)) to ~1.8e19, ruining
-                # every saved HSD file. Persist as float32 to match the
-                # native dtype.
-                _create_dataset(hdf_file, "hsd/ch0_time", variables.ch0_time, np.float32)
-                _create_dataset(hdf_file, "hsd/ch0_wave", variables.ch0_wave, np.float32)
-                _create_dataset(hdf_file, "hsd/ch1_time", variables.ch1_time, np.float32)
-                _create_dataset(hdf_file, "hsd/ch1_wave", variables.ch1_wave, np.float32)
-                _create_dataset(hdf_file, "hsd/ch2_time", variables.ch2_time, np.float32)
-                _create_dataset(hdf_file, "hsd/ch2_wave", variables.ch2_wave, np.float32)
-                _create_dataset(hdf_file, "hsd/ch3_time", variables.ch3_time, np.float32)
-                _create_dataset(hdf_file, "hsd/ch3_wave", variables.ch3_wave, np.float32)
-                # ch4/ch5 and laser_pulse are not produced by drs.experiment_measure,
-                # so we don't write empty datasets for them.
-                _create_dataset(hdf_file, "hsd/high_voltage", variables.main_v_dc_drs, np.float64)
-                _create_dataset(hdf_file, "hsd/voltage_pulse", variables.main_v_p_drs, np.float64)
+                if not detector_hdf.write_hsd_chunks(hdf_file, chunk_dir, manifest_files):
+                    # DRS readout: GetTime returns ns and GetWave returns mV as
+                    # C float — both are signed real values, NOT unsigned ints.
+                    # Casting to uint64 (the previous behaviour) silently
+                    # truncated fractional ns and wrapped negative mV samples
+                    # (range ±500 mV at SetInputRange(0)) to ~1.8e19, ruining
+                    # every saved HSD file. Persist as float32 to match the
+                    # native dtype.
+                    _create_dataset(hdf_file, "hsd/ch0_time", variables.ch0_time, np.float32)
+                    _create_dataset(hdf_file, "hsd/ch0_wave", variables.ch0_wave, np.float32)
+                    _create_dataset(hdf_file, "hsd/ch1_time", variables.ch1_time, np.float32)
+                    _create_dataset(hdf_file, "hsd/ch1_wave", variables.ch1_wave, np.float32)
+                    _create_dataset(hdf_file, "hsd/ch2_time", variables.ch2_time, np.float32)
+                    _create_dataset(hdf_file, "hsd/ch2_wave", variables.ch2_wave, np.float32)
+                    _create_dataset(hdf_file, "hsd/ch3_time", variables.ch3_time, np.float32)
+                    _create_dataset(hdf_file, "hsd/ch3_wave", variables.ch3_wave, np.float32)
+                    # ch4/ch5 and laser_pulse are not produced by drs.experiment_measure,
+                    # so we don't write empty datasets for them.
+                    _create_dataset(hdf_file, "hsd/high_voltage", variables.main_v_dc_drs, np.float64)
+                    _create_dataset(hdf_file, "hsd/voltage_pulse", variables.main_v_p_drs, np.float64)
         # h5py has flushed and closed the file. Atomically replace any prior
         # .h5 file in this folder. ``os.replace`` is atomic on POSIX and
         # atomic-or-best-effort on Windows.

@@ -22,7 +22,8 @@ half the X/Y ranges and eight at their full extents: **16 lateral probes plus
 the saved-position observation**. Each axis scales independently with its range.
 Targets are inset by 0.2 µm to avoid commanding exactly on a measured-position
 guard: with the default ±50 µm range, probe distances are 24.9 and 49.8 µm.
-This is a sparse search, so a narrow peak between probes can be missed. Re-save
+This is a sparse search, so a narrow peak between probes can be missed. An optional
+bounded coverage fallback adds probes inside those gaps (see below). Re-save
 the rough position nearer the sample or reduce `alignment_xy_range_um` if needed;
 the probe spacings automatically shrink with it. The nominal failed broad pass,
 origin return and voltage increment take under 80 s with the current defaults,
@@ -49,7 +50,7 @@ alignment begins:
 | Semi-coarse search | Candidate XY ±15 µm, also inside the inset coarse envelope; Z = Z0 | Candidate plus up to 16 probes at 7.5 and 15 µm, clipped and deduplicated near boundaries | 100 µm/s |
 | Fine search | Xf ±5 µm, Yf ±5 µm, also within the inset coarse envelope and absolute bounds | 1 µm single-axis detector-feedback probes | 16 µm/s = 0.016 mm/s |
 | Optional mapped fine correction | Same fine/coarse/absolute limits | At most ±0.1 µm per X/Y axis per correction | 16 µm/s |
-| Fine Z approach | **Enabled**, after stable XY centring and a valid circular footprint; total advance ≤20 µm from Z0 | +0.05 µm per step; never reset the allowance after a move | 0.1 µm/s |
+| Fine Z approach | **Withheld until an independent Z response calibration is declared**; then requires stable XY centring and a valid circular footprint, total advance ≤20 µm from Z0 | +0.05 µm per step; never reset the allowance after a move | 0.1 µm/s |
 
 `alignment_xy_jacobian_mm_per_um = []` selects the detector-feedback method.
 Consequently, `alignment_fine_probe_step_um = 1.0` controls the current fine
@@ -88,6 +89,8 @@ an unsuccessful detector search.
 | `alignment_fine_loss_ratio` | 0.25 | Signal-loss fraction of the verified fine-entry rate |
 | `alignment_voltage_increment` | 100 | Default stationary DC retry in volts; GUI value takes precedence |
 | `alignment_approach_enabled` / `alignment_z_max_advance_um` | true / 20 | Fine Z enable and total advance cap in µm from saved Z |
+| `alignment_z_response_calibrated` / `alignment_z_response_calibration_id` | false / empty | Independent measured Z-response/clearance relation; both required before an approach |
+| `alignment_coverage_max_probes` / `alignment_coverage_subdivisions` | 0 / 8 | Optional extra probe budget and grid subdivisions per axis; zero disables fallback |
 | `alignment_max_attempts` | 1 | Fine entries at one voltage before recovery raises DC; does not terminate the sequence |
 
 The former `alignment_entry_fraction` and `alignment_loss_fraction` are no longer
@@ -223,6 +226,37 @@ but cannot approach the electrode. The enabled XY/transfer configuration is not
 proof of physical clearance; verify the path on the actual instrument.
 Re-save sample positions after changing the holder or stage coordinate reference.
 
+Footprint area alone is not a Z-position or clearance measurement: voltage,
+specimen shape and magnification can also change it. Declare an independently
+measured Z response with `alignment_z_response_calibrated = true` and a nonempty
+`alignment_z_response_calibration_id` in addition to the existing approach flag
+and limits. Both the search and stage service enforce this gate. Without it,
+the controller abstains from approach while retaining XY centring and stationary
+bounded DC ramps. Transfer/recovery paths retain their separate safeguards.
+
+### Detector-only coverage and geometry improvements
+
+`alignment_coverage_max_probes > 0` adds a bounded space-filling search after the
+original sparse probes fail. New points fill the largest remaining normalized
+grid gaps; travel cost breaks near ties. All points remain at saved Z inside the
+original inset XY envelope. Fresh detector epochs, bounded dwell, independent
+neighbour/candidate rechecks and the existing completion criteria remain active.
+The extra budget is included in the startup timeout estimate.
+
+Dense-region XY feedback uses region geometry instead of its bright-pole-weighted
+centroid. Intensity centre and its distance from the geometry are reported
+separately. The existing circle boundary remains the geometric footprint, and
+the configured measured XY Jacobian remains optional. No calibration matrix or
+Z relation is invented from detector observations.
+
+No camera, spectrum, MRP, charge-state-ratio or laser-power optimization is used.
+Laser-mode sample alignment requires unchanged fresh enabled-output readback of
+the user-selected power/frequency/wavelength. The power setting is locked during
+sample or laser alignment; output-off remains available.
+
+See [Detector-only alignment methods](../../docs/detector_only_alignment.md) for
+coverage resolution, assumptions, replay metrics and optional laser acceleration.
+
 ### Resolving “Automatic alignment is not calibrated”
 
 This message is expected if the motion flag is disabled. Edit the alignment
@@ -338,7 +372,8 @@ and Reference are blocked throughout a sequence; Stage Stop cancels the sequence
    final increment is shortened to the cap (5900 -> 6000 for the defaults).
 6. Fine alignment centres the footprint with bounded XY detector-feedback probes
    (or a measured XY mapping when supplied),
-   then takes small Z steps only after stable XY centring and circular-fit
+   then takes small Z steps only with an independently calibrated Z response,
+   stable XY centring and circular-fit
    validation, with a total maximum approach of 20 µm. Each step settles before using fresh
    events. Centre + stable 80% target rate freezes all alignment movement for
    the remainder of the experiment. The 90% detector-area approach limit includes

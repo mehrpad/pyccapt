@@ -116,3 +116,17 @@ def test_reader_preserves_uint64_counters_and_tdc_times(tmp_path: Path):
     assert int(tdc_df["time_data"].iloc[0]) == int(big)
     assert str(dld_df["start_counter"].dtype) == "uint64"
     assert str(tdc_df["time_data"].dtype) == "uint64"
+
+
+def test_typed_mapping_preserves_precision_and_legacy_bin_conversion():
+    big = np.uint64(2**60 + 7)
+    arrays = [np.array([1000.]), np.array([200.]), np.array([0.]),
+              np.array([big], dtype=np.uint64), np.array([100.]), np.array([1300.]), np.array([1200.])]
+    mapping = hdf5_schema.column_mapping(hdf5_schema.DLD_COLUMNS, arrays)
+    assert mapping['start_counter'].dtype == np.uint64
+    assert all(column.dtype != object for column in mapping.values())
+    typed = data_loadcrop.create_pandas_dataframe(mapping, flag_old_pyccpat_data=True)
+    legacy = data_loadcrop.create_pandas_dataframe(hdf5_schema.stack_columns(arrays), flag_old_pyccpat_data=True)
+    import pandas as pd
+    pd.testing.assert_frame_equal(typed, legacy)
+    assert int(typed['start_counter'].iloc[0]) == int(big)

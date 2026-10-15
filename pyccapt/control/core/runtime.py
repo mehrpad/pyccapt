@@ -16,7 +16,8 @@ from typing import Any
 _kill_on_exit_job = None
 
 from pyccapt.control.core import read_files, share_variables
-from pyccapt.control.core.shared_ring_buffer import SharedRingBuffer
+from pyccapt.control.core.shared_ring_buffer import SharedEventBuffer
+from pyccapt.control.core.shared_namespace import ControlManager
 
 # Each plot ring buffer holds 1 M float32 samples = 4 MB.  At 1 kHz ion
 # rate that's ~17 minutes of buffered history, far more than the
@@ -34,10 +35,10 @@ class SharedContext:
     # Plot data: SPSC ring buffers in shared memory.  Producer is the TDC
     # subprocess (one writer per buffer); consumer is the visualization
     # subprocess (one reader per buffer).
-    x_plot: SharedRingBuffer
-    y_plot: SharedRingBuffer
-    t_plot: SharedRingBuffer
-    main_v_dc_plot: SharedRingBuffer
+    x_plot: SharedEventBuffer
+    y_plot: SharedEventBuffer
+    t_plot: SharedEventBuffer
+    main_v_dc_plot: SharedEventBuffer
 
 
 def find_project_root(start: Path | None = None) -> Path:
@@ -207,12 +208,13 @@ def create_shared_context(conf: dict[str, Any]) -> SharedContext:
     """Create manager namespace, shared variables, and plot ring buffers.
 
     The ring buffers replace the old multiprocessing.Queue plot pipeline:
-    bounded memory (4 MB / signal), zero-copy reads, no pickling per
+    bounded memory (4 MB / signal), one coherent copy per read, no pickling per
     chunk.  Owner is the parent process; child processes attach to the
     same shared blocks by name.
     """
-    manager = multiprocessing.Manager()
-    allocated_buffers: list[SharedRingBuffer] = []
+    manager = ControlManager()
+    manager.start()
+    allocated_buffers: list[SharedEventBuffer] = []
     try:
         namespace = manager.Namespace()
         variables = share_variables.Variables(conf, namespace)
@@ -220,11 +222,11 @@ def create_shared_context(conf: dict[str, Any]) -> SharedContext:
         # Unique per-launch suffix so we never collide with a stale block
         # left behind by a crashed previous run.
         suffix = uuid.uuid4().hex[:8]
-        for label in ("xplot", "yplot", "tplot", "vplot"):
-            allocated_buffers.append(
-                SharedRingBuffer.create(f"pyccapt_{label}_{suffix}", _PLOT_BUFFER_CAPACITY, "float32")
-            )
-        x_plot, y_plot, t_plot, main_v_dc_plot = allocated_buffers
+        events = SharedEventBuffer.create(f"pyccapt_events_{suffix}", _PLOT_BUFFER_CAPACITY)
+        allocated_buffers.append(events)
+        # Keep process argument signatures stable; all columns now share one
+        # committed event sequence and must be read/published together.
+        x_plot = y_plot = t_plot = main_v_dc_plot = events
     except Exception:
         for buffer in allocated_buffers:
             buffer.unlink()
@@ -244,7 +246,7 @@ def create_shared_context(conf: dict[str, Any]) -> SharedContext:
 
 def release_shared_context(context: SharedContext) -> None:
     """Tear down ring buffers and the manager.  Call on full shutdown."""
-    for buf in (context.x_plot, context.y_plot, context.t_plot, context.main_v_dc_plot):
+    for buf in set((context.x_plot, context.y_plot, context.t_plot, context.main_v_dc_plot)):
         try:
             buf.unlink()
         except Exception:

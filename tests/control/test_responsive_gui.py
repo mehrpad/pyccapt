@@ -182,6 +182,34 @@ def instrument_window(request, app, monkeypatch, tmp_path):
     app.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
 
 
+@pytest.mark.parametrize('instrument_window', ['visualization'], indirect=True)
+@pytest.mark.parametrize('final_drain', [False, True])
+def test_visualization_telemetry_timeout_preserves_gui_and_final_event_drain(
+        instrument_window, monkeypatch, final_drain):
+    import uuid
+    from pyccapt.control.core.shared_ring_buffer import SharedEventBuffer
+
+    _, ui, _ = instrument_window
+    events = SharedEventBuffer.create('telemetry_' + uuid.uuid4().hex, 8)
+    try:
+        events.write_events([.1], [.2], [100.], [5000.])
+        ui.x_plot = events
+        ui.variables.counter_source = 'TDC'
+
+        def busy_snapshot(self, *fields):
+            raise TimeoutError('busy telemetry lock')
+
+        monkeypatch.setattr(type(ui.variables), 'statistics_snapshot', busy_snapshot)
+        ui.update_graphs_helper(final_drain=final_drain)
+        assert ui._telemetry_unavailable
+        assert ui.length_events == int(final_drain)
+        assert events.pending() == int(not final_drain)
+        if final_drain:
+            assert ui.hist_tof_uncalib.sum() == 1
+    finally:
+        events.unlink()
+
+
 @pytest.mark.parametrize('instrument_window', ['main'], indirect=True)
 def test_main_plan_layout_is_compact_and_queue_fits(instrument_window, tmp_path):
     from pathlib import Path

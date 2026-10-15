@@ -74,10 +74,8 @@ def _expanded_peak_mask(values, template, scale=1.0):
 
 
 def _score_improved(candidate, best):
-    if not np.isfinite(candidate):
+    if not np.isfinite(candidate) or not np.isfinite(best):
         return False
-    if not np.isfinite(best):
-        return True
     return candidate > best + max(0.1, abs(best) * 0.002)
 
 
@@ -185,6 +183,7 @@ def _split_reference_peaks(calibration_array, peaks, holdout_count=2):
 
 def _evaluate_quality(calibration_array, reference_peaks, above_ceiling_strategy='nan', fast_score=False):
     return {
+        "holdout_required": bool(reference_peaks["holdout"]),
         "train_score": _evaluate_peak_group(
             calibration_array, reference_peaks["train"],
             above_ceiling_strategy=above_ceiling_strategy,
@@ -236,6 +235,32 @@ def _build_peak_template(calibration_array, peak, template_bin_size):
     )
 
 
+def _template_shift_scores(values, template, shift_grid, cell_weights=None, workspace_bytes=64 * 1024**2):
+    """Evaluate the unchanged likelihood grid in memory-bounded shift blocks.
+
+    Each column retains all ions and the same likelihood objective. At least one
+    column is evaluated, so the minimum workspace is two float64 ion vectors.
+    ``cell_weights`` is the spatial cell-by-ion CSR aggregation matrix.
+    """
+    n_values, n_shifts = len(values), len(shift_grid)
+    block_size = max(1, min(n_shifts, int(workspace_bytes) // max(16 * n_values, 1)))
+    shape = (n_shifts,) if cell_weights is None else (cell_weights.shape[0], n_shifts)
+    scores = np.empty(shape, dtype=float)
+    for start in range(0, n_shifts, block_size):
+        stop = min(start + block_size, n_shifts)
+        centered = values[:, None] - template.center - shift_grid[None, start:stop]
+        logp = np.interp(centered.ravel(), template.offsets, template.logpdf,
+                         left=template.log_floor, right=template.log_floor).reshape(n_values, stop - start)
+        if cell_weights is None:
+            scores[start:stop] = np.sum(logp, axis=0)
+        else:
+            scores[:, start:stop] = cell_weights @ logp
+        # Release both work arrays before allocating the next block; assignment
+        # alone would temporarily keep the preceding block alive as well.
+        del centered, logp
+    return scores
+
+
 def _estimate_shift_from_template(local_values, template):
     values = np.asarray(local_values, dtype=float)
     values = values[np.isfinite(values)]
@@ -243,15 +268,7 @@ def _estimate_shift_from_template(local_values, template):
         return np.nan, 0.0
     step = max(template.bin_size * 0.5, template.search_half_range / 120.0)
     shift_grid = np.arange(-template.search_half_range, template.search_half_range + step, step)
-    centered = values[:, None] - template.center - shift_grid[None, :]
-    logp = np.interp(
-        centered.ravel(),
-        template.offsets,
-        template.logpdf,
-        left=template.log_floor,
-        right=template.log_floor,
-    ).reshape(values.size, shift_grid.size)
-    scores = np.sum(logp, axis=0)
+    scores = _template_shift_scores(values, template, shift_grid)
     best_index = int(np.argmax(scores))
     return float(shift_grid[best_index]), float(scores[best_index])
 
@@ -402,7 +419,6 @@ def _fit_spatial_residual(calibration_array, template, x_det_cm, y_det_cm, grid_
     # Shift grid identical to _estimate_shift_from_template.
     step = max(template.bin_size * 0.5, template.search_half_range / 120.0)
     shift_grid = np.arange(-template.search_half_range, template.search_half_range + step, step)
-    n_shifts = shift_grid.size
     n_cells = nx * ny
 
     calib = np.asarray(calibration_array, dtype=float)
@@ -438,15 +454,6 @@ def _fit_spatial_residual(calibration_array, template, x_det_cm, y_det_cm, grid_
             cell_count_per = cell_inpeak_count
             if in_idx.size == 0:
                 continue
-            # Vectorised template log-likelihood lookup.
-            centered = calib[in_idx, None] - template.center - shift_grid[None, :]
-            logp = np.interp(
-                centered.ravel(),
-                template.offsets,
-                template.logpdf,
-                left=template.log_floor,
-                right=template.log_floor,
-            ).reshape(in_idx.size, n_shifts)
             # Sum logp rows per cell. A sparse one-hot (n_cells x n_ions) matmul
             # is bit-identical to np.add.at (an unbuffered, Python-level scatter)
             # but ~3x faster here -- the dominant cost of the spatial residual
@@ -457,7 +464,7 @@ def _fit_spatial_residual(calibration_array, template, x_det_cm, y_det_cm, grid_
                 (np.ones(in_idx.size), (cell_id_eligible, np.arange(in_idx.size))),
                 shape=(n_cells, in_idx.size),
             )
-            scores_per_cell = onehot @ logp
+            scores_per_cell = _template_shift_scores(calib[in_idx], template, shift_grid, onehot)
             # Best shift per cell.
             best_shift_idx = np.argmax(scores_per_cell, axis=1)
             best_shifts = shift_grid[best_shift_idx]
@@ -521,6 +528,12 @@ def _best_candidate(candidates, baseline_quality):
     accepted = []
     for candidate in candidates:
         quality = candidate["quality"]
+        # An absent holdout is different from a holdout whose measurement
+        # failed. The latter cannot provide evidence that a change is safe.
+        if baseline_quality.get("holdout_required", False) and not (
+            np.isfinite(baseline_quality["holdout_score"]) and np.isfinite(quality["holdout_score"])
+        ):
+            continue
         if _score_improved(quality["train_score"], baseline_quality["train_score"]) and _score_not_worse(
             quality["holdout_score"], baseline_quality["holdout_score"], tolerance_ratio=0.02
         ):
@@ -539,8 +552,8 @@ def _select_candidate_two_pass(
     Phase 1 (cheap): score EVERY candidate via ``fast_mrp`` (~50us each).
     Phase 2 (expensive but bounded): re-score the top ``top_k`` survivors
     with the full Voigt-based ``gaussian_mrp_report`` (~2s each). The
-    acceptance gate and final ranking use the full-Voigt scores, so mc
-    quality is preserved while ~70-80% of curve_fit calls are skipped.
+    acceptance gate and final ranking use the full-Voigt scores. Prescreening
+    is approximate: it can discard the exhaustive search's best candidate.
 
     ``candidate_specs`` is a list of dicts with keys: ``label``,
     ``correction`` (array shape == current_array.shape), ``info``.
@@ -559,13 +572,14 @@ def _select_candidate_two_pass(
         score = _combined_quality_score(fast_q)
         if not np.isfinite(score):
             score = -np.inf
-        fast_scored.append((score, spec, candidate_arr, fast_q))
+        fast_scored.append((score, spec))
     fast_scored.sort(key=lambda item: -item[0])
     # Always keep at least 1 finalist, even with no improvement.
     k = max(1, min(int(top_k), len(fast_scored)))
     finalists = []
     diag = []
-    for score, spec, candidate_arr, fast_q in fast_scored[:k]:
+    for score, spec in fast_scored[:k]:
+        candidate_arr = current_array - spec["correction"]
         full_q = _evaluate_quality(
             candidate_arr, reference_peaks,
             above_ceiling_strategy=above_ceiling_strategy,

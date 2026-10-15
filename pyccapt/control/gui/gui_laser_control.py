@@ -1526,7 +1526,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         self.laser_wavelegnth.setEnabled(idle and not running)
         self.laser_rate.setEnabled(idle and not running and bool(getattr(self, '_frequency_table', {})))
         self.laser_divition_factor.setEnabled(known and not running)
-        self.laser_power.setEnabled(known and not self._laser_alignment_busy())
+        self.laser_power.setEnabled(known and not self._alignment_laser_settings_locked())
         for widget, active in ((self.led_laser_listen, code == 9),
                                (self.led_laser_laser_standby, code == 33),
                                (self.led_laser_on, code in (65, 129)),

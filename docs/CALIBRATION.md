@@ -2,6 +2,13 @@
 
 The `pyccapt.calibration` package provides workflows for atom probe tomography data preparation, calibration, reconstruction, and visualization.
 
+The separate [guided notebook](../pyccapt/calibration/tutorials/jupyter_files/data_processing_guided.ipynb)
+adds accepted-state stages, reversible peak decisions, automatic range proposals,
+conditional ICF/kf ratio profiling and resumable sessions. The existing
+`data_processing.ipynb` remains available. See the [guided workflow](guided_workflow.md),
+[calibration mathematics](calibration_math.md) and [session/export contract](analysis_sessions.md)
+for input requirements, validation and the scope of each new method.
+
 ![Calibration visualization](../pyccapt/files/readme_images/visualization_gif.gif)
 
 ## Core Workflows

@@ -149,6 +149,26 @@ Run calibration tutorials:
 jupyter lab
 ```
 
+For the guided workflow, open
+[`data_processing_guided.ipynb`](pyccapt/calibration/tutorials/jupyter_files/data_processing_guided.ipynb).
+The existing [`data_processing.ipynb`](pyccapt/calibration/tutorials/jupyter_files/data_processing.ipynb)
+remains available. The guided notebook connects import, inspection, calibration,
+peak-by-peak ranging review, reconstruction, analysis and export. Suggestions
+require acceptance, preserve locked ranging decisions, support undo, and can be
+saved as resumable HDF5 sessions.
+
+Reconstruction suggestions estimate **q = ICF/kf** from independently reviewed
+near-axis crystallographic spacing and show compatible ICF/kf pairs. They report
+insufficient evidence instead of forcing a unique answer. See the
+[guided workflow](docs/guided_workflow.md) and [calibration mathematics](docs/calibration_math.md).
+
+[Analysis sessions and exports](docs/analysis_sessions.md) describe stable integer
+event IDs, learned-model snapshots, checksums, processing history, an explicitly
+partial NXapm-aligned mapping, storage benchmarks and opt-in SWMR readers.
+Detector-based [laser](pyccapt/control/LASER_ALIGNMENT.md) and
+[sample alignment](pyccapt/control/AUTOMATIC_ALIGNMENT.md) retain the user's fixed
+laser settings and existing motion/interlock constraints.
+
 Then open notebooks under `pyccapt/calibration/tutorials`.
 
 ## Configuration

@@ -11,7 +11,7 @@ import numpy as np
 from scipy.optimize import curve_fit
 from scipy.signal import find_peaks, peak_prominences, peak_widths
 
-from pyccapt.calibration.core.calibration import (
+from pyccapt.calibration.core.calibration_sampling import (
     _build_histogram_bins,
     _collect_spatial_samples,
     _radial_bowl_corr,
@@ -323,7 +323,7 @@ def multi_peak_voltage_corr_main(
         None,
     )
 
-    correction_factor = np.sqrt(f_v) if calibration_mode == 'tof' else f_v
+    correction_factor = f_v  # fitted in the active mass or time domain
 
     source = variables.dld_t_calib if calibration_mode == 'tof' else variables.mc_calib
     calibration_mc_tof = source / correction_factor
@@ -520,6 +520,24 @@ def _robust_joint_linear_fit(feature_matrix, target):
         params, *_ = np.linalg.lstsq(x_data[good], y_data[good], rcond=None)
     return params
 
+
+def _predict_joint_factors(voltage, x, y, parameters, voltage_center, voltage_scale, spatial_scale,
+                           chunk_size=250000):
+    """Apply a fitted surface without constructing a full N-by-12 design."""
+    if int(chunk_size) < 1:
+        raise CalibrationInputError("Prediction chunk_size must be positive")
+    factors = np.ones(len(voltage), dtype=float)
+    for start in range(0, len(voltage), int(chunk_size)):
+        stop = start + int(chunk_size)
+        vx, xx, yy = voltage[start:stop], x[start:stop], y[start:stop]
+        finite = np.isfinite(vx) & np.isfinite(xx) & np.isfinite(yy)
+        if not np.any(finite):
+            continue
+        features = _joint_feature_matrix(vx[finite], xx[finite], yy[finite],
+                                         voltage_center, voltage_scale, spatial_scale)
+        factors[start:stop][finite] = np.clip(features @ parameters, np.finfo(float).eps, None)
+    return factors
+
 def joint_voltage_bowl_corr_main(
     dld_x,
     dld_y,
@@ -553,11 +571,11 @@ def joint_voltage_bowl_corr_main(
 
     # Track partial rows so they're excluded from the joint fit but
     # their values pass through the apply step unchanged.
-    _finite_xy_jv = np.isfinite(dld_x_mm) & np.isfinite(dld_y_mm)
-    if not _finite_xy_jv.all():
+    complete_features = np.isfinite(dld_x_mm) & np.isfinite(dld_y_mm) & np.isfinite(dld_highVoltage)
+    if not complete_features.all():
         print(
-            f'[joint_voltage_bowl_corr_main] Excluding {int((~_finite_xy_jv).sum())} '
-            'partial-recovered rows (NaN x_det / y_det) from peak-sample collection.'
+            f'[joint_voltage_bowl_corr_main] Excluding {int((~complete_features).sum())} '
+            'rows with unavailable detector coordinates or voltage from peak-sample collection.'
         )
 
     detected = _auto_detect_peaks(
@@ -575,7 +593,7 @@ def joint_voltage_bowl_corr_main(
     peak_info = []
 
     for peak in detected:
-        mask = (calib_arr > peak['x1']) & (calib_arr < peak['x2']) & _finite_xy_jv
+        mask = (calib_arr > peak['x1']) & (calib_arr < peak['x2']) & complete_features
         peak_t = calib_arr[mask]
         peak_x = dld_x_mm[mask]
         peak_y = dld_y_mm[mask]
@@ -643,17 +661,8 @@ def joint_voltage_bowl_corr_main(
     # uncalibrated value rather than being multiplied by NaN features.
     source = variables.dld_t_calib if calibration_mode == 'tof' else variables.mc_calib
     corrected = np.array(source, dtype=float, copy=True)
-    if _finite_xy_jv.any():
-        sub_features = _joint_feature_matrix(
-            dld_highVoltage[_finite_xy_jv],
-            dld_x_mm[_finite_xy_jv],
-            dld_y_mm[_finite_xy_jv],
-            voltage_center,
-            voltage_scale,
-            spatial_scale,
-        )
-        sub_correction = np.clip(sub_features @ parameters, np.finfo(float).eps, None)
-        corrected[_finite_xy_jv] = corrected[_finite_xy_jv] / sub_correction
+    corrected /= _predict_joint_factors(dld_highVoltage, dld_x_mm, dld_y_mm, parameters,
+                                        voltage_center, voltage_scale, spatial_scale)
 
     if calibration_mode == 'tof':
         variables.dld_t_calib = corrected

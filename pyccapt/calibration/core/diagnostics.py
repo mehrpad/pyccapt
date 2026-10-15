@@ -41,24 +41,32 @@ def initial_calibration(data, flight_path_length):
 
     Partial-recovered rows (NaN x_det / y_det) yield NaN ``d_values``;
     using ``np.mean(d_values)`` would then poison every row's flight-path
-    factor. Use ``np.nanmean`` so the average is built from the
-    position-capable subset, and pass the NaN rows through with a
+    factor. Average finite distances from the position-capable subset,
+    and pass rows with unavailable positions through with a
     finite per-ion factor of 1.0 so their uncalibrated t survives.
     """
-    v_dc = data["high_voltage (V)"].to_numpy()
-    t_values = data["t (ns)"].to_numpy()
+    flight_path_length = ensure_positive(flight_path_length, field_name="flight_path_length")
+    v_dc = data["high_voltage (V)"].to_numpy(dtype=float)
+    t_values = data["t (ns)"].to_numpy(dtype=float)
     x_det = data["x_det (cm)"].to_numpy() * 10
     y_det = data["y_det (cm)"].to_numpy() * 10
     d_values = x_det**2 + y_det**2 + flight_path_length**2
 
-    mean_d = float(np.nanmean(d_values)) if np.any(np.isfinite(d_values)) else float(flight_path_length**2)
+    finite_distance = np.isfinite(d_values)
+    mean_d = float(np.mean(d_values[finite_distance])) if np.any(finite_distance) else float(flight_path_length**2)
     with np.errstate(invalid="ignore", divide="ignore"):
         init_flight_path_factor = np.where(
             np.isfinite(d_values),
-            mean_d / d_values,
+            np.sqrt(mean_d / d_values),
             1.0,  # partials: identity factor (no spatial correction)
         )
-    init_voltage_factor = np.sqrt(v_dc / np.mean(v_dc))
+    valid_voltage = np.isfinite(v_dc) & (v_dc > 0)
+    if not np.any(valid_voltage):
+        raise CalibrationInputError("Initial calibration requires at least one finite positive voltage")
+    # A bad voltage invalidates only its own row, never the normalization of
+    # every valid event. Keep unavailable results explicit for downstream masks.
+    init_voltage_factor = np.full(v_dc.shape, np.nan, dtype=float)
+    init_voltage_factor[valid_voltage] = np.sqrt(v_dc[valid_voltage] / np.mean(v_dc[valid_voltage]))
     return t_values * init_flight_path_factor * init_voltage_factor
 
 def _plot_scatter(x_values, y_values, x_label, y_label, variables, save, stem, fig_size):

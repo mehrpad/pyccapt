@@ -105,3 +105,27 @@ High-speed digitizer (DRS) waveforms and synchronized metadata.
 
 - Some historical files may use older dataset names.
 - `control/control_data_tool.py` contains migration helpers for older structures.
+# Acquisition completeness and validation
+
+Finalized files record `provenance/acquisition_completeness` as an attribute:
+`complete` means the available committed manifests have no detected gaps or
+rejected chunks and the detector reported no failure; `incomplete` records
+known loss/failure; `unverified` identifies legacy inputs without manifests.
+This does not prove the detector electronics delivered every physical event.
+
+The `chunk_integrity_json` attribute preserves per-stream written and excluded
+rows, expected manifest rows, missing chunk-ID ranges, rejected group IDs and
+reasons, detector errors, and unattributed-packet filenames. Quarantined files
+remain in the archived chunk evidence. `excluded_row_count` includes rejected
+primary event rows; raw-signal and metadata exclusions are reported separately
+per stream to avoid counting the same physical event repeatedly.
+Rejected records also identify the recovery action and quarantine location when
+available; the report lists validation checks applied. These describe observed
+evidence rather than estimating unrecorded physical events.
+
+`validate_hdf5` distinguishes `structurally_valid` from overall `valid` and
+returns the completeness status. Schema-2 validation checks required datasets,
+known dtypes/units, aligned stream lengths and the configuration content hash.
+Known incomplete acquisitions are not reported as valid. Crash recovery keeps
+this evidence but never promotes a successful recovery to proof that a crashed
+acquisition had no uncommitted tail.

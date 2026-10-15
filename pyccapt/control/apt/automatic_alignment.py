@@ -14,6 +14,7 @@ import numpy as np
 
 from pyccapt.control.apt.alignment_config import AlignmentConfig, coarse_positions
 from pyccapt.control.apt.alignment_search import RelativeSearch, range_positions, significant_jump
+from pyccapt.control.apt.alignment_response import coverage_probe
 from pyccapt.control.apt.alignment_vision import Footprint, estimate_dense_region, estimate_footprint
 
 
@@ -65,6 +66,10 @@ class AutomaticAlignment:
         self.observation_rates = []
         self.observation_count = 0
         self.observation_first_sequence = None
+        self.coverage_count = 0
+        self.search_stage = 'initial'
+        self.fixed_laser_signature = None
+        self.fixed_pulse_mode = getattr(self.v, 'pulse_mode', 'Voltage')
         self.centred_since = None
         self.centred_sequence = None
         self.events_path = Path(variables.path_meta) / 'alignment.jsonl'
@@ -87,7 +92,11 @@ class AutomaticAlignment:
     def _publish(self):
         self.v.alignment_status = {'phase': self.phase, 'attempt': self.attempts,
                                    'target_voltage': self.target_voltage, 'reason': self.reason,
-                                   'footprint': self.fit.snapshot(), 'sample': self.v.alignment_sample}
+                                   'footprint': self.fit.snapshot(), 'sample': self.v.alignment_sample,
+                                   'search_stage': self.search_stage,
+                                   'coverage_probes': self.coverage_count,
+                                   'coverage_budget': self.cfg.coverage_max_probes,
+                                   'z_response_calibrated': self.cfg.z_response_calibrated}
 
     def finish(self, outcome, reason):
         self.outcome, self.reason = outcome, reason
@@ -161,6 +170,8 @@ class AutomaticAlignment:
         self.initial_ramp = False
         self.search = RelativeSearch(self.cfg)
         self.candidate = None
+        self.coverage_count = 0
+        self.search_stage = 'sparse_probes'
         self.grid = iter(coarse_positions(self.origin, self.cfg))
         self._event('coarse_started', ranges_um=self.cfg.xy_range_um,
                     max_lateral_probes=16, boundary_margin_um=self.cfg.xy_boundary_margin_um)
@@ -205,6 +216,18 @@ class AutomaticAlignment:
 
     def _next_coarse(self):
         target = next(self.grid, None)
+        if target is None and self.coverage_count < self.cfg.coverage_max_probes:
+            lower, upper = self.cfg.search_xy_limits(self.origin)
+            visited = [r.get('target_m', r['position_m']) for r in self.search.records]
+            target = coverage_probe(self.origin, lower, upper, visited,
+                                    subdivisions=self.cfg.coverage_subdivisions)
+            if target is not None:
+                self.coverage_count += 1
+                self.search_stage = 'coverage_fallback'
+                self.reason = f'Coverage probe {self.coverage_count}/{self.cfg.coverage_max_probes}; narrow regions remain unresolved below grid spacing.'
+                self._event('coverage_probe', target_m=target, index=self.coverage_count,
+                            budget=self.cfg.coverage_max_probes,
+                            grid_spacing_um=((upper-lower)*1e6/self.cfg.coverage_subdivisions).tolist())
         if target is None:
             self._move(self.origin, 'increase_voltage')
         else:
@@ -368,6 +391,26 @@ class AutomaticAlignment:
         return (self.now-self.centred_since >= self.cfg.stable_s and
                 sequence-self.centred_sequence >= self.cfg.window_ions)
 
+    def _check_fixed_laser(self):
+        pulse_mode = getattr(self.v, 'pulse_mode', 'Voltage')
+        if pulse_mode != self.fixed_pulse_mode:
+            raise ValueError('Pulse mode changed during sample alignment.')
+        if pulse_mode != 'Laser':
+            return
+        data = dict(getattr(self.v, 'laser_telemetry', {}) or {})
+        if (not data.get('valid') or data.get('status_code') != 129 or
+                not -.1 <= self.now-float(data.get('monotonic', -np.inf)) <= 10):
+            raise ValueError('Sample alignment requires fresh enabled laser readback.')
+        signature = tuple(float(data[key]) for key in ('aom_percent', 'output_frequency_hz', 'wavelength_index'))
+        if not np.isfinite(signature).all() or signature[1] <= 0:
+            raise ValueError('Sample alignment laser settings are invalid.')
+        if self.fixed_laser_signature is None:
+            self.fixed_laser_signature = signature
+            self._event('fixed_laser_settings', aom_percent=signature[0], frequency_hz=signature[1],
+                        wavelength_index=signature[2])
+        elif signature != self.fixed_laser_signature:
+            raise ValueError('User laser power, frequency or wavelength changed during sample alignment.')
+
     def tick(self, voltage, rate, now=None):
         self._live_clock = now is None
         self.now = time.monotonic() if now is None else now
@@ -377,6 +420,7 @@ class AutomaticAlignment:
         try:
             if not np.isfinite(voltage) or not np.isfinite(rate):
                 raise ValueError('Invalid voltage or detection-rate reading.')
+            self._check_fixed_laser()
             if self.v.stop_flag:
                 self.finish('cancelled', 'Alignment cancelled by Stop.')
                 return
@@ -463,7 +507,7 @@ class AutomaticAlignment:
                 if self._stable(centred and fraction >= self.cfg.finish_fraction, sequence):
                     self.phase = 'aligned'
                     self.v.alignment_outcome = 'aligned'
-                    self._event('aligned', footprint=fit.snapshot(), rate=rate)
+                    self._event('aligned', footprint=fit.snapshot(), rate=rate, position_m=self._position())
                     self._publish()
                     return
                 if centred and fraction >= self.cfg.finish_fraction:
@@ -490,7 +534,7 @@ class AutomaticAlignment:
                         self._move(tuple(target), 'observe_fine')
                 elif (fit.model == 'circle' and
                       ((fit.radius_mm+fit.radius_uncertainty_mm)/self.cfg.detector_radius_mm)**2
-                      < self.cfg.area_target and self.cfg.approach_enabled
+                      < self.cfg.area_target and self.cfg.approach_enabled and self.cfg.z_response_calibrated
                       and fraction < self.cfg.finish_fraction):
                     if not z_centred:
                         return
@@ -502,6 +546,9 @@ class AutomaticAlignment:
                     position[2] += self.cfg.z_direction*self.cfg.z_step_um*1e-6
                     self._move(tuple(position), 'observe_fine', z=True)
                 elif self.target_voltage < self.limit:
+                    if self.cfg.approach_enabled and not self.cfg.z_response_calibrated:
+                        self.reason = 'Z approach withheld: no independently calibrated Z response relation.'
+                        self._event('z_abstained', reason=self.reason)
                     self.target_voltage = min(self.limit, self.target_voltage+self.cfg.voltage_increment)
                     self.voltage_attempts = 1  # Continuing this fine attempt at a new DC level.
                     self.phase, self.ramp_destination = 'ramp', 'fine'

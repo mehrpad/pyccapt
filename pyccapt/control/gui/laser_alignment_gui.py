@@ -95,6 +95,12 @@ class LaserAlignmentGuiMixin:
     def _laser_alignment_busy(self):
         return bool(getattr(self.variables, 'laser_alignment_status', {}).get('active'))
 
+    def _alignment_laser_settings_locked(self):
+        sample = bool(getattr(self.variables, 'automatic_alignment_enabled', False) and
+                      getattr(self.variables, 'start_flag', False) and
+                      getattr(self.variables, 'alignment_status', {}).get('phase') not in ('aligned', 'finished'))
+        return self._laser_alignment_busy() or sample
+
     def _request_laser_alignment(self, mode):
         try:
             if self.variables.experiment_state != 'running' or self.variables.stop_flag or self.variables.electrode_out:
@@ -137,11 +143,15 @@ class LaserAlignmentGuiMixin:
             reference = self._stage_reference_worker is not None and self._stage_reference_worker.isRunning()
             self._set_stage_jog_enabled(not busy and not reference)
             self.laser_stage_reference.setEnabled(not busy and not running and self.flag_super_user_stage)
-            if busy: self.laser_power.setEnabled(False)
+            if self._alignment_laser_settings_locked(): self.laser_power.setEnabled(False)
             text = status.get('phase', 'idle')+': '+status.get('reason', '')
             if status.get('target_voltage') is not None:
                 text += f" | DC target {status['target_voltage']:.0f} V"
-            self.laser_alignment_label.setText(text+'\nScan: coarse → fine XY → focus Z → fine XY. Stop Alignment leaves acquisition running.')
+            if status.get('progress'):
+                text += '\n'+status['progress']
+            if status.get('measurements'):
+                text += f" | {status['measurements']} windows, {status.get('ions_observed', 0)} measured ions"
+            self.laser_alignment_label.setText(text+'\nDetector response only; laser power stays fixed. Stop Alignment leaves acquisition running.')
             self.alignment_plot.append(self.variables.laser_alignment_plot)
         except Exception:
             self.variables.laser_alignment_cancel = True

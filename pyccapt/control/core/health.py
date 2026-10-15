@@ -48,9 +48,12 @@ def build_health_snapshot(
     health = backend.health() if backend is not None else None
     queue_depth = 0
     dropped = 0
+    seen = set()
     for buffer in buffers:
-        if buffer is None:
+        identity = getattr(buffer, "name", id(buffer))
+        if buffer is None or identity in seen:
             continue
+        seen.add(identity)
         queue_depth += int(buffer.pending())
         dropped += int(getattr(buffer, "dropped", 0))
     now = time.monotonic()

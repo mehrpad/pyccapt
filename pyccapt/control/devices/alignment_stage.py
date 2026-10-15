@@ -178,6 +178,9 @@ class AlignmentStageService:
                     if changed[2] and not cfg.approach_enabled:
                         raise ValueError('Automatic approach is disabled.')
                     if (changed[2] and cfg.z_direction*(target[2]-position[2])*1e6 > cfg.position_tolerance_um
+                            and not cfg.z_response_calibrated):
+                        raise ValueError('Z approach requires an independently calibrated response relation.')
+                    if (changed[2] and cfg.z_direction*(target[2]-position[2])*1e6 > cfg.position_tolerance_um
                             and 'fine_origin_m' not in request):
                         raise ValueError('Z approach is permitted only during fine alignment.')
                 speed = float(request['speed_um_s'])

@@ -22,6 +22,8 @@ from pathlib import Path
 
 import numpy as np
 from numpy.ctypeslib import ndpointer
+from pyccapt.control.apt.detector_chunks import ChunkStream, ChunkWriter, preserve_unattributed_packet
+from pyccapt.control.core.shared_ring_buffer import publish_plot_events
 
 
 class DRS:
@@ -75,79 +77,72 @@ class DRS:
         self.drs_lib.Drs_delete_drs_ox(self.obj)
 
 
-def experiment_measure(variables, x_plot=None, y_plot=None, t_plot=None, main_v_dc_plot=None, stop_event=None):
-    """
-    Continuously reads the DRS data and puts it into the queues.
-
-    Args:
-        variables: Variables object
-    """
-    drs_ox = None
+def experiment_measure(variables, x_plot=None, y_plot=None, t_plot=None, main_v_dc_plot=None,
+                       stop_event=None, conf=None):
+    """Persist flattened waveforms and one voltage sample per acquisition."""
+    drs_ox = writer = None
+    streams = []
+    failure = None
+    conf = conf or {}
     try:
-        drs_ox = DRS(trigger=0, test=1, delay=0, sample_frequency=2)
-
-        while True:
-            # Both the shared flag and backend event are supported so all
-            # detector implementations obey the same lifecycle contract.
-            if variables.flag_stop_tdc or variables.stop_flag or (stop_event is not None and stop_event.is_set()):
-                print('DRS loop is break in child process')
-                break
-
+        mode = str(conf.get("drs_acquisition_mode", "normal")).strip().lower()
+        if mode not in {"normal", "internal_calibration"}:
+            raise ValueError("drs_acquisition_mode must be normal or internal_calibration")
+        # Calibration routes the internal 100 MHz clock to every input. It is
+        # never implicitly selected for ordinary specimen acquisition.
+        drs_ox = DRS(trigger=0, test=int(mode == "internal_calibration"), delay=0, sample_frequency=2)
+        writer = ChunkWriter(Path(variables.path)/"temp_data"/"chunks", stop_event=stop_event)
+        waveforms = ChunkStream(writer, "hsd_waveforms",
+                                {f"ch{i}_{kind}": np.float32 for i in range(4) for kind in ("time", "wave")},
+                                chunk_size=64*1024)
+        metadata = ChunkStream(writer, "hsd_events", {"voltage_drs": np.float64, "pulse_drs": np.float64},
+                               chunk_size=64)
+        streams = [waveforms, metadata]
+        while not (variables.flag_stop_tdc or variables.stop_flag or
+                   (stop_event is not None and stop_event.is_set())):
+            writer.check()
             try:
-                return_value = np.array(drs_ox.reader())
-                data = return_value.reshape(8, 1024)
+                data = np.array(drs_ox.reader(), dtype=np.float32).reshape(8, 1024)
             except Exception as exc:
                 print(f"DRS read failed: {exc}")
-                time.sleep(0.1)
+                time.sleep(.1)
                 continue
-
-            ch0_time = data[0, :]
-            ch0_wave = data[1, :]
-            ch1_time = data[2, :]
-            ch1_wave = data[3, :]
-            ch2_time = data[4, :]
-            ch2_wave = data[5, :]
-            ch3_time = data[6, :]
-            ch3_wave = data[7, :]
-
-            variables.extend_to('ch0_time', ch0_time.tolist())
-            variables.extend_to('ch0_wave', ch0_wave.tolist())
-            variables.extend_to('ch1_time', ch1_time.tolist())
-            variables.extend_to('ch1_wave', ch1_wave.tolist())
-            variables.extend_to('ch2_time', ch2_time.tolist())
-            variables.extend_to('ch2_wave', ch2_wave.tolist())
-            variables.extend_to('ch3_time', ch3_time.tolist())
-            variables.extend_to('ch3_wave', ch3_wave.tolist())
-
-        # One DC / pulse voltage reading per acquisition (per waveform),
-        # not one per sample. The previous code tiled both to 1024 copies
-        # which bloated the HDF5 by 1024x and only "worked" because every
-        # downstream reader implicitly assumed N=1024 samples per event.
-            variables.extend_to('main_v_dc_drs', [float(variables.specimen_voltage)])
-            variables.extend_to('main_v_p_drs', [float(variables.pulse_voltage)])
-            variables.total_raw_signals = int(variables.total_raw_signals) + 1
-            variables.total_ions = int(variables.total_ions) + 1
-
-        # Plot stream: one scalar per acquisition, matching the new
-        # per-event voltage shape. (x_plot/y_plot/t_plot still feed the
-        # raw waveform time array as a placeholder — proper hit
-        # reconstruction from the waves is a separate task.)
-            if main_v_dc_plot is not None:
-                main_v_dc_plot.write([float(variables.specimen_voltage)])
-            if x_plot is not None:
-                x_plot.write(ch0_time)
-            if y_plot is not None:
-                y_plot.write(ch0_wave)
-            if t_plot is not None:
-                t_plot.write(ch0_time)
+            try:
+                dc, pulse = float(variables.specimen_voltage), float(variables.pulse_voltage)
+            except Exception:
+                preserve_unattributed_packet(Path(variables.path)/"temp_data", "hsd", {"waveforms": data})
+                raise
+            waveforms.append({f"ch{i}_{kind}": data[2*i+j] for i in range(4)
+                              for j, kind in enumerate(("time", "wave"))})
+            metadata.append({"voltage_drs": [dc], "pulse_drs": [pulse]})
+            variables.total_raw_signals = int(variables.total_raw_signals)+1
+            variables.total_ions = int(variables.total_ions)+1
+            # Live plots carry waveform samples, so voltage has one value per
+            # plotted sample. Saved metadata remains one value per waveform.
+            if all(ring is not None for ring in (x_plot, y_plot, t_plot, main_v_dc_plot)):
+                publish_plot_events(x_plot, y_plot, t_plot, main_v_dc_plot,
+                                    data[0], data[1], data[0], np.full(1024, dc))
     except Exception as exc:
-        variables.flag_tdc_failure = True
-        variables.detector_error = f"{exc.__class__.__name__}: {exc}"
-        print(f"DRS worker failed: {variables.detector_error}")
+        failure = exc
     finally:
+        if writer is not None:
+            try:
+                for stream in streams:
+                    stream.finish()
+            except Exception as exc:
+                failure = failure or exc
+            try:
+                writer.close()
+            except Exception as exc:
+                failure = failure or exc
         if drs_ox is not None:
             try:
                 drs_ox.delete_drs_ox()
             except Exception as exc:
-                print(f"DRS cleanup failed: {exc}")
+                failure = failure or exc
+        if failure is not None:
+            variables.flag_tdc_failure = True
+            variables.detector_error = f"{type(failure).__name__}: {failure}"
+            print(f"DRS acquisition failed: {variables.detector_error}")
         variables.flag_finished_tdc = True
+    return -1 if failure is not None else 0

@@ -1,3 +1,4 @@
+from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
@@ -5,6 +6,31 @@ import pandas as pd
 
 # Local module and scripts
 from pyccapt.calibration.leap_tools import leap_tools
+
+
+_EPOS_SOURCE_COLUMNS = {
+    'x (nm)': 'x (nm)', 'y (nm)': 'y (nm)', 'z (nm)': 'z (nm)',
+    'mc (Da)': 'm/n (Da)', 'high_voltage (V)': 'HV_DC (V)',
+    'pulse_v (V)': 'pulse (V)', 't (ns)': 'TOF (ns)',
+    'x_det (cm)': 'det_x (mm)', 'y_det (cm)': 'det_y (mm)',
+    'delta_p': 'pslep', 'multi': 'ipp',
+}
+
+
+def _with_import_availability(frame, source, source_columns):
+    """Record absent source fields without changing legacy numerical placeholders.
+
+    ``source_columns`` maps output fields to the actual source fields used. A
+    present, finite zero remains available; no availability is inferred from
+    its numerical value. Carry existing source metadata through renaming.
+    """
+    frame.attrs = deepcopy(getattr(source, 'attrs', {}))
+    inherited = set(frame.attrs.get('pyccapt_unavailable_columns', []))
+    unavailable = set(frame.columns).difference(source_columns)
+    unavailable.update(name for name in inherited if name in frame.columns)
+    unavailable.update(target for target, origin in source_columns.items() if origin in inherited)
+    frame.attrs['pyccapt_unavailable_columns'] = sorted(unavailable)
+    return frame
 
 
 def ccapt_to_pos(data, path=None, name=None):
@@ -121,7 +147,9 @@ def pos_to_ccapt(file_path):
             'start_counter': np.zeros(length, dtype=np.int32),
         }
     )
-    return ccapt
+    return _with_import_availability(ccapt, pos, {
+        'x (nm)': 'x (nm)', 'y (nm)': 'y (nm)', 'z (nm)': 'z (nm)', 'mc (Da)': 'm/n (Da)',
+    })
 
 
 def epos_to_ccapt(file_path):
@@ -156,7 +184,7 @@ def epos_to_ccapt(file_path):
             'start_counter': np.zeros(length, dtype=np.int32),
         }
     )
-    return ccapt
+    return _with_import_availability(ccapt, epos, _EPOS_SOURCE_COLUMNS)
 
 
 def epos_lazy_to_ccapt_chunks(epos_table, chunk_size: int = 1 << 20):
@@ -177,7 +205,7 @@ def epos_lazy_to_ccapt_chunks(epos_table, chunk_size: int = 1 << 20):
     n_rows = epos_table.n_rows
     if n_rows == 0:
         # Yield one empty frame so downstream writers see the right schema.
-        yield pd.DataFrame(
+        frame = pd.DataFrame(
             {
                 'x (nm)': np.empty(0, dtype=np.float32),
                 'y (nm)': np.empty(0, dtype=np.float32),
@@ -196,11 +224,12 @@ def epos_lazy_to_ccapt_chunks(epos_table, chunk_size: int = 1 << 20):
                 'start_counter': np.empty(0, dtype=np.int32),
             }
         )
+        yield _with_import_availability(frame, epos_table, _EPOS_SOURCE_COLUMNS)
         return
     for start in range(0, n_rows, chunk_size):
         stop = min(start + chunk_size, n_rows)
         length = stop - start
-        yield pd.DataFrame(
+        frame = pd.DataFrame(
             {
                 'x (nm)': epos_table['x (nm)'][start:stop].astype(np.float32, copy=False),
                 'y (nm)': epos_table['y (nm)'][start:stop].astype(np.float32, copy=False),
@@ -219,6 +248,7 @@ def epos_lazy_to_ccapt_chunks(epos_table, chunk_size: int = 1 << 20):
                 'start_counter': np.zeros(length, dtype=np.int32),
             }
         )
+        yield _with_import_availability(frame, epos_table, _EPOS_SOURCE_COLUMNS)
 
 
 def epos_to_ccapt_h5_streaming(epos_path, h5_output_path, *, chunk_size: int = 1 << 20, progress_callback=None):
@@ -252,10 +282,13 @@ def epos_to_ccapt_h5_streaming(epos_path, h5_output_path, *, chunk_size: int = 1
 
     rows_written = 0
     empty_schema = None
+    source_attrs = {}
     with leap_tools.read_epos_lazy(epos_path) as epos_table:
         total_rows = epos_table.n_rows
         with pd.HDFStore(str(h5_output_path), mode="w") as store:
             for chunk in epos_lazy_to_ccapt_chunks(epos_table, chunk_size=chunk_size):
+                source_attrs = {key: chunk.attrs[key] for key in
+                                ('pyccapt_source_id', 'pyccapt_unavailable_columns') if key in chunk.attrs}
                 if len(chunk) == 0:
                     if empty_schema is None:
                         empty_schema = chunk
@@ -276,6 +309,12 @@ def epos_to_ccapt_h5_streaming(epos_path, h5_output_path, *, chunk_size: int = 1
                     store.put("df", empty_schema, format="table")
                 except (ValueError, TypeError):
                     store.put("df", empty_schema, format="fixed")
+                if 'df' not in store:
+                    store.put('df', empty_schema, format='fixed')
+            # Pandas does not persist DataFrame.attrs in its HDF representation.
+            # Use the same explicit metadata contract as the processed loader.
+            from pyccapt.calibration.data_tools.analysis_session import canonical_json
+            store.get_storer('df').attrs.pyccapt_source_json = canonical_json(source_attrs)
 
     return {"h5": str(h5_output_path), "rows": rows_written}
 
@@ -293,35 +332,39 @@ def apt_to_ccapt(file_path):
 
     data = leap_tools.read_apt(file_path)
     length_data = len(data["Mass"])
+    source_columns = {}
 
-    def pick_first(*keys, default=0.0, dtype=float):
+    def pick_first(target, *keys, default=0.0, dtype=float):
         for key in keys:
             if key in data.columns:
+                source_columns[target] = key
                 return data[key].to_numpy()
         return np.full(length_data, default, dtype=dtype)
 
     if "z" in data.columns:
         z_values = data["z"].to_numpy()
+        source_columns['z (nm)'] = 'z'
     elif "zs" in data.columns:
         z_values = -1 * data["zs"].to_numpy()
+        source_columns['z (nm)'] = 'zs'
     else:
         z_values = np.zeros(length_data)
 
     data_dict = {
-        'x (nm)': pick_first('x', 'xs'),
-        'y (nm)': pick_first('y', 'ys'),
+        'x (nm)': pick_first('x (nm)', 'x', 'xs'),
+        'y (nm)': pick_first('y (nm)', 'y', 'ys'),
         'z (nm)': z_values,
-        'mc (Da)': pick_first('Mass'),
-        'high_voltage (V)': pick_first('Voltage', 'Vref'),
-        'pulse_v (V)': pick_first('Vap', 'pulse'),
-        'pulse_l (pJ)': pick_first('laserpower'),
-        't (ns)': pick_first('Epos ToF', 'tof'),
-        't_c (ns)': pick_first('tofc'),
-        'x_det (cm)': pick_first('XDet_mm'),
-        'y_det (cm)': pick_first('YDet_mm'),
-        'delta_p': pick_first('Delta Pulse', 'pulseDelta', dtype=int),
-        'multi': pick_first('Multiplicity', dtype=int),
-        'start_counter': pick_first('tElapsed', dtype=int),
+        'mc (Da)': pick_first('mc (Da)', 'Mass'),
+        'high_voltage (V)': pick_first('high_voltage (V)', 'Voltage', 'Vref'),
+        'pulse_v (V)': pick_first('pulse_v (V)', 'Vap', 'pulse'),
+        'pulse_l (pJ)': pick_first('pulse_l (pJ)', 'laserpower'),
+        't (ns)': pick_first('t (ns)', 'Epos ToF', 'tof'),
+        't_c (ns)': pick_first('t_c (ns)', 'tofc'),
+        'x_det (cm)': pick_first('x_det (cm)', 'XDet_mm'),
+        'y_det (cm)': pick_first('y_det (cm)', 'YDet_mm'),
+        'delta_p': pick_first('delta_p', 'Delta Pulse', 'pulseDelta', dtype=int),
+        'multi': pick_first('multi', 'Multiplicity', dtype=int),
+        'start_counter': pick_first('start_counter', 'tElapsed', dtype=int),
     }
 
     df = pd.DataFrame(data_dict)
@@ -332,4 +375,4 @@ def apt_to_ccapt(file_path):
     df['multi'] = df['multi'].astype(int)
     df['start_counter'] = df['start_counter'].astype(int)
 
-    return df
+    return _with_import_availability(df, data, source_columns)

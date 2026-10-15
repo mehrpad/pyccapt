@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 
 import numpy as np
+from pyccapt.control.core.shared_ring_buffer import publish_plot_events
 
 
 def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_event) -> None:
@@ -23,10 +24,7 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
             y = rng.normal(0.0, 0.8, batch_size)
             tof = rng.normal(100.0, 2.0, batch_size)
             voltage = np.full(batch_size, float(variables.specimen_voltage))
-            x_plot.write(x)
-            y_plot.write(y)
-            t_plot.write(tof)
-            main_v_dc_plot.write(voltage)
+            publish_plot_events(x_plot, y_plot, t_plot, main_v_dc_plot, x, y, tof, voltage)
             event_count += batch_size
             raw_count += batch_size * 4
             variables.total_ions = event_count

@@ -3,12 +3,13 @@ import json
 import math
 import time
 import uuid
+from collections import deque
 from pathlib import Path
 
 import numpy as np
 
 from pyccapt.control.apt.laser_alignment_config import LaserAlignmentConfig
-from pyccapt.control.apt.laser_alignment_data import peak_quality
+from pyccapt.control.apt.alignment_response import fit_local_response, informative_cross
 
 
 class LaserAlignment:
@@ -41,13 +42,37 @@ class LaserAlignment:
         self.fine_round = 0
         self.final_xy = False
         self.best_position = self.origin
+        self.measurements = 0
+        self.ions_observed = 0
+        self.surface = {}
+        self.last_usable_surface = {}
+        self.reuse_in_progress = False
+        self.reuse_radius = None
+        self.progress = 'Preparing fixed-power detector-response scan'
         self.v.laser_alignment_cancel = False
         self.v.laser_alignment_run = {'id': self.session, 'origin_m': self.origin, 'settings': self.cfg.snapshot()}
         self.laser_signature = self._signature()
         self._event('start', settings=self.cfg.snapshot(), origin_m=self.origin, mode=mode,
                     voltage_limit=self.limit, metric='detection_rate_at_fixed_dc')
         self._publish()
+        cached = self._compatible_solution() if mode == 'coarse' else None
         self._begin_scan(mode, self.origin)
+        if cached is not None:
+            # The first pending command is still the centre baseline. Replace
+            # only subsequent targets; cached coordinates never skip settling,
+            # fresh epochs or the usual candidate verification.
+            self.points = deque([tuple(cached['position_m']), self.origin])
+            self.model_pending = False
+            self.reuse_in_progress = True
+            self.reuse_target = tuple(cached['position_m'])
+            curvature = np.asarray(cached.get('surface', {}).get('curvature_per_um2', []), dtype=float)
+            if curvature.shape == (2, 2) and np.isfinite(curvature).all():
+                eigenvalues = np.linalg.eigvalsh(curvature)
+                if eigenvalues.max() < 0:
+                    self.reuse_radius = float(np.clip(1/np.sqrt(-eigenvalues.min()),
+                                                      self.cfg.fine_range_um/2, self.cfg.fine_range_um))
+            self.progress = 'Verifying previous solution against a fresh centre baseline'
+            self._event('reuse_proposed', solution=cached)
 
     @property
     def owns_voltage(self):
@@ -83,7 +108,52 @@ class LaserAlignment:
             'active': not self.finished, 'time': self.now, 'target_voltage': self.target_voltage,
             'fine_failures': self.fine_failures, 'recoveries': self.recoveries,
             'owns_voltage': self.owns_voltage,
+            'progress': self.progress, 'measurements': self.measurements,
+            'ions_observed': self.ions_observed, 'search_strategy': self.cfg.search_strategy,
+            'evidence': 'detector count/rate at fixed user laser settings',
         }
+
+    def _conditions(self):
+        return dict(context=self.cfg.reuse_context, coordinate_calibration_id=self.cfg.coordinate_calibration_id,
+                    laser_settings=list(self.laser_signature),
+                    sample=getattr(self.v, 'alignment_sample', None),
+                    sample_position_m=list(getattr(self.v, 'alignment_sample_position', ())),
+                    bounds_mm=list(self.cfg.bounds_mm), travel_um=list(self.cfg.travel_um))
+
+    def _compatible_solution(self):
+        if not self.cfg.reuse_previous:
+            return None
+        try:
+            cache = dict(getattr(self.v, 'laser_alignment_solution_cache', {}) or {})
+            position = tuple(float(x) for x in cache['position_m'])
+            self.cfg.check_position(position, self.origin)
+            surface = cache.get('surface', {})
+            if not isinstance(surface, dict):
+                raise ValueError('Invalid cached response surface')
+            curvature = np.asarray(surface.get('curvature_per_um2', []), dtype=float)
+            if curvature.size and (curvature.shape != (2, 2) or not np.isfinite(curvature).all() or
+                                   not np.allclose(curvature, curvature.T)):
+                raise ValueError('Invalid cached response curvature')
+            compatible = (cache.get('conditions') == self._conditions() and
+                          0 <= self.now-float(cache['time']) <= self.cfg.reuse_max_age_s and
+                          abs(float(cache['voltage'])-self.target_voltage) <= self.cfg.reuse_voltage_tolerance_v and
+                          abs(position[2]-self.origin[2])*1e6 <= self.cfg.tolerance_um)
+        except (KeyError, TypeError, ValueError, IndexError):
+            compatible = False
+        if compatible:
+            # Only copy validated values into the movement plan and journal.
+            return dict(position_m=position, time=float(cache['time']), voltage=float(cache['voltage']),
+                        conditions=self._conditions(),
+                        surface={'curvature_per_um2': curvature.tolist()} if curvature.size else {})
+        self._event('reuse_unavailable', reason='No compatible recent specimen, coordinate, laser, voltage and Z conditions')
+        return None
+
+    def _save_solution(self):
+        if not self.cfg.reuse_previous:
+            return
+        self.v.laser_alignment_solution_cache = dict(position_m=list(self.best_position), time=self.now,
+            voltage=self.target_voltage, conditions=self._conditions(), surface=self.last_usable_surface,
+            session=self.session, evidence='verified detector response; always remeasure before reuse')
 
     def finish(self, reason, failed=False):
         self.reason = reason
@@ -120,6 +190,9 @@ class LaserAlignment:
         self.centre = tuple(centre)
         self.cfg.check_position(self.centre, self.origin)
         self.records = []
+        self.surface = {}
+        self.model_pending = False
+        self.reuse_in_progress = False
         lower = [max(self.cfg.bounds_mm[2*i]*1e-3,
                      self.origin[i]-self.cfg.travel_um[i]*1e-6) for i in range(3)]
         upper = [min(self.cfg.bounds_mm[2*i+1]*1e-3,
@@ -150,13 +223,41 @@ class LaserAlignment:
         # Validate the whole path before issuing its first command.
         for point in points:
             self.cfg.check_position(point, self.origin)
-        self.points = iter(points)
+        self.scan_radius = radius
+        self.scan_lower, self.scan_upper = lower, upper
+        self.raster_points = points
+        if self.cfg.search_strategy == 'hybrid' and kind in ('coarse', 'fine'):
+            points = informative_cross(self.centre, lower, upper, radius, self.cfg.xy_speed_um_s)
+            self.model_pending = True
+            self.progress = 'Measuring centre, axes and diagonal response probes'
+        else:
+            self.progress = 'Measuring bounded '+kind+' scan'
+        self.points = deque(points)
         self._event('scan_start', kind=kind, centre_m=centre, radius_um=radius,
                     voltage=self.target_voltage)
         self._next_point()
 
     def _next_point(self):
-        point = next(self.points, None)
+        point = self.points.popleft() if self.points else None
+        if point is None and self.model_pending:
+            self.model_pending = False
+            self.surface = fit_local_response(self.records, self.centre, self.scan_radius,
+                                              self.scan_lower, self.scan_upper)
+            self._event('response_surface', **self.surface)
+            visited = [r['position_m'] for r in self.records]
+            if self.surface['usable']:
+                proposal = tuple(self.surface['position_m'])
+                self.cfg.check_position(proposal, self.origin)
+                self.last_usable_surface = self.surface
+                if not any(np.linalg.norm(np.subtract(proposal, p))*1e6 <= self.cfg.tolerance_um for p in visited):
+                    self.points.append(proposal)
+                self.progress = 'Remeasuring bounded model proposal and centre drift check'
+            else:
+                self.points.extend(p for p in self.raster_points[:-1] if not any(
+                    np.linalg.norm(np.subtract(p, q))*1e6 <= self.cfg.tolerance_um for q in visited))
+                self.progress = 'Raster fallback: '+self.surface['reason']
+            self.points.append(self.centre)
+            point = self.points.popleft()
         if point is None:
             self._complete_scan()
         else:
@@ -175,14 +276,30 @@ class LaserAlignment:
                 not 0 <= self.now-data.get('time', 0) <= 2):
             return None
         duration = data['time']-data['start']
-        if duration < self.cfg.dwell_s:
+        minimum = self.cfg.min_dwell_s if self.cfg.adaptive_dwell else self.cfg.dwell_s
+        if duration < minimum:
             return None
         count = int(data['count'])
         frequency = self.laser_signature[1]
         rate = count/(duration*frequency)*100
         error = math.sqrt(max(count, 1))/(duration*frequency)*100
-        quality = peak_quality(data.get('tof_ns', []), self.cfg)
-        return self._record(rate, error, count, quality)
+        if self.cfg.adaptive_dwell:
+            # Early rejection can only shorten a comparison, never certify an
+            # improvement. Final verification still requires the signal test.
+            reference = max(self.records, key=lambda r: r['rate_percent']) if self.records else None
+            poor = (self.phase != 'verify' and reference is not None and self._signal(reference) and
+                    rate+self.cfg.early_reject_sigma*error <
+                    reference['rate_percent']-self.cfg.early_reject_sigma*reference['error_percent'])
+            precise = count >= self.cfg.min_events and 1/math.sqrt(max(count, 1)) <= self.cfg.target_relative_error
+            if not (poor or precise or duration >= self.cfg.max_dwell_s):
+                self.progress = f'Collecting detector evidence: {count} ions, {duration:.1f}/{self.cfg.max_dwell_s:g} s'
+                return None
+            decision = 'clearly_poor' if poor else 'count_precision' if precise else 'maximum_dwell'
+        else:
+            decision = 'fixed_dwell'
+        record = self._record(rate, error, count, {})
+        record.update(duration_s=float(duration), dwell_decision=decision)
+        return record
 
     def _record(self, rate, error, count, quality):
         return {'rate_percent': rate, 'error_percent': error, 'count': count,
@@ -195,13 +312,9 @@ class LaserAlignment:
                 max(self.cfg.min_rate_percent, self.cfg.background_rate_percent))
 
     def _quality_ok(self, candidate, baseline):
-        if self.kind != 'focus' or not self.cfg.quality_peak_ns:
-            return True
-        a, b = candidate['quality'], baseline['quality']
-        if not a or not b:
-            return False
-        return (a['width_ns'] <= b['width_ns']*(1+self.cfg.quality_max_degradation) and
-                a['tail_fraction'] <= b['tail_fraction']+self.cfg.quality_max_degradation)
+        # Detector-only operation: legacy spectral ROI settings never influence
+        # a motor decision. Focus means best measured response, not best MRP.
+        return True
 
     def _complete_scan(self):
         baseline = self.records[0]
@@ -217,6 +330,11 @@ class LaserAlignment:
                         3*math.hypot(best['error_percent'], self.reference['error_percent']))
         if self._signal(baseline) and best['rate_percent']-reference <= threshold:
             best = baseline
+        if (self.reuse_in_progress and
+                np.linalg.norm(np.subtract(best['position_m'], self.reuse_target))*1e6 > self.cfg.tolerance_um):
+            self._event('reuse_rejected', reason='Cached position did not improve on the fresh centre')
+            self._move(self.centre, 'retry')
+            return
         self.candidate = best
         self._move(best['position_m'], 'verify')
 
@@ -242,12 +360,16 @@ class LaserAlignment:
                 self._move(self.centre, 'retry')
                 return
         self.best_position = measurement['position_m']
+        reused = self.reuse_in_progress
+        if reused:
+            self._event('reuse_verified', position_m=self.best_position)
+            self.reuse_in_progress = False
         self._event('accepted', measurement=measurement)
         self.fine_failures = 0
         if self.kind == 'coarse':
             self.final_xy = False
             self.fine_round = 0
-            self._begin_scan('fine', self.best_position)
+            self._begin_scan('fine', self.best_position, self.reuse_radius if reused else None)
         elif self.kind == 'fine' and self.fine_round < 1:
             self.fine_round += 1
             self._begin_scan('fine', self.best_position, self.cfg.fine_range_um/2)
@@ -263,9 +385,16 @@ class LaserAlignment:
             self.search_started = None
             self.v.laser_alignment_epoch = ''
             self._event('aligned', position_m=self.best_position)
+            self.progress = 'Aligned from repeated detector evidence; user laser settings unchanged'
+            self._save_solution()
 
     def _retry(self):
         self._event('scan_unsuccessful', kind=self.kind)
+        if self.reuse_in_progress:
+            self.reuse_in_progress = False
+            self._event('reuse_rejected', reason='Fresh verification failed; bounded coarse search at unchanged DC')
+            self._begin_scan('coarse', self.centre)
+            return
         if self.kind == 'coarse':
             if self.target_voltage >= self.limit:
                 self.finish('No laser alignment before the DC voltage ceiling.', failed=True)
@@ -358,9 +487,12 @@ class LaserAlignment:
                     self._begin_scan('tracking', self.best_position)
             else:
                 measured = self._measurement()
-                if measured is None and self.now-self.observation_start >= self.cfg.dwell_s+2:
+                deadline = self.cfg.max_dwell_s if self.cfg.adaptive_dwell else self.cfg.dwell_s
+                if measured is None and self.now-self.observation_start >= deadline+2:
                     measured = self._record(0., 0., 0, {})
                 if measured is not None:
+                    self.measurements += 1
+                    self.ions_observed += measured['count']
                     self._event('observation', **measured)
                     self.v.laser_alignment_plot = measured
                     if self.phase == 'verify': self._accepted(measured)

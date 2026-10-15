@@ -15,10 +15,6 @@ label_layout = widgets.Layout(width='200px')
 
 
 def call_x_y_z_calculation(variables, flight_path_length, element_selected, colab=False):
-    # Call the function or perform calculations here
-    # You can replace this with the actual implementation
-
-    # For demonstration purposes, I'm just printing the inputs
     out = Output()
     avg_dens = element_selected.value[1]
     field_evap = element_selected.value[2]
@@ -34,11 +30,23 @@ def call_x_y_z_calculation(variables, flight_path_length, element_selected, cola
     element_percentage_widget = widgets.Textarea(value=element_percentage)
     figname_widget = widgets.Text(value='3d')
     mode_widget = widgets.Dropdown(options=[('Geiser', 'Geiser'), ('Bas', 'Bas')])
-    opacity_widget = widgets.FloatText(value=0.5, min=0, max=1, step=0.1)
+    opacity_widget = widgets.BoundedFloatText(value=0.5, min=0, max=1, step=0.1)
     save_widget = widgets.Dropdown(options=[('True', True), ('False', False)], value=False)
 
     # Create a button widget to trigger the function
     button_calculate_plot = widgets.Button(description="Reconstruct & plot", button_style='primary')
+    button_load = widgets.Button(description='Load accepted parameters')
+    parameter_widgets = dict(kf=kf_widget, icf=icf_widget, det_eff=det_eff_widget,
+                             field_evap=field_evap_widget, avg_dens=avg_dens_widget,
+                             mode=mode_widget, flight_path_length=flight_path_length)
+
+    def load_accepted(_=None):
+        for name, value in getattr(variables, 'reconstruction_parameters', {}).items():
+            if name in parameter_widgets:
+                parameter_widgets[name].value = value
+
+    load_accepted()
+    button_load.on_click(load_accepted)
 
     def on_button_click(b, variables, flight_path_length):
         # Disable the button while the code is running
@@ -56,57 +64,51 @@ def call_x_y_z_calculation(variables, flight_path_length, element_selected, cola
         opacity_value = opacity_widget.value
         save_value = save_widget.value
 
-        with out:
-            out.clear_output()
-            # Call the function
-            element_percentage_dic = ast.literal_eval(element_percentage_value)
-            element_percentage_list, unranged_fraction = resolve_element_controls(
-                variables.range_data, element_percentage_dic, 0.1, 0.01
-            )
-
-            reconstruction.x_y_z_calculation_and_plot(
-                kf=kf_value,
-                det_eff=det_eff_value,
-                icf=icf_value,
-                field_evap=field_evap_value,
-                avg_dens=avg_dens_value,
-                element_percentage=element_percentage_list,
-                rotary_fig_save=False,
-                variables=variables,
-                flight_path_length=flight_path_length.value,
-                figname=figname_value,
-                mode=mode_value,
-                opacity=opacity_value,
-                save=save_value,
-                colab=colab,
-                cluster_result=None,
-                unranged_fraction=unranged_fraction,
-            )
-
-        # Enable the button when the code is finished
-        button_calculate_plot.disabled = False
+        try:
+            with out:
+                out.clear_output()
+                element_percentage_dic = ast.literal_eval(element_percentage_value)
+                element_percentage_list, unranged_fraction = resolve_element_controls(
+                    variables.range_data, element_percentage_dic, 0.1, 0.01
+                )
+                reconstruction.x_y_z_calculation_and_plot(
+                    kf=kf_value, det_eff=det_eff_value, icf=icf_value,
+                    field_evap=field_evap_value, avg_dens=avg_dens_value,
+                    element_percentage=element_percentage_list, rotary_fig_save=False,
+                    variables=variables, flight_path_length=flight_path_length.value,
+                    figname=figname_value, mode=mode_value, opacity=opacity_value,
+                    save=save_value, colab=colab, cluster_result=None,
+                    unranged_fraction=unranged_fraction,
+                )
+                actual_parameters = {name: widget.value for name, widget in parameter_widgets.items()}
+                if actual_parameters != variables.reconstruction_parameters:
+                    variables.reconstruction_ratio_result = {}
+                variables.reconstruction_parameters = actual_parameters
+        finally:
+            button_calculate_plot.disabled = False
 
     button_calculate_plot.on_click(lambda b: on_button_click(b, variables, flight_path_length))
 
     widget_container = widgets.VBox(
         [
-            widgets.HBox([widgets.Label(value='KF:', layout=label_layout), kf_widget, widgets.Label(value='(EV/nm)')]),
+            widgets.HBox([widgets.Label(value='KF:', layout=label_layout), kf_widget, widgets.Label(value='(dimensionless)')]),
             widgets.HBox([widgets.Label(value='Det_eff:', layout=label_layout), det_eff_widget]),
             widgets.HBox([widgets.Label(value='ICF:', layout=label_layout), icf_widget]),
             widgets.HBox(
                 [widgets.Label(value='Field_evap:', layout=label_layout), field_evap_widget, widgets.Label(value='(V/nm)')]
             ),
             widgets.HBox(
-                [widgets.Label(value='Avg_dens:', layout=label_layout), avg_dens_widget, widgets.Label(value='(Amu/nm^3)')]
+                [widgets.Label(value='Avg_dens:', layout=label_layout), avg_dens_widget, widgets.Label(value='(atoms/nm^3)')]
             ),
             widgets.HBox([widgets.Label(value='Display fraction:', layout=label_layout), element_percentage_widget]),
             widgets.HBox([widgets.Label(value='Fig name:', layout=label_layout), figname_widget]),
             widgets.HBox([widgets.Label(value='Save fig:', layout=label_layout), save_widget]),
             widgets.HBox([widgets.Label(value='Mode:', layout=label_layout), mode_widget]),
             widgets.HBox([widgets.Label(value='Opacity:', layout=label_layout), opacity_widget]),
-            widgets.HBox([button_calculate_plot]),
+            widgets.HBox([button_load, button_calculate_plot]),
         ]
     )
 
     display(widget_container)
     display(out)
+    return widget_container

@@ -13,7 +13,8 @@ import pandas as pd
 from pyccapt.calibration.core.exceptions import CalibrationInputError
 
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
+EVENT_ID_COLUMN = "event_id"
 UNITS = MappingProxyType(
     {
         "high_voltage (V)": "V",
@@ -49,13 +50,20 @@ class CalibrationDataset:
             raise CalibrationInputError("Calibration data must be a pandas DataFrame")
         normalized = frame.reset_index(drop=True).copy()
         row_count = len(normalized)
+        if EVENT_ID_COLUMN not in normalized:
+            normalized[EVENT_ID_COLUMN] = np.arange(row_count, dtype=np.uint64)
+        else:
+            ids = normalized[EVENT_ID_COLUMN].to_numpy()
+            if ids.dtype.kind not in 'iu' or np.any(ids < 0) or len(np.unique(ids)) != row_count:
+                raise CalibrationInputError('event_id must contain unique nonnegative integers; floats are not event identities')
+            normalized[EVENT_ID_COLUMN] = ids.astype(np.uint64, copy=False)
         for column in normalized.columns:
             if len(normalized[column]) != row_count:
                 raise CalibrationInputError(f"Column {column!r} is not aligned to {row_count} rows")
 
         finite_masks: dict[str, np.ndarray] = {}
         for column in UNITS:
-            if column in normalized.columns:
+            if column in normalized.columns and column not in normalized.attrs.get('pyccapt_unavailable_columns', []):
                 try:
                     finite_masks[column] = np.isfinite(normalized[column].to_numpy(dtype=float, copy=False))
                 except (TypeError, ValueError):
@@ -82,7 +90,12 @@ class CalibrationDataset:
             }
         )
         row_hashes = pd.util.hash_pandas_object(normalized, index=False).to_numpy(dtype=np.uint64)
-        source_hash = hashlib.sha256(row_hashes.tobytes()).hexdigest()
+        digest = hashlib.sha256(repr([(str(c), str(normalized[c].dtype)) for c in normalized]).encode())
+        digest.update(row_hashes.tobytes())
+        source_hash = digest.hexdigest()
+        # Pandas preserves attrs through ordinary slicing/reset_index. Identity
+        # is (source_id, event_id), never a wrapping hardware pulse counter.
+        normalized.attrs.setdefault('pyccapt_source_id', source_hash)
         return cls(
             frame=normalized,
             units=UNITS,
@@ -94,6 +107,27 @@ class CalibrationDataset:
     @property
     def row_count(self) -> int:
         return len(self.frame)
+
+    @property
+    def event_ids(self) -> np.ndarray:
+        ids = self.frame[EVENT_ID_COLUMN].to_numpy(copy=True)
+        ids.flags.writeable = False
+        return ids
+
+    @property
+    def source_id(self) -> str:
+        return str(self.frame.attrs['pyccapt_source_id'])
+
+    def validity_status(self, column: str) -> np.ndarray:
+        """0=measured (zero is valid), 1=unknown/nonfinite, 2=unavailable field."""
+        if column not in self.frame or column in self.frame.attrs.get('pyccapt_unavailable_columns', []):
+            return np.full(self.row_count, 2, dtype=np.uint8)
+        if column not in self.finite_masks:
+            values = self.frame[column].to_numpy()
+            if values.dtype.kind in 'biufc':
+                return (~np.isfinite(values)).astype(np.uint8)
+            return np.asarray(self.frame[column].isna(), dtype=np.uint8)
+        return (~self.finite_masks[column]).astype(np.uint8)
 
     def values(self, column: str, *, missing: float = 0.0) -> np.ndarray:
         if column in self.frame.columns:

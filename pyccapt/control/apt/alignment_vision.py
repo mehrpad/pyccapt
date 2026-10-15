@@ -68,6 +68,8 @@ class Footprint:
     angular_coverage: float = 0.
     radius_uncertainty_mm: float = 0.
     model: str = 'circle'
+    intensity_centre_mm: tuple = (0., 0.)
+    geometry_intensity_offset_mm: float = 0.
 
     def snapshot(self):
         return asdict(self)
@@ -107,23 +109,29 @@ def estimate_dense_region(points_mm, detector_radius_mm, minimum_events=200):
     region = labels == int(np.argmax(sizes))
     if region.sum() < 8 or np.count_nonzero(counts*region) < 8:
         return invalid
+    if np.any(region & ndimage.binary_dilation(~detector)):
+        return invalid  # diffuse detector-wide occupancy has no bounded footprint
     indices = np.clip(((points+radius)/pixel).astype(int), 0, bins-1)
     inside = region[indices[:, 0], indices[:, 1]]
     n_signal = int(inside.sum())
     outside_area = max(1, int(detector.sum()-region.sum()))
     expected = (len(points)-n_signal)*region.sum()/outside_area
-    if n_signal < max(50, .35*len(points)) or n_signal-expected < 3*np.sqrt(max(1., expected)):
+    if (n_signal < max(50, .35*len(points)) or n_signal-expected < 3*np.sqrt(max(1., expected))
+            or (n_signal-expected)/len(points) < .35):
         return invalid
-    # Capped intensity reduces the influence of a bright pixel inside the
-    # genuine region without discarding that region's useful centroid.
+    # Use region geometry for centring. The capped intensity centroid is a
+    # separate diagnostic: a crystallographic bright pole need not be the
+    # geometric centre of the sample footprint.
     weights = np.minimum(counts, cap)*region
-    centre = (float((weights*gx).sum()/weights.sum()), float((weights*gy).sum()/weights.sum()))
+    intensity = (float((weights*gx).sum()/weights.sum()), float((weights*gy).sum()/weights.sum()))
+    centre = (float(gx[region].mean()), float(gy[region].mean()))
     extent = float(np.quantile(np.linalg.norm(points[inside]-centre, axis=1), .95))
     if np.linalg.norm(centre)+extent >= radius*.995:
         return invalid
     return Footprint(True, 'Dense detector region accepted for XY', centre, extent,
                      float(region.sum()/detector.sum()), float((n_signal-expected)/len(points)),
-                     radius_uncertainty_mm=pixel, model='density')
+                     radius_uncertainty_mm=pixel, model='density', intensity_centre_mm=intensity,
+                     geometry_intensity_offset_mm=float(np.linalg.norm(np.subtract(centre, intensity))))
 
 
 def estimate_footprint(points_mm, detector_radius_mm, minimum_events=2000):
@@ -215,6 +223,8 @@ def estimate_footprint(points_mm, detector_radius_mm, minimum_events=2000):
     signal = max(0., (np.count_nonzero(in_circle) - background_density*np.pi*r*r)/len(points))
     valid = bool(residual <= 0.12 and coverage >= 0.75 and signal >= 0.25
                  and np.linalg.norm(centre)+r < radius*0.995)
+    intensity = tuple(float(x) for x in np.mean(points[in_circle], axis=0)) if in_circle.any() else (0., 0.)
     return Footprint(valid, 'Footprint accepted' if valid else 'Noisy, incomplete or clipped footprint',
                      tuple(float(x) for x in centre), r, (r/radius)**2, float(signal), residual, float(coverage),
-                     max(pixel, residual*r))
+                     max(pixel, residual*r), intensity_centre_mm=intensity,
+                     geometry_intensity_offset_mm=float(np.linalg.norm(np.subtract(centre, intensity))))

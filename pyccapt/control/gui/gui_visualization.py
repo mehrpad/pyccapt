@@ -1,4 +1,5 @@
 import sys
+import logging
 from pyccapt.control.core.control_state import observe
 import time
 
@@ -13,11 +14,37 @@ from PyQt6.QtCore import QTimer
 from pyccapt.control.gui.responsive import make_window_responsive
 from pyccapt.control.gui.visualization_layout import VisualizationLayoutMixin
 from pyccapt.control.core import live_calibration, runtime, tof2mc_simple
+from pyccapt.control.core.plot_history import EventHistory
+from pyccapt.control.core.shared_ring_buffer import SharedEventBuffer
 from pyccapt.control.devices import initialize_devices
 from pyccapt.control.gui import tooltips
 
 
 class Ui_Visualization(VisualizationLayoutMixin):
+    @property
+    def last_100_thousand_det_x(self):
+        return self._event_history.snapshot()[:, 0]
+
+    @property
+    def last_100_thousand_det_y(self):
+        return self._event_history.snapshot()[:, 1]
+
+    @property
+    def last_100_thousand_t(self):
+        return self._event_history.snapshot()[:, 2]
+
+    @property
+    def last_100_thousand_v(self):
+        return self._event_history.snapshot()[:, 3]
+
+    @property
+    def last_100_thousand_det_x_heatmap(self):
+        return self._hitmap_history.snapshot()[:, 0]
+
+    @property
+    def last_100_thousand_det_y_heatmap(self):
+        return self._hitmap_history.snapshot()[:, 1]
+
     def __init__(self, variables, conf, x_plot, y_plot, t_plot, main_v_dc_plot):
         """
         Constructor for the Visualization UI class.
@@ -42,19 +69,8 @@ class Ui_Visualization(VisualizationLayoutMixin):
         self.index_hist_tof = None
         self.max_tof_val = None
         self.max_mc_val = None
-        self.last_100_thousand_det_x_heatmap = np.array([])
-        self.last_100_thousand_det_y_heatmap = np.array([])
-        self.last_100_thousand_t = np.array([])
-        self.last_100_thousand_v = np.array([])
-        self.last_100_thousand_det_x = np.array([])
-        self.last_100_thousand_det_y = np.array([])
-        # Per-ion-aligned leftover from the ring-buffer drain, carried to
-        # the next tick so no events are dropped when a read lands while the
-        # producer is mid-write (see update_graphs_helper).
-        self._carry_x = np.array([])
-        self._carry_y = np.array([])
-        self._carry_t = np.array([])
-        self._carry_v = np.array([])
+        self._event_history = EventHistory()
+        self._hitmap_history = EventHistory(columns=2)
         self.length_events = 0
         self.styles = None
         self.num_event_mc_tof = None
@@ -1029,123 +1045,89 @@ class Ui_Visualization(VisualizationLayoutMixin):
             self.index_wait_on_plot_start += 1
 
         # V_dc and V_p
-        current_voltage = self.variables.specimen_voltage_plot
-        if self.index_plot < len(self.y_vdc):
-            self.y_vdc[self.index_plot] = int(current_voltage)  # Add a new value.
+        try:
+            telemetry = self.variables.statistics_snapshot(
+                'specimen_voltage_plot', 'detection_rate_current_plot', 'total_ions')
+        except TimeoutError:
+            if not getattr(self, '_telemetry_unavailable', False):
+                logging.getLogger(__name__).warning(
+                    'Plot telemetry unavailable; retaining its last display until the lock recovers')
+            self._telemetry_unavailable = True
+            telemetry = None
+            if not final_drain:
+                return
+        else:
+            self._telemetry_unavailable = False
 
-        else:
-            x_vdc_last = self.x_vdc[-1]
-            self.x_vdc.append(x_vdc_last + 0.5)  # Add a new value 1 higher than the last.
-            self.y_vdc.append(int(current_voltage))
-        # set the value of the voltage with two decimal places
-        self.voltage.setText(str("{:.2f}".format(current_voltage)))
+        # A final export must drain event data even if telemetry is unavailable.
+        if telemetry is not None:
+            current_voltage = telemetry['specimen_voltage_plot']
+            if self.index_plot < len(self.y_vdc):
+                self.y_vdc[self.index_plot] = int(current_voltage)  # Add a new value.
 
-        # Set the maximum number of data points to display
-        max_display_points = 200
-        # Downsample the data if needed
-        if len(self.x_vdc) > max_display_points:
-            step = len(self.x_vdc) // max_display_points
-            x_vdc_downsampled = self.x_vdc[::step]
-            y_vdc_downsampled = self.y_vdc[::step]
-            self.data_line_vdc.setData(x_vdc_downsampled, y_vdc_downsampled)
-        else:
-            self.data_line_vdc.setData(self.x_vdc, self.y_vdc)
+            else:
+                x_vdc_last = self.x_vdc[-1]
+                self.x_vdc.append(x_vdc_last + 0.5)  # Add a new value 1 higher than the last.
+                self.y_vdc.append(int(current_voltage))
+            # set the value of the voltage with two decimal places
+            self.voltage.setText(str("{:.2f}".format(current_voltage)))
 
-        # Detection Rate Visualization
-        # with self.variables.lock_statistics:
-        current_detection_rate = self.variables.detection_rate_current_plot
-        if self.index_plot < len(self.y_dtec):
-            self.y_dtec[self.index_plot] = current_detection_rate  # Add a new value.
-        else:
-            # self.x_dtec = self.x_dtec[1:]  # Remove the first element.
-            x_dtec_last = self.x_dtec[-1]
-            self.x_dtec.append(x_dtec_last + 0.5)  # Add a new value 1 higher than the last.
-            self.y_dtec.append(current_detection_rate)
-        self.detection_rate.setText(str("{:.2f}".format(current_detection_rate)))
-        # self.data_line_dtec.setData(self.x_dtec, self.y_dtec)
-        # Set the maximum number of data points to display
-        max_display_points = 200
-        # Downsample the data if needed
-        if len(self.x_dtec) > max_display_points and not self.change_detection_rate_range:
-            step = len(self.x_dtec) // max_display_points
-            x_dtec_downsampled = self.x_dtec[::step]
-            y_dtec_downsampled = self.y_dtec[::step]
-            self.data_line_dtec.setData(x_dtec_downsampled, y_dtec_downsampled)
-        elif len(self.x_dtec) > max_display_points and self.change_detection_rate_range:
-            x_dtec_downsampled = self.x_dtec[-max_display_points:]
-            y_dtec_downsampled = self.y_dtec[-max_display_points:]
-            self.data_line_dtec.setData(x_dtec_downsampled, y_dtec_downsampled)
-        else:
-            self.data_line_dtec.setData(self.x_dtec, self.y_dtec)
-        # Increase the index
-        # with self.variables.lock_statistics:
-        self.index_plot += 1
+            # Set the maximum number of data points to display
+            max_display_points = 200
+            # Downsample the data if needed
+            if len(self.x_vdc) > max_display_points:
+                step = len(self.x_vdc) // max_display_points
+                x_vdc_downsampled = self.x_vdc[::step]
+                y_vdc_downsampled = self.y_vdc[::step]
+                self.data_line_vdc.setData(x_vdc_downsampled, y_vdc_downsampled)
+            else:
+                self.data_line_vdc.setData(self.x_vdc, self.y_vdc)
+
+            # Detection Rate Visualization
+            # with self.variables.lock_statistics:
+            current_detection_rate = telemetry['detection_rate_current_plot']
+            if self.index_plot < len(self.y_dtec):
+                self.y_dtec[self.index_plot] = current_detection_rate  # Add a new value.
+            else:
+                # self.x_dtec = self.x_dtec[1:]  # Remove the first element.
+                x_dtec_last = self.x_dtec[-1]
+                self.x_dtec.append(x_dtec_last + 0.5)  # Add a new value 1 higher than the last.
+                self.y_dtec.append(current_detection_rate)
+            self.detection_rate.setText(str("{:.2f}".format(current_detection_rate)))
+            # self.data_line_dtec.setData(self.x_dtec, self.y_dtec)
+            # Set the maximum number of data points to display
+            max_display_points = 200
+            # Downsample the data if needed
+            if len(self.x_dtec) > max_display_points and not self.change_detection_rate_range:
+                step = len(self.x_dtec) // max_display_points
+                x_dtec_downsampled = self.x_dtec[::step]
+                y_dtec_downsampled = self.y_dtec[::step]
+                self.data_line_dtec.setData(x_dtec_downsampled, y_dtec_downsampled)
+            elif len(self.x_dtec) > max_display_points and self.change_detection_rate_range:
+                x_dtec_downsampled = self.x_dtec[-max_display_points:]
+                y_dtec_downsampled = self.y_dtec[-max_display_points:]
+                self.data_line_dtec.setData(x_dtec_downsampled, y_dtec_downsampled)
+            else:
+                self.data_line_dtec.setData(self.x_dtec, self.y_dtec)
+            # Increase the index
+            # with self.variables.lock_statistics:
+            self.index_plot += 1
         # mass spectrum
 
-        if self.counter_source == 'TDC' and self.variables.total_ions > 0 and self.index_wait_on_plot_start > 16:
-            # Drain all four ring buffers (zero-copy NumPy slices, no IPC).
-            # The producer writes x -> y -> t -> v in sequence, so a read
-            # that lands mid-write sees a longer x/y/t than v. We keep only
-            # the per-ion-aligned prefix (min length) this tick AND carry
-            # the unmatched tail over to the next tick instead of dropping
-            # it. Dropping it (the old behaviour) permanently lost those
-            # events, so the viz total drifted below total_ions — visibly
-            # so for the final events after the experiment stopped.
-            xx = np.concatenate((self._carry_x, self.x_plot.read_all()))
-            yy = np.concatenate((self._carry_y, self.y_plot.read_all()))
-            tt = np.concatenate((self._carry_t, self.t_plot.read_all()))
-            main_v_dc_dld = np.concatenate((self._carry_v, self.main_v_dc_plot.read_all()))
-            n = min(len(xx), len(yy), len(tt), len(main_v_dc_dld))
-            # Stash the leftover tail of each buffer (everything past the
-            # aligned prefix) for next tick. When the producer has finished
-            # all four indices are equal, so the tails are empty and the
-            # final drain matches every remaining event.
-            self._carry_x = xx[n:]
-            self._carry_y = yy[n:]
-            self._carry_t = tt[n:]
-            self._carry_v = main_v_dc_dld[n:]
-            if n == 0:
-                xx = np.array([])
-                yy = np.array([])
-                tt = np.array([])
-                main_v_dc_dld = np.array([])
-            else:
-                xx = xx[:n]
-                yy = yy[:n]
-                tt = tt[:n]
-                main_v_dc_dld = main_v_dc_dld[:n]
-
-            # self.length_events += len(self.tt)
+        if self.counter_source == 'TDC' and (final_drain or telemetry['total_ions'] > 0) and self.index_wait_on_plot_start > 16:
+            # Runtime publishes whole events under one commit lock. Legacy
+            # independently overflowing rings cannot establish event identity.
+            if not isinstance(self.x_plot, SharedEventBuffer):
+                raise TypeError("Visualization requires coherent SharedEventBuffer transport")
+            xx, yy, tt, main_v_dc_dld = self.x_plot.read_events()
+            # Preserve the previous float64 GUI arithmetic (the wire values
+            # have always been float32, promoted by the old carry arrays).
+            xx, yy, tt, main_v_dc_dld = (a.astype(np.float64) for a in (xx, yy, tt, main_v_dc_dld))
             self.length_events += len(tt)
-
-            # All ring-buffer writes go through the lock so the
-            # background calibration worker's snapshot can never see a
-            # half-updated buffer (e.g. concatenated v_dc but pre-trim
-            # t / x / y after the 100 k cap kicks in).
+            mask_t = tt < self.conf["max_tof"]
             with self._buffer_lock:
-                if len(self.last_100_thousand_v) == 0:
-                    self.last_100_thousand_det_x_heatmap = xx
-                    self.last_100_thousand_det_y_heatmap = yy
-                    mask_t = tt < self.conf["max_tof"]
-                    self.last_100_thousand_v = main_v_dc_dld[mask_t]
-                    self.last_100_thousand_det_x = xx[mask_t]
-                    self.last_100_thousand_det_y = yy[mask_t]
-                    self.last_100_thousand_t = tt[mask_t]
-                else:
-                    self.last_100_thousand_det_x_heatmap = np.concatenate((self.last_100_thousand_det_x_heatmap, xx))
-                    self.last_100_thousand_det_y_heatmap = np.concatenate((self.last_100_thousand_det_y_heatmap, yy))
-                    mask_t = tt < self.conf["max_tof"]
-                    self.last_100_thousand_v = np.concatenate((self.last_100_thousand_v, main_v_dc_dld[mask_t]))
-                    self.last_100_thousand_det_x = np.concatenate((self.last_100_thousand_det_x, xx[mask_t]))
-                    self.last_100_thousand_det_y = np.concatenate((self.last_100_thousand_det_y, yy[mask_t]))
-                    self.last_100_thousand_t = np.concatenate((self.last_100_thousand_t, tt[mask_t]))
-                if len(self.last_100_thousand_v) > 100000:
-                    self.last_100_thousand_v = self.last_100_thousand_v[-100000:]
-                    self.last_100_thousand_det_x = self.last_100_thousand_det_x[-100000:]
-                    self.last_100_thousand_det_x_heatmap = self.last_100_thousand_det_x_heatmap[-100000:]
-                    self.last_100_thousand_det_y = self.last_100_thousand_det_y[-100000:]
-                    self.last_100_thousand_det_y_heatmap = self.last_100_thousand_det_y_heatmap[-100000:]
-                    self.last_100_thousand_t = self.last_100_thousand_t[-100000:]
+                self._hitmap_history.append(xx, yy)
+                self._event_history.append(xx[mask_t], yy[mask_t], tt[mask_t], main_v_dc_dld[mask_t])
 
             try:
                 t_0 = self._t_0()
@@ -1300,8 +1282,7 @@ class Ui_Visualization(VisualizationLayoutMixin):
         buffer. Honours a pending Reset request."""
         if self.variables.reset_heatmap:
             self.variables.reset_heatmap = False
-            self.last_100_thousand_det_x_heatmap = np.array([])
-            self.last_100_thousand_det_y_heatmap = np.array([])
+            self._hitmap_history.clear()
         x_last_events = self.last_100_thousand_det_x_heatmap[:]
         y_last_events = self.last_100_thousand_det_y_heatmap[:]
         self.scatter.setSize(self.hitmap_plot_size.value())
@@ -1627,16 +1608,9 @@ class Ui_Visualization(VisualizationLayoutMixin):
             self.start_time_metadata = 0
             self.variables.detection_rate_current_plot = 0
 
-            self.last_100_thousand_det_x_heatmap = np.array([])
-            self.last_100_thousand_det_x = np.array([])
-            self.last_100_thousand_det_y_heatmap = np.array([])
-            self.last_100_thousand_det_y = np.array([])
-            self.last_100_thousand_t = np.array([])
-            self.last_100_thousand_v = np.array([])
-            self._carry_x = np.array([])
-            self._carry_y = np.array([])
-            self._carry_t = np.array([])
-            self._carry_v = np.array([])
+            with self._buffer_lock:
+                self._event_history.clear()
+                self._hitmap_history.clear()
             self.length_events = 0
             self.hist_fdm, xedges, yedges = np.histogram2d([], [], bins=self.bins_detector, range=self.range)
             self._fdm_hist_all = np.zeros_like(self.hist_fdm)

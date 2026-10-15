@@ -1,6 +1,7 @@
 """Run each real detector loop with fake SDK batches and a virtual clock."""
 from types import SimpleNamespace
 from unittest.mock import Mock
+from queue import Empty
 
 import numpy as np
 import pytest
@@ -34,12 +35,15 @@ def test_detector_rate_uses_actual_elapsed_time(monkeypatch, tmp_path, backend, 
         device.initialize.return_value = (0, '')
         monkeypatch.setattr(module.scTDC, 'Device', lambda **_kwargs: device)
         def callback(*_args, dld_events):
+            delivered = False
             def packet(**_kwargs):
-                if dld_events:
+                nonlocal delivered
+                if dld_events and not delivered:
+                    delivered = True
                     clock[0] = elapsed_s
                     data = {key: np.ones(count) for key in ('dif1', 'dif2', 'time', 'start_counter')}
                     return module.QUEUE_DATA, data
-                return None, None
+                raise Empty
             return SimpleNamespace(queue=Mock(get=Mock(side_effect=packet)),
                                    start_measurement=Mock(return_value=0), close=Mock())
         monkeypatch.setattr(module, 'BufDataCB4', callback)

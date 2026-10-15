@@ -10,8 +10,9 @@ ipywidgets panel on top of the widget-free algorithms in
   theoretical d-spacing (from the lattice + Miller index) and apply the
   suggested kf. The ROI is a detector disk, so it stays constant across
   iterations.
-* **Automatic** -- grid-sweep (kf, icf) maximising z-SDM peakiness in the same
-  fixed ROI, show the strength heat-map, and apply the best pair.
+* **Ratio suggestion** -- near-axis q = ICF/kf profile at an independently
+  indexed spacing, validated across acquisition bands. Applying one compatible
+  family member requires an explicitly chosen ICF anchor.
 
 For the z-SDM to show clean peaks the structure is first rotated so the chosen
 pole faces +z (planes become perpendicular to z).
@@ -26,6 +27,9 @@ from ipywidgets import Output
 
 from pyccapt.calibration.core import plot_style
 from pyccapt.calibration.reconstructions import sdm_calibration as sc
+from pyccapt.calibration.reconstructions import ratio_calibration as rc
+from pyccapt.calibration.core.exceptions import CalibrationInputError, CalibrationStateError
+from pyccapt.calibration.tutorials.tutorials_helpers.guided_jobs import NotebookJob
 
 _label = widgets.Layout(width='190px')
 _narrow = widgets.Layout(width='90px')
@@ -36,14 +40,28 @@ def call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected,
 
     avg_dens0 = element_selected.value[1]
     field_evap0 = element_selected.value[2]
+    saved = getattr(variables, 'reconstruction_parameters', {})
+    ratio_job = NotebookJob()
 
     # ---- shared reconstruction parameters --------------------------------
-    kf_w = widgets.FloatText(value=3.3, step=0.05, layout=_narrow)
-    icf_w = widgets.FloatText(value=1.65, step=0.05, layout=_narrow)
-    det_eff_w = widgets.FloatText(value=0.7, step=0.05, layout=_narrow)
-    field_evap_w = widgets.FloatText(value=field_evap0, layout=_narrow)
-    avg_dens_w = widgets.FloatText(value=avg_dens0, layout=_narrow)
-    mode_w = widgets.Dropdown(options=[('Geiser', 'Geiser'), ('Bas', 'Bas')], layout=_narrow)
+    kf_w = widgets.FloatText(value=saved.get('kf', 3.3), step=0.05, layout=_narrow)
+    icf_w = widgets.FloatText(value=saved.get('icf', 1.65), step=0.05, layout=_narrow)
+    det_eff_w = widgets.FloatText(value=saved.get('det_eff', 0.7), step=0.05, layout=_narrow)
+    field_evap_w = widgets.FloatText(value=saved.get('field_evap', field_evap0), layout=_narrow)
+    avg_dens_w = widgets.FloatText(value=saved.get('avg_dens', avg_dens0), layout=_narrow)
+    mode_w = widgets.Dropdown(options=[('Geiser', 'Geiser'), ('Bas', 'Bas')], value=saved.get('mode', 'Geiser'), layout=_narrow)
+
+    def _parameters():
+        return dict(kf=kf_w.value, icf=icf_w.value, det_eff=det_eff_w.value,
+                    field_evap=field_evap_w.value, avg_dens=avg_dens_w.value,
+                    mode=mode_w.value, flight_path_length=flight_path_length.value)
+
+    def _save_parameters():
+        if ratio_job.running:
+            raise CalibrationStateError('Wait for or cancel the ratio preview before changing accepted parameters')
+        variables.reconstruction_parameters = _parameters()
+        variables.reconstruction_ratio_result = {}
+        print('Saved reconstruction parameters. Use "Load accepted parameters" in an already-open reconstruction panel.')
 
     # ---- SDM / FDM parameters --------------------------------------------
     bin_w = widgets.FloatText(value=0.01, step=0.005, layout=_narrow)
@@ -67,7 +85,7 @@ def call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected,
     # ---- ROI (detector disk, cm) -- constant across iterations -----------
     cx_w = widgets.FloatText(value=0.0, step=0.05, layout=_narrow)
     cy_w = widgets.FloatText(value=0.0, step=0.05, layout=_narrow)
-    r_w = widgets.FloatText(value=0.30, step=0.05, layout=_narrow)
+    r_w = widgets.FloatText(value=0.05, step=0.01, layout=_narrow)
     pole_dd = widgets.Dropdown(options=[('(show FDMs first)', None)], layout=widgets.Layout(width='280px'))
 
     d_obs_w = widgets.FloatText(value=0.0, step=0.001, layout=_narrow)
@@ -86,6 +104,12 @@ def call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected,
         return sc.d_spacing((h_w.value, k_w.value, l_w.value),
                             a_w.value, b_w.value, c_w.value,
                             al_w.value, be_w.value, ga_w.value)
+
+    def _ratio_inputs():
+        fixed = {key: value for key, value in _parameters().items() if key not in ('kf', 'icf')}
+        return (fixed, cx_w.value, cy_w.value, r_w.value, _theo_d(),
+                q_lo_w.value, q_hi_w.value, q_n_w.value, icf_lo_w.value, icf_hi_w.value,
+                full_source_w.value, spacing_confirmed_w.value, id(getattr(variables, 'dataset', None)))
 
     # ---- show normal + sharp FDM, detect pole candidates -----------------
     def on_show_fdm(_):
@@ -147,7 +171,7 @@ def call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected,
         x, y, z = sc.reconstruct_xyz(variables, kf_w.value, icf_w.value, det_eff_w.value,
                                      field_evap_w.value, avg_dens_w.value,
                                      flight_path_length.value, mode=mode_w.value)
-        pole_dir = sc.pole_axis_from_detector(cx, cy, flight_path_length.value, icf_w.value)
+        pole_dir = sc.pole_axis_from_detector(cx, cy, flight_path_length.value, icf_w.value, mode=mode_w.value)
         xr, yr, zr, _ = sc.align_pole_to_z(x[mask], y[mask], z[mask], pole_dir)
         centers, counts = sc.z_sdm(xr, yr, zr, bin_size=bin_w.value, z_max=zmax_w.value,
                                    lateral_radius=lat_w.value, max_atoms=int(maxatoms_w.value))
@@ -195,79 +219,157 @@ def call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected,
                       f'{row["strength"]:>7.1f} {row["suggest_kf"]:>7.3f}')
 
     def on_apply_kf(_):
+        if ratio_job.running:
+            return
         if history and np.isfinite(history[-1]['suggest_kf']):
             kf_w.value = round(history[-1]['suggest_kf'], 4)
             with out_status:
                 out_status.clear_output()
                 print(f'kf set to {kf_w.value}. Adjust icf if needed and re-run "Reconstruct + z-SDM".')
+                _save_parameters()
 
-    # ---- automatic grid sweep --------------------------------------------
-    kf_lo_w = widgets.FloatText(value=2.8, step=0.1, layout=_narrow)
-    kf_hi_w = widgets.FloatText(value=6.0, step=0.1, layout=_narrow)
-    kf_n_w = widgets.IntText(value=9, layout=_narrow)
-    icf_lo_w = widgets.FloatText(value=1.1, step=0.05, layout=_narrow)
-    icf_hi_w = widgets.FloatText(value=1.9, step=0.05, layout=_narrow)
-    icf_n_w = widgets.IntText(value=9, layout=_narrow)
+    # ---- identifiable near-axis ratio, with an explicitly anchored family ---
+    q0 = icf_w.value / kf_w.value
+    q_lo_w = widgets.FloatText(value=.75*q0, layout=_narrow)
+    q_hi_w = widgets.FloatText(value=1.25*q0, layout=_narrow)
+    q_n_w = widgets.IntText(value=201, layout=_narrow)
+    icf_lo_w = widgets.FloatText(value=1.1, step=.05, layout=_narrow)
+    icf_hi_w = widgets.FloatText(value=1.9, step=.05, layout=_narrow)
+    full_source_w = widgets.Checkbox(value=False, description='Full acquisition loaded from event zero', indent=False)
+    spacing_confirmed_w = widgets.Checkbox(value=False, description='Indexed spacing independently known', indent=False)
+    anchor_confirmed_w = widgets.Checkbox(value=False, description='ICF above is my chosen independent/manual anchor', indent=False)
     auto_best = {}
+    ratio_progress = widgets.FloatProgress(min=0, max=1, description='Ratio profile:')
+    ratio_progress_text = widgets.Label()
 
-    def on_auto_run(_):
-        cx, cy, r = cx_w.value, cy_w.value, r_w.value
-        if int(sc.detector_roi_mask(variables, cx, cy, r).sum()) < 50:
-            with out_status:
-                out_status.clear_output(); print('Set a valid ROI (Manual tab) first.')
-            return
-        kf_vals = np.linspace(kf_lo_w.value, kf_hi_w.value, int(kf_n_w.value))
-        icf_vals = np.linspace(icf_lo_w.value, icf_hi_w.value, int(icf_n_w.value))
-        prog = widgets.IntProgress(value=0, min=0, max=kf_vals.size * icf_vals.size,
-                                   description='sweep')
-        with out_status:
-            out_status.clear_output(); display(prog)
-
-        def _p(done, total):
-            prog.value = done
-
-        res = sc.grid_sweep_kf_icf(
-            variables, (cx, cy), r, det_eff_w.value, field_evap_w.value, avg_dens_w.value,
-            flight_path_length.value, kf_vals, icf_vals, mode=mode_w.value,
-            bin_size=bin_w.value, z_max=zmax_w.value, lateral_radius=lat_w.value,
-            max_atoms=int(maxatoms_w.value), progress=_p)
-        auto_best.clear(); auto_best.update(res['best'])
-        with out_auto:
-            out_auto.clear_output(wait=True)
-            fig, ax = plt.subplots(figsize=(6.5, 5), constrained_layout=True)
-            im = ax.imshow(res['strength'].T, origin='lower', aspect='auto', cmap='viridis',
-                           extent=[kf_vals[0], kf_vals[-1], icf_vals[0], icf_vals[-1]])
-            ax.plot(res['best']['kf'], res['best']['icf'], 'r*', ms=16)
-            ax.set_xlabel('kf'); ax.set_ylabel('icf')
-            ax.set_title('z-SDM peakiness (higher = sharper)')
-            fig.colorbar(im, ax=ax, label='peakiness')
-            plt.show()
+    def _profile_error(error):
+        auto_best.clear()
+        ratio_progress.bar_style = 'warning'
         with out_status:
             out_status.clear_output()
-            b = res['best']
-            print(f'Best: kf={b["kf"]:.3f}, icf={b["icf"]:.3f}  '
-                  f'(peakiness={b["strength"]:.1f}, spacing={b["spacing"]:.3f} nm, '
-                  f'ROI={res["roi_atoms"]} ions)')
+            print(f'Ratio unavailable: {error}. Manual reconstruction remains available.')
+
+    def _display_profile(res, inputs, source_hash):
+        if inputs != _ratio_inputs() or source_hash != rc._hash_source(variables):
+            raise CalibrationStateError('Inputs or acquisition arrays changed while profiling; stale result discarded')
+        if res['status'] == 'supported':
+            if res['metadata']['source_hash'] != source_hash:
+                raise CalibrationStateError('Acquisition arrays changed during profiling; stale result discarded')
+            auto_best.update(result=res, inputs=inputs)
+        with out_status:
+            out_status.clear_output()
+            print(f"{res['status']}: {res['message']}")
+            if res['q'] is not None:
+                print(f"q = ICF/kf = {res['q']:.5f}; descriptive profile region {res['supported_interval']}.")
+                print('Compatible family: kf = ICF/q. The ratio does not determine a unique ICF or kf.')
+                for row in rc.compatible_parameter_family(res, np.linspace(*res['metadata']['icf_bounds'], 5)):
+                    print(f"ICF {row['icf']:.3f} -> kf {row['kf']:.3f}; profile range {row['kf_profile_interval']}")
+        with out_auto:
+            out_auto.clear_output(wait=True)
+            if res.get('training_profile'):
+                fig, ax = plt.subplots(figsize=(7, 4), constrained_layout=True)
+                ax.plot(res['q_grid'], res['training_profile'], label='training acquisition bands')
+                ax.plot(res['q_grid'], res['heldout_profile'], label='held-out acquisition bands')
+                if res['supported_interval'] is not None:
+                    ax.axvspan(*res['supported_interval'], alpha=.15, label='descriptive support region')
+                ax.set_xlabel('q = ICF/kf (dimensionless)')
+                ax.set_ylabel('absolute indexed-period coherence')
+                ax.legend()
+                plt.show()
+        ratio_progress.value = 1.
+        ratio_progress.bar_style = 'success'
+        ratio_progress_text.value = 'Preview complete; accepted parameters have not changed.'
+
+    def on_auto_run(_):
+        if ratio_job.running:
+            return
+        auto_best.clear()
+        try:
+            if not spacing_confirmed_w.value:
+                raise CalibrationInputError('Confirm the lattice and indexed plane spacing; defaults are not evidence')
+            inputs = _ratio_inputs()  # Snapshot widget values before starting the worker.
+            positional = ((cx_w.value, cy_w.value), r_w.value, _theo_d(),
+                          np.linspace(q_lo_w.value, q_hi_w.value, int(q_n_w.value)))
+            options = dict(det_eff=det_eff_w.value, field_evap_v_nm=field_evap_w.value,
+                atomic_density_nm3=avg_dens_w.value, flight_path_mm=flight_path_length.value,
+                full_acquisition_confirmed=full_source_w.value,
+                icf_bounds=(icf_lo_w.value, icf_hi_w.value), mode=mode_w.value)
+        except (CalibrationInputError, CalibrationStateError, ValueError) as error:
+            _profile_error(error)
+            return
+        previous_disabled = [control.disabled for control in profile_controls]
+        for control in profile_controls:
+            control.disabled = True
+        btn_cancel.disabled = False
+        ratio_progress.value, ratio_progress.bar_style = 0., ''
+        ratio_progress_text.value = 'Preparing the full acquisition depth prefix...'
+
+        def operation(cancel, report):
+            if cancel.is_set():
+                raise CalibrationStateError('Ratio profiling cancelled')
+            source_hash = rc._hash_source(variables)
+            def progress(done, total):
+                if cancel.is_set():
+                    raise CalibrationStateError('Ratio profiling cancelled')
+                if done == total or done % max(1, total//100) == 0:
+                    report(done/total, f'Profile point {done}/{total}')
+            result = rc.profile_icf_kf_ratio(variables, *positional, **options, progress=progress)
+            return result, inputs, source_hash
+
+        def progress(fraction, text):
+            ratio_progress.value, ratio_progress_text.value = fraction, text
+
+        def finished():
+            for control, disabled in zip(profile_controls, previous_disabled):
+                control.disabled = disabled
+            btn_cancel.disabled = True
+
+        try:
+            ratio_job.start(operation, on_result=lambda payload: _display_profile(*payload),
+                            on_error=_profile_error, on_progress=progress, on_finished=finished)
+        except Exception as error:
+            finished()
+            _profile_error(error)
 
     def on_auto_apply(_):
-        if auto_best:
-            kf_w.value = round(auto_best['kf'], 4)
-            icf_w.value = round(auto_best['icf'], 4)
-            with out_status:
-                out_status.clear_output()
-                print(f'Applied best kf={kf_w.value}, icf={icf_w.value}.')
+        if ratio_job.running:
+            return
+        with out_status:
+            out_status.clear_output()
+            if not auto_best:
+                print('No supported ratio to apply. Profile first or use manual reconstruction.')
+                return
+            if auto_best['inputs'] != _ratio_inputs():
+                print('Geometry, spacing, source or profile inputs changed. Run the ratio profile again.')
+                return
+            if not anchor_confirmed_w.value:
+                print('Confirm the current ICF as your independent/manual anchor. The profile has not estimated it.')
+                return
+            try:
+                parameters = rc.accept_ratio_family(variables, auto_best['result'], icf_anchor=icf_w.value)
+                kf_w.value = parameters['kf']
+                print(f"Accepted q={auto_best['result']['q']:.5f} with chosen ICF={icf_w.value}; kf={kf_w.value:.5f}.")
+                print('Use Load accepted parameters in an already-open reconstruction panel.')
+            except (CalibrationInputError, CalibrationStateError) as error:
+                print(str(error))
 
     # ---- buttons ---------------------------------------------------------
     btn_fdm = widgets.Button(description='Show FDMs', button_style='primary')
     btn_sdm = widgets.Button(description='Reconstruct + z-SDM', button_style='info')
     btn_apply_kf = widgets.Button(description='Apply suggested kf')
-    btn_auto = widgets.Button(description='Run auto sweep', button_style='info')
-    btn_auto_apply = widgets.Button(description='Apply best (kf, icf)')
+    btn_auto = widgets.Button(description='Profile ICF/kf ratio', button_style='info')
+    btn_auto_apply = widgets.Button(description='Accept anchored family', layout=widgets.Layout(width='190px'))
+    btn_cancel = widgets.Button(description='Cancel ratio profile', disabled=True)
+    profile_controls = [btn_fdm, btn_sdm, btn_apply_kf, btn_auto, btn_auto_apply,
+        kf_w, icf_w, det_eff_w, field_evap_w, avg_dens_w, mode_w,
+        cx_w, cy_w, r_w, pole_dd, a_w, b_w, c_w, al_w, be_w, ga_w, h_w, k_w, l_w,
+        q_lo_w, q_hi_w, q_n_w, icf_lo_w, icf_hi_w, full_source_w, spacing_confirmed_w, anchor_confirmed_w]
     btn_fdm.on_click(on_show_fdm)
     btn_sdm.on_click(on_reconstruct_sdm)
     btn_apply_kf.on_click(on_apply_kf)
     btn_auto.on_click(on_auto_run)
     btn_auto_apply.on_click(on_auto_apply)
+    btn_cancel.on_click(lambda _: ratio_job.cancel())
 
     def _row(lbl, *w):
         return widgets.HBox([widgets.Label(lbl, layout=_label), *w])
@@ -299,8 +401,7 @@ def call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected,
     ])
 
     manual_tab = widgets.VBox([
-        widgets.HBox([recon_box, sdm_box]),
-        widgets.HBox([lattice_box, roi_box]),
+        sdm_box,
         widgets.HBox([btn_fdm, btn_sdm, btn_apply_kf]),
         out_fdm,
         out_sdm,
@@ -311,15 +412,19 @@ def call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected,
     ])
 
     auto_tab = widgets.VBox([
-        widgets.HTML('<b>Automatic (kf, icf) grid sweep — maximises z-SDM peakiness '
-                     'in the ROI set on the Manual tab</b>'),
-        _row('kf  lo / hi / n:', kf_lo_w, kf_hi_w, kf_n_w),
-        _row('icf lo / hi / n:', icf_lo_w, icf_hi_w, icf_n_w),
-        widgets.HBox([btn_auto, btn_auto_apply]),
-        out_auto,
+        widgets.HTML('<b>Near-axis ratio profile: q = ICF/kf</b><br>'
+                     'Uses indexed plane spacing and held-out acquisition bands. '
+                     'Off-axis, weak, boundary or ambiguous evidence abstains. '
+                     'The compatible family requires a separately chosen ICF anchor.'),
+        _row('q lo / hi / grid points:', q_lo_w, q_hi_w, q_n_w),
+        _row('Allowed ICF family:', icf_lo_w, icf_hi_w),
+        full_source_w, spacing_confirmed_w, anchor_confirmed_w,
+        widgets.HBox([btn_auto, btn_auto_apply, btn_cancel]), ratio_progress, ratio_progress_text, out_auto,
     ])
-
     tabs = widgets.Tab(children=[auto_tab, manual_tab])
-    tabs.set_title(0, 'Automatic sweep')
-    tabs.set_title(1, 'Manual (ICF/kf iterate)')
-    display(widgets.VBox([tabs, widgets.HTML('<b>Status</b>'), out_status]))
+    tabs.set_title(0, 'ICF/kf ratio suggestion')
+    tabs.set_title(1, 'Manual reconstruction')
+    panel = widgets.VBox([widgets.HBox([recon_box, lattice_box]), roi_box, tabs,
+                          widgets.HTML('<b>Status</b>'), out_status])
+    display(panel)
+    return panel

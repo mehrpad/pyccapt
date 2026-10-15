@@ -35,6 +35,17 @@ class LaserAlignmentConfig:
     quality_min_events: int = 200
     quality_max_degradation: float = 0.15
     max_rate_multiple: float = 2.0
+    search_strategy: str = 'raster'
+    adaptive_dwell: bool = False
+    min_dwell_s: float = 0.5
+    max_dwell_s: float = 3.0
+    target_relative_error: float = 0.15
+    early_reject_sigma: float = 4.0
+    reuse_previous: bool = False
+    reuse_context: str = ''
+    coordinate_calibration_id: str = ''
+    reuse_max_age_s: float = 3600.0
+    reuse_voltage_tolerance_v: float = 5.0
 
     @classmethod
     def from_config(cls, conf, overrides=None):
@@ -51,6 +62,19 @@ class LaserAlignmentConfig:
     def validate(self, origin):
         if self.calibrated is not True:
             raise ValueError('Calibrate laser motion limits in config.toml before automatic laser alignment.')
+        if self.search_strategy not in ('raster', 'hybrid'):
+            raise ValueError('Laser search_strategy must be raster or hybrid.')
+        if type(self.adaptive_dwell) is not bool or type(self.reuse_previous) is not bool:
+            raise ValueError('Laser adaptive_dwell and reuse_previous must be booleans.')
+        if (self.min_dwell_s < .2 or self.max_dwell_s < self.min_dwell_s or
+                not 0 < self.target_relative_error < 1 or self.early_reject_sigma < 3):
+            raise ValueError('Invalid bounded adaptive laser dwell settings.')
+        if self.reuse_previous and (not isinstance(self.reuse_context, str) or
+                                    not isinstance(self.coordinate_calibration_id, str) or
+                                    not self.reuse_context.strip() or not self.coordinate_calibration_id.strip()):
+            raise ValueError('Reuse requires explicit specimen context and coordinate calibration identity.')
+        if self.reuse_max_age_s <= 0:
+            raise ValueError('Laser reuse age must be positive.')
         for key, value in self.snapshot().items():
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 if not math.isfinite(value) or value < 0:

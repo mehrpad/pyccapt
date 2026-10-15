@@ -26,6 +26,8 @@ from pyccapt.calibration.reconstructions.rotation_tools import (
     rotary_fig,
 )
 from pyccapt.calibration.reconstructions.species_display import range_row_masks_and_unranged
+from pyccapt.calibration.reconstructions.input_validation import validate_reconstruction_inputs
+from pyccapt.calibration.core.exceptions import CalibrationInputError
 
 def _normalize_plotly_color(value):
     """Return a Plotly-safe color string from stored range colors."""
@@ -89,6 +91,8 @@ def atom_probe_recons_from_detector_Geiser_et_al(detx, dety, hv, flight_path_len
         float: y-coordinates of reconstructed atom positions in nm.
         float: z-coordinates of reconstructed atom positions in nm.
     """
+    detx, dety, hv = validate_reconstruction_inputs(
+        detx, dety, hv, flight_path_length, kf, det_eff, icf, field_evap, avg_dens)
     # Convert detector coordinates to polar form
     rad, ang = cart2pol(detx * 1e1, dety * 1e1)
 
@@ -107,7 +111,10 @@ def atom_probe_recons_from_detector_Geiser_et_al(detx, dety, hv, flight_path_len
     theta_p = np.arctan(rad / flight_path_length)
 
     # Calculate theta normal (image compression correction)
-    theta_a = theta_p + np.arcsin((icf - 1) * np.sin(theta_p))
+    argument = (icf - 1) * np.sin(theta_p)
+    if np.any(np.abs(argument) > 1):
+        raise CalibrationInputError('ICF places detector coordinates outside the Geiser projection domain')
+    theta_a = theta_p + np.arcsin(argument)
 
     # Convert polar coordinates to Cartesian coordinates
     z_p, d = pol2cart(radius_evolution, theta_a)
@@ -125,19 +132,8 @@ def atom_probe_recons_from_detector_Geiser_et_al(detx, dety, hv, flight_path_len
     spec_area = det_area / M**2
 
     dz = omega / spec_area
-    # icf_2 = theta_a / theta_p
-    # dz = (omega * ((flight_path_length * 1E-3) ** 2) * (kf ** 2) * ((field_evap / 1E-9) ** 2)) / (
-    #         det_area * det_eff * (icf_2 ** 2) * (hv ** 2))
-
-    # dz_o = (omega * ((flight_path_length * 1E-3) ** 2) * (kf ** 2) * ((field_evap / 1E-9) ** 2)) / (
-    #         det_area * det_eff * (icf ** 2) * (hv ** 2))
-
-    # dz = avg_dens * flight_path_length ** 2 * kf ** 2 * field_evap ** 2 / (det_area * det_eff * icf ** 2 * hv ** 2)
-
-    # assert dz.any() != dz_o.any(), 'dz is not equal to dz_o'
-    # check if dz has any NaN of inf values
-    assert not np.isnan(dz).any(), 'dz has NaN values'
-    assert not np.isinf(dz).any(), 'dz has inf values'
+    if not np.isfinite(dz).all():
+        raise CalibrationInputError('Reconstruction depth increments are not finite')
 
     cum_z = np.cumsum(dz)
     z = cum_z + z_p
@@ -164,6 +160,8 @@ def atom_probe_recons_Bas_et_al(detx, dety, hv, flight_path_length, kf, det_eff,
         float: y-coordinates of reconstructed atom positions in nm.
         float: z-coordinates of reconstructed atom positions in nm.
     """
+    detx, dety, hv = validate_reconstruction_inputs(
+        detx, dety, hv, flight_path_length, kf, det_eff, icf, field_evap, avg_dens)
     radius_evolution = hv / (kf * (field_evap / 1e-9))
     m = (flight_path_length * 1e-3) / (icf * radius_evolution)
 
@@ -186,7 +184,10 @@ def atom_probe_recons_Bas_et_al(detx, dety, hv, flight_path_length, kf, det_eff,
     dz = (omega * ((flight_path_length * 1e-3) ** 2) * (kf**2) * ((field_evap / 1e-9) ** 2)) / (
         det_area * det_eff * (icf**2) * (hv**2)
     )
-    dz_p = radius_evolution * (1 - np.sqrt(1 - ((x**2 + y**2) / (radius_evolution**2))))
+    cap_argument = 1 - ((x**2 + y**2) / (radius_evolution**2))
+    if np.any(cap_argument < 0) or not np.isfinite(dz).all():
+        raise CalibrationInputError('Parameters lie outside the finite Bas reconstruction domain')
+    dz_p = radius_evolution * (1 - np.sqrt(cap_argument))
     z = np.cumsum(dz) + dz_p
 
     return x * 1e9, y * 1e9, z * 1e9
@@ -628,8 +629,7 @@ def scatter_plot(data, range_data, variables, element_percentage, selected_area,
 
     phases = range_data['element'].tolist()
     colors = _normalize_plotly_colors(range_data['color'].tolist())
-    mc_low = range_data['mc_low'].tolist()
-    mc_up = range_data['mc_up'].tolist()
+    row_masks, _, _ = range_row_masks_and_unranged(data['mc_c (Da)'].to_numpy(), range_data)
     charge = range_data['charge'].tolist()
     isotope = range_data['isotope'].tolist()
 
@@ -638,8 +638,7 @@ def scatter_plot(data, range_data, variables, element_percentage, selected_area,
     element_percentage = element_percentage.split(',')
 
     for index, elemen in enumerate(phases):
-        df_s = data.copy(deep=True)
-        df_s = df_s[(df_s['mc_c (Da)'] > mc_low[index]) & (df_s['mc_c (Da)'] < mc_up[index])]
+        df_s = data.loc[row_masks[index]].copy()
         df_s.reset_index(inplace=True, drop=True)
         remove_n = int(len(df_s) - (len(df_s) * float(element_percentage[index])))
         drop_indices = np.random.default_rng(int(len(df_s))).choice(
@@ -709,7 +708,8 @@ def projection(
     fig = plt.figure(figsize=figure_size)  # Specify the width and height
     ax = fig.add_subplot(111)
 
-    if range_sequence or range_mc or range_detx or range_dety or range_x or range_y or range_z:
+    mask_sequence = np.ones(len(variables.mc), dtype=bool)
+    if range_sequence or range_mc or range_detx or range_dety or range_x or range_y or range_z or range_vol:
         if range_sequence:
             if range_sequence:
                 mask_sequence = np.zeros_like(variables.dld_x_det, dtype=bool)
@@ -748,8 +748,7 @@ def projection(
 
     ions = variables.range_data['ion'].tolist()
     colors = _normalize_plotly_colors(variables.range_data['color'].tolist())
-    mc_low = variables.range_data['mc_low'].tolist()
-    mc_up = variables.range_data['mc_up'].tolist()
+    row_masks, _, _ = range_row_masks_and_unranged(variables.mc, variables.range_data)
 
     if isinstance(element_percentage, list):
         pass
@@ -757,11 +756,10 @@ def projection(
         print('element_percentage should be a list')
 
     for index, elemen in enumerate(ions):
-        mask_spacial = (variables.mc > mc_low[index]) & (variables.mc < mc_up[index])
-        mask = mask & mask_spacial
-        size = int(len(mask[mask == True]) * float(element_percentage[index]))
+        mask_s = mask & row_masks[index]
+        size = int(len(mask_s[mask_s == True]) * float(element_percentage[index]))
         # Find indices where the original mask is True
-        true_indices = np.where(mask)[0]
+        true_indices = np.where(mask_s)[0]
         # Randomly choose 100 indices from the true indices
         random_true_indices = np.random.default_rng(int(len(true_indices))).choice(
             true_indices, size=size, replace=False)
@@ -769,16 +767,16 @@ def projection(
         new_mask = np.full(len(variables.dld_t), False)
         # Set the selected indices to True in the new mask
         new_mask[random_true_indices] = True
-        # Apply the new mask to the original mask
-        mask = mask & new_mask
+        # Keep the original spatial selection for the next species.
+        plot_mask = mask_s & new_mask
         if ions[index] == 'unranged':
             name_element = 'unranged'
         else:
             name_element = '%s' % ions[index]
         if x_or_y == 'x':
-            ax.scatter(variables.x[mask], variables.z[mask], s=0.1, label=name_element, color=colors[index])
+            ax.scatter(variables.x[plot_mask], variables.z[plot_mask], s=0.1, label=name_element, color=colors[index])
         elif x_or_y == 'y':
-            ax.scatter(variables.y[mask], variables.z[mask], s=0.1, label=name_element, color=colors[index])
+            ax.scatter(variables.y[plot_mask], variables.z[plot_mask], s=0.1, label=name_element, color=colors[index])
 
     # ax.xaxis.tick_top()
     ax.invert_yaxis()
@@ -833,7 +831,8 @@ def heatmap(
     fig = plt.figure(figsize=figure_sie)  # Specify the width and height
     ax = fig.add_subplot(111)
 
-    if range_sequence or range_mc or range_detx or range_dety or range_x or range_y or range_z:
+    mask_sequence = np.ones(len(variables.mc), dtype=bool)
+    if range_sequence or range_mc or range_detx or range_dety or range_x or range_y or range_z or range_vol:
         if range_sequence:
             if range_sequence:
                 mask_sequence = np.zeros_like(variables.dld_x_det, dtype=bool)
@@ -872,8 +871,7 @@ def heatmap(
 
     ions = variables.range_data['ion'].tolist()
     colors = _normalize_plotly_colors(variables.range_data['color'].tolist())
-    mc_low = variables.range_data['mc_low'].tolist()
-    mc_up = variables.range_data['mc_up'].tolist()
+    row_masks, _, _ = range_row_masks_and_unranged(variables.mc, variables.range_data)
 
     if isinstance(element_percentage, list):
         pass
@@ -881,8 +879,7 @@ def heatmap(
         print('element_percentage should be a list')
 
     for index, elemen in enumerate(ions):
-        mask_spacial = (variables.mc > mc_low[index]) & (variables.mc < mc_up[index])
-        mask_s = mask & mask_spacial
+        mask_s = mask & row_masks[index]
         size = int(len(mask_s[mask_s == True]) * float(element_percentage[index]))
         # Find indices where the original mask is True
         true_indices = np.where(mask_s)[0]
@@ -910,8 +907,8 @@ def heatmap(
             alpha=0.1,
         )
 
-    ax.set_xlabel("det_x (cm)", color="red", fontsize=10)
-    ax.set_ylabel("det_y (cm)", color="red", fontsize=10)
+    ax.set_xlabel("det_x (mm)", color="red", fontsize=10)
+    ax.set_ylabel("det_y (mm)", color="red", fontsize=10)
     plt.title("Detector Heatmap")
     if len(variables.range_data) > 1:
         plt.legend(loc='upper right')
@@ -966,7 +963,8 @@ def reconstruction_2d_histogram(
     Returns:
         None
     """
-    if range_sequence or range_mc or range_detx or range_dety or range_x or range_y or range_z:
+    mask_sequence = np.ones(len(variables.mc), dtype=bool)
+    if range_sequence or range_mc or range_detx or range_dety or range_x or range_y or range_z or range_vol:
         if range_sequence:
             mask_sequence = np.zeros_like(variables.dld_x_det, dtype=bool)
             mask_sequence[range_sequence[0] : range_sequence[1]] = True
@@ -1068,45 +1066,29 @@ def detector_animation(
             & (variables.z >= variables.selected_z1)
             & (variables.z <= variables.selected_z2)
         )
-    elif selected_area_temporally:
-        mask_spacial = np.logical_and(
-            (variables.mc_calib > variables.selected_x1), (variables.mc_calib < variables.selected_x2)
-        )
-    elif selected_area_specially and selected_area_temporally:
-        mask_temporally = np.logical_and(
-            (variables.mc_calib > variables.selected_x1), (variables.mc_calib < variables.selected_x2)
-        )
-        mask_specially = (
-            (variables.x >= variables.selected_x1)
-            & (variables.x <= variables.selected_x2)
-            & (variables.y >= variables.selected_y1)
-            & (variables.y <= variables.selected_y2)
-            & (variables.z >= variables.selected_z1)
-            & (variables.z <= variables.selected_z2)
-        )
-        mask_spacial = mask_specially & mask_temporally
     else:
         mask_spacial = np.ones(len(variables.mc), dtype=bool)
+    if selected_area_temporally:
+        mask_spacial &= ((variables.mc_calib >= variables.selected_x1)
+                         & (variables.mc_calib < variables.selected_x2))
 
     if ranged == True:
         ions = variables.range_data['ion'].tolist()
         colors = _normalize_plotly_colors(variables.range_data['color'].tolist())
-        mc_low = variables.range_data['mc_low'].tolist()
-        mc_up = variables.range_data['mc_up'].tolist()
+        row_masks, _, _ = range_row_masks_and_unranged(variables.mc[mask_spacial], variables.range_data)
     else:
         ions = ['unranged']
         colors = ['black']
-        mc_low = [0]
-        mc_up = [400]
+        row_masks = [np.ones(np.count_nonzero(mask_spacial), dtype=bool)]
 
     x_data = variables.dld_x_det[mask_spacial]
     y_data = variables.dld_y_det[mask_spacial]
 
-    # Define the number of points per frame
-    points_per_frame = 5000
+    if not isinstance(points_per_frame, (int, np.integer)) or points_per_frame <= 0:
+        raise CalibrationInputError("points_per_frame must be a positive integer")
 
     # Calculate the total number of frames
-    total_frames = len(x_data) // points_per_frame
+    total_frames = (len(x_data) + points_per_frame - 1) // points_per_frame
 
     # Create a figure and axis
     fig, ax = plt.subplots(figsize=figure_sie)
@@ -1116,10 +1098,8 @@ def detector_animation(
         ax.clear()
         start_idx = frame * points_per_frame
         end_idx = (frame + 1) * points_per_frame
-        mc = variables.mc[start_idx:end_idx]
         for index, elemen in enumerate(ions):
-            mask = (mc > mc_low[index]) & (mc < mc_up[index])
-            mask = mask & mask_spacial[start_idx:end_idx]
+            mask = row_masks[index][start_idx:end_idx]
             x = x_data[start_idx:end_idx][mask]
             y = y_data[start_idx:end_idx][mask]
             if ions[index] == 'unranged':

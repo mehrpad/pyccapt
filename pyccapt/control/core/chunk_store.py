@@ -225,6 +225,47 @@ def validate_manifest_records(chunk_dir: str | Path, *, quarantine: bool = True)
     return valid, invalid
 
 
+class ValidatedChunkIndex(dict):
+    """One validation pass plus its recovery evidence, local to finalization."""
+
+    def __init__(self, files, valid, invalid):
+        super().__init__(files)
+        self.valid_records = valid
+        self.invalid_records = invalid
+
+    def declares(self, stem):
+        return any(stem in record.get('fields', {}) for record in self.valid_records + self.invalid_records)
+
+    def integrity_report(self):
+        streams = {}
+        rejected = []
+        for accepted, records in ((True, self.valid_records), (False, self.invalid_records)):
+            for record in records:
+                name = str(record.get('stream', 'unknown'))
+                stream = streams.setdefault(name, {'written_rows': 0, 'excluded_rows': 0, 'chunk_ids': []})
+                rows = int(record.get('rows', 0))
+                stream['written_rows' if accepted else 'excluded_rows'] += rows
+                if record.get('chunk_id') is not None:
+                    stream['chunk_ids'].append(int(record['chunk_id']))
+                if not accepted:
+                    rejected.append({**{key: record.get(key) for key in ('stream', 'chunk_id', 'rows', 'error')},
+                                     'recovery_action': 'quarantined' if record.get('quarantine') else 'excluded; original files retained',
+                                     'quarantine_path': record.get('quarantine')})
+        missing = False
+        for stream in streams.values():
+            ids = sorted(set(stream.pop('chunk_ids')))
+            # Store ranges, not potentially enormous expanded missing-ID lists.
+            gaps = [[left + 1, right - 1] for left, right in zip(ids, ids[1:]) if right > left + 1]
+            stream['missing_chunk_id_ranges'] = gaps
+            stream['expected_manifest_rows'] = stream['written_rows'] + stream['excluded_rows']
+            missing = missing or bool(gaps)
+        return {'status': 'incomplete' if rejected or missing else 'complete',
+                'scope': 'committed chunk manifests; unknown uncommitted losses require detector status',
+                'validation_checks': ['manifest status', 'file existence', 'dtype', 'shape', 'SHA-256 when recorded',
+                                      'internal chunk sequence gaps'],
+                'streams': streams, 'rejected_records': rejected}
+
+
 def validated_files_by_stem(chunk_dir: str | Path) -> dict[str, list[Path]] | None:
     """Validate once and index every field of a stopped acquisition.
 
@@ -234,12 +275,13 @@ def validated_files_by_stem(chunk_dir: str | Path) -> dict[str, list[Path]] | No
     directory = Path(chunk_dir).resolve()
     if not any(directory.glob("manifest*.jsonl")):
         return None
-    valid, _ = validate_manifest_records(directory, quarantine=True)
+    valid, invalid = validate_manifest_records(directory, quarantine=True)
     files: dict[str, list[tuple[int, Path]]] = {}
     for record in valid:
         for stem, metadata in record.get("fields", {}).items():
             files.setdefault(stem, []).append((int(record["chunk_id"]), directory / metadata["file"]))
-    return {stem: [path for _, path in sorted(parts)] for stem, parts in files.items()}
+    return ValidatedChunkIndex(
+        {stem: [path for _, path in sorted(parts)] for stem, parts in files.items()}, valid, invalid)
 
 
 def validated_files_for_stem(chunk_dir: str | Path, stem: str) -> list[Path] | None:

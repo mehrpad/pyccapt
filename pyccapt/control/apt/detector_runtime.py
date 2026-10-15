@@ -6,6 +6,7 @@ import json
 import multiprocessing
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
@@ -190,7 +191,8 @@ def _build_backend(
         )
     if model == HSD_MODEL and source == "HSD":
         return HSDBackend(
-            name="HSD", counter_source="HSD", target=drs.experiment_measure, **common,
+            name="HSD", counter_source="HSD",
+            target=partial(drs.experiment_measure, conf=dict(conf)), **common,
         )
     if model == SIMULATOR_MODEL:
         # Copy only explicit simulator controls into the process namespace.

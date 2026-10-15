@@ -256,6 +256,7 @@ class SharedVariablesBase:
         frame = dataset.frame
         self.dataset = dataset
         self.data = frame
+        self.event_ids = dataset.event_ids
         if update_backups or self.data_backup is None:
             self.data_backup = frame.copy()
 
@@ -308,6 +309,10 @@ class SharedVariablesBase:
         # V/Bowl correction on top of uncalibrated t (ns).
         self.initial_calibration_done_mc = False
         self.initial_calibration_done_tof = False
+        self.reconstruction_parameters = {}
+        self.reconstruction_ratio_result = {}
+        self.guided_calibration_receipt = {}
+        self.guided_calibration_valid_mask = np.zeros(0, dtype=bool)
         if clear_selection:
             self.clear_peak_range()
             self.selected_x_fdm = 0
@@ -418,6 +423,10 @@ class Variables(SharedVariablesBase):
         self.range_path = None
 
         self.plotly_3d_reconstruction = None
+        self.reconstruction_parameters = {}
+        self.reconstruction_ratio_result = {}
+        self.guided_calibration_receipt = {}
+        self.guided_calibration_valid_mask = np.zeros(0, dtype=bool)
         self.data = None
         self.dataset = None
         self.data_backup = None

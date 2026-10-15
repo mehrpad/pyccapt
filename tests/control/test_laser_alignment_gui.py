@@ -65,6 +65,24 @@ def test_uncalibrated_auto_enable_shows_error(gui):
     assert ui.error_message.called
 
 
+def test_sample_alignment_locks_user_power_and_laser_progress_is_visible(gui):
+    ui, v, _, _ = gui
+    v.start_flag = True
+    v.experiment_state = 'running'
+    v.automatic_alignment_enabled = True
+    v.alignment_status = {'phase': 'fine'}
+    assert ui._alignment_laser_settings_locked()
+    ui._tick_laser_alignment()
+    assert not ui.laser_power.isEnabled()
+    v.alignment_status = {'phase': 'aligned'}
+    assert not ui._alignment_laser_settings_locked()
+    v.laser_alignment_status = dict(active=True, phase='fine', progress='Remeasuring bounded proposal',
+                                    measurements=12, ions_observed=1400)
+    ui._tick_laser_alignment()
+    assert 'Remeasuring bounded proposal' in ui.laser_alignment_label.text()
+    assert '12 windows' in ui.laser_alignment_label.text()
+
+
 def test_plot_history_resets_between_alignment_sessions(gui):
     ui, v, _, _ = gui
     base = dict(origin_m=(0, 0, 0), position_m=(1e-6, 0, 0), rate_percent=.4,
@@ -75,6 +93,24 @@ def test_plot_history_resets_between_alignment_sessions(gui):
     ui.alignment_plot.append({**base, 'time': 2, 'session': 'two'})
     assert len(ui.alignment_plot.records) == 1
     assert ui.alignment_plot.session == 'two'
+
+
+def test_focus_plot_survives_missing_optional_opengl(monkeypatch):
+    import sys
+    from pyccapt.control.gui.laser_alignment_plot import LaserAlignmentPlot
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    monkeypatch.setitem(sys.modules, 'pyqtgraph.opengl', None)
+    plot = LaserAlignmentPlot()
+    try:
+        assert plot.view is None
+        assert plot.tabs.count() == 2
+        plot.append(dict(origin_m=(0, 0, 0), position_m=(0, 0, 2e-6),
+                         rate_percent=.4, voltage=1500, phase='focus', time=1, session='one', quality={}))
+        x, y = plot.focus_curve.getData()
+        assert list(x) == [2.]
+        assert list(y) == [.4]
+    finally:
+        plot.deleteLater()
 
 
 @pytest.mark.parametrize('first_poll_fails', [False, True])

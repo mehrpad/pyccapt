@@ -16,6 +16,7 @@ def settings(**changes):
     cfg = AlignmentConfig(motion_calibrated=True, bounds_mm=((-1, 1), (-1, 1), (-1, 1)),
                           xy_range_um=(1., 1.), xy_step_um=1., xy_jacobian_mm_per_um=((1., 0.), (0., 1.)),
                           approach_enabled=False, z_max_advance_um=0.,
+                          z_response_calibrated=True, z_response_calibration_id='synthetic-response',
                           z_direction=1, transfer_z_mm=-0.5)
     return replace(cfg, **changes)
 

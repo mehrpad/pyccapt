@@ -4,6 +4,8 @@ from pathlib import Path
 
 import numpy as np
 from numpy.ctypeslib import ndpointer
+from pyccapt.control.apt.detector_chunks import ChunkStream, ChunkWriter, preserve_unattributed_packet, read_event_metadata
+from pyccapt.control.core.shared_ring_buffer import publish_plot_events
 from pyccapt.control.nkt_photonics.readback import pulse_energy_pj, experiment_frequency_hz
 
 
@@ -110,104 +112,99 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
         variables.flag_tdc_failure = False
         return 0
 
-    tdc.run_tdc()
-    events_detected = 0
-    raw_signal_detected = 0
-    events_detected_tmp = 0
+    events_detected = raw_signal_detected = events_detected_tmp = 0
     start_time = time.monotonic()
-    pulse_frequency = max(experiment_frequency_hz(variables), 1.0)
-    _last_buf_error = None  # dedup transient SDK read errors
-
+    pulse_frequency = max(experiment_frequency_hz(variables), 1.)
+    last_buf_error = None
+    writer = stream = None
+    failure = None
     from pyccapt.control.apt.laser_alignment_data import LaserAlignmentPublisher
-    laser_alignment_publisher = LaserAlignmentPublisher(variables)
     from pyccapt.control.apt.alignment_vision import AlignmentEventPublisher
+    laser_alignment_publisher = LaserAlignmentPublisher(variables)
     alignment_publisher = AlignmentEventPublisher(variables)
-    while not stop_event.is_set() and not variables.flag_stop_tdc:
-        # A DLL fault here used to take down the subprocess silently.
-        # Catch + dedup so transient hiccups don't spam stdout and
-        # don't bring down the experiment.
-        try:
-            return_value = tdc.get_data_tdc_buf()
-        except Exception as exc:
-            msg = str(exc)
-            if msg != _last_buf_error:
-                _last_buf_error = msg
-                print(f"RoentDek TDC: get_data_tdc_buf failed (non-fatal): {msg}")
-            time.sleep(0.05)
-            continue
-        _last_buf_error = None
-        buffer_length = int(return_value[0])
-        if buffer_length <= 0:
-            time.sleep(0.01)
-            continue
-
-        return_value_tmp = np.copy(return_value[1 : buffer_length * 12 + 1].reshape(buffer_length, 12))
-
-        xx = return_value_tmp[:, 8]
-        yy = return_value_tmp[:, 9]
-        tt = return_value_tmp[:, 10]
-        time_stamp = return_value_tmp[:, 11]
-        events_detected += buffer_length
-        raw_signal_detected += buffer_length
-        events_detected_tmp += buffer_length
-
-        main_v_dc_list = np.tile(variables.specimen_voltage, buffer_length)
-        pulse_data = np.tile(variables.pulse_voltage, buffer_length)
-        laser_data = np.tile(pulse_energy_pj(variables), buffer_length)
-
-        # Push into the shared-memory ring buffers (one per signal).
-        # Append is non-blocking and bounded; the visualization
-        # subprocess drains the rings on its own cadence.  (Was
-        # Queue.put before the migration to SharedRingBuffer; this file
-        # was missed in that round.)
-        x_plot.write(xx)
-        y_plot.write(yy)
-        t_plot.write(tt)
-        main_v_dc_plot.write(main_v_dc_list)
-        alignment_publisher.append(xx, yy)
-        laser_alignment_publisher.append(tt)
-
-        variables.extend_to('x', xx.tolist())
-        variables.extend_to('y', yy.tolist())
-        variables.extend_to('t', tt.tolist())
-        variables.extend_to('time_stamp', time_stamp.tolist())
-        variables.extend_to('ch0', return_value_tmp[:, 0].tolist())
-        variables.extend_to('ch1', return_value_tmp[:, 1].tolist())
-        variables.extend_to('ch2', return_value_tmp[:, 2].tolist())
-        variables.extend_to('ch3', return_value_tmp[:, 3].tolist())
-        variables.extend_to('ch4', return_value_tmp[:, 4].tolist())
-        variables.extend_to('ch5', return_value_tmp[:, 5].tolist())
-        variables.extend_to('ch6', return_value_tmp[:, 6].tolist())
-        variables.extend_to('ch7', return_value_tmp[:, 7].tolist())
-        variables.extend_to('main_v_dc_dld', main_v_dc_list.tolist())
-        variables.extend_to('main_v_p_dld', pulse_data.tolist())
-        variables.extend_to('main_l_p_dld', laser_data.tolist())
-        variables.extend_to('main_v_dc_tdc', main_v_dc_list.tolist())
-        variables.extend_to('main_v_p_tdc', pulse_data.tolist())
-        variables.extend_to('main_l_p_tdc', laser_data.tolist())
-        variables.extend_to('main_p_tdc_roentdek', pulse_data.tolist())
-
-        current_time = time.monotonic()
-        elapsed_s = current_time - start_time
-        if elapsed_s >= 0.5:
-            # Re-read pulse_frequency every interval - if the user
-            # changes it mid-run the rate calc otherwise stays wrong.
+    try:
+        writer = ChunkWriter(Path(variables.path)/"temp_data"/"chunks", stop_event=stop_event)
+        dtypes = {name: np.float64 for name in
+                  ("x", "y", "t", "voltage", "voltage_pulse", "laser_pulse")}
+        dtypes.update({name: np.uint64 for name in ("time_stamp", *(f"ch{i}" for i in range(8)))})
+        stream = ChunkStream(writer, "roentdek", dtypes)
+        tdc.run_tdc()
+        while not stop_event.is_set() and not variables.flag_stop_tdc:
+            writer.check()
             try:
-                live_pulse_frequency = max(experiment_frequency_hz(variables), 1.0)
-                pulse_frequency = live_pulse_frequency
-            except Exception:
-                pass
-            detection_rate = events_detected_tmp * 100 / (pulse_frequency * elapsed_s)
-            variables.detection_rate_current = detection_rate
-            variables.detection_rate_current_plot = detection_rate
-            variables.total_ions = events_detected
-            variables.total_raw_signals = raw_signal_detected
-            events_detected_tmp = 0
-            start_time = current_time
+                return_value = tdc.get_data_tdc_buf()
+                last_buf_error = None
+            except Exception as exc:
+                if str(exc) != last_buf_error:
+                    last_buf_error = str(exc)
+                    print(f"RoentDek TDC read failed: {exc}")
+                return_value = np.zeros(1)
+                time.sleep(.05)
+            buffer_length = int(return_value[0])
+            if buffer_length < 0 or buffer_length > 30000:
+                raise ValueError(f"Invalid RoentDek SDK event count: {buffer_length}")
+            if buffer_length:
+                data = np.copy(return_value[1:buffer_length*12+1].reshape(buffer_length, 12))
+                try:
+                    dc, pulse, laser = read_event_metadata(variables, pulse_energy_pj)
+                except Exception:
+                    preserve_unattributed_packet(Path(variables.path)/"temp_data", "roentdek", {"events": data})
+                    raise
+                voltage = np.full(buffer_length, dc)
+                arrays = {"x": data[:, 8], "y": data[:, 9], "t": data[:, 10],
+                          "time_stamp": data[:, 11], "voltage": voltage,
+                          "voltage_pulse": np.full(buffer_length, pulse),
+                          "laser_pulse": np.full(buffer_length, laser)}
+                arrays.update({f"ch{i}": data[:, i] for i in range(8)})
+                stream.append(arrays)
+                events_detected += buffer_length
+                raw_signal_detected += buffer_length
+                events_detected_tmp += buffer_length
+                publish_plot_events(x_plot, y_plot, t_plot, main_v_dc_plot,
+                                    data[:, 8], data[:, 9], data[:, 10], voltage)
+                alignment_publisher.append(data[:, 8], data[:, 9])
+                laser_alignment_publisher.append(data[:, 10])
+            else:
+                time.sleep(.01)
 
-    tdc.stop_tdc()
-    variables.total_ions = events_detected
-    variables.total_raw_signals = raw_signal_detected
-    variables.flag_finished_tdc = True
-
-    return 0
+            # Empty packets still advance the rate window. A silent detector
+            # must publish zero rather than retain its last nonzero response.
+            current_time = time.monotonic()
+            elapsed_s = current_time-start_time
+            if elapsed_s >= .5:
+                try:
+                    pulse_frequency = max(experiment_frequency_hz(variables), 1.)
+                except Exception:
+                    pass
+                rate = events_detected_tmp*100/(pulse_frequency*elapsed_s)
+                variables.detection_rate_current = rate
+                variables.detection_rate_current_plot = rate
+                variables.total_ions = events_detected
+                variables.total_raw_signals = raw_signal_detected
+                events_detected_tmp = 0
+                start_time = current_time
+    except Exception as exc:
+        failure = exc
+    finally:
+        if stream is not None:
+            try:
+                stream.finish()
+            except Exception as exc:
+                failure = failure or exc
+        if writer is not None:
+            try:
+                writer.close()
+            except Exception as exc:
+                failure = failure or exc
+        try:
+            tdc.stop_tdc()
+        except Exception as exc:
+            failure = failure or exc
+        variables.total_ions = events_detected
+        variables.total_raw_signals = raw_signal_detected
+        if failure is not None:
+            variables.flag_tdc_failure = True
+            variables.detector_error = f"{type(failure).__name__}: {failure}"
+            print(f"RoentDek acquisition failed: {variables.detector_error}")
+        variables.flag_finished_tdc = True
+    return -1 if failure is not None else 0

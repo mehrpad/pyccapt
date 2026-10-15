@@ -48,6 +48,43 @@ documented in [LASER_ALIGNMENT.md](LASER_ALIGNMENT.md).
 
 ## Runtime Architecture
 
+Live plot delivery uses one `SharedEventBuffer` for complete `(x, y, tof,
+voltage)` records. A shared commit lock protects publication and copying, so
+overflow drops whole events rather than independently shifting columns. The
+plot-only lock has a bounded wait: an abandoned publisher/consumer disables
+that local transport with an error instead of blocking acquisition or Stop.
+Recreate the application context after this transport error. Saved detector
+chunks are independent of plot loss. Dropped counters include oversized batches
+and count each overwritten event only once.
+
+Plot histories retain the last 100,000 events in fixed-size arrays. Unfiltered
+hitmaps and TOF-filtered calibration histories have separate retention windows;
+ordered, immutable copies are produced on demand. Numeric graph telemetry is
+read once per refresh using the Manager Namespace's selected-field snapshot.
+This path excludes control inputs, stop flags, interlocks and event arrays;
+the feedback loop continues to read its existing inputs at its existing rate.
+
+All detector backends write bounded typed chunks through a supervised writer.
+RoentDek finalization preserves event-major eight-channel ordering and uint64
+counters. HSD retains float32 time/waveform samples and one float64 voltage
+record per waveform. `drs_acquisition_mode` defaults to `normal`; the explicit
+`internal_calibration` value selects the built-in test signal and is recorded
+in HDF5 provenance. This setting does not interpret waveforms as reconstructed
+DLD coordinates.
+
+Writer errors and bounded shutdown failures set detector failure state. Hardware
+safe-off precedes the cooperative drain wait. A packet whose voltage/laser
+metadata cannot be obtained is retained under `temp_data/unattributed` and the
+run is marked incomplete. Control-loop frequency, gain interpretation, motion
+settling periods and alignment search objectives are unchanged by these data
+transport optimizations.
+
+Regression coverage includes mocked detector replay, writer pressure/failure,
+SDK-array ownership, spawn-process transport, buffer overflow, coherent event
+pairing, last-N histories, minimum-voltage crossings, empty detector-rate
+windows, and streamed HDF5 layout parity. These tests do not commission a real
+detector or validate hardware latency.
+
 Stop first cancels alignment, stops acquisition and commands the energized
 outputs off. The GUI enables a new run after detector shutdown, HDF5 saving and
 cleanup finish. Finalization validates the acquisition manifest once and reuses

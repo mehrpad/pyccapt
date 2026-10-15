@@ -2,6 +2,13 @@
 
 This document summarizes the data layout used by the calibration module and its range files.
 
+Processed datasets now retain unsigned `event_id` values and source identity
+through cropping and HDF5 round trips. The optional `pyccapt-session-2` group
+stores the full guided analysis, including source data, fitted models, masks,
+accepted outputs and review history. It supplements the legacy dataframe layout.
+See [analysis sessions](analysis_sessions.md) for checksums, schema migration,
+missing-value status and the explicitly partial NXapm v2026.01 mapping.
+
 The canonical machine-readable definition of the raw acquisition groups
 (`/dld`, `/tdc`, `/hsd`) — column names, order, dtypes, and the group
 aliases accepted across pyccapt versions — lives in

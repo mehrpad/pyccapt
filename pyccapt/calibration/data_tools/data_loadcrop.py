@@ -235,7 +235,7 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld', *, lazy: bool 
             # (N,) or (N, 1) datasets; the previous np.concatenate(axis=1)
             # raised AxisError if any column came back 1-D. Column order
             # MUST match hdf5_schema.DLD_COLUMNS / create_pandas_dataframe.
-            dld_group_array = hdf5_schema.stack_columns(
+            dld_group_array = hdf5_schema.column_mapping(hdf5_schema.DLD_COLUMNS,
                 (dld_high_voltage, dld_pulse_v, dld_pulse_l, dld_start_counter, dld_t, dld_x, dld_y)
             )
             dld_group_storage = create_pandas_dataframe(
@@ -272,7 +272,7 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld', *, lazy: bool 
 
             # Shape-robust stack (see DLD branch). Column order MUST match
             # hdf5_schema.TDC_COLUMNS / create_pandas_dataframe('tdc_*').
-            dld_group_array = hdf5_schema.stack_columns(
+            dld_group_array = hdf5_schema.column_mapping(hdf5_schema.TDC_COLUMNS,
                 (channel, start_counter, high_voltage, voltage_pulse, laser_pulse, time_data)
             )
             dld_group_storage = create_pandas_dataframe(dld_group_array, mode=extract_mode)
@@ -917,9 +917,15 @@ def create_pandas_dataframe(data_crop, mode='dld', flag_old_pyccpat_data=False):
             XYFACTOR = 80 / DETBINS * BINNINGFAC  # XXX mm/bin
             XYBINSHIFT = DETBINS / BINNINGFAC / 2  # to center detector
 
-            data_crop[:, 4] = data_crop[:, 4] * TOFFACTOR  # in ns
-            data_crop[:, 5] = ((data_crop[:, 5] - XYBINSHIFT) * XYFACTOR) * 0.1  # from mm to in cm by dividing by 10
-            data_crop[:, 6] = ((data_crop[:, 6] - XYBINSHIFT) * XYFACTOR) * 0.1  # from mm to in cm by dividing by 10
+            if isinstance(data_crop, dict):
+                data_crop = dict(data_crop)
+                data_crop['t (ns)'] = data_crop['t (ns)'] * TOFFACTOR
+                for name in ('x_det (cm)', 'y_det (cm)'):
+                    data_crop[name] = ((data_crop[name] - XYBINSHIFT) * XYFACTOR) * .1
+            else:
+                data_crop[:, 4] = data_crop[:, 4] * TOFFACTOR  # in ns
+                data_crop[:, 5] = ((data_crop[:, 5] - XYBINSHIFT) * XYFACTOR) * 0.1
+                data_crop[:, 6] = ((data_crop[:, 6] - XYBINSHIFT) * XYFACTOR) * 0.1
 
         hdf_dataframe = pd.DataFrame(
             data=data_crop,

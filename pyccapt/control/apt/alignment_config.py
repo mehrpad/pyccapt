@@ -52,6 +52,10 @@ class AlignmentConfig:
     bounds_mm: tuple = ()
     xy_jacobian_mm_per_um: tuple = ()
     motion_calibrated: bool = False
+    coverage_max_probes: int = 0
+    coverage_subdivisions: int = 8
+    z_response_calibrated: bool = False
+    z_response_calibration_id: str = ''
 
     @classmethod
     def from_snapshot(cls, snapshot):
@@ -86,8 +90,14 @@ class AlignmentConfig:
         return result
 
     def validate(self):
-        if type(self.motion_calibrated) is not bool or type(self.approach_enabled) is not bool:
+        if any(type(value) is not bool for value in
+               (self.motion_calibrated, self.approach_enabled, self.z_response_calibrated)):
             raise ValueError('Alignment motion flags must be TOML booleans, not quoted strings.')
+        if (type(self.coverage_max_probes) is not int or not 0 <= self.coverage_max_probes <= 256 or
+                type(self.coverage_subdivisions) is not int or not 2 <= self.coverage_subdivisions <= 32):
+            raise ValueError('Coverage search requires 0–256 probes and 2–32 subdivisions per axis.')
+        if self.z_response_calibrated and not self.z_response_calibration_id.strip():
+            raise ValueError('A measured Z response requires its calibration identity.')
         for key, value in asdict(self).items():
             if isinstance(value, (float, int)) and not math.isfinite(value):
                 raise ValueError(f'Alignment {key} must be finite.')
@@ -179,7 +189,9 @@ class AlignmentConfig:
             duration += (self.coarse_max_dwell_s + self.settle_s + 0.5
                          + np.max(np.abs(point-previous))*1e6/self.xy_speed_um_s)
             previous = point
-        return float(duration + self.settle_s + 0.5
+        extra = self.coverage_max_probes*(self.coarse_max_dwell_s+self.settle_s+.5+
+                                         2*max(self.xy_range_um)/self.xy_speed_um_s)
+        return float(duration + extra + self.settle_s + 0.5
                      + np.max(np.abs(previous))*1e6/self.xy_speed_um_s)
 
     def check_fine_position(self, target, centre):

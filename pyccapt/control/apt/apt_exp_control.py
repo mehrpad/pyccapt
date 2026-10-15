@@ -445,8 +445,8 @@ class APT_Exp_Control:
 
         # update v_dc
         if not self.variables.stop_flag and not self.variables.vdc_hold and voltage_step != 0:
-            specimen_voltage_temp = min(self.specimen_voltage + voltage_step, self.vdc_max)
-            if specimen_voltage_temp > self.vdc_min:
+            specimen_voltage_temp = max(self.vdc_min, min(self.specimen_voltage + voltage_step, self.vdc_max))
+            if specimen_voltage_temp >= self.vdc_min:
                 if specimen_voltage_temp != self.specimen_voltage:
                     if self._vdc_active():
                         apt_exp_control_func.command_v_dc(self.com_port_v_dc, ">S0 %s" % specimen_voltage_temp)
@@ -1099,16 +1099,12 @@ class APT_Exp_Control:
             % (int(1000 / self.variables.ex_freq), index_time, steps)
         )
 
-        if self.variables.counter_source == 'TDC' and self.detector_runtime.tdc_process is not None:
-            # Teardown cost does NOT scale with total ion count: the bulk data is
-            # streamed to temp_data/chunks/ continuously during the run (the save
-            # worker sustains ~200k events/s, far above any APT detection rate, so
-            # it never backs up). At shutdown only the final residual chunk
-            # (< CHUNK_SIZE) is written and the device is deinitialized before
-            # flag_finished_tdc is set -- a few seconds even for 100M+ ion runs.
-            # 60 s is generous headroom. Timing out is non-fatal: the residual
-            # chunk is already on disk before flag_finished_tdc would be set, and
-            # join_detector_processes() below joins (never kills) the worker.
+        if any(process is not None for process in
+               (self.detector_runtime.tdc_process, self.detector_runtime.hsd_process)):
+            # Every detector now finalizes bounded residual chunks and joins
+            # its supervised writer before acknowledging completion. Outputs
+            # are already off. Give HSD the same cooperative drain window as
+            # TDC; the later short process join must not kill a normal flush.
             tdc_finish_timeout_s = 60
             print('Waiting for TDC process to be finished for maximum %s seconds...' % tdc_finish_timeout_s)
             for i in range(tdc_finish_timeout_s):
@@ -1120,6 +1116,9 @@ class APT_Exp_Control:
             else:
                 print('TDC process is not finished after %s seconds' % tdc_finish_timeout_s)
                 self.log_apt.warning('TDC process is not finished after %s seconds', tdc_finish_timeout_s)
+                self._run_failure = 'Detector did not acknowledge finalization before the shutdown deadline.'
+                self.variables.flag_tdc_failure = True
+                self.variables.detector_error = self._run_failure
         else:
             self.variables.flag_finished_tdc = True
 
@@ -1129,6 +1128,8 @@ class APT_Exp_Control:
             for process in (self.detector_runtime.tdc_process, self.detector_runtime.hsd_process):
                 if process is not None and (process.is_alive() or process.exitcode not in (None, 0)):
                     self._run_failure = 'Detector worker did not complete cleanly; automatic sequence stopped.'
+            if self.variables.flag_tdc_failure:
+                self._run_failure = getattr(self.variables, 'detector_error', '') or 'Detector acquisition failed.'
         except Exception as exc:
             self._run_failure = f'Detector shutdown failed: {exc}'
             print(

@@ -44,6 +44,11 @@ from scipy.optimize import curve_fit
 from scipy.signal import find_peaks, peak_prominences, peak_widths
 
 from pyccapt.calibration.core.exceptions import CalibrationInputError
+from pyccapt.calibration.core.calibration_sampling import (
+    _build_histogram_bins, _cell_peak_value, _collect_spatial_samples,
+    _iter_polar_cells, _radial_bowl_corr, _resolve_peak_location, _resolve_sampling_mode,
+    _voltage_segments,
+)
 from pyccapt.calibration.core.parallel import parallel_map
 from pyccapt.calibration.core.validation import (
     BOWL_FIT_MODES,
@@ -55,7 +60,6 @@ from pyccapt.calibration.core.validation import (
     ensure_matching_lengths,
     ensure_non_empty_array,
     ensure_positive,
-    normalize_sampling_mode,
     normalize_voltage_model,
 )
 from pyccapt.calibration.path_utils import save_figure
@@ -89,63 +93,6 @@ def _resolve_sample_size(sample_size, population_size):
     if requested > population_size:
         return max(1, population_size // 10)
     return requested
-
-def _build_histogram_bins(values, bin_size):
-    """Build stable histogram bin edges/count from the actual data span."""
-    data = ensure_non_empty_array(values, field_name="histogram_values")
-    lower = float(np.min(data))
-    upper = float(np.max(data))
-    span = max(upper - lower, float(bin_size))
-    n_bins = max(10, int(np.ceil(span / float(bin_size))))
-    edges = np.linspace(lower, upper, n_bins + 1)
-    return edges, n_bins
-
-def _resolve_peak_location(values, method, bin_size, fast_calibration=False, rng=None):
-    """Resolve the reference peak location by histogram/mean/median.
-
-    Parameters
-    ----------
-    rng : optional ``numpy.random.Generator``
-        Generator used by the ``fast_calibration`` subsample path. Defaults
-        to a seeded generator so the same input produces the same peak
-        location across runs (the previous implementation used the global
-        ``np.random`` state, making fast-mode calibrations non-reproducible).
-    """
-    ensure_choice(method, field_name="maximum_cal_method", allowed=SAMPLE_METHODS)
-    data = ensure_non_empty_array(values, field_name="peak_values")
-    if fast_calibration and data.size > 10:
-        if rng is None:
-            rng = np.random.default_rng(0)
-        data = rng.choice(data, int(data.size * 0.1), replace=False)
-
-    if method == "mean":
-        return float(np.mean(data))
-    if method == "median":
-        return float(np.median(data))
-
-    bins, n_bins = _build_histogram_bins(data, bin_size)
-    hist = fast_histogram.histogram1d(
-        data,
-        bins=n_bins,
-        range=(np.min(data), np.max(data)),
-    )
-    peaks, properties = find_peaks(hist, height=0)
-    if len(peaks) == 0:
-        return float(np.mean(data))
-    index_peak_max_ini = np.argmax(properties["peak_heights"])
-    # ``bins`` is the edges array (length n_bins+1); ``peaks`` indexes the
-    # counts array (length n_bins). bins[peak] returns the LEFT edge of the
-    # bin, biasing the peak location low by half a bin width. Use the bin
-    # center instead.
-    peak_idx = int(peaks[index_peak_max_ini])
-    return float(0.5 * (bins[peak_idx] + bins[peak_idx + 1]))
-
-def _radial_bowl_corr(data_xy, a, b, c, d, e):
-    """Radial-dominant bowl model where r^2 drives the primary curvature."""
-    x = np.asarray(data_xy[0], dtype=float)
-    y = np.asarray(data_xy[1], dtype=float)
-    r2 = x**2 + y**2
-    return a + b * r2 + c * (r2**2) + d * x + e * y
 
 def voltage_correction(
     dld_highVoltage_peak,
@@ -222,31 +169,7 @@ def voltage_correction(
 
         segments = [_segment_indices(i) for i in range(num_segments)]
     elif mode == 'voltage':
-        v_min = np.min(dld_highVoltage_peak)
-        v_max = np.max(dld_highVoltage_peak)
-        # Ceildiv on the voltage range; sample_size is the V step in this
-        # mode. Need to handle zero-range data (all the same voltage)
-        # explicitly so we don't underflow to zero segments.
-        v_range = float(v_max - v_min)
-        if v_range <= 0:
-            num_segments = 1
-        else:
-            num_segments = max(1, int(np.ceil(v_range / float(sample_size))))
-
-        def _segment_by_voltage(i: int):
-            lo = v_min + i * sample_size
-            hi = v_min + (i + 1) * sample_size
-            if i == num_segments - 1:
-                # The final segment must be right-inclusive: a strict ``< hi``
-                # drops every ion sitting exactly at v_max when the voltage
-                # range divides evenly into sample_size, biasing the fit away
-                # from the high-V end (where the correction matters most).
-                mask = dld_highVoltage_peak >= lo
-            else:
-                mask = np.logical_and(dld_highVoltage_peak >= lo, dld_highVoltage_peak < hi)
-            return dld_highVoltage_peak[mask], dld_t_peak[mask]
-
-        segments = [_segment_by_voltage(i) for i in range(num_segments)]
+        segments = _voltage_segments(dld_highVoltage_peak, dld_t_peak, sample_size)
     else:
         segments = []
 
@@ -350,7 +273,7 @@ def voltage_correction(
 
         ax2 = ax1.twinx()
         f_v = _predict_voltage_model(model, fitresult, np.array(high_voltage_mean_list))
-        y = ax2.plot(np.array(high_voltage_mean_list) / 1000, np.sqrt(f_v), color='r', label=r"$C_V$")
+        y = ax2.plot(np.array(high_voltage_mean_list) / 1000, f_v, color='r', label=r"$C_V$")
         # y = ax2.plot(np.array(high_voltage_mean_list) / 1000, f_v, color='r', label=r"$C_V$")
         ax2.set_ylabel(r"$C_V$", color="red", fontsize=10)  # Get the current axis
         ax2.tick_params(axis='y', colors='red')  # Change color and thickness of tick labels on y-axis
@@ -479,13 +402,10 @@ def voltage_corr_main(
         if model == 'curve_fit':
             voltage_peak = np.asarray(dld_highVoltage_peak_v, dtype=float)
             peak_raw = np.asarray(dld_peak_b, dtype=float)
-            sqrt_cal = calibration_mode == 'tof'
 
             def _apply_voltage_correction(coeffs):
                 factor = voltage_corr(voltage_peak, *coeffs)
                 factor = np.where(factor > 0, factor, np.nan)
-                if sqrt_cal:
-                    factor = np.sqrt(factor)
                 return peak_raw / factor
 
             fitresult, refine_info = refine_correction_nelder_mead(
@@ -506,15 +426,12 @@ def voltage_corr_main(
             )
 
     f_v = _predict_voltage_model(model, fitresult, np.asarray(dld_highVoltage))
-    # Guard against a poor/extrapolated quadratic predicting f_v <= 0, which
-    # would make np.sqrt(f_v) NaN (tof) and poison the calibrated array on
-    # division. Matches the np.clip(..., eps, None) in multi_peak_voltage_corr_main.
+    # Bound extrapolated factors away from zero before division, matching
+    # the established multi_peak_voltage_corr_main policy.
     f_v = np.clip(f_v, np.finfo(float).eps, None)
 
-    if calibration_mode == 'tof':
-        correction_factor = np.sqrt(f_v)
-    else:
-        correction_factor = f_v
+    # The fit target is observed/reference in the active domain, including ToF.
+    correction_factor = f_v
     print("Maximum value of correction factor:", np.max(correction_factor))
     print("Minimum value of correction factor:", np.min(correction_factor))
     # In-place divide over the full array: the previous all-True boolean-mask
@@ -545,7 +462,7 @@ def voltage_corr_main(
         ax2 = ax1.twinx()
         f_v_plot = _predict_voltage_model(model, fitresult, dld_highVoltage_peak_v)
 
-        correction_plot = 1 / np.sqrt(f_v_plot) if calibration_mode == 'tof' else 1 / f_v_plot
+        correction_plot = 1 / f_v_plot
         y = ax2.plot(dld_highVoltage_peak_v / 1000, correction_plot, color='r', label=r"$C_{V}^{-1}$")
         # y = ax2.plot(dld_highVoltage_peak_v / 1000, f_v_plot, color='r', label=r"$C_{V}^{-1}$")
         ax2.set_ylabel(r"$C_{V}^{-1}$", color="red", fontsize=10)
@@ -599,171 +516,6 @@ def voltage_corr_main(
         elif calibration_mode == 'mc':
             variables.mc_calib = calibration_mc_tof
     return f_v
-
-def _resolve_sampling_mode(sampling_mode, variables=None):
-    """Resolve sampling mode with a variable-level default fallback."""
-    configured = sampling_mode
-    if configured is None and variables is not None:
-        configured = getattr(variables, "bowl_sampling_mode", "polar")
-    mode = normalize_sampling_mode(configured)
-    if variables is not None and hasattr(variables, "bowl_sampling_mode"):
-        variables.bowl_sampling_mode = mode
-    return mode
-
-def _cell_peak_value(values, maximum_location, sample_range_max, bin_size):
-    if sample_range_max == 'mean':
-        return float(np.mean(values)) / maximum_location
-    values = np.asarray(values, dtype=float)
-    if values.size == 0:
-        return float('nan')
-    value_span = float(np.max(values) - np.min(values))
-    if not np.isfinite(value_span) or value_span <= 0:
-        return float(np.mean(values)) / maximum_location
-    bins, n_bins = _build_histogram_bins(values, bin_size)
-    y_hist = fast_histogram.histogram1d(
-        values,
-        bins=n_bins,
-        range=(np.min(values), np.max(values)),
-    )
-    peaks, properties = find_peaks(y_hist, height=0)
-    if len(peaks) == 0:
-        return float(np.mean(values)) / maximum_location
-    index_peak_max_ini = np.argmax(properties['peak_heights'])
-    # ``bins`` is the edges array (length n_bins+1); ``peaks`` indexes the
-    # counts array. Use the bin CENTER, not the left edge.
-    peak_idx = int(peaks[index_peak_max_ini])
-    peak_center = 0.5 * (bins[peak_idx] + bins[peak_idx + 1])
-    return float(peak_center) / maximum_location
-
-def _iter_polar_cells(radial_distance, sample_size, det_diam):
-    r_max_data = float(np.max(radial_distance)) if len(radial_distance) else 0.0
-    r_max_detector = max(0.0, float(det_diam) / 2.0)
-    r_max = max(r_max_data, r_max_detector, float(sample_size))
-    n_rings = max(1, int(np.ceil(r_max / float(sample_size))))
-    ring_edges = np.linspace(0.0, r_max, n_rings + 1)
-
-    for r_idx in range(n_rings):
-        r_min_i = float(ring_edges[r_idx])
-        r_max_i = float(ring_edges[r_idx + 1])
-        r_mid = 0.5 * (r_min_i + r_max_i)
-        circumference = 2.0 * np.pi * max(r_mid, 0.5 * float(sample_size))
-        n_sectors = int(np.clip(np.ceil(circumference / float(sample_size)), 8, 96))
-        for theta_idx in range(n_sectors):
-            theta_min = float(theta_idx * 2.0 * np.pi / n_sectors)
-            theta_max = float((theta_idx + 1) * 2.0 * np.pi / n_sectors)
-            yield r_min_i, r_max_i, theta_min, theta_max
-
-def _collect_spatial_samples(
-    dld_x,
-    dld_y,
-    dld_t,
-    maximum_location,
-    sample_range_max,
-    sample_size,
-    bin_size,
-    *,
-    sampling_mode,
-    det_diam,
-    dld_v=None,
-):
-    # The inner work for each cell is a histogram + peak find + mean / median
-    # call on a small subarray. Every cell is independent of every other, and
-    # the inner kernel is NumPy/SciPy (GIL-releasing), so this is the textbook
-    # case for parallel_map(gil_releasing=True). On a 80 mm detector at 2 mm
-    # sampling we get O(2000) cells per call -- typically 4-8x speedup with
-    # threads, automatic serial fallback for tiny inputs.
-    if sampling_mode == 'polar':
-        radial_distance = np.hypot(dld_x, dld_y)
-        polar_angle = np.mod(np.arctan2(dld_y, dld_x), 2.0 * np.pi)
-        cells = list(_iter_polar_cells(radial_distance, sample_size, det_diam))
-
-        def _eval_polar_cell(bounds):
-            r_min_i, r_max_i, theta_min, theta_max = bounds
-            mask = (
-                (radial_distance >= r_min_i)
-                & (radial_distance < r_max_i)
-                & (polar_angle >= theta_min)
-                & (polar_angle < theta_max)
-            )
-            if not np.any(mask):
-                return None
-            cell_t = dld_t[mask]
-            normalized_value = _cell_peak_value(cell_t, maximum_location, sample_range_max, bin_size)
-            if not np.isfinite(normalized_value) or normalized_value <= 0:
-                return None
-            row = (
-                float(np.median(dld_x[mask])),
-                float(np.median(dld_y[mask])),
-                normalized_value,
-                float(np.mean(dld_v[mask])) if dld_v is not None else None,
-            )
-            return row
-
-        results = parallel_map(_eval_polar_cell, cells, gil_releasing=True)
-    else:
-        cell_size = float(sample_size)
-        x_min = float(np.floor(np.min(dld_x)))
-        x_max = float(np.ceil(np.max(dld_x)))
-        y_min = float(np.floor(np.min(dld_y)))
-        y_max = float(np.ceil(np.max(dld_y)))
-        n_cols = max(1, int(np.ceil((x_max - x_min) / cell_size)))
-        n_rows = max(1, int(np.ceil((y_max - y_min) / cell_size)))
-        x_bin = np.floor((dld_x - x_min) / cell_size).astype(int)
-        y_bin = np.floor((dld_y - y_min) / cell_size).astype(int)
-        valid = (x_bin >= 0) & (x_bin < n_cols) & (y_bin >= 0) & (y_bin < n_rows)
-        if not np.any(valid):
-            results: list = []
-        else:
-            cell_id = y_bin[valid] * n_cols + x_bin[valid]
-            order = np.argsort(cell_id, kind='mergesort')
-            x_sorted = dld_x[valid][order]
-            y_sorted = dld_y[valid][order]
-            t_sorted = dld_t[valid][order]
-            v_sorted = dld_v[valid][order] if dld_v is not None else None
-            cell_sorted = cell_id[order]
-            _, starts, counts = np.unique(cell_sorted, return_index=True, return_counts=True)
-            # Stays serial: cartesian cells operate on pre-sorted contiguous
-            # slices so each cell is sub-millisecond. Thread dispatch overhead
-            # exceeds the per-cell work, so parallelism here regresses
-            # wall-clock time on every realistic dataset.
-            results = []
-            for start, count in zip(starts, counts):
-                stop = start + count
-                cell_t = t_sorted[start:stop]
-                normalized_value = _cell_peak_value(cell_t, maximum_location, sample_range_max, bin_size)
-                if not np.isfinite(normalized_value) or normalized_value <= 0:
-                    results.append(None)
-                    continue
-                results.append(
-                    (
-                        float(np.median(x_sorted[start:stop])),
-                        float(np.median(y_sorted[start:stop])),
-                        normalized_value,
-                        float(np.mean(v_sorted[start:stop])) if v_sorted is not None else None,
-                    )
-                )
-
-    x_samples: list = []
-    y_samples: list = []
-    t_samples: list = []
-    v_samples: list = []
-    for row in results:
-        if row is None:
-            continue
-        x_samples.append(row[0])
-        y_samples.append(row[1])
-        t_samples.append(row[2])
-        if dld_v is not None:
-            v_samples.append(row[3])
-
-    result = {
-        'x': np.asarray(x_samples, dtype=float),
-        'y': np.asarray(y_samples, dtype=float),
-        't': np.asarray(t_samples, dtype=float),
-    }
-    if dld_v is not None:
-        result['v'] = np.asarray(v_samples, dtype=float)
-    return result
 
 def bowl_correction(
     dld_x_bowl,

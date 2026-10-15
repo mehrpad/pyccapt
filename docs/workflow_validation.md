@@ -1,5 +1,93 @@
 # Guided workflow validation — 15 October 2026
 
+## Actual raw input supplied later: sample 1891
+
+The user supplied
+`D:/APT_data/1891_Jul-05-2024_12-10_Al_test_50um_1.h5`, an actual raw HDF5 file.
+It contains **6,058,440 detector-hit rows**, **25,105,070 TDC channel rows** and
+38,547 control observations, with no mass column. Unlike the derived 2643 replay
+below, this file directly exercises the raw acquisition layout.
+
+Inspection found that the eager DLD importer read every group, including all TDC
+channel rows, before discarding the unrelated data. It now requests only `/dld`;
+explicit TDC imports request only `/tdc`. The general `read_hdf5` default retains
+its previous all-group behavior. Regression tests guard unrelated dataset reads
+and preserve values, exact integer counters, legacy aliases and unit conversions.
+This is an I/O optimization; no calibration mathematics changed in this follow-up.
+
+The file has no stored attributes, instrument settings, units or completeness
+receipt. Its units follow the recognized legacy PyCCAPT layout. Nonzero voltage
+pulses and zero laser-pulse values suggested voltage pulsing. The user subsequently
+confirmed **voltage mode, 110 mm flight length and 38 ns time zero**. The replay
+uses these explicit inputs and records them as conversion settings; it does not
+claim they were present in the original acquisition file.
+
+`tools/validate_raw_guided_workflow.py` executes the shipped notebook cells and
+widget callbacks. The full-file replay verified every imported DLD measurement
+and exact unsigned counter against the source, then checked crop, accepted mass,
+selected-table export, embedded session and standalone save/resume. Source SHA-256
+before and after was
+`7d44afdf1d403050cdefb5c3cf7cebd25773ba178075989626f37550dfd2ff9a`.
+
+The **software-test crop** `[1000, 6057440)` retained 6,056,440 events; it is not a
+scientifically selected smooth-voltage interval or detector ROI. Of these,
+6,044,752 gave finite masses identical to the existing `tof2mc` function. The
+11,688 selected events with ToF at or below 38 ns remained NaN, as did the 2,000
+crop-excluded events in the full-source session. No peak identities, reference
+fits, ranges or ICF/kf parameters were accepted. The initial conversion's median
+mass was 31.13 Da and its 99th percentile was 1714.17 Da; the broad unfiltered
+distribution is not evidence of a valid Al mass calibration.
+
+The initial raw import/inspect took 4.20 s. The confirmed conversion, export and
+resume replay took 80.98 s including hashing and setup on this machine. These
+are observed timings, not a hardware-independent speed claim. Reports are under
+`analysis_outputs/1891_raw_ui/confirmed_physical/`. Reproduce with:
+
+```console
+python tools/validate_raw_guided_workflow.py --data D:/APT_data/1891_Jul-05-2024_12-10_Al_test_50um_1.h5 --output-directory analysis_outputs/1891_raw_ui/replay_new --event-start 1000 --event-stop 6057440 --flight-mm 110 --t0-ns 38 --pulse-mode voltage
+```
+
+Choose a fresh output folder: the validator refuses existing result artifacts
+so a failed callback cannot be mistaken for a successful earlier save.
+
+Interactive cropping now follows the user's procedure: a rectangle chooses the
+event interval on the DC-voltage plot, and a true circle selects the detector
+region on a logarithmic FDM. Both remain drafts until preview and acceptance.
+Regression tests cover old-preview invalidation after an edit, selection bounds,
+source lifetime, busy callbacks, and undo restoring visible fields. These changes
+do not alter the mass-conversion equations or infer a scientific ROI automatically.
+Physical-preview tests also cover input edits during calculation, editing a
+setting back to its original value, resumed-preview confirmation, and preserving
+imported mass independently of the physical-input controls. Export preserves
+recorded acquisition completeness instead of replacing known incomplete data
+with an unverified label.
+
+An additional actual-data drawing replay used the real `ipympl` canvas with
+synthesized mouse events. An illustrative rectangle and circle retained
+2,240,111 events; an independent all-row circle/intersection calculation matched
+the preview and accepted masks exactly. All 3,635,065 finite detector hits in
+that draft interval matched an independently calculated density histogram.
+Acceptance cleared downstream calibration; undo restored the prior mass array
+exactly, restored the visible crop fields, and disconnected the old drawing.
+The original raw file and saved input session were unchanged. The script,
+report and plotted canvases are under `analysis_outputs/1891_raw_ui/drawing_check/`.
+This exercises the widget canvas and callbacks, not browser event transport.
+
+The follow-up's combined targeted suite passed **374 tests** in 40.33 s, covering
+raw import, guided calibration/cropping, plotting events, storage, metadata and
+control-file preservation. Ruff and whitespace checks passed. The documentation
+build succeeded with 16 warnings in existing API docstrings; the final incremental
+guide/report build succeeded without warnings. No instrument was operated for
+these checks.
+
+All DLD values are finite. Hardware start counters decrease 63,799 times and are
+not a global event coordinate. Control event counts sum to 6,151,914, which is
+93,474 more than the stored DLD rows. The cause is unresolved: the old counter
+semantics are not recorded, so this difference is not proof of lost hits or of
+complete acquisition. The adjacent processed temporary file has 4,373,572 rows
+and lacks recorded crop criteria and instrument settings; it cannot substitute
+for the complete raw event history.
+
 ## Follow-up: mixed calibration, missing ratio evidence and raw-data support
 
 The first comparison below is retained as a historical audit. The subsequent
@@ -111,8 +199,8 @@ Ruff and staged whitespace checks passed. The full documentation build succeeded
 with the existing docstring/cross-reference warnings; the final incremental
 build after correcting the new link completed without warnings. Notebook
 execution was disabled for documentation generation. No physical hardware
-alignment or acquisition was performed, and original raw-file validation still
-requires the actual acquisition file.
+alignment or acquisition was performed. This validation preceded the separately
+supplied sample 1891 raw file described above.
 
 ## Same-dataset comparison: sample 2643
 

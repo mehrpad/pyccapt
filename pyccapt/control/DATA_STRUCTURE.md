@@ -25,6 +25,15 @@ are checked by `pyccapt validate-hdf5` and let downstream tools distinguish sche
 
 ## Group `instrument_metadata`
 
+This is an **additional metadata group**. Existing `apt`, `dld`, `tdc` or `hsd`
+data and all existing `provenance` attributes remain in the same file. It uses
+the NeXus [NXcollection](https://manual.nexusformat.org/classes/base_classes/NXcollection.html)
+container for project-specific metadata, with an explicit `conformance`
+attribute. NXcollection contents are not NXDL validated. Raw control output
+does **not** claim complete [NXapm](https://manual.nexusformat.org/classes/applications/NXapm.html)
+conformance or write `definition=NXapm`; the separate calibration exporter can
+add the documented partial `/entry` mapping.
+
 `instrument_metadata/json` uses `pyccapt-instrument-1`. The `acquisition`
 subgroup exposes typed scalar flight path (`flight_path_length_mm`, mm),
 configured voltage/laser offsets (`t0_voltage_ns`, `t0_laser_ns`, ns), detector
@@ -40,6 +49,34 @@ exact detector-event transition boundaries. A run with multiple modes is marked
 configured offsets remain available for review. Older writer callers without a
 run snapshot retain the available configuration but have unknown run mode and
 unknown selected offset; the GUI default/final mode is not substituted.
+
+Before starting control, set the instrument-specific values in the loaded
+`pyccapt/config.toml` (or the explicitly selected TOML configuration). These
+constants currently have no separate control-GUI editor:
+
+| Configuration key | Saved acquisition field | Units |
+| --- | --- | --- |
+| `flight_path_length` | `flight_path_length_mm` | mm |
+| `t_0_voltage` | `t0_voltage_ns` | ns |
+| `t_0_laser` | `t0_laser_ns` | ns |
+| `detector_diameter` | `detector_diameter_mm` | mm |
+| `device_name` | `instrument_name` | dimensionless text |
+| `tdc_model` | `detector_model` | dimensionless text |
+
+Restart control after editing the file so the intended configuration is loaded.
+The values shipped with the repository are not measurements of a user's
+instrument. Missing, nonfinite or invalid numeric settings, including boolean
+values, are recorded as unknown; the metadata writer does not invent defaults.
+Flight length and detector diameter must be positive. A finite zero t0 is valid.
+For a single-mode run, `t0_ns` references the corresponding configured offset.
+The full mode-change history, including its observation scope, is retained in
+`instrument_metadata/json`; it is not a per-ion pulse-mode assignment.
+
+The configuration JSON and SHA-256 in `provenance` also remain available.
+Instrument constants use the run-start snapshot even if the configuration
+object later changes before finalization. Metadata availability is distinct
+from acquisition completeness: unknown settings do not establish event loss,
+and known settings do not prove that all detector events were saved.
 
 Calibration loaders retain this metadata. The independent `calibration`
 context records explicit calibration inputs/fitted offsets after acceptance;

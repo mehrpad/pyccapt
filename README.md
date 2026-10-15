@@ -159,6 +159,9 @@ saved as resumable HDF5 sessions.
 
 Raw `/dld` data does not need a mass column: inspect and crop it, confirm the
 flight length/time zero/pulse mode, then preview its initial mass spectrum.
+Draw the sequence rectangle on DC voltage and the detector circle on the density
+map; review and accept the crop separately. Raw hit import skips unrelated TDC
+arrays to reduce loading time and memory.
 Optional reference fitting reports improvements and regressions against that
 baseline before acceptance. Full source history remains in the session even
 when the exported table contains only selected events.
@@ -174,8 +177,9 @@ near-axis crystallographic spacing and show compatible ICF/kf pairs. They report
 insufficient evidence instead of forcing a unique answer. See the
 [guided workflow](docs/guided_workflow.md) and [calibration mathematics](docs/calibration_math.md).
 
-The [same-dataset validation report](docs/workflow_validation.md) compares both
-workflows on 5.84 million events, including exact mass/ToF persistence, ranging,
+The [same-dataset validation report](docs/workflow_validation.md) includes the
+6.06-million-event raw Al import, physical conversion and save/resume replay, and
+compares both workflows on 5.84 million processed events, including exact mass/ToF persistence, ranging,
 calibration timings and conditional ICF/kf diagnostics. It records the limits of
 the historical labels and where the new method abstains instead of suggesting
 unsupported parameters.

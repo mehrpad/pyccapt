@@ -16,10 +16,13 @@ You do not need an `mc` column to begin.
    channel streams must first be converted into hits in the raw-data notebook.
 2. **Inspect:** look at flight time and voltage versus event position and the
    detector map. Look for startup transients, interruptions and unwanted regions.
-3. **Crop:** enter the useful start/stop event positions, then optionally limit
-   raw flight time, voltage or the detector circle. Click **Preview crop**, check
-   the count and plots, then **Accept crop**. These controls use event positions,
-   not the hardware start counter. Start is included; stop is excluded.
+3. **Crop:** click **Draw crop regions**. Drag a rectangle across the part of the
+   DC-voltage curve with a smooth increase. Its horizontal span fills the start
+   and stop event positions; its height does not add a voltage filter. Then draw
+   a circle inside the detector density map, avoiding sparse edges and mouse
+   bites. Check the numeric fields, click **Preview crop**, check the count and
+   plots, then **Accept crop**. These controls use event positions, not the
+   hardware start counter. Start is included; stop is excluded.
 4. **Calibrate:** enter the actual flight length, time zero and pulse mode. Check
    their confirmation box, click **Preview physical mass**, inspect the spectrum,
    then **Accept calibration**. This is the initial estimate. For processed data,
@@ -42,6 +45,35 @@ and accepted data use every event. Cropping stores a mask and preserves the full
 source in memory and in the session. Reconstruction still needs earlier events
 for its cumulative depth calculation. The exported table contains only selected
 rows; a cropped table by itself cannot supply missing acquisition history.
+
+### Drawing the crop
+
+The two drawings implement the sequence-plus-detector selection described in
+the [PyCCAPT paper, Section 2.3 and Figure 3](https://doi.org/10.1002/jemt.70011).
+You choose the region: a smooth voltage trace and a bright detector region help
+identify useful data, but they do not establish composition or calibration quality.
+
+- The sequence rectangle uses the full source's event positions. Fractional
+  drag bounds are rounded outward (`floor(left)`, `ceil(right)`) and clipped to
+  the source length. Exact start/stop fields remain editable.
+- The FDM is a logarithmic density histogram using every finite detector hit in
+  the draft sequence interval. This is not a subsampled scatter plot. It shows
+  that interval before the circle, optional ToF window, or optional voltage
+  window is applied, so excluded edges remain visible for review.
+- Draw a box around the desired circular area; the displayed circle fits inside
+  it. Its center and radius are in cm, with equal detector-axis scaling. Reverse
+  drags work. Fine-tune the center and radius numerically if necessary.
+- After typing a new interval, click **Update detector map**. Drawing an interval
+  updates the map automatically. Reopen **Draw crop regions** to start a new
+  drawing. Keep the plot toolbar's pan/zoom tools off while selecting.
+- Drawing or typing changes only the draft. Editing a crop field clears the old
+  preview, so you cannot accidentally accept a different crop than the displayed
+  values. **Preview all events** resets the draft limits; **Undo accepted change**
+  restores the previous accepted state and its fields.
+
+The interactive canvas uses `ipympl`, included in the calibration dependencies.
+Use a Jupyter frontend with widget support; no global Matplotlib backend change
+is needed. Numeric crop controls remain usable without the interactive canvas.
 
 ## Accepted state and dependencies
 
@@ -71,6 +103,10 @@ workflow's imported source directly. Reimport changed data as a new workflow.
 
 Import supports PyCCAPT processed/raw HDF5, this project's partial NeXus mapping,
 and existing POS/EPOS/APT/ATO loaders.
+Raw hit import reads only the `/dld` group. It does not load the often much
+larger `/tdc` channel arrays unless a separate raw-channel operation requests
+them. This reduces unnecessary I/O and memory without changing hit values,
+units or the downstream calibration equations.
 Inspect reports measured capabilities and unknown positions. Unavailable fields
 are not interchangeable with measured zero. Placeholder imported mass columns
 cannot be accepted as calibrated mass. An available uncalibrated mass column is
@@ -92,6 +128,13 @@ mass can instead be previewed and explicitly accepted. Known source metadata
 prefills the controls; otherwise their initial values are examples, not detected
 instrument measurements. Editing these fields clears confirmation. The mass-view
 limits change the displayed spectrum only; they do not crop data.
+
+Changing physical-conversion settings also discards its pending preview. A
+calculation already running cannot publish a result if the settings or their
+confirmation changed meanwhile, even if you change them back. Preview again
+after confirming the current values. A resumed physical preview restores its
+own settings and requires confirmation before acceptance. Imported mass is
+independent of those controls and retains its recorded provenance.
 
 Optional multi-reference calibration proposes windows in the accepted initial
 mass spectrum (default), or in raw flight time. Fill in independently known

@@ -41,7 +41,7 @@ def _resolve_variable_output_file(variables, *, filename: str, data_directory: b
     return filename
 
 
-def read_hdf5(filename: str | Path, *, lazy: bool = False):
+def read_hdf5(filename: str | Path, *, lazy: bool = False, groups=None):
     """
     Read non-pandas HDF5 content into a dictionary of dataframes.
 
@@ -55,11 +55,17 @@ def read_hdf5(filename: str | Path, *, lazy: bool = False):
             :meth:`LazyTable.iter_chunks` to stream the rows. The caller is
             responsible for closing the table (preferably with a
             ``with`` block).
+        groups: Optional iterable of top-level group names to materialize.
+            Eager reads only; ``None`` retains the complete legacy read.
+            Selecting ``("dld",)`` avoids reading unrelated TDC events.
 
     Returns:
         dict[str, pd.DataFrame] | LazyTable | None
     """
     file_path = _as_path(filename)
+    if groups is not None and lazy:
+        raise ValueError("groups is supported only for eager read_hdf5 calls")
+    selected_groups = None if groups is None else set((groups,) if isinstance(groups, str) else groups)
     if lazy:
         from pyccapt.calibration.data_tools import lazy_io
 
@@ -77,8 +83,9 @@ def read_hdf5(filename: str | Path, *, lazy: bool = False):
         group_dict: dict[str, list[str]] = {}
 
         with h5py.File(file_path, "r") as hdf:
-            groups = list(hdf.keys())
-            for item in groups:
+            for item in hdf:
+                if selected_groups is not None and item not in selected_groups:
+                    continue
                 if isinstance(hdf[item], h5py.Group):
                     group_dict[item] = list(hdf[item].keys())
 

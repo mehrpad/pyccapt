@@ -19,7 +19,9 @@ from pyccapt.calibration.tutorials.tutorials_helpers.guided_jobs import Notebook
 def show_guided_workflow(workflow=None, *, display_panel=True):
     """Render controls only. Loading, fitting, acceptance and file writes require clicks."""
     controller = {"workflow": workflow, "calibration_workspace": None, "calibration_session": None,
-                  "reconstruction_workspace": None, "calibration_panel": None, "range_panel": None}
+                  "reconstruction_workspace": None, "calibration_panel": None, "range_panel": None,
+                  "crop_drawing": None, "restoring_crop": False,
+                  "physical_generation": 0, "restoring_instrument": False}
     job = NotebookJob()
     status, progress_text = widgets.HTML(), widgets.Label()
     progress = widgets.FloatProgress(min=0, max=1, description="Progress:")
@@ -48,6 +50,9 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
     preview_crop = widgets.Button(description="Preview crop")
     accept_crop = widgets.Button(description="Accept crop")
     reset_crop = widgets.Button(description="Preview all events")
+    draw_crop = widgets.Button(description="Draw crop regions")
+    update_fdm = widgets.Button(description="Update detector map")
+    drawing_box = widgets.VBox()
     crop_output = widgets.Output()
     flight = widgets.FloatText(value=100., description="Flight mm:")
     t0 = widgets.FloatText(value=0., description="Time zero ns:")
@@ -91,7 +96,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
     export_path = widgets.Text(value="guided_result.h5", description="Result path:", layout=widgets.Layout(width="850px"))
     export = widgets.Button(description="Export accepted HDF5")
     export_nexus = widgets.Button(description="Export NeXus mapping")
-    buttons = [load, resume, find_sessions, inspect, preview_crop, accept_crop, reset_crop, imported, physical, accept_cal, compare_cal, show_mass, propose_refs, configure,
+    buttons = [load, resume, find_sessions, inspect, draw_crop, update_fdm, preview_crop, accept_crop, reset_crop, imported, physical, accept_cal, compare_cal, show_mass, propose_refs, configure,
                capture, open_ranges, preview_recon, accept_recon, compare_recon, ratio, capture_ratio, analyze, save, export, export_nexus, undo]
 
     def active():
@@ -111,6 +116,10 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
         for button in buttons:
             button.disabled = job.running or (session is None and button not in (load, resume, find_sessions))
         cancel.disabled = not job.running
+        drawing = controller["crop_drawing"]
+        if drawing is not None:
+            drawing.set_enabled(not job.running)
+        update_fdm.disabled = job.running or drawing is None
         if session is not None:
             usable_mass = any(name in session.source and name not in session.source.attrs.get("pyccapt_unavailable_columns", [])
                 and np.any(np.isfinite(session.source[name]) & (session.source[name] > 0)) for name in ("mc (Da)", "mc_uc (Da)"))
@@ -125,6 +134,9 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
             for button in (preview_recon, ratio, analyze):
                 button.disabled = job.running or session.accepted["ranges"] is None
             accept_cal.disabled = job.running or "calibration" not in session.preview
+            pending = session.preview.get("calibration", {})
+            if pending.get("receipt", {}).get("method") == "tof2mc physical conversion" and not instrument_confirmed.value:
+                accept_cal.disabled = True
             accept_recon.disabled = job.running or "reconstruction" not in session.preview
             undo.disabled = job.running or not session.history
 
@@ -147,11 +159,17 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
         refresh()
 
     def replace_workflow(session):
+        close_drawing()
+        controller["physical_generation"] += 1
         controller.update(workflow=session, calibration_workspace=None, calibration_session=None, reconstruction_workspace=None,
                           calibration_panel=None, range_panel=None)
         reference_windows.value = "[]"
         reference_confirmed.value = False
-        instrument_confirmed.value = False
+        controller["restoring_instrument"] = True
+        try:
+            instrument_confirmed.value = False
+        finally:
+            controller["restoring_instrument"] = False
         restore_controls(session)
         range_box.children = ()
         cal_output.clear_output(wait=False)
@@ -166,28 +184,43 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
         cal = session.accepted["calibration"]
         spatial = session.accepted["reconstruction"]
         receipt = cal["receipt"] if cal else {}
+        pending = session.preview.get("calibration", {}).get("receipt", {})
+        physical_pending = pending.get("method") == "tof2mc physical conversion"
+        if physical_pending:
+            receipt = pending
         parameters = spatial["parameters"] if spatial else {}
-        mode_value = parameters.get("pulse_mode", receipt.get("pulse_mode", known.get("pulse_mode")))
-        if mode_value in ("laser", "voltage"):
-            pulse_mode.value = mode_value
-        flight.value = parameters.get("flight_path_length", receipt.get("flight_length_mm", known.get("flight_path_length_mm", flight.value)))
-        t0.value = receipt.get("model", {}).get("t0_ns", receipt.get("t0_ns", known.get("t0_ns", t0.value)))
-        selected_crop = session.accepted.get("crop")
+        mode_value = receipt["pulse_mode"] if physical_pending else parameters.get("pulse_mode", receipt.get("pulse_mode", known.get("pulse_mode")))
+        controller["restoring_instrument"] = True
+        try:
+            if mode_value in ("laser", "voltage"):
+                pulse_mode.value = mode_value
+            flight.value = receipt["flight_length_mm"] if physical_pending else parameters.get("flight_path_length", receipt.get("flight_length_mm", known.get("flight_path_length_mm", flight.value)))
+            t0.value = receipt.get("model", {}).get("t0_ns", receipt.get("t0_ns", known.get("t0_ns", t0.value)))
+        finally:
+            controller["restoring_instrument"] = False
+        selected_crop = session.preview.get("crop", session.accepted.get("crop"))
         criteria = selected_crop["criteria"] if selected_crop else {}
-        crop_start.value, crop_stop.value = criteria.get("event_start", 0), criteria.get("event_stop", session.n)
-        crop_tof.value, crop_voltage.value, crop_detector.value = (key in criteria for key in ("tof_bounds", "voltage_bounds", "detector_circle"))
-        if crop_tof.value:
-            crop_tof_min.value, crop_tof_max.value = criteria["tof_bounds"]
-        if crop_voltage.value:
-            crop_voltage_min.value, crop_voltage_max.value = criteria["voltage_bounds"]
-        if crop_detector.value:
-            crop_x.value, crop_y.value, crop_radius.value = criteria["detector_circle"]
+        restore_crop_controls(criteria, session.n)
         for widget, key in ((icf, "icf"), (kf, "kf"), (efficiency, "det_eff"), (field, "field_evap"), (density, "avg_dens")):
             if key in parameters:
                 widget.value = parameters[key]
         projection = parameters.get("projection", parameters.get("mode"))
         if projection in ("Geiser", "Bas"):
             recon_kind.value = projection
+
+    def restore_crop_controls(criteria, n):
+        controller["restoring_crop"] = True
+        try:
+            crop_start.value, crop_stop.value = criteria.get("event_start", 0), criteria.get("event_stop", n)
+            crop_tof.value, crop_voltage.value, crop_detector.value = (key in criteria for key in ("tof_bounds", "voltage_bounds", "detector_circle"))
+            if crop_tof.value:
+                crop_tof_min.value, crop_tof_max.value = criteria["tof_bounds"]
+            if crop_voltage.value:
+                crop_voltage_min.value, crop_voltage_max.value = criteria["voltage_bounds"]
+            if crop_detector.value:
+                crop_x.value, crop_y.value, crop_radius.value = criteria["detector_circle"]
+        finally:
+            controller["restoring_crop"] = False
 
     def import_data():
         selected = (path.value, kind.value, mode.value)
@@ -211,8 +244,95 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
             session_path.value = change["new"]
     session_list.observe(selected_session, names="value")
     reference_windows.observe(lambda _: setattr(reference_confirmed, "value", False), names="value")
+
+    def discard_physical_preview():
+        session = controller["workflow"]
+        pending = session.preview.get("calibration", {}) if session else {}
+        if pending.get("receipt", {}).get("method") == "tof2mc physical conversion":
+            session.preview.pop("calibration")
+            mass_output.clear_output(wait=False)
+
+    def instrument_edited(_):
+        if controller["restoring_instrument"]:
+            return
+        controller["physical_generation"] += 1
+        instrument_confirmed.value = False
+        discard_physical_preview()
+        refresh()
+
+    def confirmation_edited(change):
+        if controller["restoring_instrument"]:
+            return
+        controller["physical_generation"] += 1
+        if not change["new"]:
+            discard_physical_preview()
+        refresh()
+
     for setting in (flight, t0, pulse_mode):
-        setting.observe(lambda _: setattr(instrument_confirmed, "value", False), names="value")
+        setting.observe(instrument_edited, names="value")
+    instrument_confirmed.observe(confirmation_edited, names="value")
+
+    def sync_drawing():
+        drawing = controller["crop_drawing"]
+        if drawing is not None:
+            drawing.set_draft((crop_start.value, crop_stop.value),
+                              (crop_x.value, crop_y.value, crop_radius.value) if crop_detector.value else None)
+
+    def crop_edited(_):
+        if controller["restoring_crop"]:
+            return
+        session = controller["workflow"]
+        if session is not None and session.preview.pop("crop", None) is not None:
+            crop_output.clear_output(wait=False)
+        sync_drawing()
+        refresh()
+
+    for setting in (crop_start, crop_stop, crop_tof, crop_tof_min, crop_tof_max,
+                    crop_voltage, crop_voltage_min, crop_voltage_max, crop_detector,
+                    crop_x, crop_y, crop_radius):
+        setting.observe(crop_edited, names="value")
+
+    def close_drawing():
+        drawing = controller["crop_drawing"]
+        controller["crop_drawing"] = None
+        if drawing is not None:
+            drawing.close()
+        drawing_box.children = ()
+
+    def open_crop_drawing():
+        from pyccapt.calibration.tutorials.tutorials_helpers.helper_guided_crop import create_crop_drawing
+        session = active()
+        close_drawing()
+
+        def current():
+            return not job.running and controller["workflow"] is session and controller["crop_drawing"] is drawing
+
+        def interval_selected(start, stop):
+            if current():
+                crop_start.value, crop_stop.value = start, stop
+                drawing.refresh_detector()
+
+        def circle_selected(x, y, radius):
+            if current():
+                crop_x.value, crop_y.value, crop_radius.value = x, y, radius
+                crop_detector.value = True
+
+        drawing = create_crop_drawing(session, on_interval=interval_selected, on_circle=circle_selected,
+                                      interval_provider=lambda: (crop_start.value, crop_stop.value))
+        controller["crop_drawing"] = drawing
+        sync_drawing()
+        drawing_box.children = (drawing.widget,)
+
+    def refresh_fdm():
+        drawing = controller["crop_drawing"]
+        if drawing is not None:
+            drawing.refresh_detector()
+            sync_drawing()
+
+    def undo_accepted():
+        result = active().undo()
+        replace_workflow(active())
+        return result
 
     def inspect_source():
         from pyccapt.calibration.tutorials.tutorials_helpers.helper_guided_crop import source_overview
@@ -228,6 +348,9 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
     def crop_preview(all_events=False):
         from pyccapt.calibration.tutorials.tutorials_helpers.helper_guided_crop import source_overview
         session = active()
+        if all_events:
+            restore_crop_controls({}, session.n)
+            close_drawing()
         criteria = {} if all_events else dict(event_start=crop_start.value, event_stop=crop_stop.value,
             tof_bounds=(crop_tof_min.value, crop_tof_max.value) if crop_tof.value else None,
             voltage_bounds=(crop_voltage_min.value, crop_voltage_max.value) if crop_voltage.value else None,
@@ -284,6 +407,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
         if not np.isfinite([flight.value, t0.value]).all() or flight.value <= 0:
             raise CalibrationInputError("Flight length must be finite and positive in mm, and time zero finite in ns")
         session, revision = active(), active().revision
+        generation = controller["physical_generation"]
         working = session.working_variables()
         working.pulse_mode = pulse_mode.value
         geometry = (flight.value, t0.value, pulse_mode.value)
@@ -304,11 +428,20 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
                 report(min(1., (start+250000)/session.n), "Converting raw ToF with reviewed physical parameters")
             return values
         def receive(masses):
+            if (controller["workflow"] is not session or generation != controller["physical_generation"] or
+                    not instrument_confirmed.value):
+                raise CalibrationStateError("Instrument settings or their confirmation changed during conversion; preview again")
             result = session.preview_calibration(masses, expected_revision=revision,
                 receipt={"method": "tof2mc physical conversion", "flight_length_mm": geometry[0], "t0_ns": geometry[1], "pulse_mode": geometry[2]})
             show_mass_comparison()
             message(result)
         launch(operation, receive)
+
+    def accept_calibration():
+        pending = active().preview.get("calibration", {})
+        if pending.get("receipt", {}).get("method") == "tof2mc physical conversion" and not instrument_confirmed.value:
+            raise CalibrationStateError("Confirm the physical conversion settings before accepting calibration")
+        return active().accept("calibration")
 
     def propose_references():
         from pyccapt.calibration.core.calibration_advanced import auto_detect_reference_peaks
@@ -448,7 +581,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
         session._sync_outputs()
         target = Path(export_path.value).expanduser().resolve()
         metadata = {"workflow_source_hash": session.source_hash, "workflow_revision": session.revision,
-                    "acquisition_completeness": "unverified", "accepted_stages": session.status()}
+                    "accepted_stages": session.status()}
         frame = session.export_frame()
         metadata["selection"] = frame.attrs["pyccapt_selection"]
         if nexus:
@@ -464,25 +597,30 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
         return str(target.parent / (target.stem+".h5"))
 
     actions = {load: import_data, resume: resume_data, find_sessions: search_sessions, inspect: inspect_source,
+        draw_crop: open_crop_drawing, update_fdm: refresh_fdm,
         preview_crop: crop_preview, accept_crop: accept_selection, reset_crop: lambda: crop_preview(True),
         # Imported mass has unknown historical instrument settings unless the
         # source supplies them; do not stamp current widget defaults as provenance.
         imported: imported_preview, show_mass: show_mass_comparison,
-        physical: physical_preview, accept_cal: lambda: active().accept("calibration"), compare_cal: lambda: active().compare("calibration"),
+        physical: physical_preview, accept_cal: accept_calibration, compare_cal: lambda: active().compare("calibration"),
         propose_refs: propose_references, configure: configure_references, capture: capture_calibration, open_ranges: open_review,
         preview_recon: reconstruction_preview, accept_recon: lambda: active().accept("reconstruction"),
         compare_recon: lambda: active().compare("reconstruction"), ratio: open_ratio, capture_ratio: capture_geometry,
         analyze: lambda: active().analyze(), save: lambda: active().save(session_path.value),
-        export: export_accepted, export_nexus: lambda: export_accepted(True), undo: lambda: active().undo(), cancel: job.cancel}
+        export: export_accepted, export_nexus: lambda: export_accepted(True), undo: undo_accepted, cancel: job.cancel}
     for button, operation in actions.items():
         button.on_click(act(operation))
     tabs = widgets.Tab(children=[
         widgets.VBox([path, widgets.HBox([kind, mode, load]), widgets.HBox([session_directory, session_query, find_sessions]),
                       session_list, session_path, resume]),
         widgets.VBox([widgets.HTML("Inspect units, finite capabilities and source identity before calibration."), inspect]),
-        widgets.VBox([widgets.HTML("<b>Keep the useful part of the run.</b> Choose source event positions, then optionally limit raw ToF, voltage or detector area. "
+        widgets.VBox([widgets.HTML("<b>Keep the useful part of the run.</b> Click <b>Draw crop regions</b>. Draw a rectangle across the smooth part of the DC-voltage curve; "
+            "its horizontal span sets the event interval (its height does not filter voltage). Then draw a circle inside the detector FDM to exclude low-intensity edges and mouse bites. "
+            "Drawing changes the draft fields only. After numeric interval edits, click <b>Update detector map</b> before drawing the circle. "
+            "You can also enter exact positions and optional raw ToF or voltage limits below. "
             "Start is included; stop is excluded. Preview shows what stays. Accepting a crop clears later results; Undo restores them. "
             "The original source remains in the session so reconstruction retains the earlier evaporation history."),
+            widgets.HBox([draw_crop, update_fdm]), drawing_box,
             widgets.HBox([crop_start, crop_stop]), widgets.HBox([crop_tof, crop_tof_min, crop_tof_max]),
             widgets.HBox([crop_voltage, crop_voltage_min, crop_voltage_max]),
             widgets.HBox([crop_detector, crop_x, crop_y, crop_radius]),

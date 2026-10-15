@@ -34,8 +34,11 @@ def _record(name, value, source, status='configured'):
         valid = bool(value)
     else:
         try:
+            # TOML booleans are not physical quantities, even though Python's
+            # float(True/False) would silently manufacture a 1/0 value.
+            is_boolean = isinstance(value, bool)
             value = float(value)
-            valid = math.isfinite(value) and (value > 0 if name.endswith('_mm') else True)
+            valid = not is_boolean and math.isfinite(value) and (value > 0 if name.endswith('_mm') else True)
         except (TypeError, ValueError, OverflowError):
             valid = False
     return {'value': value if valid else None, 'units': UNITS[name],
@@ -122,7 +125,10 @@ def write_instrument_metadata(parent, metadata, *, name='instrument_metadata'):
     """Write a versioned JSON contract and discoverable typed scalar settings."""
     import h5py
     group = parent.create_group(name)
-    group.attrs.update(NX_class='NXcollection', schema_version=SCHEMA)
+    group.attrs.update(
+        NX_class='NXcollection', schema_version=SCHEMA,
+        nx_class_reference='https://manual.nexusformat.org/classes/base_classes/NXcollection.html',
+        conformance='PyCCAPT metadata extension; NXcollection content is not NXDL validated; not full NXapm conformance')
     group.create_dataset('json', data=json.dumps(metadata, sort_keys=True, allow_nan=False),
                          dtype=h5py.string_dtype('utf-8'))
     for context_name in ('acquisition', 'calibration', 'conversion_preview', 'uncorrected_conversion', 'legacy_workflow_inputs', 'import_inputs'):

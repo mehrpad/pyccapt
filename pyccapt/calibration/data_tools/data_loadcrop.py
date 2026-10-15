@@ -202,7 +202,7 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld', *, lazy: bool 
     flag_old_pyccpat_data = False
     if extract_mode == 'dld':
         try:
-            hdf5_data = data_tools.read_hdf5(filename)
+            hdf5_data = data_tools.read_hdf5(filename, groups=("dld",))
             if hdf5_data is None:
                 raise FileNotFoundError
             dld_high_voltage = hdf5_data['dld/high_voltage'].to_numpy()
@@ -261,7 +261,7 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld', *, lazy: bool 
             print("[*] HDF5 file not found")
     elif extract_mode in {'tdc_sc', 'tdc_ro'}:
         try:
-            hdf5_data = data_tools.read_hdf5(filename)
+            hdf5_data = data_tools.read_hdf5(filename, groups=("tdc",))
             if hdf5_data is None:
                 raise FileNotFoundError
             channel = hdf5_data['tdc/channel'].to_numpy()

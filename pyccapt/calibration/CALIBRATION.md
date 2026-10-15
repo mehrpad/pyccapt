@@ -5,6 +5,9 @@ reconstruction, and visualization utilities for APT datasets.
 
 The separate [guided processing notebook](tutorials/jupyter_files/data_processing_guided.ipynb)
 adds accepted-state steps, resumable sessions and human-reviewed peak proposals.
+Raw hits need no mass column. Interactive cropping uses a rectangle on DC voltage
+versus event sequence and a circle on the detector density map, with a separate
+preview and acceptance step.
 See the [workflow guide](../../docs/guided_workflow.md) for dependencies, review
 actions, cancellation, storage and scientific limitations. The legacy processing
 notebook remains a separate entry point.

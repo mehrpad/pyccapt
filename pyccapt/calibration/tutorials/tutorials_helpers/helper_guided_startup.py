@@ -5,7 +5,28 @@ import sys
 
 
 EXPECTED_STAGES = ("Import", "Inspect", "Crop", "Calibrate", "Range", "Reconstruct", "Analyze", "Export")
-GUIDED_UI_API_VERSION = 6
+GUIDED_UI_API_VERSION = 7
+
+
+def enable_calibration_widgets():
+    """Enable the original tools' interactive spectra on an explicit notebook click.
+
+    Headless scripts/tests retain their backend. The legacy notebook activates
+    ipympl with a magic cell; the guided notebook needs the same backend for its
+    embedded peak selectors, even though its crop canvas is self-contained.
+    """
+    from IPython import get_ipython
+    from matplotlib import get_backend
+    shell = get_ipython()
+    if shell is None or not hasattr(shell, "kernel") or "ipympl" in get_backend().lower():
+        return
+    try:
+        shell.run_line_magic("matplotlib", "ipympl")
+    except (ImportError, RuntimeError, ValueError) as error:
+        from pyccapt.calibration.core.exceptions import CalibrationStateError
+        raise CalibrationStateError(
+            "Interactive calibration spectra need ipympl in this kernel. Install the calibration notebook "
+            "dependencies and restart the kernel; your initial mass preview is still available.") from error
 
 
 def load_guided_workflow(*, repository_root=None):
@@ -30,7 +51,7 @@ def load_guided_workflow(*, repository_root=None):
             tuple(getattr(helper, "STAGES", ())) != EXPECTED_STAGES or
             getattr(helper, "GuidedWorkflow", None) is not core.GuidedWorkflow):
         raise RuntimeError(
-            "Jupyter is still using an older guided workflow. The current panel must include the Crop tab, Browse dataset and automatic format controls. "
+            "Jupyter is still using an older guided workflow. The current panel must include the Crop tab, Browse dataset and Start calibration controls. "
             f"{restart} Rerunning an import cell alone does not refresh cached Python modules.")
     print(f"Guided workflow: {' → '.join(EXPECTED_STAGES)}")
     print(f"PyCCAPT source: {package_directory}")

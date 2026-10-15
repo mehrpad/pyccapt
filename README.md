@@ -151,6 +151,10 @@ jupyter lab
 
 For the guided workflow, open
 [`data_processing_guided.ipynb`](pyccapt/calibration/tutorials/jupyter_files/data_processing_guided.ipynb).
+After cropping, **Start calibration** creates an initial mass and opens the
+original voltage/bowl and automatic calibration tools. Preview corrected results,
+then accept before ranging; [calibration steps](docs/guided_workflow.md#calibration-after-cropping)
+explain the separate mass and ToF outputs.
 The existing [`data_processing.ipynb`](pyccapt/calibration/tutorials/jupyter_files/data_processing.ipynb)
 remains available. The guided notebook connects import, inspection, cropping, calibration,
 peak-by-peak ranging review, reconstruction, analysis and export. Suggestions

@@ -16,7 +16,7 @@ from pyccapt.calibration.core.guided_workflow import GuidedWorkflow, STAGES
 from pyccapt.calibration.tutorials.tutorials_helpers.guided_jobs import NotebookJob
 
 
-GUIDED_UI_API_VERSION = 6
+GUIDED_UI_API_VERSION = 7
 
 
 def show_guided_workflow(workflow=None, *, display_panel=True):
@@ -26,7 +26,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
                   "crop_drawing": None, "restoring_crop": False,
                   "crop_dirty": not bool(workflow and workflow.accepted.get("crop")), "crop_error": None,
                   "reconstruction_generation": 0, "restoring_reconstruction": False,
-                  "physical_generation": 0, "restoring_instrument": False,
+                  "physical_generation": 0, "restoring_instrument": False, "standard_workspace": None, "standard_panel": None,
                   "crop_seeded": bool(workflow and (workflow.accepted.get("crop") or workflow.preview.get("crop")))}
     job = NotebookJob()
     status, progress_text = widgets.HTML(), widgets.Label()
@@ -70,6 +70,13 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
     pulse_mode = widgets.Dropdown(options=["laser", "voltage"], description="Pulse mode:")
     instrument_confirmed = widgets.Checkbox(description="I checked flight length, time zero and pulse mode for this run", indent=False)
     calibration_help = widgets.HTML()
+    calibration_state = widgets.HTML()
+    start_cal = widgets.Button(description="Start calibration", button_style="primary")
+    open_corrections = widgets.Button(description="Open voltage/bowl tools")
+    capture_corrections = widgets.Button(description="Preview corrected calibration", button_style="primary")
+    detector_diameter = widgets.FloatText(value=80., description="Detector mm:")
+    correction_box = widgets.VBox()
+    calibration_tabs = widgets.Tab()
     imported = widgets.Button(description="Preview imported mass")
     physical = widgets.Button(description="Preview physical mass")
     accept_cal = widgets.Button(description="Accept calibration")
@@ -111,7 +118,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
     export_path = widgets.Text(value="guided_result.h5", description="Result path:", layout=widgets.Layout(width="850px"))
     export = widgets.Button(description="Export accepted HDF5")
     export_nexus = widgets.Button(description="Export NeXus mapping")
-    buttons = [browse, load, resume, find_sessions, inspect, draw_crop, update_fdm, suggest_crop, preview_crop, accept_crop, reset_crop, imported, physical, accept_cal, compare_cal, show_mass, propose_refs, configure,
+    buttons = [browse, load, resume, find_sessions, inspect, draw_crop, update_fdm, suggest_crop, preview_crop, accept_crop, reset_crop, imported, physical, start_cal, open_corrections, capture_corrections, accept_cal, compare_cal, show_mass, propose_refs, configure,
                capture, open_ranges, preview_recon, accept_recon, compare_recon, ratio, capture_ratio, analyze, save, export, export_nexus, undo]
     for button in (*buttons, cancel):
         button.layout.width = "auto"
@@ -181,9 +188,9 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
             usable_mass = any(name in session.source and name not in session.source.attrs.get("pyccapt_unavailable_columns", [])
                 and np.any(np.isfinite(session.source[name]) & (session.source[name] > 0)) for name in ("mc (Da)", "mc_uc (Da)"))
             imported.disabled = job.running or not usable_mass
-            calibration_help.value = ("<b>No mass column is needed.</b> Your source contains raw flight times. First accept a crop, "
-                "then check the instrument settings, tick the confirmation box, click <b>Preview physical mass</b>, inspect and accept."
-                if not usable_mass else "Start from the saved mass with <b>Preview imported mass</b>, or calculate a new initial mass from raw flight times after checking the instrument settings.")
+            calibration_help.value = ("<b>1. Start.</b> Check the instrument values and confirmation box, then click <b>Start calibration</b>. "
+                "This calculates an initial mass from raw ToF and opens the original notebook's voltage/bowl and Auto calibration tools. "
+                "Use <b>Preview imported mass</b> to retain a saved mass instead. Opening tools does not run a fit or accept a result.")
             accept_crop.disabled = job.running or "crop" not in session.preview
             pending_crop = session.preview.get("crop")
             if job.running:
@@ -209,8 +216,20 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
                 button.disabled = job.running or session.accepted["ranges"] is None
             accept_cal.disabled = job.running or "calibration" not in session.preview
             pending = session.preview.get("calibration", {})
-            if pending.get("receipt", {}).get("method") == "tof2mc physical conversion" and not instrument_confirmed.value:
+            has_mass = bool(pending) or session.accepted["calibration"] is not None
+            compare_cal.disabled = job.running or not pending
+            show_mass.disabled = job.running or not has_mass
+            start_cal.disabled = job.running or not instrument_confirmed.value
+            open_corrections.disabled = job.running or not has_mass or not instrument_confirmed.value
+            capture_corrections.disabled = job.running or controller["standard_workspace"] is None or not instrument_confirmed.value
+            if pending.get("receipt", {}).get("method") in ("tof2mc physical conversion", "original voltage/bowl correction tools") and not instrument_confirmed.value:
                 accept_cal.disabled = True
+            if pending:
+                calibration_state.value = "<b>Preview ready.</b> Inspect the mass spectrum, then <b>Accept calibration</b> to continue to Range. Correction tools edit a separate workspace; click <b>Preview corrected calibration</b> after each trial to refresh this preview."
+            elif session.accepted["calibration"] is not None:
+                calibration_state.value = "<b>Calibration accepted.</b> Continue to Range, or open correction tools for a new trial."
+            else:
+                calibration_state.value = "<b>No calibration yet.</b> Click <b>Start calibration</b> after confirming the instrument settings. Compare and Accept become available after a successful preview."
             accept_recon.disabled = job.running or "reconstruction" not in session.preview
             undo.disabled = job.running or not session.history
 
@@ -249,6 +268,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
 
     def replace_workflow(session):
         close_drawing()
+        clear_corrections()
         controller["physical_generation"] += 1
         controller["crop_seeded"] = bool(session.accepted.get("crop") or session.preview.get("crop"))
         controller.update(crop_dirty=not bool(session.accepted.get("crop")), crop_error=None)
@@ -277,7 +297,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
         spatial = session.preview.get("reconstruction", session.accepted["reconstruction"])
         receipt = cal["receipt"] if cal else {}
         pending = session.preview.get("calibration", {}).get("receipt", {})
-        physical_pending = pending.get("method") == "tof2mc physical conversion"
+        physical_pending = pending.get("method") in ("tof2mc physical conversion", "original voltage/bowl correction tools")
         if physical_pending:
             receipt = pending
         parameters = spatial["parameters"] if spatial else {}
@@ -288,6 +308,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
                 pulse_mode.value = mode_value
             flight.value = receipt["flight_length_mm"] if physical_pending else parameters.get("flight_path_length", receipt.get("flight_length_mm", known.get("flight_path_length_mm", flight.value)))
             t0.value = receipt.get("model", {}).get("t0_ns", receipt.get("t0_ns", known.get("t0_ns", t0.value)))
+            detector_diameter.value = receipt.get("detector_diameter_mm", detector_diameter.value)
         finally:
             controller["restoring_instrument"] = False
         selected_crop = session.preview.get("crop", session.accepted.get("crop"))
@@ -359,7 +380,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
     def discard_physical_preview():
         session = controller["workflow"]
         pending = session.preview.get("calibration", {}) if session else {}
-        if pending.get("receipt", {}).get("method") == "tof2mc physical conversion":
+        if pending.get("receipt", {}).get("method") in ("tof2mc physical conversion", "original voltage/bowl correction tools"):
             session.preview.pop("calibration")
             mass_output.clear_output(wait=False)
 
@@ -368,6 +389,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
             return
         controller["physical_generation"] += 1
         instrument_confirmed.value = False
+        clear_corrections()
         discard_physical_preview()
         refresh()
 
@@ -377,6 +399,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
         controller["physical_generation"] += 1
         if not change["new"]:
             discard_physical_preview()
+            clear_corrections()
         refresh()
 
     for setting in (flight, t0, pulse_mode):
@@ -534,6 +557,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
 
     def accept_selection():
         result = active().accept("crop")
+        clear_corrections()
         controller.update(crop_dirty=False, crop_error=None)
         controller.update(calibration_workspace=None, calibration_session=None, reconstruction_workspace=None,
                           calibration_panel=None, range_panel=None)
@@ -547,6 +571,8 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
 
     def show_mass_comparison():
         session = active()
+        if not session.preview.get("calibration") and session.accepted["calibration"] is None:
+            return "No mass preview yet. Confirm the instrument settings and click Start calibration first."
         lo, hi = mass_view_min.value, mass_view_max.value
         if not np.isfinite([lo, hi]).all() or lo >= hi:
             raise CalibrationInputError("Mass view limits must be finite and increasing")
@@ -559,6 +585,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
                     mask = session.active_mask & np.isfinite(values) & (values >= lo) & (values <= hi)
                     axis.hist(values[mask], bins=2000, range=(lo, hi), histtype="step", label=f"{label}: {int(mask.sum()):,} in view")
             axis.set(xlabel="Mass-to-charge (Da)", ylabel="Events", yscale="log",
+                     xlim=(lo, hi),
                      title="Display window only; source crop and accepted values are unchanged")
             if axis.get_legend_handles_labels()[0]:
                 axis.legend()
@@ -566,17 +593,19 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
             plt.close(fig)
 
     def imported_preview():
+        clear_corrections()
         result = active().preview_imported_mass()
         show_mass_comparison()
         return result
 
-    def physical_preview():
+    def physical_preview(*, with_tools=False):
         from pyccapt.calibration.mc.mc_tools import tof2mc
         if not instrument_confirmed.value:
             raise CalibrationStateError("Check the flight length, time zero and pulse mode, then tick their confirmation box")
         if not np.isfinite([flight.value, t0.value]).all() or flight.value <= 0:
             raise CalibrationInputError("Flight length must be finite and positive in mm, and time zero finite in ns")
         session, revision = active(), active().revision
+        clear_corrections()
         generation = controller["physical_generation"]
         working = session.working_variables()
         working.pulse_mode = pulse_mode.value
@@ -604,14 +633,72 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
             result = session.preview_calibration(masses, expected_revision=revision,
                 receipt={"method": "tof2mc physical conversion", "flight_length_mm": geometry[0], "t0_ns": geometry[1], "pulse_mode": geometry[2]})
             show_mass_comparison()
+            if with_tools:
+                open_standard_tools()
             message(result)
         launch(operation, receive)
 
     def accept_calibration():
         pending = active().preview.get("calibration", {})
-        if pending.get("receipt", {}).get("method") == "tof2mc physical conversion" and not instrument_confirmed.value:
+        if pending.get("receipt", {}).get("method") in ("tof2mc physical conversion", "original voltage/bowl correction tools") and not instrument_confirmed.value:
             raise CalibrationStateError("Confirm the physical conversion settings before accepting calibration")
-        return active().accept("calibration")
+        result = active().accept("calibration")
+        clear_corrections()
+        return result
+
+    def clear_corrections():
+        tools = controller["standard_panel"]
+        if tools is not None:
+            tools.dispose()
+        controller["standard_panel"] = None
+        controller["standard_workspace"] = None
+        correction_box.children = ()
+
+    def open_standard_tools():
+        from pyccapt.calibration.core.guided_corrections import CorrectionWorkspace
+        from pyccapt.calibration.tutorials.tutorials_helpers.helper_calibration import call_voltage_bowl_calibration
+        from pyccapt.calibration.tutorials.tutorials_helpers.helper_guided_startup import enable_calibration_widgets
+        if not instrument_confirmed.value:
+            raise CalibrationStateError("Confirm instrument settings before opening correction tools")
+        if not np.isfinite(detector_diameter.value) or detector_diameter.value <= 0:
+            raise CalibrationInputError("Detector diameter must be finite and positive in mm")
+        clear_corrections()
+        enable_calibration_widgets()
+        workspace = CorrectionWorkspace(active(), flight_length_mm=flight.value, t0_ns=t0.value,
+            pulse_mode=pulse_mode.value, detector_diameter_mm=detector_diameter.value)
+        tools = call_voltage_bowl_calibration(workspace.variables, detector_diameter.value,
+            flight.value, pulse_mode.value, t0.value, display_panel=False)
+        from pyccapt.calibration.core.calibration_metadata import record_step
+        record_step(workspace.variables, "open_original_correction_tools", status="working",
+            parameters={"detector_diameter_mm": detector_diameter.value, "flight_length_mm": flight.value,
+                        "t0_ns": t0.value, "pulse_mode": pulse_mode.value})
+        tools.controls["mode_tabs"].selected_index = 1  # Ranging uses corrected mass, not independently normalized ToF.
+        controller["standard_workspace"] = workspace
+        controller["standard_panel"] = tools
+        correction_box.children = (widgets.HTML(f"Private correction workspace: {len(workspace.indices):,} events. "
+            f"{workspace.summary['selected_events_not_corrected']:,} selected events lack correction inputs and keep their initial values."), tools)
+        calibration_tabs.selected_index = 1
+        return "Use Plot hist and select a peak, then Auto calibration or the individual voltage/bowl controls. Preview corrected calibration and accept separately."
+
+    def capture_standard_tools():
+        workspace = controller["standard_workspace"]
+        if workspace is None or not instrument_confirmed.value:
+            raise CalibrationStateError("Start calibration or open the voltage/bowl tools first")
+        result = workspace.preview(active(), (flight.value, t0.value, pulse_mode.value))
+        show_mass_comparison()
+        return result
+
+    def detector_edited(_):
+        if controller["restoring_instrument"]:
+            return
+        clear_corrections()
+        pending = active().preview.get("calibration", {}) if controller["workflow"] is not None else {}
+        if pending.get("receipt", {}).get("method") == "original voltage/bowl correction tools":
+            active().preview.pop("calibration")
+            mass_output.clear_output(wait=False)
+        refresh()
+
+    detector_diameter.observe(detector_edited, names="value")
 
     def propose_references():
         from pyccapt.calibration.core.calibration_advanced import auto_detect_reference_peaks
@@ -801,7 +888,9 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
         # Imported mass has unknown historical instrument settings unless the
         # source supplies them; do not stamp current widget defaults as provenance.
         imported: imported_preview, show_mass: show_mass_comparison,
-        physical: physical_preview, accept_cal: accept_calibration, compare_cal: lambda: active().compare("calibration"),
+        physical: physical_preview, start_cal: lambda: physical_preview(with_tools=True),
+        open_corrections: open_standard_tools, capture_corrections: capture_standard_tools,
+        accept_cal: accept_calibration, compare_cal: lambda: active().compare("calibration"),
         propose_refs: propose_references, configure: configure_references, capture: capture_calibration, open_ranges: open_review,
         preview_recon: reconstruction_preview, accept_recon: lambda: active().accept("reconstruction"),
         compare_recon: lambda: active().compare("reconstruction"), ratio: open_ratio, capture_ratio: capture_geometry,
@@ -826,6 +915,20 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
             row([ratio, capture_ratio]), ratio_box]))
     reconstruction_tabs.set_title(0, "3D reconstruction")
     reconstruction_tabs.set_title(1, "ICF/kf calibration")
+    calibration_tabs.children = (
+        widgets.VBox([calibration_help, row([flight, t0, pulse_mode, detector_diameter]), instrument_confirmed,
+            row([start_cal, imported, physical])]),
+        widgets.VBox([widgets.HTML("<b>2. Correct voltage and detector effects.</b> These are the original notebook's calibration tools. "
+            "Start in <b>mc calibration</b>: Plot hist, select a reference peak, then run Auto calibration or individual corrections. "
+            "Auto tools can choose their own working peak; review their diagnostics. No peak identity or successful calibration is guaranteed. "
+            "The ToF tab corrects a separate array and does not automatically update mass. <b>Save correction</b> is only a working backup. "
+            "After a trial, click <b>Preview corrected calibration</b> below and inspect it before accepting."),
+            open_corrections, correction_box, capture_corrections]),
+        widgets.VBox([widgets.HTML("<b>Optional known-reference refinement.</b> This alternative requires independently identified masses. "
+            "Accept an initial mass before proposing mass windows. Window choice and correlated holdout do not prove chemistry."),
+            reference_domain, propose_refs, reference_windows, reference_confirmed, roles, row([configure, capture]), cal_output]))
+    for index, title in enumerate(("1. Start calibration", "2. Voltage / bowl correction", "Optional reference fitting")):
+        calibration_tabs.set_title(index, title)
     tabs = widgets.Tab(children=[
         widgets.VBox([row([browse, path]), row([kind, mode, load]), format_hint, row([session_directory, session_query, find_sessions]),
                       session_list, session_path, resume]),
@@ -838,12 +941,9 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
             "The original source remains in the session so reconstruction retains the earlier evaporation history."),
             row([draw_crop, update_fdm, suggest_crop]), crop_suggestion, drawing_box,
             crop_state, row([preview_crop, accept_crop, reset_crop]), exact_crop, crop_output]),
-        widgets.VBox([widgets.HTML("<b>Preview first; accept separately.</b> Set actual instrument values; control defaults are not instrument measurements."),
-            calibration_help, row([flight, t0, pulse_mode]), instrument_confirmed,
-            row([imported, physical, compare_cal, accept_cal]),
-            row([mass_view_min, mass_view_max, show_mass]), mass_output,
-            widgets.HTML("Optional refinement: choose windows in the initial mass spectrum when voltage variation makes raw ToF peaks overlap. Fill independently known mass_Da identities. Neither window choice nor a correlated holdout proves chemistry."),
-            reference_domain, propose_refs, reference_windows, reference_confirmed, roles, row([configure, capture]), cal_output]),
+        widgets.VBox([widgets.HTML("<b>Start → correct → preview → accept.</b> Set actual instrument values; defaults are not instrument measurements."),
+            calibration_tabs, calibration_state, row([compare_cal, accept_cal]),
+            row([mass_view_min, mass_view_max, show_mass]), mass_output]),
         widgets.VBox([open_ranges, range_box]),
         reconstruction_tabs,
         widgets.VBox([widgets.HTML("Composition uses accepted integer interval assignments; ambiguous mixtures require review."), analyze]),
@@ -861,6 +961,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
                           tabs=tabs, job=job, refresh=refresh, pulse_mode=pulse_mode, flight=flight, t0=t0,
                           progress=progress, progress_text=progress_text,
                           instrument_confirmed=instrument_confirmed, calibration_help=calibration_help,
+                          calibration_tabs=calibration_tabs, calibration_state=calibration_state, detector_diameter=detector_diameter,
                           crop_start=crop_start, crop_stop=crop_stop, crop_tof=crop_tof, crop_tof_min=crop_tof_min,
                           crop_tof_max=crop_tof_max, crop_voltage=crop_voltage, crop_voltage_min=crop_voltage_min,
                           crop_voltage_max=crop_voltage_max, crop_detector=crop_detector, crop_x=crop_x, crop_y=crop_y, crop_radius=crop_radius,

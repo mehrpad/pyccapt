@@ -55,7 +55,7 @@ def save_on_click(variables, calibration_mode):
         'note': 'Working-array backup; exported dataframe remains the result checkpoint.'})
 
 
-def clear_plot_on_click(out, out_status):
+def clear_plot_on_click(out, out_status, *, clear_cell=True):
     """Clear both diagnostic outputs and any inline display."""
     from IPython.display import clear_output
 
@@ -63,7 +63,8 @@ def clear_plot_on_click(out, out_status):
         out.clear_output()
     with out_status:
         out_status.clear_output()
-    clear_output(wait=True)
+    if clear_cell:
+        clear_output(wait=True)
 
 
 def peaks_overlap(first_peak, second_peak):

@@ -623,3 +623,43 @@ silently clips a reviewed kf to an arbitrary limit of 20; the existing mathemati
 validators reject invalid geometry. Ruff and the documentation build passed; no
 calibration or reconstruction equation was changed. These checks exercise Python
 and widget callbacks, not a live browser session.
+
+## Calibration entry after accepting a crop (15 October 2026)
+
+The guided Calibrate tab previously offered a physical mass estimate and optional
+reference fitting but did not expose the original voltage/bowl/Auto tools. It now
+has **Start calibration**, ordered start/correction/reference tabs, and a separate
+**Preview corrected calibration → Accept calibration** path. The original tools
+run in a private selected-event workspace. They retain their existing equations
+and independent mass/ToF calculations. Their Plot/Clear actions do not erase the
+guided cell. Jupyter opening activates the same `ipympl` backend used by the
+original notebook, so peak selectors can receive mouse input; headless validation
+does not establish frontend interaction behavior.
+
+On the full 1642 raw source and the exact screenshot crop, the replay retained
+11,295,260 of 12,312,996 events. Using the entered 110 mm / 38 ns / voltage inputs,
+11,291,088 events could enter the correction workspace; 4,172 selected events
+had no valid initial mass because ToF was at or below time zero. Their initial
+NaNs were retained. Two thousand positions spanning the selected source matched
+the existing `tof2mc` calculation. Original event IDs and source order were
+preserved. The real original-panel histogram action, capture, comparison and
+acceptance callbacks succeeded; acceptance enabled ranging. Opening/capturing
+unchanged tools did not fit, change either array, or manufacture corrected ToF.
+The source SHA-256 remained
+`04ac007f950c2fb3a6969d71077f40b1f1d5ffdfa7aec05ea63ef5825081b431`.
+
+The replay took 34.91 seconds including import, hashing and histogram operations.
+Local artifacts are in `analysis_outputs/1642_calibration_entry/`. This verifies
+the raw-data entry and acceptance path, not optimal physical settings, peak
+identities or calibration quality for 1642. No automatic fit was run or accepted
+as a scientific result. Regression tests separately cover cropped scatter-back,
+independent ToF, invalid/misaligned outputs, uint64 identity, source/settings
+changes, preview gating, pending-preview restoration and correction-history
+save/resume. The calibration guide and notebook explain the required user steps.
+
+The complete calibration suite passed **851 tests** in 172.37 seconds. The final
+widget-release refinement then passed all **81 focused** notebook, correction,
+startup, metadata and module-size checks. Ruff and the documentation build passed.
+An earlier diagnostic run hit a native SciPy access violation; its isolated test
+and the subsequent full run both passed without the timed traceback hook. No
+numerical workaround or calibration-equation change was introduced for that event.

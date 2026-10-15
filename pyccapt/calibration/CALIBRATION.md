@@ -8,6 +8,11 @@ adds accepted-state steps, resumable sessions and human-reviewed peak proposals.
 Raw hits need no mass column. Interactive cropping uses a rectangle on DC voltage
 versus event sequence and a circle on the detector density map, with a separate
 preview and acceptance step.
+After cropping, **Start calibration** performs the initial ToF-to-mass conversion
+and opens the original voltage/bowl/Auto tools in a private selected-event
+workspace. Corrected mass and ToF remain independent. Preview the working result,
+then accept it to enable ranging; source order, crop masks and correction history
+remain attached. This connects existing mathematics without changing its equations.
 The guided Import tab offers **Browse dataset** and defaults to automatic format
 and HDF5 mode detection. Crop status explains when a preview is required before
 **Accept crop** becomes available; any selection edit requires a fresh preview.

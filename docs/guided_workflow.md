@@ -23,10 +23,10 @@ to **Auto detect**. Restart the kernel if those controls still show the old vers
 
 For the raw 1891 Al file, reimport after restarting, accept your sequence/detector
 crop, then enter **110 mm**, **38 ns**, and **voltage** mode. Tick the instrument
-confirmation checkbox, click **Preview physical mass**, inspect the spectrum,
-then **Accept calibration**. **Preview imported mass** requires a saved mass
+confirmation checkbox, click **Start calibration**, then use the voltage/bowl
+tools described below. **Preview imported mass** requires a saved mass
 column and is disabled for this raw source. The physical conversion supplies an
-initial spectrum; optional reference fitting is a later refinement. Proposed
+initial spectrum; voltage/bowl correction and optional reference fitting refine it. Proposed
 reference rows with `mass_Da: null` still require independently identified masses.
 The comparison's `finite_accepted_values: 0` means you have not yet accepted a
 mass calibration; it does not mean that the finite preview failed.
@@ -55,9 +55,12 @@ You do not need an `mc` column to begin.
    Exact fields are available under **Exact values and optional filters**. Event
    limits use source positions, not the hardware counter; stop is excluded.
 4. **Calibrate:** enter the actual flight length, time zero and pulse mode. Check
-   their confirmation box, click **Preview physical mass**, inspect the spectrum,
-   then **Accept calibration**. This is the initial estimate. For processed data,
-   use **Preview imported mass** to retain its existing calibration instead.
+   their confirmation box and click **Start calibration**. This creates the initial
+   mass spectrum and opens **2. Voltage / bowl correction**, with the same tools
+   as the original notebook. Plot/select a peak, run corrections, then click
+   **Preview corrected calibration**, inspect and **Accept calibration**. For
+   processed data, **Preview imported mass** retains the saved mass; you can
+   accept it directly or open correction tools for a new trial.
 5. **Range:** choose plausible elements and charges, propose peaks, review each
    identity and its boundaries, then preview and accept the reviewed ranges.
 6. **Reconstruct:** use reviewed material/instrument parameters. The optional
@@ -86,6 +89,62 @@ file. Unsupported channel streams and unrelated NeXus layouts are not guessed.
 **Preview** shows a proposal; **Accept** makes it current. If an earlier step
 changes, dependent results are cleared. **Undo accepted change** restores the
 previous state. A failed optional fit leaves your accepted calibration intact.
+
+### Calibration after cropping
+
+The Calibrate tab has three parts:
+
+1. **Start calibration** calculates an initial mass from raw flight times using
+   your confirmed instrument settings. A mass column is not needed. This is a
+   physical starting estimate, not a fitted correction. **Preview physical mass**
+   performs only this conversion if you want to inspect it without opening tools.
+2. **Voltage / bowl correction** embeds the original notebook's correction panel.
+   It opens on **mc calibration**, because ranging uses the corrected mass array.
+   Click **Plot hist** and select the peak region, then use **Auto calibration**
+   or the individual voltage/bowl controls under **advance**. The **Hybrid auto +
+   residual** option and the existing calibration presets remain available. Auto
+   routines can choose a working peak; inspect the statistics and peak shapes.
+   A sharper peak does not independently establish its chemical identity.
+   Enter your detector diameter in mm before opening the tools. Its initial
+   value is an editable starting value, not a measurement for your instrument.
+3. **Optional reference fitting** is an alternative multi-reference method for
+   independently identified peaks. It is not required to start calibration.
+
+Corrections run in a private workspace containing the selected crop. Click
+**Preview corrected calibration** after each trial to copy its current results
+into the displayed comparison. Only **Accept calibration** applies that preview
+and enables Range. **Save correction** inside the original tools is a temporary
+working backup, not workflow acceptance or a file export. You may accept the
+initial physical estimate without fitting when that is intentional.
+
+The mass and ToF tabs retain their original separate calculations. ToF tools
+can normalize for voltage and path length; their output is not raw ToF with the
+same time-zero convention. Running only ToF corrections does **not** recalibrate
+the mass spectrum. Capture preserves the two outputs independently and never
+passes normalized ToF through the raw physical conversion again. Check mass
+diagnostics before accepting a mass calibration.
+
+The adapter preserves original event IDs and scatters corrected values back to
+source positions. Events without the required finite measurements retain their
+initial values and are counted beside the tools. Changing instrument settings,
+detector diameter or the accepted crop requires reopening the correction tools.
+An older workspace cannot be captured against a changed workflow. Working
+correction history, instrument inputs and the initial mass receipt accompany the
+accepted result and resumable session; this is not a promise that a fitted recipe
+can be transferred to another experiment. Uncaptured private trials are not saved.
+
+**Compare calibration** is enabled only after a preview exists. The mass plot is
+also unavailable before there are accepted or preview masses, avoiding an empty
+plot or the former “There is no preview to compare” error. If no peak appears in
+the chosen mass window, adjust **View mass min/max**; these affect display only.
+Restart the kernel after updating to see **Start calibration** and the new tabs.
+The correction algorithms and equations are unchanged; this update connects the
+existing tools to the guided preview/accept workflow.
+Opening these tools in Jupyter enables `ipympl`, as the original notebook's
+Matplotlib magic cell does, so the spectrum's peak selector can receive mouse
+input. Headless scripts retain their plotting backend. A missing interactive
+backend produces an installation/restart message instead of silently leaving an
+unusable selector; the initial mass preview remains available.
 
 The inspection plots display a bounded sample for responsiveness; crop counts
 and accepted data use every event. Cropping stores a mask and preserves the full

@@ -34,12 +34,18 @@ class ValidationPolicy:
     max_abs_relative_bias: float = .005
     max_relative_rmse: float = .02
     min_events_per_reference_block: int = 10
+    require_no_regression: bool = True
+    validation_time_bins: int = 4
 
     def __post_init__(self):
         if (not np.isfinite(self.max_abs_relative_bias) or self.max_abs_relative_bias <= 0 or
                 not np.isfinite(self.max_relative_rmse) or self.max_relative_rmse <= 0 or
-                not isinstance(self.min_events_per_reference_block, int) or self.min_events_per_reference_block < 2):
-            raise CalibrationInputError("Validation tolerances must be positive; each reference/block needs >=2 events")
+                not isinstance(self.min_events_per_reference_block, int) or self.min_events_per_reference_block < 2 or
+                not isinstance(self.require_no_regression, bool) or
+                isinstance(self.validation_time_bins, bool) or not isinstance(self.validation_time_bins, int) or
+                not 1 <= self.validation_time_bins <= 20):
+            raise CalibrationInputError("Positive validation tolerances, >=2 events, boolean non-regression policy "
+                                        "and 1–20 integer time bins are required")
 
 
 class GuidedCalibrationSession:
@@ -55,13 +61,15 @@ class GuidedCalibrationSession:
     def __init__(self, variables, references, roles, *, mode, flight_length_mm,
                  pulse_mode="laser", model_config=None, policy=None, apply_mask=None,
                  reference_voltage_V=5000., reference_flight_length_mm=None,
-                 max_fit_events_per_group=5000):
+                 max_fit_events_per_group=5000, baseline_mass_da=None, fit_seed=0):
         if mode not in ("tof", "mc"):
             raise CalibrationInputError("mode must be tof or mc")
         if getattr(variables, "dataset", None) is None:
             raise CalibrationStateError("Load data with Variables.sync_from_data before creating a session")
         if not isinstance(max_fit_events_per_group, int) or max_fit_events_per_group < 10:
             raise CalibrationInputError("max_fit_events_per_group must be an integer >=10")
+        if not isinstance(fit_seed, (int, np.integer)) or isinstance(fit_seed, bool) or fit_seed < 0:
+            raise CalibrationInputError("fit_seed must be a nonnegative integer fixed before fitting")
         self.variables, self.mode = variables, mode
         self._dataset = variables.dataset
         required = ["t (ns)", "high_voltage (V)", "x_det (cm)", "y_det (cm)"]
@@ -81,6 +89,15 @@ class GuidedCalibrationSession:
         if self._active.shape != (self.n,):
             raise CalibrationInputError("Active calibration array is not event-aligned")
         self._active_hash = _digest(self._active)
+        self.baseline_origin = "explicit mass array" if baseline_mass_da is not None else None
+        if baseline_mass_da is None and "mc (Da)" in self._dataset.frame and "mc (Da)" not in unavailable:
+            recorded_mass = self._dataset.frame["mc (Da)"].to_numpy()
+            if np.any(np.isfinite(recorded_mass) & (recorded_mass > 0)):
+                baseline_mass_da, self.baseline_origin = recorded_mass, "recorded mc (Da) column"
+        self.baseline_mass = None if baseline_mass_da is None else _immutable(baseline_mass_da)
+        if self.baseline_mass is not None and (self.baseline_mass.shape != (self.n,) or
+                not np.any(np.isfinite(self.baseline_mass) & (self.baseline_mass > 0))):
+            raise CalibrationInputError("baseline_mass_da must be aligned and contain finite positive masses")
         self.flight_length_mm, self.pulse_mode = float(flight_length_mm), pulse_mode
         self.reference_voltage_V = float(reference_voltage_V)
         self.reference_flight_length_mm = float(flight_length_mm if reference_flight_length_mm is None else reference_flight_length_mm)
@@ -118,7 +135,21 @@ class GuidedCalibrationSession:
         self.policy = policy or ValidationPolicy()
         self.model = MultiReferenceToFModel(model_config)
         self.blocks = _immutable(np.searchsorted(self.model.config.block_edges, self.features[:, 3], side="right"), int)
+        # Application chooses output events; it must not erase held-out
+        # reference evidence or shrink the acquisition span used to validate it.
+        apply_event = self.features[self.apply_mask | np.isfinite(self.labels), 3]
+        low, high = float(apply_event.min()), float(apply_event.max())
+        edges = set(self.model.config.block_edges)
+        # Subdivide declared blocks, rather than overlaying almost coincident
+        # grids (which can create spurious empty slivers after excluding a row).
+        boundaries = [low, *(edge for edge in self.model.config.block_edges if low < edge < high), high]
+        for left, right in zip(boundaries[:-1], boundaries[1:]):
+            parts = max(1, round(self.policy.validation_time_bins*(right-left)/max(high-low, 1e-15)))
+            edges.update(np.linspace(left, right, parts+1)[1:-1])
+        self.validation_edges = tuple(sorted(edges))
+        self.validation_blocks = _immutable(np.searchsorted(self.validation_edges, self.features[:, 3], side="right"), int)
         self.max_fit_events_per_group = max_fit_events_per_group
+        self.fit_seed = int(fit_seed)
         self.status, self.diagnostics = "preview", {}
         self._copied_to_mass = False
         self._model_hash = None
@@ -132,10 +163,15 @@ class GuidedCalibrationSession:
             raise CalibrationInputError(f"{name} must be an event-aligned boolean mask")
         return value
 
-    def _groups(self, role):
+    def _groups(self, role, *, validation=False):
+        blocks = self.validation_blocks if validation else self.blocks
+        edges = self.validation_edges if validation else self.model.config.block_edges
+        occupied = set(np.unique(blocks[self.roles[role]])) if validation else None
         for mass in np.unique(self.labels[np.isfinite(self.labels)]):
-            for block in range(len(self.model.config.block_edges) + 1):
-                yield mass, block, self.roles[role] & (self.labels == mass) & (self.blocks == block)
+            for block in range(len(edges) + 1):
+                if occupied is not None and block not in occupied:
+                    continue
+                yield mass, block, self.roles[role] & (self.labels == mass) & (blocks == block)
 
     def _check_coverage(self, role):
         for mass, block, mask in self._groups(role):
@@ -163,7 +199,9 @@ class GuidedCalibrationSession:
     def _fingerprint_protocol(self):
         protocol = (self.mode, self.flight_length_mm, self.pulse_mode, self.reference_scale,
                     self.reference_voltage_V, self.reference_flight_length_mm,
-                    asdict(self.policy), asdict(self.model.config), self.max_fit_events_per_group,
+                    asdict(self.policy), asdict(self.model.config), self.max_fit_events_per_group, self.fit_seed,
+                    self.validation_edges, self.baseline_origin,
+                    None if self.baseline_mass is None else _digest(self.baseline_mass),
                     _digest(self.labels, self.apply_mask, *self.roles.values()))
         return hashlib.sha256(json.dumps(protocol, sort_keys=True).encode()).hexdigest()
 
@@ -174,43 +212,84 @@ class GuidedCalibrationSession:
                     role_counts={role: int(mask.sum()) for role, mask in self.roles.items()},
                     role_reference_counts={role: int((mask & np.isfinite(self.labels)).sum()) for role, mask in self.roles.items()},
                     reference_masses_da=np.unique(self.labels[np.isfinite(self.labels)]).tolist(),
-                    block_edges=list(self.model.config.block_edges), policy=asdict(self.policy))
+                    block_edges=list(self.model.config.block_edges), validation_time_edges=list(self.validation_edges),
+                    baseline_comparison=self.baseline_origin or "unavailable: no recorded calibrated mass",
+                    fit_seed=self.fit_seed, policy=asdict(self.policy))
 
     def fit(self):
         self._check_current()
         if self.status not in ("preview", "fitted", "selection_failed", "selection_passed"):
             raise CalibrationStateError("Confirmation freezes the model; create a new session to refit")
         indices = []
+        rng = np.random.default_rng(self.fit_seed)
         for _, _, mask in self._groups("train"):
             group = np.flatnonzero(mask)
-            indices.append(group[np.linspace(0, len(group)-1, min(len(group), self.max_fit_events_per_group), dtype=int)])
+            indices.append(group if len(group) <= self.max_fit_events_per_group else
+                           rng.choice(group, self.max_fit_events_per_group, replace=False))
         indices = np.sort(np.concatenate(indices))
         self.status, self._model_hash = "preview", None
         self.model.fit(self.features[indices], np.column_stack((self.raw[0][indices], self.labels[indices])))
         self._model_hash = self._fingerprint_model()
         self.diagnostics = {"training": dict(self.model.fit_diagnostics, fit_event_hash=_digest(indices),
+                                               sampling="seeded without replacement per reference/model block",
+                                               fit_seed=self.fit_seed,
                                                available_events=int((self.roles["train"] & np.isfinite(self.labels)).sum()))}
         self.status = "fitted"
         return deepcopy(self.diagnostics["training"])
 
     def _evaluate(self, role):
         rows, passed = [], True
-        for mass, block, mask in self._groups(role):
+        for mass, block, mask in self._groups(role, validation=True):
             features = self.features[mask]
             in_domain = self.model.domain_mask(features)
+            positive_elapsed = self.raw[0][mask] > self.model.t0_ns
             row = dict(mass_da=float(mass), block=int(block), events=len(features),
-                       outside_domain=int((~in_domain).sum()))
-            if not np.all(in_domain):
+                       outside_domain=int((~in_domain).sum()), nonpositive_elapsed=int((~positive_elapsed).sum()))
+            if len(features) < self.policy.min_events_per_reference_block:
+                row.update(passed=False, reason="insufficient events in acquisition-time validation band")
+            elif not np.all(in_domain):
                 row.update(passed=False, reason="outside training domain")
+            elif not np.all(positive_elapsed):
+                row.update(passed=False, reason="nonpositive elapsed ToF")
             else:
                 relative = (self.model.predict_mass_da(features, self.raw[0][mask]) - mass) / mass
                 bias, rmse = float(np.median(relative)), float(np.sqrt(np.mean(relative**2)))
+                absolute_pass = abs(bias) <= self.policy.max_abs_relative_bias and rmse <= self.policy.max_relative_rmse
                 row.update(relative_median_bias=bias, relative_rmse=rmse,
                            relative_error_quantiles=np.quantile(relative, [.025, .5, .975]).tolist(),
-                           passed=abs(bias) <= self.policy.max_abs_relative_bias and rmse <= self.policy.max_relative_rmse)
+                           passed_absolute_limits=absolute_pass, passed=absolute_pass)
+                if self.baseline_mass is None:
+                    row["baseline_comparison"] = dict(available=False, reason="no recorded calibrated mass baseline")
+                else:
+                    baseline = self.baseline_mass[mask]
+                    available = np.isfinite(baseline) & (baseline > 0)
+                    comparison = dict(available=bool(np.all(available)), events=int(available.sum()))
+                    if np.all(available):
+                        errors = (baseline-mass)/mass
+                        old_bias, old_rmse = float(np.median(errors)), float(np.sqrt(np.mean(errors**2)))
+                        comparison.update(relative_median_bias=old_bias, relative_rmse=old_rmse,
+                            absolute_bias_increase=abs(bias)-abs(old_bias), relative_rmse_increase=rmse-old_rmse)
+                        # Numerical tolerance only: no scientific threshold is
+                        # widened to make a mixed result count as an improvement.
+                        comparison["passed"] = abs(bias) <= abs(old_bias)+1e-12 and rmse <= old_rmse+1e-12
+                    else:
+                        comparison.update(passed=False, reason="baseline unavailable on some validation events")
+                    row["baseline_comparison"] = comparison
+                    if self.policy.require_no_regression:
+                        row["passed"] &= comparison["passed"]
             passed &= row["passed"]
             rows.append(row)
-        return dict(passed=bool(passed), groups=rows)
+        passed = bool(rows) and bool(passed)
+        return dict(passed=bool(passed), groups=rows, validation_time_edges=list(self.validation_edges),
+                    evaluated_time_bands=sorted({row["block"] for row in rows}),
+                    reason=None if rows else "No held-out reference groups were evaluated",
+                    comparison_rule="Each reference/time band must satisfy absolute gates and, when a baseline exists, "
+                                    "not worsen absolute median bias or relative RMSE on the same events.",
+                    guidance=[] if passed else [
+                        "Keep the existing calibration; confirmation is not a tuning set.",
+                        "Review reference identity, overlaps, tail/background contamination and mass-window truncation.",
+                        "Provide independently identified references spanning mass, voltage, detector position and acquisition order.",
+                        "Declare justified drift terms or blocks before creating a new session and reserve fresh confirmation data."])
 
     def validate_selection(self):
         self._check_current()
@@ -303,6 +382,9 @@ class GuidedCalibrationSession:
                     references_hash=_digest(self.labels), roles_hashes={k: _digest(v) for k, v in self.roles.items()},
                     apply_mask_hash=_digest(self.apply_mask), applied_events=int(self.apply_mask.sum()),
                     excluded_events=int((~self.apply_mask).sum()), policy=asdict(self.policy),
+                    baseline_origin=self.baseline_origin,
+                    baseline_mass_hash=None if self.baseline_mass is None else _digest(self.baseline_mass),
+                    validation_time_edges=list(self.validation_edges), fit_seed=self.fit_seed,
                     model=self.model.provenance(), diagnostics=deepcopy(self.diagnostics),
                     input_units="raw ToF ns, detector cm, voltage V, flight length mm, reference mass-to-charge Da",
                     pulse_mode=self.pulse_mode, flight_length_mm=self.flight_length_mm,

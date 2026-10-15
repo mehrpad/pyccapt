@@ -40,6 +40,7 @@ from pyccapt.control.core.contracts import (
     WorkerStatus,
 )
 from pyccapt.control.devices import initialize_devices, signal_generator
+from pyccapt.instrument_metadata import acquisition_metadata, record_mode_observation
 
 
 class APT_Exp_Control:
@@ -621,6 +622,9 @@ class APT_Exp_Control:
             raise RuntimeError("Electrode is out; experiment start is blocked")
         self.variables.flag_visualization_start = True
         self.pulse_mode = self.variables.pulse_mode
+        self.variables.acquisition_instrument_metadata = acquisition_metadata(
+            self.conf, pulse_mode=self.pulse_mode,
+            observed_at=datetime.datetime.now(datetime.timezone.utc).isoformat())
         self.control_algorithm = self.variables.control_algorithm
         self.access_override_enabled = bool(getattr(self.variables, "access_override_enabled", False))
         self.override_disabled_devices = set(getattr(self.variables, "override_disabled_devices", []))
@@ -914,6 +918,10 @@ class APT_Exp_Control:
                     # if the vdc is hold, we need to check if the pulse mode is changed or not to initialize the
                     # pulser and set the voltage
                     if last_pulse_mode != self.pulse_mode:
+                        self.variables.acquisition_instrument_metadata = record_mode_observation(
+                            self.variables.acquisition_instrument_metadata, self.pulse_mode,
+                            observed_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                            control_iteration=steps)
                         flag_change_pulse_mode = True
                         last_pulse_mode = self.pulse_mode
                     if flag_change_pulse_mode and self.pulse_mode in ['Voltage', 'VoltageLaser']:

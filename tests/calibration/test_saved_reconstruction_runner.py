@@ -1,5 +1,6 @@
 """The read-only numerical audit must preserve input and honor named columns."""
 import importlib.util
+import json
 import os
 from pathlib import Path
 
@@ -33,24 +34,27 @@ def test_reordered_named_coordinate_columns_are_read_correctly(tmp_path):
         frame = stream.create_group('df')
         frame.create_dataset('block0_items', data=np.asarray(columns, dtype='S'))
         frame.create_dataset('block0_values', data=values)
+        frame.attrs['pyccapt_source_json'] = json.dumps({'pyccapt_source_id': 'stable-source'})
     before = source.read_bytes()
     variables, sample, xyz, metadata = module.load(source)
     np.testing.assert_array_equal(xyz, values[np.ix_(sample, [6, 4, 1])])
     np.testing.assert_array_equal(variables.dld_high_voltage, values[:, 2])
     assert metadata['rows'] == 112
+    assert variables.data.attrs['pyccapt_source_id'] == 'stable-source'
     assert source.read_bytes() == before
 
 
-@pytest.mark.parametrize('suffix', ['.json', '.png'])
+@pytest.mark.parametrize('suffix', ['.json', '.png', '_detector.png'])
 def test_input_output_hardlink_alias_rejected_without_writes(tmp_path, suffix):
     module = _runner()
     source = tmp_path / 'source.h5'
     original = b'original acquisition must not be overwritten'
     source.write_bytes(original)
-    output = tmp_path / Path(module.REPORT_NAME).with_suffix(suffix)
+    name = Path(module.REPORT_NAME)
+    output = tmp_path / (name.with_suffix(suffix) if not suffix.startswith('_') else name.stem+suffix)
     os.link(source, output)
     with pytest.raises(SystemExit) as raised:
-        module.parse_args(['--data', str(source), '--output-directory', str(tmp_path), '--flight-mm', '110'])
+        module.parse_args(['--data', str(source), '--output-directory', str(tmp_path), '--flight-mm', '110', '--diagnose-signal'])
     assert raised.value.code == 2
     assert source.read_bytes() == original
     assert output.read_bytes() == original
@@ -73,3 +77,18 @@ def test_source_hash_does_not_require_python311_file_digest(tmp_path, monkeypatc
     source.write_bytes(contents)
     monkeypatch.delattr(module.hashlib, 'file_digest', raising=False)
     assert module.file_sha256(source) == module.hashlib.sha256(contents).hexdigest()
+
+
+def test_diagnostic_loader_preserves_cropped_export_receipt_for_prefix_guard(tmp_path):
+    module = _runner()
+    source = tmp_path/'cropped.h5'
+    names = ['x (nm)','y (nm)','z (nm)','x_det (cm)','y_det (cm)','high_voltage (V)','pulse_v (V)']
+    with h5py.File(source,'w') as stream:
+        frame = stream.create_group('df')
+        frame.create_dataset('block0_items',data=np.asarray(names,dtype='S'))
+        frame.create_dataset('block0_values',data=np.ones((100,len(names))))
+        frame.attrs['pyccapt_source_json'] = json.dumps({'pyccapt_selection': {
+            'source_events': 200, 'selected_events': 100, 'preserves_full_source': False}})
+    variables, _, _, _ = module.load(source)
+    with pytest.raises(module.CalibrationInputError,match='cropped export'):
+        module.sc.validate_full_source_metadata(variables)

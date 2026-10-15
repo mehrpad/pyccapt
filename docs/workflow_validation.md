@@ -1,5 +1,119 @@
 # Guided workflow validation — 15 October 2026
 
+## Follow-up: mixed calibration, missing ratio evidence and raw-data support
+
+The first comparison below is retained as a historical audit. The subsequent
+investigation changed the optional reference model and its acceptance checks;
+its current outcome on sample 2643 is **selection failed**, not a better accepted
+calibration. No candidate was applied to the user's data.
+
+### Why the calibration results were mixed
+
+The original aggregate checks could pass even when some reference peaks moved
+farther from their assumed target. Also, the equal-reference soft-L1 fit put
+reference weights inside the residual, which changed the outlier cutoff with
+reference population. Weights now multiply the robust loss itself. A replication
+counterexample verifies that repeating one reference 20 times no longer changes
+its robust influence: the corrected fitted offset agrees within 1.3e-11 ns,
+whereas the old formulation shifted by about 0.00651 ns. This verifies the
+weighting logic, not the physical accuracy of the real-data model.
+
+Fitting uses fixed-seed sampling without replacement. Validation now reports
+each reference in fixed acquisition bands, compares against the baseline on
+the same events, and rejects worsening absolute median bias or relative RMSE.
+The existing absolute error gates remain unchanged. Blocked holdouts work for
+stationary models without allowing time-dependent extrapolation or unseen block
+categories. The equations, sampling policy and limits are in
+[calibration_math.md](calibration_math.md).
+
+The corrected candidate fails in **8 of 20 reference/time groups**: three Ni58
+bias groups, all four Ni60 bias groups and the first Mo96 RMSE group. Confirmation
+is left untouched, and no acceptance/application occurs. The diagnostic took
+11.94 s, including 0.554 s fitting. The historical Fe56 window also includes
+nominal Fe57; this contamination and provisional identities limit what any fit
+can establish. A change in peak location is not evidence of improved peak width.
+Source hashes and active calibration arrays remain unchanged.
+
+### Why there is no reliable ICF/kf pair
+
+All six tested acquisition bands have scanned maximum coherence **0.0803–0.0957**,
+below their unchanged required **0.1078–0.1146**. Checking the bands individually
+does not reveal a strong signal hidden by averaging. Using the exact spherical
+cap/pole correction at the replay's fixed ICF anchor gives **0.0804–0.0960**,
+still with zero passing bands. The detector-feature finder at its standard
+contrast setting returns no candidates. These findings apply to the tested
+central region and assumptions; they do not prove that all other ROIs lack
+usable planes.
+
+The panel now exposes per-band evidence, detector-map review and specific failure
+reasons. Detector features require manual crystallographic review. Evidence
+thresholds are unchanged; the code does not turn a numerical maximum into a
+supported answer. Even a well-supported ratio only fixes a family of pairs:
+`kf = ICF / q`; an independent anchor is needed to select one.
+
+### Additional inputs that would help
+
+| Purpose | Needed input |
+| --- | --- |
+| Establish the specimen | Confirm whether this is the NiC1 specimen or the 316L described in the historical log; supply expected phases/composition. |
+| Improve mass calibration | Clean, nonoverlapping, independently identified isotope/charge windows covering the voltage range, detector area and run duration; exclude or explicitly model contaminated peaks. Provide the actual flight length, pulse mode and voltage convention. A known time offset helps the initial physical conversion; a fitted offset remains conditional on references. |
+| Establish reconstruction depth | Original acquisition from event zero, or documented prefix information, plus any interruptions, cropping and losses. Contiguous exported row IDs alone do not establish completeness. |
+| Estimate q | An indexed near-axis pole/ROI and confirmed lattice spacing/order, with reviewed field, density and detector efficiency. Search for a stronger region without treating hotspots as indexed poles. |
+| Choose ICF and kf separately | An independently constrained ICF, such as two indexed poles with known angular separation, or suitable independent specimen-geometry measurements. |
+| Confirm a searched solution | Reserve an unscreened interval after exploring ROIs/models, or provide an independent acquisition. Interleaved events from this file are correlated holdouts. |
+
+### Raw-data and cropping replay
+
+No original raw acquisition HDF5 was found in the supplied folder. A local
+**derived raw-style `/dld` file** was therefore made from this dataset's recorded
+ToF, detector and voltage fields, omitting all mass and XYZ columns. This tests
+the raw interface on real measurements; it does not prove original acquisition
+completeness or replace testing the user's actual failing raw file.
+
+The guided widget callbacks imported **5,842,702** events, cropped positions
+`[1000, N-1000)` to **5,840,702**, and used explicitly confirmed 110 mm / 38 ns /
+voltage-mode settings. The physical mass preview matches the source `mc_uc`
+**exactly** for every selected event. The 2,000 excluded outputs remain NaN.
+The selected export retains original event IDs and declares that its table is
+cropped; the embedded session restores the full source, mask and cumulative
+voltage context. Both input hashes remain unchanged. Import took 3.00 s,
+conversion preview 3.70 s, export 26.94 s and resume 7.87 s on this machine.
+No peak identities or reconstruction were accepted during this replay.
+
+Regression tests additionally check crop boundaries, invalid/empty crops,
+dependency invalidation and undo, full-prefix reconstruction parity, selected
+role splitting, old-session migration, corrupt restored masks/criteria/previews,
+and required instrument confirmation. Metadata tests cover original-workflow
+NeXus import/export and control run-start settings with fake hardware objects.
+
+Local detailed reports are under `analysis_outputs/2643_calibration_revision`,
+`analysis_outputs/2643_ratio/investigation` and
+`analysis_outputs/2643_derived_raw_ui`. They are ignored validation artifacts;
+the reproducible diagnostic runners and this interpretation are versioned.
+
+### Follow-up software validation
+
+The final collection contains **1,278 tests**. Across the broad run and focused
+reruns, **1,277 have passing results**; the optional performance/memory test is
+skipped. The broad run passed 1,268 tests and exposed one empty-panel metadata
+regression. That failure was fixed, with 39 legacy/metadata tests passing,
+including a new no-mutation regression. The final guided workflow subset passed
+70 tests, including the new physical-input and selected-mass fallback cases.
+
+The unchanged adaptive peak-fitting test was isolated because it takes several
+minutes; it passed in 230.47 s on supported Python 3.12.7 with NumPy 1.26.4 and
+SciPy 1.13.1. Earlier interrupted/timeout-diagnostic attempts are not counted as
+passes; one produced a native Windows access violation. The completed isolated
+run used no timeout dumping and unchanged numerical/test settings. Native
+OMP/OpenBLAS/MKL thread limits were set to one for these checks.
+
+Ruff and staged whitespace checks passed. The full documentation build succeeded
+with the existing docstring/cross-reference warnings; the final incremental
+build after correcting the new link completed without warnings. Notebook
+execution was disabled for documentation generation. No physical hardware
+alignment or acquisition was performed, and original raw-file validation still
+requires the actual acquisition file.
+
 ## Same-dataset comparison: sample 2643
 
 The user supplied the local copy of the legacy notebook's selected dataset at
@@ -46,7 +160,7 @@ event order. Neither fact establishes that the export contains every original
 acquisition event. All-zero laser-energy values lack availability metadata and
 are not evidence of measured zero laser energy.
 
-### Calibration preservation, speed and optional fit
+### Initial comparison: calibration preservation, speed and optional fit
 
 Using the notebook's 38 ns, 110 mm and voltage-mode settings reproduces saved
 `mc_uc (Da)` **exactly for every event**. Guided acceptance of imported
@@ -92,7 +206,8 @@ instrument's time offset. The windows were selected using the old calibration,
 and interleaved event holdouts share the same acquisition. Consequently passing
 these gates does not establish a generally better calibration. The diagnostic
 never calls acceptance or application, and all active/source arrays remain
-unchanged. No calibration mathematics changed during this validation follow-up.
+unchanged. That initial validation did not change calibration mathematics; the
+later weighting and validation corrections are described at the top of this report.
 
 ### Ranging and complete notebook persistence replay
 
@@ -174,22 +289,24 @@ $ranges = Join-Path (Join-Path (Join-Path $processing $sample) 'data_processing'
 python tools/validate_guided_notebook_ui.py --data $data --ranges $ranges --mass-min 0 --mass-max 65 --output-directory analysis_outputs/2643_ui
 python tools/validate_calibration_comparison.py --data $data --ranges $ranges --reference-rows 11 15 16 17 26 --flight-mm 110 --t0-ns 38 --pulse-mode voltage --output analysis_outputs/2643_calibration/summary.json
 python tools/validate_saved_reconstruction.py --data $data --flight-mm 110 --output-directory analysis_outputs/2643_ratio
+python tools/validate_saved_reconstruction.py --data $data --flight-mm 110 --diagnose-signal --output-directory analysis_outputs/2643_ratio/investigation
 ```
 
 The JSON reports retain settings, per-reference errors, unmatched range reasons,
 source fingerprints and timing. They are local validation outputs rather than
 new scientific annotations on the input data.
 
-### Changes made after obtaining the dataset
+### Changes made during the initial dataset comparison
 
-No new production calibration/control error was reproduced in these checks.
+No new production calibration/control error was reproduced in those initial checks.
 The validation runner now accepts explicit detection bounds, retains original
 widget-job errors, explains candidate-tolerance mismatches, and checks exact
 calibrated ToF alongside mass and IDs. New diagnostics make the conditional
 calibration and saved-reconstruction comparisons reproducible. An independent
 review also found that pathname-only output checks missed hard links to inputs;
 the runners now reject those aliases before writing, with regression coverage.
-The application equations, evidence gates and historical source data are unchanged.
+At that point the application equations, evidence gates and historical source
+data were unchanged. The later fixes are documented in the follow-up above.
 
 ## Errors found during integration testing
 

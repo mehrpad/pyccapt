@@ -7,11 +7,12 @@ the Jupyter notebooks, where PyQt6 is present.
 """
 
 DATASET_FILTER = (
-    "Dataset files (*.epos *.pos *.apt *.h5 *.ato *.csv *.rhit *.RHIT *.str *.STR *.hits *.HITS);;"
+    "Dataset files (*.epos *.pos *.apt *.h5 *.nxs *.nx5 *.ato *.csv *.rhit *.RHIT *.str *.STR *.hits *.HITS);;"
     "LEAP (*.epos *.pos *.apt);;"
     "LEAP CAMECA RHIT (*.rhit *.RHIT);;"
     "LEAP CAMECA STR / HITS (*.str *.STR *.hits *.HITS);;"
     "PyCCAPT / HDF5 (*.h5);;"
+    "PyCCAPT NeXus mapping (*.nxs *.nx5 *.h5);;"
     "ATO (*.ato);;"
     "CSV (*.csv);;"
     "All Files (*)"
@@ -32,7 +33,7 @@ CAMECA_RAW_FILTER = (
     "All Files (*)"
 )
 GENERIC_FILTER = (
-    "Dataset / range files (*.epos *.pos *.apt *.h5 *.ato *.csv "
+    "Dataset / range files (*.epos *.pos *.apt *.h5 *.nxs *.nx5 *.ato *.csv "
     "*.rhit *.RHIT *.str *.STR *.hits *.HITS *.rrng *.rng);;"
     "All Files (*)"
 )

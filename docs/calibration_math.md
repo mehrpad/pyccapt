@@ -50,7 +50,21 @@ Block offsets change multiplicative scale; this version has one global
 additive $t_0$, not a separate drifting additive offset in each block.
 
 The model uses a bounded robust nonlinear least-squares fit with soft-L1 loss.
-Each reference species has equal total fitting weight. Positivity comes from
+For $J$ references, $n_j$ fitted events in reference $j$, $N=\sum_j n_j$,
+raw time residual $r_i$ in ns and declared robust scale $c$ in ns, its objective is
+
+$$
+ \frac{c^2}{2}\sum_i a_i\rho((r_i/c)^2),\qquad
+ a_i=\frac{N}{J n_{j(i)}},\qquad \rho(z)=2(\sqrt{1+z}-1).
+$$
+
+Each reference species has equal total fitting weight. The weight multiplies
+the **loss**, not the residual before applying the nonlinear loss. The latter
+would change the robust cutoff to $c/\sqrt{a_i}$ and make abundant and scarce
+references use different outlier rules. A regression repeats one reference
+twenty times while preserving its distribution and verifies an unchanged fit.
+This corrects the objective; it does not identify an incorrectly labelled or
+overlapping reference. Positivity comes from
 the exponential; declared factor bounds are checked separately. An active
 coefficient bound, failed convergence or poorly conditioned scaled Jacobian
 rejects the fit. Coefficients have numerical bounds [-2,2] in standardized
@@ -66,19 +80,59 @@ This prevents an apparently successful fit based on one species in one block
 and another species in a different block. It does not prove identifiability
 under arbitrary composition or detector correlations.
 
-Fit time is bounded by deterministically sampling at most 5,000 training events
-per reference/block, evenly in acquisition order. The sample hash and available
-event count are recorded. Increase the cap when residual diagnostics justify it.
+Fit time is bounded by sampling at most 5,000 training events per reference/model
+block **without replacement**, using a seed fixed at session creation
+(`fit_seed=0` by default). Selected indices are restored to acquisition order.
+The sample hash, seed and available event count are recorded. Regular-stride
+sampling is avoided: a synthetic periodic 5 ns tail is sampled exclusively by
+the old evenly spaced subset, producing more than 2% median mass bias; seeded
+sampling of the same population passes the unchanged validation limits.
+Increase the cap when training/selection diagnostics justify it; do not search
+seeds or sampling settings against confirmation data.
 Selection and confirmation evaluate all supplied reference events in those
-splits. They **never update coefficients**. Per-reference/block reports include
+splits. They **never update coefficients**. Validation uses four fixed
+acquisition-time bands by default (`validation_time_bins=4`) over the union of
+reference and application extents. An application mask never erases held-out
+reference evidence, and an empty evaluation cannot pass. Declared model-block boundaries are respected when
+subdividing that extent, avoiding nearly coincident boundaries and empty
+slivers. Each reference must have enough held-out events in every resulting
+band occupied by the evaluated role; insufficient reference coverage there fails
+explicitly. A contiguous later holdout need not contain events in earlier bands
+reserved for training. Per-reference/time-band reports include
 relative median bias, relative RMS mass error, empirical 2.5/50/97.5-percentile
-errors and counts outside the training domain. The policy is fixed at session
+errors, positive-elapsed-time validity and counts outside the training domain.
+This catches equal/opposite temporal biases that cancel in an aggregate report.
+The policy is fixed at session
 creation; default limits are 0.5% absolute median bias and 2% RMS relative error.
 These defaults are starting tolerances to review for the experiment, not
 universal standards for adequate mass calibration.
 
-Prediction is allowed only inside the rectangular training feature bounds,
-expanded by the declared margin (default 2% of each feature's training range).
+Replacement validation also compares the candidate with a saved mass baseline
+on **identical held-out events**. By default (`require_no_regression=True`),
+neither absolute median bias nor relative RMSE may worsen in any reference/time
+band; only a $10^{-12}$ numerical allowance is used. This is deliberately
+conservative, not a statistical significance test. A pass within broad absolute
+limits is insufficient to call a mixed result an improvement. A real-data check
+on sample 2643 fails eight of twenty groups under this rule and leaves
+confirmation unused. The source calibration remains untouched.
+
+Supply `baseline_mass_da=accepted_mass_array` when replacing an accepted result.
+The array is snapshotted and hashed. When omitted, a usable recorded `mc (Da)`
+column is the fallback, **not** the legacy active array, which can initially
+contain `mc_uc`. Unavailable/zero placeholder mass supplies no baseline;
+comparison is then explicitly unavailable and the absolute gates still apply.
+An existing baseline with missing values on a validation group fails the
+comparison. Baseline agreement does not establish correct chemical identities.
+
+Prediction is allowed only inside the rectangular training voltage/detector
+feature bounds, expanded by the declared margin (default 2% of each feature's
+training range). A fitted linear drift additionally requires event order inside
+the training event-order range; extrapolation is rejected. Without a drift term,
+event order is unused and a later holdout tests the model's explicit stationarity
+assumption. It is not rejected merely for being later. Declared block offsets
+require a block category observed in training, even in a stationary-within-block
+model. Older snapshots without recorded categories retain their original
+conservative event-domain restriction.
 This is a coordinate-range check, not evidence of dense joint coverage. Inspect
 residuals against voltage, detector position and acquisition order. A point can
 lie inside every marginal range while occupying a sparse joint combination.
@@ -163,6 +217,8 @@ session = GuidedCalibrationSession(
     pulse_mode="laser",  # Use voltage mode only with valid pulse voltages.
     model_config=ToFModelConfig(linear_drift=True, block_edges=()),
     policy=ValidationPolicy(max_abs_relative_bias=.005, max_relative_rmse=.02),
+    baseline_mass_da=accepted_mass_array,  # Omit if there is no accepted mass baseline.
+    fit_seed=0,  # Fix before looking at selection/confirmation results.
 )
 show_guided_calibration(session, receipt_path="guided_calibration_receipt.json")
 # Equivalent script: preview(), fit(), validate_selection(), confirm(),
@@ -177,6 +233,32 @@ of source arrays, reference labels, role masks and application mask. Save raw
 data and masks separately: hashes verify identity but cannot reconstruct the
 original event selections. JSON receipts are audit records, not resumable
 serialized sessions.
+
+## Inputs needed when a fit gives mixed results
+
+Keep the prior calibration when the candidate worsens a reference; do not
+automatically widen thresholds, relabel peaks or trim a window until it passes.
+The useful additional inputs are independently identified isotope/charge
+references across a wider mass span; windows with reviewed tails, background
+and neighbouring species; measured event-aligned pulse voltage; checked detector
+units and flight geometry; and acquisition regions reserved before model
+selection. The bundled isotope weights are rounded, so sub-millidalton claims
+would additionally need validated higher-precision reference masses.
+
+A broad mass window is not a pure reference. In sample 2643 the historical Fe56
+doubly charged window includes the nominal Fe57 doubly charged mass at 28.47 Da.
+The diagnostic reports this possibility without deleting those ions or changing
+their labels. Isotope-family evidence or narrower independently justified
+windows can help review such a case; selecting them with the fitted residuals
+alone creates circular evidence.
+
+Raw ToF windows can also combine different masses when voltage or geometry
+varies. Inspect a physically normalized mass view with checked instrument
+settings when choosing event masks, then fit the original raw times. Declare
+linear drift or acquisition blocks only when the instrument/history supports
+them, and keep confirmation untouched. More model terms cannot repair an
+incorrect identity. The fitted offset remains conditional on the labels and
+model; it is not an independent measurement of hardware time zero.
 
 ## Reconstruction and ranging corrections kept separate
 

@@ -109,7 +109,8 @@ def call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected,
         fixed = {key: value for key, value in _parameters().items() if key not in ('kf', 'icf')}
         return (fixed, cx_w.value, cy_w.value, r_w.value, _theo_d(),
                 q_lo_w.value, q_hi_w.value, q_n_w.value, icf_lo_w.value, icf_hi_w.value,
-                full_source_w.value, spacing_confirmed_w.value, id(getattr(variables, 'dataset', None)))
+                full_source_w.value, spacing_confirmed_w.value, id(getattr(variables, 'dataset', None)),
+                rc.selection_hash(variables))
 
     # ---- show normal + sharp FDM, detect pole candidates -----------------
     def on_show_fdm(_):
@@ -118,15 +119,17 @@ def call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected,
             print('Building FDMs...')
         detx = np.asarray(variables.dld_x_det, dtype=float)
         dety = np.asarray(variables.dld_y_det, dtype=float)
+        active = sc.active_selection_mask(variables)
+        if active is not None:
+            detx, dety = detx[active], dety[active]
         density, contrast, xe, ye = sc.sharp_fdm_map(
             detx, dety, bins=int(fdm_bins_w.value), smooth_sigma=fdm_smooth_w.value)
         cands = sc.detect_pole_candidates(contrast, xe, ye, n=8)
         opts = [('(manual cx/cy below)', None)]
         for i, (px, py, s) in enumerate(cands):
-            opts.append((f'pole {i + 1}: ({px:.2f}, {py:.2f}) cm  {s:.1f}σ', (px, py)))
+            opts.append((f'unindexed ROI {i + 1}: ({px:.2f}, {py:.2f}) cm  contrast {s:.1f}', (px, py)))
         pole_dd.options = opts
-        if cands:
-            cx_w.value, cy_w.value = round(cands[0][0], 3), round(cands[0][1], 3)
+        pole_dd.value = None  # Density contrast does not identify a crystallographic pole.
         ext = [xe[0], xe[-1], ye[0], ye[-1]]
         with out_fdm:
             out_fdm.clear_output(wait=True)
@@ -136,7 +139,7 @@ def call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected,
             ax[0].imshow(np.log10(d), origin='lower', extent=ext, cmap='viridis', aspect='equal')
             ax[0].set_title('Normal FDM (log hit density)')
             ax[1].imshow(contrast.T, origin='lower', extent=ext, cmap='magma', aspect='equal')
-            ax[1].set_title('Best/sharp FDM (pole contrast, σ)')
+            ax[1].set_title('Detrended FDM (unindexed density features)')
             for a in ax:
                 a.set_xlabel('det x (cm)'); a.set_ylabel('det y (cm)')
             for i, (px, py, s) in enumerate(cands):
@@ -149,8 +152,9 @@ def call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected,
             plt.show()
         with out_status:
             out_status.clear_output()
-            print(f'Detected {len(cands)} pole candidate(s). Pick one or set cx/cy/radius, '
-                  'then "Reconstruct + z-SDM".')
+            print(f'Found {len(cands)} unindexed density feature(s). Current ROI has not changed. '
+                  'Review a feature or set cx/cy/radius, then inspect its z-SDM. '
+                  'Neither a density feature nor detector center identifies a plane; confirm the spacing independently.')
 
     def on_pole_select(change):
         if change['new'] is not None:
@@ -238,6 +242,10 @@ def call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected,
     full_source_w = widgets.Checkbox(value=False, description='Full acquisition loaded from event zero', indent=False)
     spacing_confirmed_w = widgets.Checkbox(value=False, description='Indexed spacing independently known', indent=False)
     anchor_confirmed_w = widgets.Checkbox(value=False, description='ICF above is my chosen independent/manual anchor', indent=False)
+    def reference_changed(_):
+        spacing_confirmed_w.value = False
+    for reference in (cx_w, cy_w, r_w, a_w, b_w, c_w, al_w, be_w, ga_w, h_w, k_w, l_w):
+        reference.observe(reference_changed, names='value')
     auto_best = {}
     ratio_progress = widgets.FloatProgress(min=0, max=1, description='Ratio profile:')
     ratio_progress_text = widgets.Label()
@@ -259,6 +267,15 @@ def call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected,
         with out_status:
             out_status.clear_output()
             print(f"{res['status']}: {res['message']}")
+            band_evidence = res.get('diagnostics', {}).get('band_evidence', {})
+            if band_evidence:
+                print('Band diagnostics (scanned maxima are exploratory, not accepted estimates):')
+                for band in band_evidence['bands']:
+                    print(f"  {band['role']} band {band['band']+1}: n={band['events']}, "
+                          f"coherence at fixed training choice={band['coherence_at_training_choice']:.3f}, "
+                          f"best scanned={band['exploratory_peak_coherence']:.3f}, gate={band['coherence_floor']:.3f}")
+            for step in rc.ratio_next_steps(res):
+                print(f'Next: {step}')
             if res['q'] is not None:
                 print(f"q = ICF/kf = {res['q']:.5f}; descriptive profile region {res['supported_interval']}.")
                 print('Compatible family: kf = ICF/q. The ratio does not determine a unique ICF or kf.')
@@ -274,10 +291,13 @@ def call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected,
                     ax.axvspan(*res['supported_interval'], alpha=.15, label='descriptive support region')
                 ax.set_xlabel('q = ICF/kf (dimensionless)')
                 ax.set_ylabel('absolute indexed-period coherence')
+                floors = res.get('diagnostics', {}).get('coherence_floor')
+                if floors:
+                    ax.axhline(min(floors), color='gray', ls=':', label='smallest individual-band evidence gate')
                 ax.legend()
                 plt.show()
         ratio_progress.value = 1.
-        ratio_progress.bar_style = 'success'
+        ratio_progress.bar_style = 'success' if res['status'] == 'supported' else 'warning'
         ratio_progress_text.value = 'Preview complete; accepted parameters have not changed.'
 
     def on_auto_run(_):
@@ -395,15 +415,17 @@ def call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected,
         _row('Miller h / k / l:', h_w, k_w, l_w),
     ])
     roi_box = widgets.VBox([
-        widgets.HTML('<b>Pole ROI (detector, cm) — constant over iterations</b>'),
-        _row('pick pole:', pole_dd),
+        widgets.HTML('<b>Review a detector ROI (cm)</b><br>Density features are unindexed candidates. '
+                     'Selecting one requires independent spacing confirmation. Crops select events; the full depth prefix is retained.'),
+        btn_fdm,
+        _row('review candidate:', pole_dd),
         _row('cx / cy / radius (cm):', cx_w, cy_w, r_w),
+        out_fdm,
     ])
 
     manual_tab = widgets.VBox([
         sdm_box,
-        widgets.HBox([btn_fdm, btn_sdm, btn_apply_kf]),
-        out_fdm,
+        widgets.HBox([btn_sdm, btn_apply_kf]),
         out_sdm,
         widgets.HBox([widgets.Label('Measured d_obs (nm):', layout=_label), d_obs_w, theo_lbl]),
         suggest_lbl,

@@ -84,11 +84,68 @@ unavailable, so they are not presented as measured zeros. Validity codes are
 `0=measured/finite`, `1=unknown/nonfinite`, `2=unavailable`; missing coordinates
 remain NaN. The NXapm mapping carries explicit status arrays and field availability.
 
-An optional `/entry` representation targets NXapm v2026.01 as a **partial mapping**.
+The `/entry` representation targets NXapm v2026.01 as a **partial mapping**.
 It preserves the existing groups, maps units explicitly, and lists missing
 instrument/specimen/coordinate metadata instead of asserting full conformance.
 See [session and export documentation](../../docs/analysis_sessions.md) for the
 schema, migration, validation, benchmark and opt-in SWMR APIs.
+
+## Instrument settings and NeXus interoperability
+
+The original notebook's `save_data(..., hdf=True)` now writes the partial NeXus
+mapping alongside `/df` by default. `nexus=False` keeps a legacy-only export;
+instrument metadata still survives. Existing numerical columns are unchanged.
+The original Save data widget keeps working without notebook changes. For
+widget discovery, `save_data` exposes scalar controls and an `**export_metadata`
+slot; optional `analysis_session` and `nexus_metadata` remain accepted as their
+documented positional or keyword arguments, or explicit `fixed(...)` widget
+arguments. Constructing the manual panel does not perform an export.
+The mapping duplicates event arrays for interoperability, so its storage/time
+cost is additional to the `/df` export. This is not full NXapm conformance:
+no `definition=NXapm` assertion is written, and the mapping report lists missing
+context. The mapping follows the distinction between acquisition and processing
+in the official [NXapm definition](https://manual.nexusformat.org/classes/applications/NXapm.html),
+with project-specific settings in labelled
+[NXcollection groups](https://manual.nexusformat.org/classes/base_classes/NXcollection.html).
+
+`dataframe.attrs['pyccapt_instrument_metadata']` (`pyccapt-instrument-1`) contains
+separate contexts with `value`, `units`, `status` and `source` per setting:
+
+- `acquisition`: configured instrument constants and observed run modes;
+- `calibration`: explicit accepted calibration inputs; a model-fit t0 is labelled
+  `fitted_model`, not a measured hardware offset;
+- `legacy_workflow_inputs`: values explicitly passed to the original loader or
+  calibration panel, without claiming that they produced an imported calibration;
+- `import_inputs`: optional settings supplied when accepting imported masses in
+  the guided API; the historical calibration context is retained;
+- `conversion_preview`: inputs actually used by the original t0 preview;
+- `uncorrected_conversion`: the preview inputs when copied to `mc_uc`, or explicit
+  legacy converter assumptions (110 mm, 0 ns, zero pulse-voltage voltage-mode
+  conversion). These assumptions are not acquisition facts.
+
+Settings are also exposed as typed scalar datasets below
+`instrument_metadata` and `/entry/atom_probe1/instrument_metadata`, with mm/ns
+units. Acquisition and calibration contexts remain distinct. Unknown numeric
+values are NaN in HDF5 and null in JSON. A mixed/combined-mode acquisition does
+not offer a single pulse mode/t0. Older config-only files can recover configured
+constants but cannot infer the run's actual pulse mode from its GUI default.
+
+`pyccapt.instrument_metadata.extract_instrument_settings(frame)` returns only
+known, supported flight length/t0/mode suggestions. A calibration context takes
+precedence as a whole; missing values are not filled from a different context.
+The helper does not confirm settings or apply any calibration.
+
+Raw eager/lazy loads and processed loads preserve these attributes. All finite
+JSON-compatible `pyccapt_` dataframe attributes, including acquisition
+completeness, crop scope and accepted analysis receipts, survive `/df` saves.
+Missing raw pulse columns remain compatibility zeros but are marked unavailable;
+recorded zeros remain available measurements.
+
+The original notebook's **Data mode → PyCCAPT NeXus mapping** imports this
+project's `.nxs`, `.nx5` or `.h5` exports. The file picker exposes these formats.
+`load_data(path, 'nexus')` also reads standalone `/entry` exports, preserving
+integer event IDs and metadata. It deliberately rejects unrelated third-party
+NeXus layouts rather than assuming their fields match this partial mapping.
 
 ## Range Dataset (HDF5 or Imported `.rrng` / `.rng`)
 

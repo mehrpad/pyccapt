@@ -241,7 +241,18 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld', *, lazy: bool 
             dld_group_storage = create_pandas_dataframe(
                 dld_group_array, mode='dld', flag_old_pyccpat_data=flag_old_pyccpat_data
             )
-            return dld_group_storage
+            missing = []
+            for column, aliases in {
+                'pulse_v (V)': ('dld/pulse', 'dld/voltage_pulse', 'dld/pulse_voltage'),
+                'pulse_l (pJ)': hdf5_schema.DLD_GROUP_ALIASES['pulse_l (pJ)'],
+                'start_counter': ('dld/start_counter',),
+            }.items():
+                if not any(alias in hdf5_data for alias in aliases):
+                    missing.append(column)
+            if missing:
+                dld_group_storage.attrs['pyccapt_unavailable_columns'] = missing
+            from pyccapt.instrument_metadata import attach_instrument_metadata
+            return attach_instrument_metadata(dld_group_storage, filename)
         except KeyError as error:
             print(error)
             print("[*] Keys missing in the dataset")
@@ -276,7 +287,10 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld', *, lazy: bool 
                 (channel, start_counter, high_voltage, voltage_pulse, laser_pulse, time_data)
             )
             dld_group_storage = create_pandas_dataframe(dld_group_array, mode=extract_mode)
-            return dld_group_storage
+            if 'tdc/laser_pulse' not in hdf5_data:
+                dld_group_storage.attrs['pyccapt_unavailable_columns'] = ['pulse_l (pJ)']
+            from pyccapt.instrument_metadata import attach_instrument_metadata
+            return attach_instrument_metadata(dld_group_storage, filename)
         except KeyError as error:
             print(error)
             print("[*] Keys missing in the dataset")
@@ -338,6 +352,7 @@ def _fetch_dataset_from_dld_grp_lazy(filename: str, extract_mode: str):
         selected,
         source_path=raw.source_path,
         close=raw.close,
+        attrs=raw.attrs,
     )
 
 def concatenate_dataframes_of_dld_grp(dataframe_list: list) -> pd.DataFrame:

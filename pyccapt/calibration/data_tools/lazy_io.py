@@ -171,10 +171,13 @@ class LazyTable:
         n_rows: int | None = None,
         source_path: Path | None = None,
         close: Callable[[], None] | None = None,
+        attrs: dict | None = None,
     ):
         if not columns:
             raise ValueError("LazyTable needs at least one column")
         self._columns: dict[str, LazyColumn] = dict(columns)
+        from copy import deepcopy
+        self.attrs = deepcopy(attrs or {})
         column_lengths = [len(c) for c in self._columns.values()]
         if n_rows is None:
             n_rows = max(column_lengths)
@@ -254,12 +257,18 @@ class LazyTable:
     ) -> Iterator[pd.DataFrame]:
         """Same as :meth:`iter_chunks` but yields DataFrames."""
         for chunk in self.iter_chunks(columns, chunk_size):
-            yield pd.DataFrame(chunk)
+            yield self._frame(chunk)
+
+    def _frame(self, data, **kwargs):
+        from copy import deepcopy
+        result = pd.DataFrame(data, **kwargs)
+        result.attrs = deepcopy(self.attrs)
+        return result
 
     def head(self, n: int = 20, columns: Sequence[str] | None = None) -> pd.DataFrame:
         n = max(0, int(n))
         wanted = list(columns) if columns is not None else self.columns
-        return pd.DataFrame({name: self._columns[name][:n] for name in wanted})
+        return self._frame({name: self._columns[name][:n] for name in wanted})
 
     def to_dataframe(
         self,
@@ -274,7 +283,7 @@ class LazyTable:
         wanted = list(columns) if columns is not None else self.columns
         lengths = {name: len(self._columns[name]) for name in wanted}
         if not lengths or max(lengths.values()) == 0:
-            return pd.DataFrame({name: np.empty(0, dtype=self._columns[name].dtype) for name in wanted})
+            return self._frame({name: np.empty(0, dtype=self._columns[name].dtype) for name in wanted})
         # Preallocate the destination per-column. Once the destination buffers
         # exist we never hold a second full copy of any column.
         buffers = {name: np.empty(lengths[name], dtype=self._columns[name].dtype) for name in wanted}
@@ -286,9 +295,9 @@ class LazyTable:
                     continue
                 buffers[name][start:stop] = self._columns[name][start:stop]
         if len(set(lengths.values())) == 1:
-            return pd.DataFrame(buffers, copy=False)
+            return self._frame(buffers, copy=False)
         # Mixed lengths: build per-column Series and let pandas align/pad with NaN.
-        return pd.DataFrame({name: pd.Series(buffers[name]) for name in wanted})
+        return self._frame({name: pd.Series(buffers[name]) for name in wanted})
 
     # --- resource management ---------------------------------------------
 
@@ -510,7 +519,13 @@ def open_pyccapt_raw_hdf5(file_path: str | Path) -> LazyTable:
         handle.close()
         raise ValueError(f"{file_path} contains no /dld/* or /tdc/* datasets -- is this a pyccapt-raw HDF5?")
 
-    return LazyTable(columns, source_path=file_path, close=handle.close)
+    from pyccapt.instrument_metadata import read_instrument_metadata
+    try:
+        attrs = read_instrument_metadata(file_path)
+    except Exception:
+        handle.close()
+        raise
+    return LazyTable(columns, source_path=file_path, close=handle.close, attrs=attrs)
 
 
 class _H5SqueezeWrapper:

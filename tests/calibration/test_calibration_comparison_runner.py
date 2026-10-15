@@ -33,6 +33,17 @@ def test_reference_selection_preserves_half_open_windows_and_catalogue_masses(ru
     assert [row["events"] for row in details] == [2, 1]
 
 
+def test_reference_audit_exposes_neighbour_isotope_without_relabelling(runner):
+    catalogue, ranges = catalogue_and_ranges()
+    catalogue.loc[len(catalogue)] = ["Fe", 57, 56.94]
+    frame = pd.DataFrame({"mc (Da)": [26.98, 55.94, 56.94]})
+    masks, details = runner.reference_masks(frame, ranges, [0, 1], catalogue)
+    assert details[1]["other_same_element_isotopes_inside_window"] == [
+        {"element": "Fe", "isotope": 57, "mass_Da": 56.94}]
+    assert details[1]["nominal_target_inside_window"]
+    assert masks[55.94].sum() == 2  # The diagnostic reports the assumption; it never edits it.
+
+
 @pytest.mark.parametrize("problem", ["duplicate_row", "out_of_bounds", "overlap", "empty", "missing_isotope", "charge", "composition"])
 def test_invalid_assumed_references_fail_before_fitting(runner, problem):
     catalogue, ranges = catalogue_and_ranges()
@@ -75,7 +86,8 @@ def test_hardlink_output_collision_preserves_input(runner, tmp_path):
     assert source.read_bytes() == alias.read_bytes() == b"original"
 
 
-def test_conditional_diagnostic_holdouts_never_accept_or_apply(runner, monkeypatch, tmp_path):
+@pytest.mark.parametrize("regressed_selection", [False, True])
+def test_conditional_diagnostic_holdouts_never_accept_or_apply(runner, monkeypatch, tmp_path, regressed_selection):
     from pyccapt.calibration.core import flight_path_t0
     from pyccapt.calibration.core.guided_calibration import GuidedCalibrationSession
     from pyccapt.calibration.core.multireference_tof import physical_tof_baseline
@@ -86,6 +98,8 @@ def test_conditional_diagnostic_holdouts_never_accept_or_apply(runner, monkeypat
         raise AssertionError("A diagnostic must not accept or apply the conditional calibration")
     monkeypatch.setattr(GuidedCalibrationSession, "accept", forbidden)
     monkeypatch.setattr(GuidedCalibrationSession, "apply", forbidden)
+    if regressed_selection:
+        monkeypatch.setattr(GuidedCalibrationSession, "confirm", forbidden)
     rng = np.random.default_rng(24)
     n = 1800
     mass = np.tile([26.98, 55.94], n//2)
@@ -93,8 +107,11 @@ def test_conditional_diagnostic_holdouts_never_accept_or_apply(runner, monkeypat
     x, y = rng.uniform(-2., 2., (2, n))
     pulse = voltage * .2
     baseline = physical_tof_baseline(voltage, x, y, 110., pulse, "voltage")
-    frame = pd.DataFrame({"mc (Da)": mass*1.001, "mc_uc (Da)": mass,
-                          "t (ns)": 38.+baseline*np.sqrt(mass), "high_voltage (V)": voltage,
+    raw_t = 38.+baseline*np.sqrt(mass)
+    if regressed_selection:
+        raw_t[np.random.default_rng(2643).integers(0, 5, n, dtype=np.int8) == 3] += .2
+    frame = pd.DataFrame({"mc (Da)": mass if regressed_selection else mass*1.001, "mc_uc (Da)": mass,
+                          "t (ns)": raw_t, "high_voltage (V)": voltage,
                           "pulse_v (V)": pulse, "x_det (cm)": x, "y_det (cm)": y})
     source, ranges_path = tmp_path / "source.h5", tmp_path / "ranges.h5"
     frame.to_hdf(source, key="df")
@@ -103,11 +120,16 @@ def test_conditional_diagnostic_holdouts_never_accept_or_apply(runner, monkeypat
     destination = tmp_path / "report.json"
     result = runner.compare(source, ranges_path, destination, rows=[0, 1], flight_mm=110.,
                             t0_ns=38., pulse_mode="voltage")
-    assert result["state"] == "confirmed"
+    assert result["state"] == ("selection_failed" if regressed_selection else "confirmed")
     assert result["source_files_unchanged"] and result["active_calibration_unchanged"]
     assert result["grouping_benchmark"]["exact_values_and_order"]
-    assert result["physical_vs_saved_uncorrected"]["allclose_rtol_1e_12"]
-    assert result["confirmation"]["passed"]
+    if regressed_selection:
+        assert result["confirmation"]["evaluated"] is False
+        assert result["replacement_assessment"]["baseline_regressions"] > 0
+        assert all(group["passed_absolute_limits"] for group in result["selection"]["groups"])
+    else:
+        assert result["physical_vs_saved_uncorrected"]["allclose_rtol_1e_12"]
+        assert result["confirmation"]["passed"]
     assert json.loads(destination.read_text())["assumptions"] == result["assumptions"]
     for row in result["selection_comparison"]:
-        assert row["candidate"]["relative_rmse"] < 1e-8
+        assert row["candidate"]["relative_rmse"] < (.005 if regressed_selection else 1e-8)

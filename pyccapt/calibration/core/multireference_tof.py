@@ -128,15 +128,21 @@ class MultiReferenceToFModel(CalibrationModel):
             raise CalibrationInputError("Reference coverage cannot identify the requested model terms")
         baseline = np.sqrt(target[:, 1]) * values[:, 4]
         # Equal total weight per reference; abundant species cannot monopolize the fit.
-        weights = np.sqrt(len(values) / (len(masses) * counts[np.searchsorted(masses, target[:, 1])]))
+        weights_squared = len(values) / (len(masses) * counts[np.searchsorted(masses, target[:, 1])])
         def residual(parameters):
-            return weights * (parameters[0] + baseline * np.exp(design @ parameters[1:]) - target[:, 0])
+            return parameters[0] + baseline * np.exp(design @ parameters[1:]) - target[:, 0]
+        def balanced_soft_l1(squared_residual):
+            # Weight the loss, not its input. Scaling residuals before soft_l1
+            # changes the robust cutoff with reference population and breaks
+            # equal-reference weighting outside the quadratic regime.
+            root = np.sqrt(1. + squared_residual)
+            return weights_squared * np.vstack((2. * (root-1.), 1. / root, -.5 / root**3))
         low, high = self.config.t0_bounds_ns
         initial = np.zeros(design.shape[1] + 1)
         initial[0] = np.clip(0., low + 1e-9, high - 1e-9)
         result = least_squares(residual, initial, bounds=(np.r_[low, np.full(design.shape[1], -2.)],
                                                         np.r_[high, np.full(design.shape[1], 2.)]),
-                               loss="soft_l1", f_scale=self.config.robust_scale_ns,
+                               loss=balanced_soft_l1, f_scale=self.config.robust_scale_ns,
                                x_scale="jac", max_nfev=400)
         norms = np.linalg.norm(result.jac, axis=0)
         condition = np.linalg.cond(result.jac / np.maximum(norms, 1e-15))
@@ -149,10 +155,15 @@ class MultiReferenceToFModel(CalibrationModel):
         self.coefficients = result.x[1:].copy()
         self._valid_domain = {name: (float(values[:, i].min()), float(values[:, i].max()))
                               for i, name in enumerate(FEATURE_NAMES[:4])}
-        variance = float(np.sum(result.fun**2) / (len(values) - len(result.x)))
+        weighted_sum_squares = float(np.sum(weights_squared * result.fun**2))
+        variance = weighted_sum_squares / (len(values) - len(result.x))
         covariance = np.linalg.pinv(result.jac.T @ result.jac) * variance
         self.fit_diagnostics = dict(condition_number=float(condition), n_train=len(values),
-                                    weighted_rmse_ns=float(np.sqrt(np.mean(result.fun**2))),
+                                    weighted_rmse_ns=float(np.sqrt(weighted_sum_squares / len(values))),
+                                    objective="equal-reference weighted soft_l1 of raw ToF residuals",
+                                    robust_cutoff_ns=self.config.robust_scale_ns,
+                                    observed_acquisition_blocks=np.unique(np.searchsorted(
+                                        self.config.block_edges, values[:, 3], side="right")).tolist(),
                                     parameter_standard_errors=np.sqrt(np.maximum(0, np.diag(covariance))).tolist(),
                                     uncertainty_kind="local model-conditional linearization; not coverage probabilities")
         return self
@@ -175,8 +186,23 @@ class MultiReferenceToFModel(CalibrationModel):
             raise CalibrationInputError(f"Expected columns {FEATURE_NAMES}")
         mask = np.all(np.isfinite(values), axis=1) & (values[:, 0] > 0) & (values[:, 4] > 0)
         for i, (low, high) in enumerate(self._valid_domain.values()):
+            if i == 3 and not self.config.linear_drift:
+                # Event order does not enter a stationary model. A later
+                # holdout tests stationarity; it is not extrapolation of an
+                # unrequested drift term. Block effects remain categorical.
+                continue
             margin = max((high - low) * self.config.domain_margin_fraction, 1e-12)
             mask &= (values[:, i] >= low - margin) & (values[:, i] <= high + margin)
+        if self.config.block_edges:
+            observed = self.fit_diagnostics.get("observed_acquisition_blocks")
+            if observed is None:
+                # Legacy snapshots lacked explicit categories; preserve their
+                # original time-domain restriction rather than infer support.
+                low, high = self._valid_domain["event_fraction"]
+                margin = max((high-low)*self.config.domain_margin_fraction, 1e-12)
+                mask &= (values[:, 3] >= low-margin) & (values[:, 3] <= high+margin)
+            else:
+                mask &= np.isin(np.searchsorted(self.config.block_edges, values[:, 3], side="right"), observed)
         return mask
 
     def predict_mass_da(self, features, raw_t_ns):

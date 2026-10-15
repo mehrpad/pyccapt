@@ -7,18 +7,21 @@ PyCCAPT groups remain readable alongside the new /entry representation.
 from __future__ import annotations
 
 import hashlib
+import json
 
 import h5py
 import numpy as np
+import pandas as pd
 
 from pyccapt.calibration.core.dataset import CalibrationDataset, UNITS
 from pyccapt.calibration.core.exceptions import CalibrationInputError
 from pyccapt.calibration.data_tools.analysis_session import (
     _atomic_hdf, canonical_json, dataset_options, software_identity,
 )
+from pyccapt.instrument_metadata import ATTR as INSTRUMENT_ATTR, extract_instrument_settings, write_instrument_metadata
 
 
-MAPPING_VERSION = 'pyccapt-nxapm-map-1'
+MAPPING_VERSION = 'pyccapt-nxapm-map-2'
 NXAPM_VERSION = 'v2026.01'
 NXAPM_REFERENCE = 'https://manual.nexusformat.org/classes/applications/NXapm.html'
 
@@ -61,7 +64,8 @@ def _measurement(parent, name, source, columns, units, scale=1.):
 
 
 def write_nexus_mapping(handle, frame, *, metadata=None, ranges=None, reconstruction=None):
-    metadata, reconstruction = dict(metadata or {}), dict(reconstruction or {})
+    metadata = {**frame.attrs.get('pyccapt_acquisition_metadata', {}), **dict(metadata or {})}
+    reconstruction = dict(reconstruction or {})
     if 'entry' in handle:
         raise CalibrationInputError('Refusing to replace an existing NeXus entry')
     had_ids = 'event_id' in frame
@@ -96,7 +100,14 @@ def write_nexus_mapping(handle, frame, *, metadata=None, ranges=None, reconstruc
          else 'unavailable' for column in UNITS}))
     _text(collection, 'software_json', canonical_json(identity))
     _text(collection, 'experiment_metadata_json', canonical_json(metadata))
+    _text(collection, 'dataframe_provenance_json', canonical_json(
+        {key: value for key, value in frame.attrs.items() if key.startswith('pyccapt_')}))
     instrument = _group(entry, 'atom_probe1', 'NXinstrument')
+    instrument_metadata = frame.attrs.get(INSTRUMENT_ATTR, {'schema_version': 'pyccapt-instrument-1'})
+    if 'instrument_metadata' in handle:
+        instrument['instrument_metadata'] = handle['instrument_metadata']
+    else:
+        write_instrument_metadata(instrument, instrument_metadata)
     if {'x_det (cm)', 'y_det (cm)'}.issubset(frame):
         hits = _group(instrument, 'hit_finding', 'NXprocess')
         _measurement(hits, 'hit_positions', dataset, ['x_det (cm)', 'y_det (cm)'], 'mm', scale=10.)
@@ -137,6 +148,11 @@ def write_nexus_mapping(handle, frame, *, metadata=None, ranges=None, reconstruc
                                            'NeXus nuclide encoding for ranged ions, if present'],
               'missing_user_metadata': [key for key in ('start_time', 'operation_mode') if key not in metadata],
               'event_identity_preserved': had_ids,
+              'instrument_contexts': [name for name in instrument_metadata if name != 'schema_version'],
+              'missing_instrument_settings': [name for name in ('flight_path_length_mm', 't0_ns', 'pulse_mode')
+                                              if name not in extract_instrument_settings(frame)],
+              'instrument_settings_scope': 'configured/user-supplied/model inputs distinguished by status and source; missing values remain unknown',
+              'selection': frame.attrs.get('pyccapt_selection', {}),
               'acquisition_completeness': metadata.get('acquisition_completeness', 'unverified')}
     _text(entry, 'mapping_report_json', canonical_json(report))
     entry.attrs['mapping_report_sha256'] = hashlib.sha256(canonical_json(report).encode()).hexdigest()
@@ -146,3 +162,32 @@ def write_nexus_mapping(handle, frame, *, metadata=None, ranges=None, reconstruc
 def export_nexus(path, frame, *, metadata=None, ranges=None, reconstruction=None):
     return _atomic_hdf(path, lambda handle: write_nexus_mapping(
         handle, frame, metadata=metadata, ranges=ranges, reconstruction=reconstruction))
+
+
+def load_nexus_mapping(path):
+    """Read this project's partial mapping, not arbitrary third-party NXapm files."""
+    with h5py.File(path, 'r') as handle:
+        if ('entry' not in handle or
+                handle['entry'].attrs.get('mapping_version') not in {'pyccapt-nxapm-map-1', MAPPING_VERSION}):
+            raise CalibrationInputError('Unsupported NeXus layout; only PyCCAPT partial mappings can be imported')
+        collection = handle['entry/pyccapt_data']
+        values = {}
+        unavailable = []
+        for key in sorted(collection['columns'], key=lambda key: int(key.removeprefix('column'))):
+            column = collection['columns'][key]
+            name = str(column.attrs['name'])
+            values[name] = column['value'][...]
+            if name != 'event_id' and len(column['status']) and np.all(column['status'][...] == 2):
+                unavailable.append(name)
+        frame = pd.DataFrame(values)
+        if 'event_id' not in frame:
+            frame['event_id'] = collection['event_id'][...]
+        if 'dataframe_provenance_json' in collection:
+            frame.attrs.update(json.loads(collection['dataframe_provenance_json'].asstr()[()]))
+        frame.attrs.setdefault('pyccapt_source_id', str(collection.attrs['source_id']))
+        if unavailable:
+            frame.attrs['pyccapt_unavailable_columns'] = sorted(set(
+                frame.attrs.get('pyccapt_unavailable_columns', [])) | set(unavailable))
+        if INSTRUMENT_ATTR not in frame.attrs and 'entry/atom_probe1/instrument_metadata/json' in handle:
+            frame.attrs[INSTRUMENT_ATTR] = json.loads(handle['entry/atom_probe1/instrument_metadata/json'].asstr()[()])
+    return frame

@@ -20,10 +20,28 @@ def validate_restored_workflow(workflow):
             raise CalibrationStateError(f"Saved {name} has no valid positive output")
         return array
 
-    def calibration(payload):
-        vector(payload["mass"], (n,), "mass", positive=True)
+    def crop(payload):
+        if payload is None:
+            return np.ones(n, dtype=bool)
+        mask = np.asarray(payload["mask"])
+        if mask.shape != (n,) or mask.dtype != bool or not mask.any() or not isinstance(payload["criteria"], dict):
+            raise CalibrationStateError("Saved crop must contain a nonempty aligned boolean selection and criteria")
+        from pyccapt.calibration.core.guided_crop import crop_mask
+        criteria = dict(payload["criteria"])
+        criteria.pop("interval_convention", None)
+        expected, _ = crop_mask(workflow.source, **criteria)
+        if not np.array_equal(mask, expected):
+            raise CalibrationStateError("Saved crop criteria do not reproduce its selected events")
+        return mask
+
+    def calibration(payload, selected):
+        mass = vector(payload["mass"], (n,), "mass", positive=True)
+        if np.isfinite(mass[~selected]).any():
+            raise CalibrationStateError("Saved mass includes events outside the accepted crop")
         if payload.get("tof") is not None:
-            vector(payload["tof"], (n,), "ToF", positive=True)
+            tof = vector(payload["tof"], (n,), "ToF", positive=True)
+            if np.isfinite(tof[~selected]).any():
+                raise CalibrationStateError("Saved ToF includes events outside the accepted crop")
         learned = payload.get("model_state")
         if learned and "learned_model" in learned:
             from pyccapt.calibration.data_tools.model_state import restore_model_state
@@ -57,17 +75,20 @@ def validate_restored_workflow(workflow):
             raise CalibrationStateError("Saved accepted ranges differ from reviewed decisions")
 
     def accepted(state, review_state=None):
-        if set(state) != {"calibration", "ranges", "reconstruction", "analysis"}:
+        if set(state) != {"crop", "calibration", "ranges", "reconstruction", "analysis"}:
             raise CalibrationStateError("Saved accepted stages are incomplete")
         cal, ranged, spatial = state["calibration"], state["ranges"], state["reconstruction"]
+        selected = crop(state["crop"])
         if (ranged is not None and cal is None) or ((spatial is not None or state["analysis"] is not None) and ranged is None):
             raise CalibrationStateError("Saved workflow dependencies are inconsistent")
         if cal is not None:
-            calibration(cal)
+            calibration(cal, selected)
         if ranged is not None:
             ranges(ranged, cal["mass"])
         if spatial is not None:
-            vector(spatial["xyz"], (n, 3), "reconstruction")
+            xyz = vector(spatial["xyz"], (n, 3), "reconstruction")
+            if np.isfinite(xyz[~selected]).any():
+                raise CalibrationStateError("Saved reconstruction includes events outside the accepted crop")
         if review_state is not None:
             if cal is None:
                 raise CalibrationStateError("Saved review has no accepted calibration")
@@ -78,12 +99,18 @@ def validate_restored_workflow(workflow):
         for snapshot in workflow.history:
             accepted(snapshot["accepted"], snapshot["review"])
         for stage, payload in workflow.preview.items():
-            if stage == "calibration":
-                calibration(payload)
+            if stage == "crop":
+                crop(payload)
+            elif stage == "calibration":
+                calibration(payload, workflow.active_mask)
             elif stage == "ranges":
                 ranges(payload, workflow.accepted["calibration"]["mass"])
             elif stage == "reconstruction":
-                vector(payload["xyz"], (n, 3), "reconstruction preview")
+                xyz = vector(payload["xyz"], (n, 3), "reconstruction preview")
+                if workflow.accepted["ranges"] is None:
+                    raise CalibrationStateError("Saved reconstruction preview has no accepted ranges")
+                if np.isfinite(xyz[~workflow.active_mask]).any():
+                    raise CalibrationStateError("Saved reconstruction preview includes events outside the accepted crop")
             else:
                 raise CalibrationStateError("Unknown saved preview stage")
     except (KeyError, TypeError, ValueError) as exc:

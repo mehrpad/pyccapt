@@ -93,6 +93,55 @@ def test_uncrystalline_data_has_no_ratio_suggestion():
     variables, _, _ = periodic_acquisition(random_roi=True)
     result = profile(variables)
     assert result['q'] is None and result['status'] == 'no_periodic_evidence'
+    evidence = result['diagnostics']['band_evidence']
+    assert evidence['bands_with_exploratory_signal'] == 0
+    assert len(evidence['bands']) == 6
+    assert all(row['exploratory_peak_coherence'] < row['coherence_floor'] for row in evidence['bands'])
+    assert any('independently indexed' in step for step in rc.ratio_next_steps(result))
+
+
+def test_active_crop_selects_events_and_band_span_without_restarting_depth():
+    variables, expected_prefix, _ = periodic_acquisition(n=180000)
+    active = np.zeros(len(expected_prefix), dtype=bool)
+    active[30000:150000] = True
+    variables.reconstruction_selection_mask = active
+    geometry = prepare(variables)
+    np.testing.assert_array_equal(geometry.cumulative_inverse_voltage2, expected_prefix)
+    assert geometry.metadata['source_events'] == 180000
+    assert geometry.metadata['active_selection_events'] == 120000
+    assert geometry.metadata['analysis_source_index_span'] == [30000, 150000]
+    assert np.all(active[geometry.selected_indices])
+    assert len(np.unique(geometry.bands)) == 6
+    result = rc.profile_ratio_geometry(geometry, .2, np.linspace(.4, .6, 161))
+    assert result['status'] == 'supported' and result['q'] == pytest.approx(.5, abs=.002)
+    # In-place crop edits must invalidate acceptance even though source arrays are unchanged.
+    variables.reconstruction_selection_mask[30000] = False
+    with pytest.raises(CalibrationStateError, match='selection changed'):
+        rc.accept_ratio_family(variables, result, icf_anchor=1.6)
+
+
+def test_recorded_cropped_export_cannot_override_missing_prefix_with_checkbox():
+    import pandas as pd
+    variables, _, _ = periodic_acquisition(n=1000)
+    variables.data = pd.DataFrame({'event_id': np.arange(1000, 2000)})
+    variables.data.attrs['pyccapt_selection'] = dict(source_events=2000, selected_events=1000, preserves_full_source=False)
+    kwargs = dict(det_eff=.7, field_evap_v_nm=30., atomic_density_nm3=60., flight_path_mm=110.)
+    result = rc.profile_icf_kf_ratio(variables, (0.,0.), .01, .2, np.linspace(.4,.6,41),
+                                    full_acquisition_confirmed=True, **kwargs)
+    assert result['q'] is None and 'cropped export' in result['message']
+    from pyccapt.calibration.reconstructions.sdm_calibration import reconstruct_xyz
+    with pytest.raises(CalibrationInputError, match='cropped export'):
+        reconstruct_xyz(variables, 3., 1.5, .7, 30., 60., 110.)
+
+
+def test_band_diagnostics_reveal_signal_that_does_not_transfer_without_accepting_it():
+    variables, _, _ = periodic_acquisition(changing_ratio=True)
+    result = profile(variables)
+    rows = result['diagnostics']['band_evidence']['bands']
+    assert result['q'] is None and result['status'] == 'heldout_disagreement'
+    assert all(row['exploratory_peak_passes_gates'] for row in rows)
+    np.testing.assert_allclose([row['exploratory_peak_q'] for row in rows[::2]], .5, atol=.002)
+    np.testing.assert_allclose([row['exploratory_peak_q'] for row in rows[1::2]], .525, atol=.002)
 
 
 def test_off_axis_data_abstains_with_actionable_geometry_message():

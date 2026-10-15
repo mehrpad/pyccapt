@@ -221,7 +221,8 @@ def dataset_instrument_specification_selection():
     max_mc = widgets.FloatText(value='400', placeholder='Maximum possible mc', description='Max mc:', disabled=False)
 
     tdc = widgets.Dropdown(
-        options=['pyccapt', 'leap_epos', 'leap_pos', 'leap_apt', 'ato_v6'],
+        options=[('pyccapt', 'pyccapt'), ('PyCCAPT NeXus mapping', 'nexus'),
+                 ('leap_epos', 'leap_epos'), ('leap_pos', 'leap_pos'), ('leap_apt', 'leap_apt'), ('ato_v6', 'ato_v6')],
         value='pyccapt',
         description='Data mode:',
     )

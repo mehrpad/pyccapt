@@ -24,6 +24,14 @@ Changing calibration invalidates dependent range acceptance; changing
 reconstruction invalidates spatial analysis results. Undo restores an accepted
 state rather than silently editing its historical record.
 
+Guided workflow state version `1.1` adds an accepted crop mask and its criteria;
+version `1.0` states load with all source events selected. A crop invalidates
+calibration and its dependent stages. The source arrays retain every imported
+event in order, including those excluded by the crop, so reconstruction can use
+the original cumulative voltage history. Resume checks that criteria reproduce
+the stored mask and that excluded calibrated/reconstructed outputs are NaN.
+The storage envelope below remains `pyccapt-session-2`.
+
 The storage schema is `pyccapt-session-2`:
 
 ```text
@@ -118,8 +126,26 @@ HDF metadata; a bare `pandas.read_hdf` call returns the table without its attrs.
 
 `save_data(..., analysis_session=(metadata, arrays), nexus_metadata={...})`
 embeds a resumable session and a NeXus mapping alongside the existing dataframe.
+The original notebook's `save_data(..., hdf=True)` also includes the partial
+mapping by default, even without a guided session. `nexus=False` opts out of
+that duplicate-array representation; instrument metadata still survives.
 Saving a subset does not relabel the original session's masks as subset masks.
 The source/accepted arrays and exported event IDs establish the relationship.
+
+Guided exports write only selected events to `/df` and the mapping, while the
+embedded session keeps the full imported source and crop. `pyccapt_selection`
+records source/selected counts, criteria and whether the table preserves the
+full imported source. Existing evidence of an incomplete upstream selection is
+never erased by re-export. Resume the session for full history; reading the
+cropped table alone does not restore missing rows.
+
+`pyccapt_instrument_metadata` records flight length, mode-specific time offsets,
+observed pulse modes and available instrument constants with value/units/status/
+source. Acquisition settings are captured at run start; pulse-mode observations
+do not claim per-ion mode boundaries. Calibration settings, fitted offsets and
+preview/import inputs occupy separate contexts. Unknown fields stay unknown.
+The [data structure guide](Calibration_DATA_STRUCTURE.md) describes
+legacy notebook loading and the scalar HDF5 representation.
 
 `nexus_export.export_nexus(path, frame, metadata=..., ranges=...,
 reconstruction=...)` creates a standalone mapping. Mapping version

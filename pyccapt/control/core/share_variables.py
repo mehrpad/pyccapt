@@ -500,6 +500,7 @@ class Variables:
         "pulse_voltage": 0.0,
         "control_algorithm": "",
         "pulse_mode": "",
+        "acquisition_instrument_metadata": {},
         "count_last": 0,
         "count_temp": 0,
         "avg_n_count": 0,

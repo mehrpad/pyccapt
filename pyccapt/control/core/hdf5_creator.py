@@ -18,6 +18,7 @@ import pyccapt
 from pyccapt.control.apt.detector_models import normalize_tdc_model
 from pyccapt.control.core import chunk_store, detector_hdf
 from pyccapt.control.nkt_photonics.readback import TELEMETRY_UNITS, json_safe
+from pyccapt.instrument_metadata import acquisition_metadata, write_instrument_metadata
 
 logger = logging.getLogger("apt")
 
@@ -336,11 +337,24 @@ def hdf_creator(variables, conf, time_counter, time_ex):
         logger.info('Acquisition chunk validation completed in %.3f s; writing HDF5',
                     time.monotonic()-save_started)
         with h5py.File(tmp_path, "w") as hdf_file:
+            instrument_metadata = getattr(variables, 'acquisition_instrument_metadata', None)
+            # Old callers have no run-mode history. Do not label the GUI's
+            # final/default mode as the mode of every acquired event.
+            write_instrument_metadata(hdf_file, instrument_metadata or acquisition_metadata(conf))
             provenance = hdf_file.require_group("provenance")
             provenance.attrs["schema_version"] = "2.0"
             provenance.attrs["pyccapt_version"] = pyccapt.__version__
             provenance.attrs["created_utc"] = dt.datetime.now(dt.timezone.utc).isoformat()
             provenance.attrs["experiment_name"] = str(variables.exp_name)
+            # Temporal coverage is the available control-loop observations,
+            # not a claim of detector-electronics start/end synchronization.
+            finite_times = np.asarray(time_ex, dtype=float)
+            finite_times = finite_times[np.isfinite(finite_times)]
+            if len(finite_times):
+                provenance.attrs['control_first_observation_utc'] = dt.datetime.fromtimestamp(
+                    float(finite_times[0]), dt.timezone.utc).isoformat()
+                provenance.attrs['control_last_observation_utc'] = dt.datetime.fromtimestamp(
+                    float(finite_times[-1]), dt.timezone.utc).isoformat()
             provenance.attrs["electrode_name"] = str(getattr(variables, "electrode", ""))
             provenance.attrs['laser_readback_revision'] = 'unit-aware-1'
             provenance.attrs['laser_pulse_energy_storage_unit'] = 'pJ (nJ readback multiplied by 1000)'

@@ -9,6 +9,26 @@ import numpy as np
 from pyccapt.control.core.data_integrity import validate_hdf5
 from pyccapt.control.core.hdf5_creator import hdf_creator
 from pyccapt.control.core import chunk_store
+from pyccapt.instrument_metadata import acquisition_metadata, record_mode_observation
+
+
+def test_hdf5_keeps_run_snapshot_and_mode_history_not_final_defaults(tmp_path):
+    initial = {'tdc': 'off', 'flight_path_length': 110., 't_0_voltage': 38., 't_0_laser': 800.}
+    metadata = acquisition_metadata(initial, pulse_mode='Voltage', observed_at='2026-10-15T12:00:00+00:00')
+    metadata = record_mode_observation(metadata, 'Laser', control_iteration=5)
+    variables = SimpleNamespace(path=str(tmp_path), exp_name='instrument', main_counter=[1],
+        main_raw_counter=[1], main_temperature=[45.], main_chamber_vacuum=[1e-8],
+        acquisition_instrument_metadata=metadata, pulse_mode='Laser')
+    hdf_creator(variables, {**initial, 'flight_path_length': 999.}, [0], [0.])
+    with h5py.File(tmp_path/'instrument.h5', 'r') as handle:
+        group = handle['instrument_metadata/acquisition']
+        assert group['flight_path_length_mm'][()] == 110.
+        assert group['flight_path_length_mm'].attrs['units'] == 'mm'
+        assert group['pulse_mode'].asstr()[()] == 'mixed'
+        assert np.isnan(group['t0_ns'][()])
+        assert group['t0_ns'].attrs['status'] == 'unknown'
+        assert group['t0_voltage_ns'][()] == 38.
+        assert json.loads(handle['instrument_metadata/json'].asstr()[()]) == metadata
 
 
 def test_hdf5_records_schema_units_hashes_and_model_provenance(tmp_path):

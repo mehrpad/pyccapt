@@ -6,8 +6,10 @@ import os
 from pathlib import Path
 import warnings
 import ast
+import inspect
 import re
 import tempfile
+from copy import deepcopy
 
 import h5py
 import numpy as np
@@ -17,6 +19,7 @@ import scipy.io
 from pyccapt.calibration.data_tools import ato_tools
 from pyccapt.calibration.leap_tools import ccapt_tools, leap_tools
 from pyccapt.calibration.mc import tof_tools
+from pyccapt.instrument_metadata import ATTR as INSTRUMENT_ATTR, attach_instrument_metadata
 
 
 def _as_path(path_value: str | Path) -> Path:
@@ -76,11 +79,16 @@ def read_hdf5(filename: str | Path, *, lazy: bool = False):
         with h5py.File(file_path, "r") as hdf:
             groups = list(hdf.keys())
             for item in groups:
-                group_dict[item] = list(hdf[item].keys())
+                if isinstance(hdf[item], h5py.Group):
+                    group_dict[item] = list(hdf[item].keys())
 
             for key, value in group_dict.items():
                 for item in value:
-                    dataset = pd.DataFrame(np.array(hdf[f"{key}/{item}"]), columns=["values"])
+                    node = hdf[f"{key}/{item}"]
+                    # Metadata collections/scalars are not event tables.
+                    if not isinstance(node, h5py.Dataset) or node.ndim == 0:
+                        continue
+                    dataset = pd.DataFrame(np.array(node), columns=["values"])
                     dataframe_storage[f"{key}/{item}"] = dataset
 
         return dataframe_storage
@@ -264,8 +272,7 @@ def store_df_to_hdf(dataframe, key, filename, *, format: str = "fixed"):
             dataframe.to_hdf(file_path, key=str(key), mode="w", format="table")
         else:
             raise
-    identity_attrs = {key: dataframe.attrs[key] for key in ('pyccapt_source_id', 'pyccapt_unavailable_columns')
-                      if key in dataframe.attrs}
+    identity_attrs = {name: value for name, value in dataframe.attrs.items() if name.startswith('pyccapt_')}
     if identity_attrs:
         from pyccapt.calibration.data_tools.analysis_session import canonical_json
         with pd.HDFStore(file_path, mode='a') as store:
@@ -356,6 +363,7 @@ def save_data(
     save_range=False,
     analysis_session=None,
     nexus_metadata=None,
+    nexus=True,
 ):
     """Persist data in one or more supported export formats.
 
@@ -377,6 +385,9 @@ def save_data(
     nexus_metadata : dict, optional
         Available experimental metadata for an explicitly partial NXapm mapping.
         Passing an empty dictionary requests a mapping with missing context listed.
+    nexus : bool, default True
+        Include the partial NeXus mapping alongside the compatible /df table.
+        Set False for a legacy-only HDF5; instrument provenance is still retained.
     """
     if name is not None:
         data_name = name
@@ -385,7 +396,25 @@ def save_data(
     else:
         data_name = variables.result_data_name
 
-    export_data = _slice_data_for_export(data, start_index=start_index, end_index=end_index)
+    export_data = _slice_data_for_export(data, start_index=start_index, end_index=end_index).copy(deep=False)
+    export_data.attrs = deepcopy(data.attrs)
+    if len(export_data) != len(data):
+        selection = deepcopy(export_data.attrs.get('pyccapt_selection', {}))
+        selection.update(schema_version='1.0', source_events=selection.get('source_events', len(data)),
+                         selected_events=len(export_data), preserves_full_source=False,
+                         export_input_events=len(data),
+                         criteria={'prior': selection.get('criteria', {}),
+                                   'export_input_row_slice': {'start_inclusive': start_index, 'end_inclusive': end_index}})
+        export_data.attrs['pyccapt_selection'] = selection
+    receipt = getattr(variables, 'guided_calibration_receipt', None)
+    reconstruction_parameters = getattr(variables, 'reconstruction_parameters', None)
+    ratio_result = getattr(variables, 'reconstruction_ratio_result', None)
+    if receipt or reconstruction_parameters or ratio_result:
+        export_data.attrs['pyccapt_analysis'] = {
+            'schema_version': 'pyccapt-analysis-1', 'export_rows': len(export_data),
+            'receipt_scope': 'original source dataset; export may be a subset',
+            'guided_calibration': receipt or {}, 'reconstruction_parameters': reconstruction_parameters or {},
+            'reconstruction_ratio_result': ratio_result or {}}
     if not any([hdf, epos, pos, ato_6v, csv]):
         print("No export format was selected.")
         return None
@@ -410,9 +439,6 @@ def save_data(
             # Accepted optional-model mathematics/units travel with the result.
             # The receipt describes its original source dataset; an export may
             # be a subset, so never imply that source masks align to export rows.
-            receipt = getattr(variables, 'guided_calibration_receipt', None)
-            reconstruction_parameters = getattr(variables, 'reconstruction_parameters', None)
-            ratio_result = getattr(variables, 'reconstruction_ratio_result', None)
             if receipt or reconstruction_parameters or ratio_result:
                 import json
                 with pd.HDFStore(tmp_h5_path, mode='a') as store:
@@ -458,13 +484,16 @@ def save_data(
                     range_table.to_hdf(tmp_h5_path, key="range", mode="a")
                     range_status = f"{output_h5} (/range, {len(range_table)} rows)"
             # All writes succeeded -- atomically replace the target.
-            if analysis_session is not None or nexus_metadata is not None:
+            if analysis_session is not None or nexus or nexus_metadata is not None or INSTRUMENT_ATTR in export_data.attrs:
                 import h5py
                 with h5py.File(tmp_h5_path, 'a') as handle:
+                    if INSTRUMENT_ATTR in export_data.attrs:
+                        from pyccapt.instrument_metadata import write_instrument_metadata
+                        write_instrument_metadata(handle, export_data.attrs[INSTRUMENT_ATTR])
                     if analysis_session is not None:
                         from pyccapt.calibration.data_tools.analysis_session import write_session_group
                         write_session_group(handle, *analysis_session)
-                    if nexus_metadata is not None:
+                    if nexus or nexus_metadata is not None:
                         from pyccapt.calibration.data_tools.nexus_export import write_nexus_mapping
                         write_nexus_mapping(handle, export_data, metadata=nexus_metadata,
                                             ranges=getattr(variables, 'range_data', None),
@@ -527,6 +556,17 @@ def save_data(
     return None
 
 
+# The original notebook passes this callable directly to interact_manual.
+# ipywidgets cannot infer controls from the optional None-valued metadata
+# arguments. Expose scalar controls for discovery and accept explicitly supplied
+# fixed metadata through **export_metadata. This changes introspection only:
+# save_data still accepts its documented positional and keyword arguments above.
+save_data.__signature__ = inspect.signature(save_data).replace(parameters=[
+    parameter for parameter in inspect.signature(save_data).parameters.values()
+    if parameter.name not in {'analysis_session', 'nexus_metadata'}
+] + [inspect.Parameter('export_metadata', inspect.Parameter.VAR_KEYWORD)])
+
+
 def load_data(dataset_path, data_type, mode="processed", *, load_tdc=False, tdc_extract_mode="tdc_sc"):
     """Load supported dataset formats into the pyccapt dataframe convention.
 
@@ -553,7 +593,7 @@ def load_data(dataset_path, data_type, mode="processed", *, load_tdc=False, tdc_
             raise ValueError("load_tdc is only supported for pyccapt h5 datasets")
         return ato_tools.ato_to_ccapt(dataset_path, mode="pyccapt")
 
-    if data_type == "pyccapt":
+    if data_type in {"pyccapt", "nexus"}:
         if mode == "raw":
             from pyccapt.calibration.data_tools import data_loadcrop
 
@@ -569,14 +609,21 @@ def load_data(dataset_path, data_type, mode="processed", *, load_tdc=False, tdc_
                 raise last_error
             return data_loadcrop.fetch_dataset_from_dld_grp(dataset_path)
         if mode == "processed":
-            with pd.HDFStore(dataset_path, mode='r') as store:
-                data = store['df']
-                source_json = getattr(store.get_storer('df').attrs, 'pyccapt_source_json', None)
+            with h5py.File(dataset_path, 'r') as handle:
+                has_dataframe = 'df' in handle
+            source_json = None
+            if not has_dataframe:
+                from pyccapt.calibration.data_tools.nexus_export import load_nexus_mapping
+                data = load_nexus_mapping(dataset_path)
+            else:
+                with pd.HDFStore(dataset_path, mode='r') as store:
+                    data = store['df']
+                    source_json = getattr(store.get_storer('df').attrs, 'pyccapt_source_json', None)
             if source_json is not None:
                 import json
                 source_attrs = json.loads(source_json)
-                data.attrs.update({key: source_attrs[key] for key in ('pyccapt_source_id', 'pyccapt_unavailable_columns')
-                                   if key in source_attrs})
+                data.attrs.update({key: value for key, value in source_attrs.items() if key.startswith('pyccapt_')})
+            attach_instrument_metadata(data, dataset_path)
             unavailable = set(data.attrs.get('pyccapt_unavailable_columns', []))
             if "pulse_v (V)" not in data.columns:
                 if "pulse" in data.columns:
@@ -788,6 +835,12 @@ def pyccapt_raw_to_processed(data):
     if 'event_id' in data.columns:
         data_processed['event_id'] = data['event_id'].to_numpy()
     data_processed.attrs = dict(data.attrs)
+    if 'mc_uc (Da)' not in data and n > 0 and {'t (ns)', 'high_voltage (V)', 'x_det (cm)', 'y_det (cm)'}.issubset(data):
+        from pyccapt.instrument_metadata import record_calibration_settings
+        record_calibration_settings(
+            data_processed, flight_path_length_mm=110., t0_ns=0., pulse_mode='voltage',
+            source='legacy raw converter defaults with zero pulse voltage; not instrument measurements',
+            status='assumed_legacy_conversion', context='uncorrected_conversion')
     unavailable = set(data.attrs.get('pyccapt_unavailable_columns', []))
     unavailable.update(('x (nm)', 'y (nm)', 'z (nm)'))
     unavailable.update(column for column in ('mc (Da)', 't_c (ns)', 'delta_p', 'multi') if column not in data)

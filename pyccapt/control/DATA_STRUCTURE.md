@@ -23,6 +23,33 @@ control configuration plus its SHA-256, the chunk-manifest SHA-256, excluded-row
 provenance. Every numeric dataset also carries a `units` attribute (`1` for dimensionless quantities). These attributes
 are checked by `pyccapt validate-hdf5` and let downstream tools distinguish schema evolution from data corruption.
 
+## Group `instrument_metadata`
+
+`instrument_metadata/json` uses `pyccapt-instrument-1`. The `acquisition`
+subgroup exposes typed scalar flight path (`flight_path_length_mm`, mm),
+configured voltage/laser offsets (`t0_voltage_ns`, `t0_laser_ns`, ns), detector
+diameter (mm), instrument name and detector model. Each scalar has `units`,
+`status` and `source`; unknown numbers are NaN in HDF5 and null in JSON.
+Configured constants are not labelled as measured calibration results.
+
+The experiment owner snapshots these constants at run start. Selected pulse
+modes are recorded at start and on observed mode changes, with UTC time and
+control iteration in `pulse_mode_history`. These observations do not establish
+exact detector-event transition boundaries. A run with multiple modes is marked
+`mixed`; combined VoltageLaser and mixed runs have no single `t0_ns`. Both
+configured offsets remain available for review. Older writer callers without a
+run snapshot retain the available configuration but have unknown run mode and
+unknown selected offset; the GUI default/final mode is not substituted.
+
+Calibration loaders retain this metadata. The independent `calibration`
+context records explicit calibration inputs/fitted offsets after acceptance;
+it never overwrites the acquisition context. See the calibration
+[data structure](../calibration/DATA_STRUCTURE.md#instrument-settings-and-nexus-interoperability).
+
+`provenance/control_first_observation_utc` and
+`control_last_observation_utc` record the available control-loop timestamp
+coverage, not independently synchronized detector start/end times.
+
 ## Group `apt`
 
 Control-loop metadata recorded each iteration.

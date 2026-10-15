@@ -12,8 +12,9 @@ from pyccapt.calibration.core.ranging_review import PeakReviewQueue
 from pyccapt.calibration.core.share_variables import Variables
 
 
-STAGES = ("Import", "Inspect", "Calibrate", "Range", "Reconstruct", "Analyze", "Export")
-DEPENDENTS = {"calibration": ("ranges", "reconstruction", "analysis"),
+STAGES = ("Import", "Inspect", "Crop", "Calibrate", "Range", "Reconstruct", "Analyze", "Export")
+DEPENDENTS = {"crop": ("calibration", "ranges", "reconstruction", "analysis"),
+              "calibration": ("ranges", "reconstruction", "analysis"),
               "ranges": ("reconstruction", "analysis"), "reconstruction": ("analysis",), "analysis": ()}
 
 
@@ -81,6 +82,7 @@ class GuidedWorkflow:
         self.source_path = str(source_path or "")
         self.event_ids = _owned(variables.dataset.event_ids, np.uint64)
         self.n = len(self.event_ids)
+        self._all_events = _owned(np.ones(self.n, dtype=bool))
         self.accepted = {key: None for key in DEPENDENTS}
         self.preview = {}
         self.review = None
@@ -90,8 +92,19 @@ class GuidedWorkflow:
         self._sync_outputs()
 
     @classmethod
-    def import_file(cls, path, *, data_type="pyccapt", mode="processed", variables=None):
+    def import_file(cls, path, *, data_type="pyccapt", mode="auto", variables=None):
         from pyccapt.calibration.data_tools.data_tools import load_data
+        if data_type == "pyccapt" and mode == "auto":
+            import h5py
+            with h5py.File(Path(path).expanduser(), "r") as handle:
+                if "df" in handle:
+                    mode = "processed"
+                elif "dld" in handle:
+                    mode = "raw"
+                elif "entry" in handle:
+                    data_type, mode = "nexus", "processed"
+                else:
+                    raise CalibrationInputError("Expected processed /df or raw /dld events; convert raw detector channels into hits first")
         frame = load_data(str(Path(path).expanduser()), data_type, mode=mode)
         if isinstance(frame, tuple):
             frame = frame[0]
@@ -115,7 +128,7 @@ class GuidedWorkflow:
         for name in DEPENDENTS[stage]:
             self.accepted[name] = None
         self.preview.clear()
-        if stage == "calibration":
+        if stage in ("crop", "calibration"):
             self.mass_revision += 1
             self.review = None
 
@@ -149,8 +162,21 @@ class GuidedWorkflow:
         v.reconstruction_parameters = deepcopy(spatial["parameters"]) if spatial else {}
         v.reconstruction_ratio_result = deepcopy(spatial.get("ratio_result", {})) if spatial else {}
         v.guided_calibration_receipt = deepcopy(calibration["receipt"]) if calibration else {}
+        if calibration and "flight_length_mm" in calibration["receipt"]:
+            from pyccapt.instrument_metadata import record_calibration_settings
+            receipt = calibration["receipt"]
+            fitted_t0 = receipt.get("model", {}).get("t0_ns")
+            record_calibration_settings(frame, flight_path_length_mm=receipt.get("flight_length_mm"),
+                t0_ns=fitted_t0 if fitted_t0 is not None else receipt.get("t0_ns"), pulse_mode=receipt.get("pulse_mode"),
+                context="import_inputs" if receipt.get("method") == "imported mass" else "calibration",
+                source="accepted guided calibration receipt", status={"flight_path_length_mm": "user_supplied",
+                    "t0_ns": "fitted_model" if fitted_t0 is not None else "user_supplied", "pulse_mode": "user_supplied"})
+        v.reconstruction_selection_mask = self.active_mask.copy()
+        frame.attrs["pyccapt_selection"] = self.selection_metadata(preserves_full_source=True)
+        from pyccapt.instrument_metadata import extract_instrument_settings
+        recorded_mode = extract_instrument_settings(frame).get("pulse_mode")
         v.pulse_mode = (spatial["parameters"].get("pulse_mode") if spatial else None) or (
-            calibration["receipt"].get("pulse_mode") if calibration else None) or getattr(v, "pulse_mode", "laser")
+            calibration["receipt"].get("pulse_mode") if calibration else None) or recorded_mode or getattr(v, "pulse_mode", "laser")
         replaced = ({"mc (Da)"} if calibration else set()) | ({"t_c (ns)"} if tof is not None else set())
         if spatial:
             replaced.update(("x (nm)", "y (nm)", "z (nm)"))
@@ -158,12 +184,45 @@ class GuidedWorkflow:
             frame.attrs.get("pyccapt_unavailable_columns", []) if name not in replaced]
         v.data = frame
 
+    @property
+    def active_mask(self):
+        crop = self.accepted["crop"]
+        return crop["mask"] if crop else self._all_events
+
+    def selection_metadata(self, *, preserves_full_source):
+        crop = self.accepted["crop"]
+        upstream = self.source.attrs.get("pyccapt_selection", {})
+        source_events = upstream.get("source_events", self.n)
+        if not isinstance(source_events, int) or source_events < self.n:
+            source_events = self.n
+        return {"schema_version": "1.0", "source_events": source_events, "loaded_source_events": self.n,
+                "selected_events": int(self.active_mask.sum()), "source_hash": self.source_hash,
+                "criteria": deepcopy(crop["criteria"]) if crop else {},
+                "preserves_full_source": bool(preserves_full_source and upstream.get("preserves_full_source", True)),
+                "upstream_selection": deepcopy(upstream) if upstream else None}
+
+    def preview_crop(self, **criteria):
+        from pyccapt.calibration.core.guided_crop import crop_mask
+        self._check()
+        mask, description = crop_mask(self.source, **criteria)
+        self.preview["crop"] = {"revision": self.revision, "mask": _owned(mask, bool), "criteria": description}
+        return self.compare("crop")
+
+    def export_frame(self):
+        """Selected accepted outputs; full source remains in the resumable session."""
+        self._check()
+        self._sync_outputs()
+        frame = self.variables.data.loc[self.active_mask].copy().reset_index(drop=True)
+        frame.attrs["pyccapt_selection"] = self.selection_metadata(preserves_full_source=bool(self.active_mask.all()))
+        return frame
+
     def working_variables(self):
         """Independent sandbox for legacy/calibration/ratio panels; acceptance is separate."""
         self._check()
         working = Variables()
         working.sync_from_data(self.source.copy(deep=True), update_backups=True)
         working.pulse_mode = self.variables.pulse_mode
+        working.reconstruction_selection_mask = self.active_mask.copy()
         # Legacy tables can contain numerical zero placeholders. In this
         # independent preview workspace, availability takes precedence over the
         # numerical value; do not invent detector-center or pulse measurements.
@@ -193,7 +252,7 @@ class GuidedWorkflow:
     def inspect(self):
         self._check()
         self.inspected = True
-        return {"events": self.n, "source_hash": self.source_hash,
+        return {"events": self.n, "selected_events": int(self.active_mask.sum()), "source_hash": self.source_hash,
                 "columns": list(self.source.columns), "capabilities": dict(self.variables.dataset.capabilities),
                 "unknown_positions": int((~self.variables.dataset.finite_mask("detector_positions")).sum()),
                 "accepted_stages": self.status()}
@@ -201,13 +260,19 @@ class GuidedWorkflow:
     def preview_calibration(self, masses, *, receipt=None, model_state=None, tof=None, expected_revision=None):
         self._check()
         self._revision_check(expected_revision)
-        mass = _owned(masses, float)
+        mass = np.array(masses, dtype=float, copy=True)
+        if mass.shape == (self.n,):
+            mass[~self.active_mask] = np.nan
+        mass = _owned(mass)
         if mass.shape != (self.n,) or np.isinf(mass).any() or not np.any(np.isfinite(mass) & (mass > 0)):
             raise CalibrationInputError("Mass preview must be event-aligned, contain positive finite masses, and use NaN for unavailable events")
         if np.any(mass[np.isfinite(mass)] < 0):
             raise CalibrationInputError("Mass values cannot be negative")
         if tof is not None:
-            tof = _owned(tof, float)
+            tof = np.array(tof, dtype=float, copy=True)
+            if tof.shape == (self.n,):
+                tof[~self.active_mask] = np.nan
+            tof = _owned(tof)
             if (tof.shape != (self.n,) or np.isinf(tof).any() or not np.any(tof > 0) or
                     np.any(tof[np.isfinite(tof)] < 0)):
                 raise CalibrationInputError("Calibrated ToF must be aligned and nonnegative with positive finite values, NaN where unavailable")
@@ -219,7 +284,8 @@ class GuidedWorkflow:
     def preview_imported_mass(self, *, pulse_mode=None, flight_length_mm=None):
         unavailable = self.source.attrs.get("pyccapt_unavailable_columns", [])
         columns = [name for name in ("mc (Da)", "mc_uc (Da)") if name in self.source and name not in unavailable
-                   and np.any(np.isfinite(self.source[name].to_numpy(dtype=float)) & (self.source[name].to_numpy(dtype=float) > 0))]
+                   and np.any(self.active_mask & np.isfinite(self.source[name].to_numpy(dtype=float)) &
+                              (self.source[name].to_numpy(dtype=float) > 0))]
         if not columns:
             raise CalibrationStateError("Imported data has no mass column; calibrate ToF first")
         receipt = {"method": "imported mass", "column": columns[0]}
@@ -268,7 +334,10 @@ class GuidedWorkflow:
         self._revision_check(expected_revision)
         if self.accepted["ranges"] is None:
             raise CalibrationStateError("Accept reviewed ranges before the reconstruction stage")
-        xyz = _owned(xyz, float)
+        xyz = np.array(xyz, dtype=float, copy=True)
+        if xyz.shape == (self.n, 3):
+            xyz[~self.active_mask] = np.nan
+        xyz = _owned(xyz)
         if xyz.shape != (self.n, 3) or np.isinf(xyz).any() or not np.isfinite(xyz).all(axis=1).any():
             raise CalibrationInputError("Reconstruction must be an aligned N-by-3 nm array with finite valid rows")
         self.preview["reconstruction"] = {"revision": self.revision, "xyz": xyz,
@@ -313,11 +382,17 @@ class GuidedWorkflow:
         candidate, accepted = self.preview.get(stage), self.accepted.get(stage)
         if candidate is None:
             raise CalibrationStateError("There is no preview to compare")
+        if stage == "crop":
+            return {"source_events": self.n, "currently_selected": int(self.active_mask.sum()),
+                    "preview_selected": int(candidate["mask"].sum()), "preview_excluded": int((~candidate["mask"]).sum()),
+                    "criteria": candidate["criteria"],
+                    "next": "Accept crop to use this selection. Calibration, ranges and reconstruction will need renewed acceptance."}
         if stage == "ranges":
             return {"accepted_ranges": len(accepted["rows"]) if accepted else 0,
                     "preview_ranges": len(candidate["rows"]),
                     "preview_ranged_events": int(np.count_nonzero(candidate["assignment"] >= 0)),
-                    "unranged_events": int(np.count_nonzero(candidate["assignment"] < 0))}
+                    "unranged_events": int(np.count_nonzero((candidate["assignment"] < 0) & self.active_mask)),
+                    "excluded_events": int((~self.active_mask).sum())}
         key = "mass" if stage == "calibration" else "xyz"
         values = candidate[key]
         valid = np.isfinite(values)
@@ -342,7 +417,8 @@ class GuidedWorkflow:
         total = sum(atoms.values())
         result = {"events_per_ion": ions,
                   "atoms_per_element": atoms, "atomic_fractions_of_assigned_atoms": {k: v/total for k, v in atoms.items()} if total else {},
-                  "unranged_events": int(np.count_nonzero(ranged["assignment"] < 0)),
+                  "unranged_events": int(np.count_nonzero((ranged["assignment"] < 0) & self.active_mask)),
+                  "selected_events": int(self.active_mask.sum()), "excluded_events": int((~self.active_mask).sum()),
                   "interpretation": "Hard interval assignments, not a background-corrected composition or uncertainty estimate"}
         self._snapshot("analyze")
         self.accepted["analysis"] = result
@@ -353,12 +429,13 @@ class GuidedWorkflow:
 
     def status(self):
         result = {"Import": "accepted", "Inspect": "reviewed" if self.inspected else "ready",
+                "Crop": f"{int(self.active_mask.sum())} of {self.n} selected" if self.accepted["crop"] else "all events; ready to crop",
                 "Calibrate": "accepted" if self.accepted["calibration"] else "ready",
                 "Range": "accepted" if self.accepted["ranges"] else "ready" if self.accepted["calibration"] else "blocked",
                 "Reconstruct": "accepted" if self.accepted["reconstruction"] else "ready" if self.accepted["ranges"] else "blocked",
                 "Analyze": "accepted" if self.accepted["analysis"] else "ready" if self.accepted["ranges"] else "blocked",
                 "Export": "session ready; derived export ready" if self.accepted["calibration"] else "session ready"}
-        for key, label in (("calibration", "Calibrate"), ("ranges", "Range"), ("reconstruction", "Reconstruct")):
+        for key, label in (("crop", "Crop"), ("calibration", "Calibrate"), ("ranges", "Range"), ("reconstruction", "Reconstruct")):
             if key in self.preview:
                 result[label] += "; preview awaiting acceptance"
         if self.review is not None and self.accepted["ranges"] is not None:
@@ -380,7 +457,7 @@ class GuidedWorkflow:
                 data = data.tolist()
             columns.append({"name": str(name), "dtype": str(series.dtype), "data": data})
         arrays = {}
-        metadata = _pack({"workflow_schema": "1.0", "source_hash": self.source_hash,
+        metadata = _pack({"workflow_schema": "1.1", "source_hash": self.source_hash,
             "source_path": self.source_path, "source_attrs": self.source.attrs, "source_columns": columns,
             "event_ids": self.event_ids, "accepted": self.accepted, "preview": self.preview,
             "review": None if self.review is None else self.review.to_state(), "history": self.history,
@@ -390,7 +467,7 @@ class GuidedWorkflow:
     @classmethod
     def from_state(cls, metadata, arrays, *, variables=None):
         state = _unpack(metadata, arrays)
-        if state.get("workflow_schema") != "1.0":
+        if state.get("workflow_schema") not in ("1.0", "1.1"):
             raise CalibrationInputError("Unsupported guided workflow session schema")
         frame = pd.DataFrame({column["name"]: pd.Series(column["data"], dtype=column["dtype"])
                               for column in state["source_columns"]})
@@ -402,6 +479,10 @@ class GuidedWorkflow:
             raise CalibrationStateError("Session source identity/order/hash does not match the saved workflow")
         workflow.accepted, workflow.preview = state["accepted"], state["preview"]
         workflow.history, workflow.log = state["history"], state["log"]
+        if state["workflow_schema"] == "1.0":
+            workflow.accepted.setdefault("crop", None)
+            for snapshot in workflow.history:
+                snapshot["accepted"].setdefault("crop", None)
         workflow.revision, workflow.mass_revision, workflow.inspected = state["revision"], state["mass_revision"], state["inspected"]
         if state["review"] is not None:
             workflow.review = PeakReviewQueue.from_state(workflow.accepted["calibration"]["mass"], state["review"])

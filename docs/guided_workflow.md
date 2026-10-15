@@ -5,16 +5,55 @@ with the calibration dependencies installed (`pip install -e ".[calibration]"`
 or the project's full environment). Run the two code cells. The panel is a
 separate, optional workflow; the original processing notebook is preserved.
 
+## Start here: raw data with no mass column
+
+A raw event tells us **when an ion arrived**, its detector position and the
+voltage. Calibration turns that flight time into a mass-to-charge estimate.
+You do not need an `mc` column to begin.
+
+1. **Import:** choose the HDF5 file and leave the mode on **Auto detect**. The
+   workflow recognizes raw `/dld` hits and processed `/df` tables. Raw detector
+   channel streams must first be converted into hits in the raw-data notebook.
+2. **Inspect:** look at flight time and voltage versus event position and the
+   detector map. Look for startup transients, interruptions and unwanted regions.
+3. **Crop:** enter the useful start/stop event positions, then optionally limit
+   raw flight time, voltage or the detector circle. Click **Preview crop**, check
+   the count and plots, then **Accept crop**. These controls use event positions,
+   not the hardware start counter. Start is included; stop is excluded.
+4. **Calibrate:** enter the actual flight length, time zero and pulse mode. Check
+   their confirmation box, click **Preview physical mass**, inspect the spectrum,
+   then **Accept calibration**. This is the initial estimate. For processed data,
+   use **Preview imported mass** to retain its existing calibration instead.
+5. **Range:** choose plausible elements and charges, propose peaks, review each
+   identity and its boundaries, then preview and accept the reviewed ranges.
+6. **Reconstruct:** use reviewed material/instrument parameters. The optional
+   ICF/kf panel can suggest a ratio only when a correctly indexed crystal feature
+   supplies enough evidence. It explains an unsupported result.
+7. **Analyze:** inspect the composition of accepted ranges and the unranged count.
+8. **Export:** save a resumable session at any time. Export accepted HDF5 when you
+   want a selected-event table plus metadata, NeXus mapping and embedded session.
+
+**Preview** shows a proposal; **Accept** makes it current. If an earlier step
+changes, dependent results are cleared. **Undo accepted change** restores the
+previous state. A failed optional fit leaves your accepted calibration intact.
+
+The inspection plots display a bounded sample for responsiveness; crop counts
+and accepted data use every event. Cropping stores a mask and preserves the full
+source in memory and in the session. Reconstruction still needs earlier events
+for its cumulative depth calculation. The exported table contains only selected
+rows; a cropped table by itself cannot supply missing acquisition history.
+
 ## Accepted state and dependencies
 
-The tabs follow Import → Inspect → Calibrate → Range → Reconstruct → Analyze →
+The tabs follow Import → Inspect → Crop → Calibrate → Range → Reconstruct → Analyze →
 Export. Opening a panel only renders controls. Dataset reads, fitting, acceptance,
 and writes require explicit actions. Every derived stage has a preview and an
 acceptance step. The header distinguishes accepted values, pending previews, and
 review edits that have not been applied. Comparisons report the change in mass or
 coordinates and the number of ranged/unranged events.
 
-Accepting mass calibration clears the accepted ranges, geometry, and analysis.
+Accepting a crop clears calibration, ranges, geometry and analysis. Accepting
+mass calibration clears the accepted ranges, geometry, and analysis.
 Accepting revised ranges clears geometry and analysis. Accepting geometry clears
 analysis. This conservative dependency rule prevents a mixture of results from
 different processing states. **Undo accepted change** restores a complete prior
@@ -30,7 +69,8 @@ workflow's imported source directly. Reimport changed data as a new workflow.
 
 ## Import, inspect, and calibrate
 
-Import supports PyCCAPT processed/raw HDF5 and existing POS/EPOS/APT/ATO loaders.
+Import supports PyCCAPT processed/raw HDF5, this project's partial NeXus mapping,
+and existing POS/EPOS/APT/ATO loaders.
 Inspect reports measured capabilities and unknown positions. Unavailable fields
 are not interchangeable with measured zero. Placeholder imported mass columns
 cannot be accepted as calibrated mass. An available uncalibrated mass column is
@@ -45,15 +85,21 @@ ToF. Measured finite zero ToF is retained in an otherwise usable vector, while
 all-zero legacy ToF placeholders are omitted. Current control defaults are not
 written as historical instrument settings when merely accepting imported mass.
 
-Enter the actual pulse mode, flight length in mm, and time zero in ns. Physical
+Enter and confirm the actual pulse mode, flight length in mm, and time zero in ns. Physical
 conversion previews raw ToF using the existing `tof2mc` convention and checks
 finite geometry and positive voltage; unavailable output remains NaN. Imported
-mass can instead be previewed and explicitly accepted. These controls' initial
-values are examples, not detected instrument measurements.
+mass can instead be previewed and explicitly accepted. Known source metadata
+prefills the controls; otherwise their initial values are examples, not detected
+instrument measurements. Editing these fields clears confirmation. The mass-view
+limits change the displayed spectrum only; they do not crop data.
 
-Optional multi-reference calibration proposes windows in the raw-ToF spectrum.
-Fill in independently known `mass_Da` identities, edit each `tof_min_ns` and
-`tof_max_ns`, and confirm the identities before creating a session. Inspect
+Optional multi-reference calibration proposes windows in the accepted initial
+mass spectrum (default), or in raw flight time. Fill in independently known
+`mass_Da` identities and edit each window's `mass_min_Da` / `mass_max_Da` or
+`tof_min_ns` / `tof_max_ns`. Mass windows require an accepted initial calibration;
+they depend on it and are not independent reference evidence. Confirm the
+identities and instrument settings before creating a session. The model fits its
+own time zero; the current time-zero field supplies the initial conversion only. Inspect
 truncation, tails, overlap, and coverage first. The optional model jointly fits
 time zero and positive voltage/spatial/time scale as described in
 [calibration_math.md](calibration_math.md). The existing guided protocol enforces
@@ -61,12 +107,20 @@ training → selection validation → single confirmation → acceptance → app
 Capture the applied model as a workflow preview and accept it separately.
 Reference-window construction excludes invalid source rows and reports the
 excluded count; every required reference/validation group must still meet the
-model's coverage rules.
+model's coverage rules. Validation checks both absolute errors and changes
+against the available baseline on identical events in fixed acquisition bands.
+Worsening absolute median bias or relative RMSE prevents replacement. This is a
+conservative comparison, not a statistical significance test or a guarantee of
+chemical accuracy. The equal-reference robust loss and seeded fitting sample are
+documented in [calibration_math.md](calibration_math.md).
 
 Interleaved 60/20/20 role assignment shares acquisition conditions and is a
 correlated holdout, not independent experimental validation. Contiguous 60/20/20
-roles can reveal drift but must contain each reference in each required block;
-domain and coverage failures remain failures. Neither split certifies chemistry
+roles partition the selected usable events in their original order and can reveal
+drift. Each role must contain each reference in its occupied validation bands.
+A stationary model may test later events with in-domain voltage and detector
+conditions; time-dependent models cannot extrapolate to unseen time ranges or
+block categories. Domain and coverage failures remain failures. Neither split certifies chemistry
 or real-data performance. Learned coefficients/trees/model configuration are
 saved with role masks, reference labels, application mask, and receipts, rather
 than reconstructing a model from settings alone.
@@ -140,6 +194,21 @@ geometry computes coordinates from those accepted settings, then requires
 workflow acceptance. Ratio evidence and selected settings survive session resume.
 The restored controls display saved accepted geometry rather than fresh defaults.
 
+Use the detector map to review the ROI before profiling. Detected features are
+unindexed candidates, not crystallographic assignments. Selecting one requires
+review; changing the ROI or lattice information clears spacing confirmation.
+The report shows evidence for each acquisition band, so a weak average cannot
+hide a strong but inconsistent band. A table explicitly marked as a cropped
+export cannot be treated as a complete acquisition by ticking a confirmation box.
+
+For sample 2643 the tested central region has insufficient periodic evidence in
+every band. Useful extra inputs are a confirmed phase/lattice and indexed plane
+spacing (including diffraction order), an indexed near-axis pole/ROI, an
+independent ICF anchor (for example two indexed poles with known angular
+separation), field/density/efficiency estimates, and the complete original event
+history. After searching ROIs, reserve a fresh interval for confirmation. See
+[the dataset investigation](workflow_validation.md) for measured results.
+
 Analyze reports counts by ion and stoichiometric atomic fractions of assigned
 atoms. It aggregates repeated ion labels and reports unranged events. These are
 hard-interval results, not background-corrected concentration estimates or
@@ -165,12 +234,17 @@ model state, and dependencies in a temporary workspace before replacing live
 state. Session folder/search controls read compact headers; full verification
 happens when a selected session is loaded.
 
-**Export accepted HDF5** rebuilds mass, optional calibrated ToF, and optional XYZ
-from accepted state. Raw source columns do not override accepted outputs; stale
+**Export accepted HDF5** writes selected events and rebuilds mass, optional
+calibrated ToF, and optional XYZ from accepted state. Raw source columns do not override accepted outputs; stale
 geometry/ToF columns are omitted. It embeds the complete analysis session and the
 available NeXus mapping. **Export NeXus mapping** creates the standalone mapping.
 This is explicitly a partial NXapm-aligned representation; missing instrument,
-acquisition, and coordinate-system context are reported, not fabricated. A
+acquisition, and coordinate-system context are reported, not fabricated.
+Instrument metadata separates run-start settings, preview inputs and accepted
+calibration settings, with units and provenance. A fitted time zero is labelled
+as a model result, not a hardware measurement. Importing saved masses preserves
+their historical metadata. Both this notebook and the original notebook can
+read this project's mapping; legacy `save_data` includes it by default. A
 session may be saved before calibration, but derived-data export requires an
 accepted mass spectrum.
 

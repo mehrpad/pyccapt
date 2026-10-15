@@ -32,6 +32,14 @@ from pyccapt.calibration.tutorials.tutorials_helpers._helper_calibration_pure im
 
 
 def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse_mode, t0=0.0):
+    # The panel can be rendered before a dataset is loaded. Only a real working
+    # frame can carry these inputs; rendering must not manufacture source data.
+    if variables.data is not None:
+        from pyccapt.instrument_metadata import record_calibration_settings
+        record_calibration_settings(
+            variables.data, flight_path_length_mm=flight_path_length, t0_ns=t0,
+            pulse_mode=pulse_mode, source='legacy calibration panel explicit arguments; inputs, not proof of applied corrections',
+            context='legacy_workflow_inputs')
     out = Output()
     out_status = Output()
 

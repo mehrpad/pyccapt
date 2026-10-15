@@ -62,6 +62,7 @@ reference_windows = [{'mass_Da': float(mass), 'tof_min_ns': float(raw_t[known_ma
 assert reference_windows[0]['tof_max_ns'] < reference_windows[1]['tof_min_ns']
 guided_panel.controls['reference_windows'].value = json.dumps(reference_windows)
 guided_panel.controls['reference_confirmed'].value = True
+guided_panel.controls['instrument_confirmed'].value = True
 guided_panel.controls['Create reference session'].click()
 calibration_panel = guided_panel.controller['calibration_panel']
 assert calibration_panel is not None

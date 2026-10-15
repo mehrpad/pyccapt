@@ -4,7 +4,8 @@
 # Instrument identity
 device_name = "Oxcart"
 
-# Geometry and conversion constants
+# Geometry (mm) and configured ToF offsets (ns), recorded with acquisition.
+# These are configured conversion inputs, not independently measured calibration.
 flight_path_length = 110
 t_0_voltage = 38.0
 t_0_laser = 800.0

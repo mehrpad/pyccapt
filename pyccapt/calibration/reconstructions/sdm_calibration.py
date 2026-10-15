@@ -138,6 +138,32 @@ def build_hv(variables):
     return np.asarray(variables.dld_high_voltage, dtype=float)
 
 
+def active_selection_mask(variables):
+    """Optional full-source analysis selection; never use it to shorten depth history."""
+    value = getattr(variables, 'reconstruction_selection_mask', None)
+    if value is None:
+        return None
+    mask = np.asarray(value)
+    if mask.dtype != bool or mask.shape != np.asarray(variables.dld_high_voltage).shape:
+        raise CalibrationInputError('reconstruction_selection_mask must be boolean and aligned to every source event')
+    if not mask.any():
+        raise CalibrationInputError('The active reconstruction selection contains no events')
+    return mask
+
+
+def validate_full_source_metadata(variables):
+    """A recorded cropped export cannot recreate the missing acquisition prefix."""
+    frame = getattr(variables, 'data', None)
+    metadata = getattr(frame, 'attrs', {}).get('pyccapt_selection', {})
+    if not isinstance(metadata, dict):
+        raise CalibrationInputError('Recorded source selection metadata is invalid')
+    source_events = metadata.get('source_events', len(variables.dld_high_voltage))
+    if (not isinstance(source_events, (int, np.integer)) or source_events < 0):
+        raise CalibrationInputError('Recorded source event count must be a nonnegative integer')
+    if metadata.get('preserves_full_source') is False or source_events > len(variables.dld_high_voltage):
+        raise CalibrationInputError('Recorded cropped export lacks the full acquisition prefix; reload the original source or its complete session')
+
+
 def reconstruct_xyz(variables, kf, icf, det_eff, field_evap, avg_dens,
                     flight_path_length, mode="Geiser"):
     """Reconstruct (x, y, z) in nm for ALL events without mutating ``variables``.
@@ -145,6 +171,7 @@ def reconstruct_xyz(variables, kf, icf, det_eff, field_evap, avg_dens,
     z is a global cumulative sum, so the full set must be reconstructed even
     when only a pole ROI is analysed afterwards.
     """
+    validate_full_source_metadata(variables)
     detx = np.asarray(variables.dld_x_det, dtype=float)
     dety = np.asarray(variables.dld_y_det, dtype=float)
     hv = build_hv(variables)
@@ -166,7 +193,9 @@ def detector_roi_mask(variables, cx, cy, radius):
     """
     detx = np.asarray(variables.dld_x_det, dtype=float)
     dety = np.asarray(variables.dld_y_det, dtype=float)
-    return (detx - cx) ** 2 + (dety - cy) ** 2 <= radius ** 2
+    selected = (detx - cx) ** 2 + (dety - cy) ** 2 <= radius ** 2
+    active = active_selection_mask(variables)
+    return selected if active is None else selected & active
 
 
 # ---------------------------------------------------------------------------

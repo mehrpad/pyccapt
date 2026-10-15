@@ -63,8 +63,17 @@ def reference_masks(frame, ranges, rows, isotope_table):
             raise ValueError("Reference windows must be populated, disjoint and have distinct target masses")
         selected |= mask
         masks[target] = mask
+        neighbours = []
+        if len(components[0]) == 1 and components[2][0] == 1:
+            for isotope in isotope_table[isotope_table.element == components[0][0]].itertuples():
+                mass_to_charge = float(isotope.weight) / charge
+                if isotope.isotope != components[1][0] and lo <= mass_to_charge < hi:
+                    neighbours.append(dict(element=str(isotope.element), isotope=int(isotope.isotope),
+                                           mass_Da=mass_to_charge))
         descriptions.append(dict(row=index, historical_ion=str(row.ion), target_Da=target,
-                                 bounds_Da=[lo, hi], events=int(mask.sum())))
+            bounds_Da=[lo, hi], events=int(mask.sum()), nominal_target_inside_window=bool(lo <= target < hi),
+            other_same_element_isotopes_inside_window=neighbours,
+            interpretation="Window membership is conditional evidence, not a pure or independently identified reference"))
     return masks, descriptions
 
 
@@ -143,11 +152,17 @@ def compare(data, ranges_path, destination, *, rows, flight_mm, t0_ns, pulse_mod
     split = np.random.default_rng(seed).integers(0, 5, len(frame), dtype=np.int8)
     roles = dict(train=split < 3, selection=split == 3, confirmation=split == 4)
     session = GuidedCalibrationSession(variables, references, roles, mode="mc", flight_length_mm=flight_mm,
-                                       pulse_mode=pulse_mode)
+                                       pulse_mode=pulse_mode, baseline_mass_da=frame["mc (Da)"].to_numpy())
     tick = time.perf_counter()
     report["training"] = session.fit()
     report["fit_seconds"] = time.perf_counter()-tick
     report["selection"] = session.validate_selection()
+    report["replacement_assessment"] = dict(
+        passed=report["selection"]["passed"],
+        failed_reference_time_groups=sum(not group["passed"] for group in report["selection"]["groups"]),
+        baseline_regressions=sum(not group.get("baseline_comparison", {}).get("passed", True)
+                                 for group in report["selection"]["groups"]),
+        interpretation="Absolute tolerances alone do not establish improvement; every declared validation group must pass.")
     if report["selection"]["passed"]:
         report["confirmation"] = session.confirm()
     else:

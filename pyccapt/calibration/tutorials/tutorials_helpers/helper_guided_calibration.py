@@ -116,7 +116,12 @@ def show_guided_calibration(session, *, receipt_path="guided_calibration_receipt
     notice = widgets.HTML(value=("<b>Guided multi-reference calibration</b><br>"
         "Reference identities, event masks and validation policy are fixed when creating the session. "
         "Selection and confirmation do not fit the model. Confirmation is used once. "
+        "Validation checks each reference across fixed acquisition-time bands and compares with recorded calibrated mass "
+        "when available. A pass within broad absolute tolerances does not excuse worsening an existing reference. "
         "Excluded events become NaN in derived output; raw data remains available.<br>"
+        "If validation fails, review independently known identities, overlaps/tails, clean reference windows and "
+        "coverage across mass, voltage, detector and acquisition order. Do not widen limits to accept a failed fit. "
+        "Drift terms/blocks must be declared with physical justification before a fresh confirmation set is used.<br>"
         "Normalized ToF uses the receipt's reference voltage/flight length and zero t0. "
         "Use <b>Convert ToF to mass</b> here; do not reapply per-event voltage/geometry or the old t0."))
     fit_controls = [widgets.HBox([progress, cancel])] if background_fit else []

@@ -316,6 +316,14 @@ names = [
 
 ## Common owner state contract
 
+Acquisition exports also carry a run-start snapshot of configured flight length,
+ToF offsets, detector geometry/identity and observed pulse-mode history through
+`pyccapt.instrument_metadata`. This module performs no device I/O. It distinguishes
+configured values from measured telemetry and retains unknown values explicitly.
+The experiment owner publishes snapshots only at start and mode changes, so
+there is no new per-event or per-iteration metadata RPC. See
+[HDF5 instrument metadata](DATA_STRUCTURE.md#group-instrument_metadata).
+
 `core/control_state.py` defines the shared connection, request, observation,
 evidence, freshness, fault and command lifecycle contract. Every active control
 owner publishes through `Variables.update_control_state()`; the dedicated shared

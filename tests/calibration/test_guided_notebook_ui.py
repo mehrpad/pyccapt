@@ -243,9 +243,11 @@ def test_voltage_physical_preview_requires_available_pulse_voltage(monkeypatch):
     session = workflow()  # no measured pulse_v column
     panel = helper.show_guided_workflow(session, display_panel=False)
     panel.controls["pulse_mode"].value = "voltage"
+    panel.controls["instrument_confirmed"].value = True
     panel.controls["Preview physical mass"].click()
     assert "calibration" not in session.preview
     panel.controls["pulse_mode"].value = "laser"
+    panel.controls["instrument_confirmed"].value = True
     panel.controls["Preview physical mass"].click()
     assert np.isfinite(session.preview["calibration"]["mass"]).all()
 
@@ -264,6 +266,7 @@ def test_reference_window_configuration_excludes_unknown_detector_rows(monkeypat
              "tof_max_ns": float(variables.dld_t[mask].max()+1)} for mass, mask in refs.items()]
     panel.controls["reference_windows"].value = json.dumps(rows)
     panel.controls["reference_confirmed"].value = True
+    panel.controls["instrument_confirmed"].value = True
     panel.controls["Create reference session"].click()
     configured = panel.controller["calibration_session"]
     assert configured is not None

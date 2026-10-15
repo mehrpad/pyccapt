@@ -13,7 +13,9 @@ import numpy as np
 
 from pyccapt.calibration.core.exceptions import CalibrationInputError, CalibrationStateError
 from pyccapt.calibration.reconstructions.input_validation import validate_reconstruction_inputs
-from pyccapt.calibration.reconstructions.sdm_calibration import build_hv
+from pyccapt.calibration.reconstructions.sdm_calibration import (
+    active_selection_mask, build_hv, validate_full_source_metadata,
+)
 
 
 def _hash_source(variables):
@@ -29,6 +31,12 @@ def _readonly(values, dtype=float):
     result = np.array(values, dtype=dtype, copy=True)
     result.flags.writeable = False
     return result
+
+
+def selection_hash(variables):
+    """Fingerprint the analysis selection separately from acquisition coverage."""
+    mask = active_selection_mask(variables)
+    return None if mask is None else hashlib.sha256(mask.tobytes()).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -59,6 +67,7 @@ def prepare_ratio_geometry(variables, roi_center_cm, roi_radius_cm, *, det_eff,
     """
     if not full_acquisition_confirmed:
         raise CalibrationInputError('Confirm the loaded source contains the full acquisition from event zero before profiling')
+    validate_full_source_metadata(variables)
     x, y, voltage = validate_reconstruction_inputs(
         variables.dld_x_det, variables.dld_y_det, build_hv(variables), flight_path_mm,
         1., det_eff, 1., field_evap_v_nm, atomic_density_nm3)
@@ -80,13 +89,21 @@ def prepare_ratio_geometry(variables, roi_center_cm, roi_radius_cm, *, det_eff,
         coefficient = flight_path_mm**2 * field_evap_v_nm**2 / (atomic_density_nm3 * det_eff * area)
     if not np.all(np.isfinite(prefix)) or not np.isfinite(coefficient) or coefficient <= 0:
         raise CalibrationInputError('Source voltage or geometry cannot form a finite positive depth prefix')
+    active = active_selection_mask(variables)
+    first, stop = 0, len(voltage)
     selected = np.isfinite(x) & np.isfinite(y) & (np.hypot(x-center[0], y-center[1]) <= roi_radius_cm)
+    if active is not None:
+        active = np.array(active, copy=True)
+        first, stop = int(np.argmax(active)), len(active)-int(np.argmax(active[::-1]))
+        selected &= active
     if event_mask is not None:
         event_mask = np.asarray(event_mask)
         if event_mask.dtype != bool or event_mask.shape != selected.shape:
             raise CalibrationInputError('event_mask must be an event-aligned boolean mask; it never filters the prefix')
         selected &= event_mask
-    all_bands = np.minimum(np.arange(len(voltage)) * depth_bands // len(voltage), depth_bands-1)
+    # Bands span the active acquisition interval, using ORIGINAL source indices.
+    # Internal gaps remain gaps. Neither active nor species selection changes H.
+    all_bands = np.clip((np.arange(len(voltage))-first) * depth_bands // (stop-first), 0, depth_bands-1)
     indices, available = [], []
     rng = np.random.default_rng(sample_seed)
     for band in range(depth_bands):
@@ -102,6 +119,10 @@ def prepare_ratio_geometry(variables, roi_center_cm, roi_radius_cm, *, det_eff,
                     hv_convention='DC plus pulse voltage in voltage mode, DC otherwise; current reconstruction convention',
                     sampled_event_indices_sha256=hashlib.sha256(indices.tobytes()).hexdigest(),
                     event_mask_sha256=None if event_mask is None else hashlib.sha256(event_mask.tobytes()).hexdigest(),
+                    active_selection_sha256=None if active is None else hashlib.sha256(active.tobytes()).hexdigest(),
+                    active_selection_events=len(voltage) if active is None else int(active.sum()),
+                    analysis_source_index_span=[first, stop],
+                    band_convention='equal original-event intervals over active first-to-last source index; internal gaps retained',
                     detector_partial_events=int(np.count_nonzero(~np.isfinite(x) | ~np.isfinite(y))),
                     depth_bands=depth_bands, band_available_events=available,
                     detector_area_mm2=area, area_convention='full observed circular detector extent',
@@ -115,6 +136,44 @@ def prepare_ratio_geometry(variables, roi_center_cm, roi_radius_cm, *, det_eff,
     return RatioGeometry(_readonly(prefix), _readonly(indices, int), _readonly(coefficient*prefix[indices]),
                          _readonly(x[indices]), _readonly(y[indices]), _readonly(voltage[indices]),
                          _readonly(all_bands[indices], int), metadata)
+
+
+def ratio_next_steps(result):
+    """Actionable abstention guidance; no threshold relaxation or guessed identity."""
+    status = result['status']
+    if status == 'supported':
+        return ['Use an independently justified ICF anchor to select one compatible family member; this profile does not infer it.']
+    steps = {
+        'source_or_geometry_unavailable': ['Load the full original event sequence and retain crop/species selections as masks; confirm coverage separately.'],
+        'insufficient_events': ['Inspect counts in each acquisition band. Use a justified larger indexed ROI or a longer contiguous interval; keep the full prefix.'],
+        'grid_underresolved': ['Narrow q bounds using independent information or explicitly increase the grid cap; do not treat a coarse maximum as evidence.'],
+        'geometry_unsupported': ['Use a tighter independently indexed near-axis ROI or a justified narrower ICF interval. Off-axis poles require a geometry model validated for that pole.'],
+        'insufficient_depth_span': ['Include a longer acquisition interval containing at least five indexed spacings in every band.'],
+        'no_periodic_evidence': [
+            'Inspect the detector map and choose an independently indexed pole. Detector center and density extrema are only ROI candidates.',
+            'Confirm the phase, lattice parameter and plane order for that ROI; defaults are not measured spacing.',
+            'Inspect individual-band evidence. Weak maxima in every band cannot establish a ratio; mixed strong/weak bands can indicate changing structure, geometry or sampling.'],
+        'heldout_disagreement': ['A single ratio did not transfer between acquisition intervals. Inspect independent segments for changing structure or geometry before considering a time-dependent model.'],
+        'flat': ['The profile does not localize q. Add independent spacing/geometry evidence; retain manual parameters.'],
+        'boundary': ['A boundary maximum does not identify q. Review independent parameter bounds and spacing before expanding a search.'],
+        'ambiguous': ['Competing branches require another independent spacing or angular reference; do not choose a branch only because it is highest.'],
+    }.get(status, [])
+    return steps + ['Further ROI, spacing or q searches are exploratory; freeze those choices before evaluating fresh confirmation data.']
+
+
+def _band_diagnostics(q, scores, coherence, counts, chosen, floors, minimum_score):
+    maxima = np.argmax(coherence, axis=1)
+    rows = []
+    for band, peak in enumerate(maxima):
+        rows.append(dict(band=int(band), role='training' if band % 2 == 0 else 'held_out',
+            events=int(counts[band]), coherence_floor=float(floors[band]),
+            exploratory_peak_q=float(q[peak]), exploratory_peak_coherence=float(coherence[band, peak]),
+            exploratory_peak_contrast=float(scores[band, peak]),
+            exploratory_peak_passes_gates=bool(coherence[band, peak] >= floors[band] and scores[band, peak] >= minimum_score),
+            coherence_at_training_choice=float(coherence[band, chosen]), contrast_at_training_choice=float(scores[band, chosen])))
+    return dict(bands=rows,
+        interpretation='Per-band maxima are exploratory diagnostics, not independent estimates or corrected significance tests. Selection and acceptance still use the frozen training choice.',
+        bands_with_exploratory_signal=sum(row['exploratory_peak_passes_gates'] for row in rows))
 
 
 def periodic_band_evidence(coordinate_nm, spacing_nm):
@@ -281,6 +340,8 @@ def profile_ratio_geometry(geometry, spacing_nm, q_values, *, icf_bounds=(1.1, 1
     result['diagnostics']['coherence_floor'] = evidence_floor.tolist()
     result['diagnostics']['exact_coherence_at_training_choice'] = coherence[:, peak].tolist()
     result['diagnostics']['scores_at_training_choice'] = scores[:, peak].tolist()
+    result['diagnostics']['band_evidence'] = _band_diagnostics(
+        q, scores, coherence, [len(indices) for indices in band_indices], peak, evidence_floor, minimum_score)
     periods = [float(np.ptp(geometry.base_depth_nm[indices]/q[peak]**2)/spacing_nm) for indices in band_indices]
     result['diagnostics']['period_span_per_band_at_training_choice'] = periods
     if min(periods) < 5:
@@ -349,6 +410,8 @@ def accept_ratio_family(variables, result, *, icf_anchor):
     pair = compatible_parameter_family(result, [icf_anchor])[0]
     if _hash_source(variables) != result['metadata']['source_hash']:
         raise CalibrationStateError('Acquisition arrays changed after profiling; rerun the ratio profile')
+    if selection_hash(variables) != result['metadata'].get('active_selection_sha256'):
+        raise CalibrationStateError('Active reconstruction selection changed after profiling; rerun the ratio profile')
     m = result['metadata']
     parameters = {key: m[key] for key in ('det_eff', 'field_evap', 'avg_dens', 'flight_path_length', 'mode')}
     parameters.update(kf=pair['kf'], icf=pair['icf'])

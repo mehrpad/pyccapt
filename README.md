@@ -152,10 +152,22 @@ jupyter lab
 For the guided workflow, open
 [`data_processing_guided.ipynb`](pyccapt/calibration/tutorials/jupyter_files/data_processing_guided.ipynb).
 The existing [`data_processing.ipynb`](pyccapt/calibration/tutorials/jupyter_files/data_processing.ipynb)
-remains available. The guided notebook connects import, inspection, calibration,
+remains available. The guided notebook connects import, inspection, cropping, calibration,
 peak-by-peak ranging review, reconstruction, analysis and export. Suggestions
 require acceptance, preserve locked ranging decisions, support undo, and can be
 saved as resumable HDF5 sessions.
+
+Raw `/dld` data does not need a mass column: inspect and crop it, confirm the
+flight length/time zero/pulse mode, then preview its initial mass spectrum.
+Optional reference fitting reports improvements and regressions against that
+baseline before acceptance. Full source history remains in the session even
+when the exported table contains only selected events.
+
+Control exports now retain run-start instrument settings and observed pulse
+modes, including configured flight length and time offsets. Both calibration
+workflows preserve these metadata separately from preview and fitted settings.
+The original notebook also reads this project's partial NeXus mapping and writes
+it alongside `/df` by default; `save_data(..., nexus=False)` opts out.
 
 Reconstruction suggestions estimate **q = ICF/kf** from independently reviewed
 near-axis crystallographic spacing and show compatible ICF/kf pairs. They report

@@ -50,6 +50,8 @@ def parse_args(argv=None):
     parser.add_argument('--q-relative-min', type=float, default=.75, help='q lower bound / replay q (default .75)')
     parser.add_argument('--q-relative-max', type=float, default=1.25, help='q upper bound / replay q (default 1.25)')
     parser.add_argument('--grid-budget-seconds', type=float, default=45., help='Production-grid time budget, checked between candidates')
+    parser.add_argument('--diagnose-signal', action='store_true',
+        help='Also inspect unindexed detector-density candidates and exact fixed-anchor phase evidence; no candidate is accepted')
     args = parser.parse_args(argv)
     numeric = [getattr(args, key) for key in ('flight_mm', 'spacing_nm', 'field_v_nm', 'efficiency',
         'roi_radius_cm', 'icf_min', 'icf_max', 'q_relative_min', 'q_relative_max', 'grid_budget_seconds')]
@@ -62,7 +64,10 @@ def parse_args(argv=None):
     args.data = args.data.resolve()
     args.output_directory = args.output_directory.resolve()
     args.output = args.output_directory/REPORT_NAME
-    for output in (args.output, args.output.with_suffix('.png')):
+    outputs = [args.output, args.output.with_suffix('.png')]
+    if args.diagnose_signal:
+        outputs.append(args.output.with_name(args.output.stem+'_detector.png'))
+    for output in outputs:
         if output.resolve() == args.data or (output.exists() and args.data.exists() and output.samefile(args.data)):
             parser.error('An output path resolves to the input data; select another output directory')
     if not args.data.is_file():
@@ -130,9 +135,12 @@ def load(source):
         metadata = dict(root_groups=list(store.keys()),
                         group_attrs={key: clean(value) for key, value in group.attrs.items()},
                         rows=n, columns=names, dtypes=str(dataset.dtype))
+        source_attrs = json.loads(clean(group.attrs.get('pyccapt_source_json', '{}')))
+        if not isinstance(source_attrs, dict):
+            raise ValueError('Recorded pyccapt_source_json must contain an attribute mapping')
     variables = SimpleNamespace(dld_x_det=data['x_det (cm)'], dld_y_det=data['y_det (cm)'],
         dld_high_voltage=data['high_voltage (V)'], dld_pulse_v=data['pulse_v (V)'],
-        pulse_mode='voltage', data_backup=None)
+        pulse_mode='voltage', data_backup=None, data=SimpleNamespace(attrs=source_attrs))
     return variables, sample, xyz, metadata
 
 
@@ -229,11 +237,62 @@ def legacy_grid_from_full_prefix(variables, prefix, parameters, kf_values, icf_v
         expected_spacing_used_for_selection=False)
 
 
+def diagnose_signal(variables, geometry, profile, *, icf_anchor, detector_output):
+    """Exploratory diagnostics cannot change the selected q or acceptance decision."""
+    density, contrast, xe, ye = sc.sharp_fdm_map(variables.dld_x_det, variables.dld_y_det, bins=200)
+    candidates = sc.detect_pole_candidates(contrast, xe, ye, n=8)
+    finite_contrast = contrast[np.isfinite(contrast)]
+    result = dict(interpretation='Exploratory diagnostics only. Density features are unindexed; exact phase uses the fitted recipe anchor, not an independent physical calibration.',
+        detector_map=dict(bins=200, smooth_sigma=1.4, minimum_contrast=3.,
+            maximum_finite_contrast=None if not len(finite_contrast) else float(finite_contrast.max()),
+            unindexed_candidates=[dict(center_cm=[x,y], contrast=value) for x,y,value in candidates]),
+        exact_fixed_anchor=dict(status='not_evaluated', accepted_q=None),
+        next_steps=rc.ratio_next_steps(profile))
+    if profile.get('training_profile'):
+        q = np.asarray(profile['q_grid'])
+        m = geometry.metadata
+        direction = rc._launch(geometry.detector_x_cm, geometry.detector_y_cm, icf_anchor, m['flight_path_length'], 'Geiser')
+        pole = rc._launch(np.array([m['roi_center_cm'][0]]), np.array([m['roi_center_cm'][1]]),
+                          icf_anchor, m['flight_path_length'], 'Geiser')[0]
+        exact, contrast_scores = np.empty((m['depth_bands'],len(q))), np.empty((m['depth_bands'],len(q)))
+        bands = [np.flatnonzero(geometry.bands==band) for band in range(m['depth_bands'])]
+        for j, ratio in enumerate(q):
+            z = geometry.base_depth_nm/ratio**2*pole[2] + geometry.voltage_V*ratio/(icf_anchor*m['field_evap'])*(pole[2]-direction@pole)
+            for band, indices in enumerate(bands):
+                contrast_scores[band,j], exact[band,j] = rc.periodic_band_evidence(z[indices], profile['metadata']['spacing_nm'])
+        chosen = int(np.argmax(np.median(exact[::2],axis=0)))
+        counts = [len(indices) for indices in bands]
+        result['exact_fixed_anchor'] = dict(status='diagnostic_only', accepted_q=None, icf_anchor=icf_anchor,
+            exploratory_training_peak_q=float(q[chosen]),
+            band_evidence=rc._band_diagnostics(q,contrast_scores,exact,counts,chosen,
+                np.maximum(.08,4./np.sqrt(counts)),profile['metadata']['minimum_score']),
+            training_profile=np.median(exact[::2],axis=0), heldout_profile=np.median(exact[1::2],axis=0))
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    fig, axes = plt.subplots(1,2,figsize=(11,4.5),constrained_layout=True)
+    extent = [xe[0],xe[-1],ye[0],ye[-1]]
+    axes[0].imshow(np.log10(np.maximum(density.T,1)),origin='lower',extent=extent,cmap='viridis')
+    axes[1].imshow(contrast.T,origin='lower',extent=extent,cmap='magma')
+    for ax in axes:
+        ax.set(xlabel='detector x (cm)',ylabel='detector y (cm)')
+        ax.add_patch(plt.Circle(geometry.metadata['roi_center_cm'],geometry.metadata['roi_radius_cm'],color='cyan',fill=False))
+    for i,(cx,cy,_) in enumerate(candidates):
+        axes[1].plot(cx,cy,'c+')
+        axes[1].annotate(str(i+1),(cx,cy),color='cyan')
+    axes[0].set_title('Detector density; cyan = diagnostic ROI')
+    axes[1].set_title('Unindexed density minima: require review')
+    fig.savefig(detector_output,dpi=160)
+    plt.close(fig)
+    return result
+
+
 def main(argv=None):
     args = parse_args(argv)
     args.output_directory.mkdir(parents=True, exist_ok=True)
     start = perf_counter()
     variables, sample, xyz, metadata = load(args.data)
+    sc.validate_full_source_metadata(variables)
     load_seconds = perf_counter()-start
     ratio = variables.dld_pulse_v/variables.dld_high_voltage
     dc_fit, dc_prefix = fit_recipe(variables, sample, xyz, variables.dld_high_voltage, 'DC only', args.flight_mm)
@@ -293,6 +352,9 @@ def main(argv=None):
     report['conditional_ratio_profile'] = rc.profile_ratio_geometry(geometry, spacing, q_values,
         icf_bounds=icf_bounds, mode='Geiser')
     report['conditional_ratio_seconds'] = perf_counter()-start
+    if args.diagnose_signal:
+        report['signal_diagnostics'] = diagnose_signal(variables, geometry, report['conditional_ratio_profile'],
+            icf_anchor=icf_replay, detector_output=args.output.with_name(args.output.stem+'_detector.png'))
     report['conditional_coverage_override'] = 'Complete file numerical probe only; does not establish original acquisition completeness'
     write(report, args.output)
     kf_values = (np.array([.85, 1., 1.15])*kf_replay).tolist()

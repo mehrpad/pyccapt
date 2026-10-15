@@ -183,10 +183,9 @@ def load_data(
             Use ``'roentdek'`` for RoentDek hardware. Ignored when
             ``merge_partial_tdc=False``.
     """
-    if tdc == 'pyccapt':
-        # Check that the dataset is a valid pyccapt dataset with .h5 extension
-        if not dataset_path.endswith(('.h5', '.H5')):
-            raise ValueError('The dataset should be a valid pyccapt dataset with .h5 extension')
+    if tdc in {'pyccapt', 'nexus'}:
+        if Path(dataset_path).suffix.lower() not in {'.h5', '.nxs', '.nx5'}:
+            raise ValueError('The dataset should be PyCCAPT HDF5/NeXus with .h5, .nxs or .nx5 extension')
     elif tdc == 'leap_epos':
         # Check that the dataset is a valid leap_epos dataset with .epos extension
         if not dataset_path.endswith(('.epos', '.EPOS')):
@@ -251,6 +250,8 @@ def load_data(
                     dld_group_storage, tdc_df = loaded
                 else:
                     dld_group_storage = loaded
+                if dld_group_storage is None:
+                    raise ValueError('No raw DLD table; try a processed PyCCAPT/NeXus table')
                 print('The data is loaded in raw mode' + (' (with raw tdc)' if tdc_df is not None else ''))
                 mode = 'raw'
             except Exception:
@@ -358,6 +359,11 @@ def load_data(
     variables.max_tof = max_tof
     variables.flight_path_length = flightPathLength
     variables.pulse_mode = pulse_mode
+    from pyccapt.instrument_metadata import record_calibration_settings
+    record_calibration_settings(
+        variables.data, flight_path_length_mm=flightPathLength, pulse_mode=pulse_mode,
+        source='legacy loader explicit arguments; loaded calibration may have different historical settings',
+        context='legacy_workflow_inputs')
     variables.sync_from_data(update_backups=True)
     progress.update(1)  # phase 2: shared variables synchronized
 
@@ -567,6 +573,13 @@ def add_columns(variables, max_mc):
         variables.data.insert(5, 'mc_uc (Da)', variables.mc_uc)
     else:
         variables.data['mc_uc (Da)'] = variables.mc_uc
+    # A t0 preview becomes the uncorrected-mass baseline only at this copy.
+    from copy import deepcopy
+    from pyccapt.instrument_metadata import ATTR
+    metadata = deepcopy(variables.data.attrs.get(ATTR, {}))
+    if 'conversion_preview' in metadata:
+        metadata['uncorrected_conversion'] = deepcopy(metadata['conversion_preview'])
+        variables.data.attrs[ATTR] = metadata
     if 't_c (ns)' not in variables.data:
         variables.data.insert(8, 't_c (ns)', np.zeros(len(variables.dld_t)))
 

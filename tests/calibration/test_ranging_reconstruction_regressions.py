@@ -250,7 +250,7 @@ def test_ratio_background_cancel_interrupts_progress_without_accepting_state(mon
     assert _button(panel, 'Cancel ratio profile').disabled
 
 
-@pytest.mark.parametrize('change', ['cancel', 'flight', 'source'])
+@pytest.mark.parametrize('change', ['cancel', 'flight', 'source', 'selection'])
 def test_completed_ratio_result_is_discarded_if_cancelled_or_stale(monkeypatch, change):
     variables, flight, panel, jobs, callbacks = _background_ratio_panel(monkeypatch, _supported_ratio)
     _button(panel, 'Profile ICF/kf ratio').click()
@@ -260,6 +260,9 @@ def test_completed_ratio_result_is_discarded_if_cancelled_or_stale(monkeypatch, 
         _button(panel, 'Cancel ratio profile').click()
     elif change == 'flight':
         flight.value = 120.
+    elif change == 'selection':
+        variables.reconstruction_selection_mask = np.ones(60, dtype=bool)
+        variables.reconstruction_selection_mask[0] = False
     else:
         variables.dld_high_voltage[0] += 10.
     _finish_ratio_job(jobs, callbacks)
@@ -267,6 +270,27 @@ def test_completed_ratio_result_is_discarded_if_cancelled_or_stale(monkeypatch, 
     assert not variables.reconstruction_parameters and not variables.reconstruction_ratio_result
     assert not _button(panel, 'Profile ICF/kf ratio').disabled
     assert any(isinstance(widget, widgets.FloatProgress) and widget.value == .25 for widget in _widgets(panel))
+
+
+def test_showing_density_candidates_preserves_roi_until_review_and_resets_spacing_confirmation(monkeypatch):
+    variables = Variables()
+    variables.dld_x_det = np.ones(60)
+    variables.dld_y_det = np.zeros(60)
+    variables.dld_high_voltage = np.full(60, 5000.)
+    monkeypatch.setattr(hs, 'display', lambda *_: None)
+    monkeypatch.setattr(reconstruction.plt, 'show', lambda: None)
+    monkeypatch.setattr(hs.sc, 'sharp_fdm_map', lambda *args, **kwargs: (
+        np.ones((2,2)), np.ones((2,2)), np.array([-1.,0.,1.]), np.array([-1.,0.,1.])))
+    monkeypatch.setattr(hs.sc, 'detect_pole_candidates', lambda *args, **kwargs: [(.2,.3,5.)])
+    panel = hs.call_sdm_icf_kf_calibration(variables, widgets.FloatText(value=110.), SimpleNamespace(value=('Al',60.,30.)))
+    confirmation = next(w for w in _widgets(panel) if isinstance(w, widgets.Checkbox) and 'Indexed spacing' in w.description)
+    confirmation.value = True
+    _button(panel, 'Show FDMs').click()
+    candidate = next(w for w in _widgets(panel) if isinstance(w, widgets.Dropdown) and any('unindexed ROI' in str(opt) for opt in w.options))
+    assert candidate.value is None and confirmation.value  # Map inspection does not alter the reference.
+    candidate.value = (.2,.3)
+    assert not confirmation.value  # A different ROI needs a newly confirmed plane assignment.
+    reconstruction.plt.close('all')
 
 
 def test_reconstruct_button_recovers_after_downstream_failure(monkeypatch):

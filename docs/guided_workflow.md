@@ -192,3 +192,12 @@ checks. No claim of real-acquisition calibration accuracy follows from these
 software tests. Large datasets still require memory for the source, accepted
 outputs, sorting, and bounded undo snapshots; this workflow does not claim
 out-of-core processing.
+
+The [same-dataset validation report](workflow_validation.md) covers the legacy
+notebook's 5,842,702-event sample 2643, including exact calibration persistence,
+reviewed-ranging comparisons, a conditional multireference fit and old/new
+reconstruction suggestions. It also records where the evidence does not justify
+a better calibration or a parameter suggestion. The replay runner accepts
+`--mass-min` and `--mass-max` to bound peak detection without cropping source
+events; proposals outside the window are not silently accepted or discarded
+from saved data.

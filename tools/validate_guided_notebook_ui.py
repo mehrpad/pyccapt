@@ -33,9 +33,11 @@ class InProcessJob:
 
     def start(self, operation, *, on_result, on_error, on_progress=lambda *_: None, on_finished=lambda: None):
         self.running = True
+        self.error = None
         try:
             on_result(operation(Event(), on_progress))
         except Exception as error:
+            self.error = error
             on_error(error)
             raise
         finally:
@@ -61,15 +63,22 @@ def identity(row):
     return tuple(sorted(composition.items())), int(row["charge"])
 
 
-def validate(data, ranges, output_directory, *, bin_width=.02, prominence=20., tolerance=.15, max_atoms=1):
+def validate(data, ranges, output_directory, *, bin_width=.02, prominence=20., tolerance=.15, max_atoms=1,
+             mass_min=None, mass_max=None):
     from pyccapt.calibration.core.guided_workflow import GuidedWorkflow
     from pyccapt.calibration.tutorials.tutorials_helpers import helper_guided_workflow, helper_peak_review
 
     data, ranges = Path(data).resolve(), Path(ranges).resolve()
     output = Path(output_directory).resolve()
+    if any(bound is not None and not np.isfinite(bound) for bound in (mass_min, mass_max)):
+        raise ValueError("Detection mass bounds must be finite")
+    if mass_min is not None and mass_max is not None and mass_min >= mass_max:
+        raise ValueError("Detection mass minimum must be less than maximum")
     inputs = {data, ranges}
     for filename in ("session.h5", "accepted.h5", "ui_transcript.txt", "summary.json"):
-        if (output / filename).resolve() in inputs:
+        destination = (output / filename).resolve()
+        if destination in inputs or (destination.exists() and any(
+                source.exists() and destination.samefile(source) for source in inputs)):
             raise ValueError(f"Validation output {filename} would overwrite an input; select a separate output directory")
     output.mkdir(parents=True, exist_ok=True)
     initial_hashes = {"data": file_sha256(data), "ranges": file_sha256(ranges)}
@@ -104,6 +113,7 @@ def validate(data, ranges, output_directory, *, bin_width=.02, prominence=20., t
             assert workflow.accepted["calibration"] is None
             panel.controls["Accept calibration"].click()
             accepted_mass = workflow.accepted["calibration"]["mass"]
+            accepted_tof = workflow.accepted["calibration"]["tof"]
             column = workflow.accepted["calibration"]["receipt"]["column"]
             np.testing.assert_array_equal(accepted_mass, workflow.source[column].to_numpy())
             report.update(events=workflow.n, source_columns=list(workflow.source.columns),
@@ -111,6 +121,10 @@ def validate(data, ranges, output_directory, *, bin_width=.02, prominence=20., t
                           imported_tof_preserved=workflow.accepted["calibration"]["tof"] is not None,
                           mass_quantiles_Da=np.nanpercentile(accepted_mass, [0, 1, 50, 99, 100]).tolist(),
                           source_hash=workflow.source_hash)
+            if accepted_tof is not None:
+                tof_column = workflow.accepted["calibration"]["receipt"]["tof_column"]
+                report["imported_tof_bitwise_unchanged"] = np.array_equal(
+                    accepted_tof, workflow.source[tof_column].to_numpy(), equal_nan=True)
             report["phases_seconds"]["import_inspect_accept"] = time.perf_counter()-phase
             phase = time.perf_counter()
             panel.controls["Open peak-review queue"].click()
@@ -121,14 +135,32 @@ def validate(data, ranges, output_directory, *, bin_width=.02, prominence=20., t
             review.controls["bin_width"].value = bin_width
             review.controls["prominence"].value = prominence
             review.controls["tolerance"].value = tolerance
+            if mass_min is not None:
+                review.controls["minimum"].value = mass_min
+            if mass_max is not None:
+                review.controls["maximum"].value = mass_max
+            bounds = [review.controls["minimum"].value, review.controls["maximum"].value]
+            report["settings"]["detection_mass_bounds_Da"] = bounds
+            report["events_in_detection_window"] = int(np.count_nonzero(
+                (accepted_mass >= bounds[0]) & (accepted_mass <= bounds[1])))
+            report["events_outside_detection_window_or_nonfinite"] = workflow.n - report["events_in_detection_window"]
             review.controls["Propose peaks"].click()
+            # Widget callbacks display errors instead of propagating them. Keep
+            # the original operation failure visible to this validation runner.
+            if review.controls["job"].error is not None:
+                raise review.controls["job"].error
             queue = workflow.review
             assert queue.ranges().empty
             report["proposal_count"] = len(queue.records)
+            report["proposals_without_candidates"] = sum(not row["candidates"] for row in queue.records)
+            report["proposals_with_multiple_candidates"] = sum(len(row["candidates"]) > 1 for row in queue.records)
             report["automatic_acceptances"] = 0
             report["phases_seconds"]["proposal_generation"] = time.perf_counter()-phase
             phase = time.perf_counter()
             matches, unmatched, used = [], [], set()
+            identity_masses = {}
+            for candidate in queue.catalogue.candidates:
+                identity_masses.setdefault(identity(candidate.record()), []).append(candidate.mass)
             for index, historical_row in historical.iterrows():
                 expected_identity = identity(historical_row)
                 available = [row for row in queue.records if row["id"] not in used and
@@ -136,8 +168,20 @@ def validate(data, ranges, output_directory, *, bin_width=.02, prominence=20., t
                 options = [(row, candidate) for row in available for candidate in row["candidates"]
                            if identity(candidate) == expected_identity]
                 if not options:
+                    expected_masses = identity_masses.get(expected_identity, [])
+                    residuals = [abs(row["center"]-mass) for row in available for mass in expected_masses]
+                    nearest_residual = min(residuals) if residuals else None
+                    if not available:
+                        reason = "No unused proposed center inside the historical window"
+                    elif not expected_masses:
+                        reason = "Historical identity is outside the requested catalogue"
+                    elif nearest_residual > tolerance:
+                        reason = "Detected centers exist, but the historical identity lies outside the candidate mass tolerance"
+                    else:
+                        reason = "Historical identity is absent from the bounded candidate list despite lying within mass tolerance"
                     unmatched.append({"historical_row": int(index), "ion": str(historical_row.ion),
-                        "reason": "No proposed center inside the historical window with its identity in the bounded candidate list"})
+                        "reason": reason, "available_proposed_centers_Da": [row["center"] for row in available],
+                        "identity_masses_Da": expected_masses, "nearest_absolute_mass_residual_Da": nearest_residual})
                     continue
                 row, candidate = min(options, key=lambda item: abs(item[0]["center"]-float(historical_row.mc)))
                 proposed_low, proposed_high = row["lower"], row["upper"]
@@ -201,6 +245,8 @@ def validate(data, ranges, output_directory, *, bin_width=.02, prominence=20., t
             panel.controls["Export accepted HDF5"].click()
             exported = pd.read_hdf(exported_path, "df")
             np.testing.assert_array_equal(exported["mc (Da)"], accepted_mass)
+            if accepted_tof is not None:
+                np.testing.assert_array_equal(exported["t_c (ns)"], accepted_tof)
             np.testing.assert_array_equal(exported["event_id"], workflow.event_ids)
             # This run has no verified reconstruction settings. Imported XYZ must
             # not masquerade as newly accepted geometry in derived export.
@@ -210,8 +256,15 @@ def validate(data, ranges, output_directory, *, bin_width=.02, prominence=20., t
             assert restored is not workflow and restored.source_hash == workflow.source_hash
             np.testing.assert_array_equal(restored.accepted["ranges"]["assignment"], actual)
             np.testing.assert_array_equal(restored.variables.mc, accepted_mass)
+            if accepted_tof is not None:
+                np.testing.assert_array_equal(restored.accepted["calibration"]["tof"], accepted_tof)
             embedded = GuidedWorkflow.load(exported_path)
             np.testing.assert_array_equal(embedded.event_ids, workflow.event_ids)
+            np.testing.assert_array_equal(embedded.accepted["calibration"]["mass"], accepted_mass)
+            np.testing.assert_array_equal(embedded.accepted["ranges"]["assignment"], actual)
+            if accepted_tof is not None:
+                np.testing.assert_array_equal(embedded.accepted["calibration"]["tof"], accepted_tof)
+                report["accepted_tof_export_and_resume_exact"] = True
             report.update(session_resume_verified=True, embedded_session_verified=True, accepted_export_verified=True,
                           reconstruction_abstained_without_instrument_settings=True, final_status=restored.status())
             report["phases_seconds"]["save_export_resume"] = time.perf_counter()-phase
@@ -221,7 +274,7 @@ def validate(data, ranges, output_directory, *, bin_width=.02, prominence=20., t
     report["source_files_unchanged"] = initial_hashes == {"data": file_sha256(data), "ranges": file_sha256(ranges)}
     assert report["source_files_unchanged"]
     report["total_seconds"] = time.perf_counter()-started
-    report["limitations"] = ["Supplementary dataset only; not a substitute for the specifically requested original acquisition.",
+    report["limitations"] = ["Validation applies only to the explicitly supplied dataset and historical range file.",
         "Imported mass retained exactly; no new calibration accuracy or q/ICF/kf accuracy established.",
         "Historical identities/bounds are validation inputs, not independent ground truth or new user approvals.",
         "Unmatched weak, molecular, ambiguous, or out-of-window ranges remain unaccepted.",
@@ -239,10 +292,13 @@ def main():
     parser.add_argument("--prominence", type=float, default=20.)
     parser.add_argument("--tolerance", type=float, default=.15)
     parser.add_argument("--max-atoms", type=int, default=1)
+    parser.add_argument("--mass-min", type=float, help="Explicit peak-detection lower bound in Da; no event cropping")
+    parser.add_argument("--mass-max", type=float, help="Explicit peak-detection upper bound in Da; no event cropping")
     arguments = parser.parse_args()
     result = validate(arguments.data, arguments.ranges, arguments.output_directory,
                       bin_width=arguments.bin_width, prominence=arguments.prominence,
-                      tolerance=arguments.tolerance, max_atoms=arguments.max_atoms)
+                      tolerance=arguments.tolerance, max_atoms=arguments.max_atoms,
+                      mass_min=arguments.mass_min, mass_max=arguments.mass_max)
     print(json.dumps({key: result[key] for key in ("events", "proposal_count", "replayed_range_count", "replayed_ranged_events",
         "historical_ranged_events", "source_files_unchanged", "total_seconds")}, indent=2))
 

@@ -162,6 +162,12 @@ near-axis crystallographic spacing and show compatible ICF/kf pairs. They report
 insufficient evidence instead of forcing a unique answer. See the
 [guided workflow](docs/guided_workflow.md) and [calibration mathematics](docs/calibration_math.md).
 
+The [same-dataset validation report](docs/workflow_validation.md) compares both
+workflows on 5.84 million events, including exact mass/ToF persistence, ranging,
+calibration timings and conditional ICF/kf diagnostics. It records the limits of
+the historical labels and where the new method abstains instead of suggesting
+unsupported parameters.
+
 [Analysis sessions and exports](docs/analysis_sessions.md) describe stable integer
 event IDs, learned-model snapshots, checksums, processing history, an explicitly
 partial NXapm-aligned mapping, storage benchmarks and opt-in SWMR readers.

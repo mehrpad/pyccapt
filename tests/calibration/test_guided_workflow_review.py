@@ -70,6 +70,15 @@ def test_catalogue_cache_includes_content_and_rejects_excessive_work():
         get_isotope_catalogue("Fe,Ni", (1, 2), 5, table=isotope_table(), max_candidates=10)
 
 
+def test_builtin_catalogue_preserves_explicit_deuterium_and_hydrogen_isotope_identities():
+    result = get_isotope_catalogue("H,D", (1,), 1)
+    deuterium = next(item for item in result.candidates if item.element == ("D",))
+    alternatives = result.search(deuterium.mass, tolerance=.001)
+    identities = {(item.element, item.isotope, item.complex, item.charge) for item in alternatives}
+    assert identities == {(("D",), (2,), (1,), 1), (("H",), (2,), (1,), 1)}
+    assert len({item.key for item in alternatives}) == 2
+
+
 def test_proposals_do_not_accept_and_locked_decisions_survive_redetection():
     session = accepted_mass()
     queue = session.begin_review()

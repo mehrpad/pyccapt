@@ -431,3 +431,27 @@ Local source attribution (read-only comparison, no runtime dependency):
 - `E:/apt3d/reconstruction_correction/orientation_workflow/angular_depth_ratio.py`:
   nested angular/depth models require more independently supported observations;
   deliberately not adopted by this bounded static-ratio workflow.
+
+## Crop proposals and processing provenance
+
+The editable automatic crop shapes are selection heuristics, not new mass or
+reconstruction equations. The temporal proposal uses up to 512 acquisition windows:
+local residual roughness is `1.4826 * median(abs(residual - median(residual)))` after
+removing an endpoint trend. Jump/drop, roughness and finite-positive-voltage tests
+mark bad windows; a one-window margin is added, and the longest passing interval
+is proposed. Similar-length intervals are reported as ambiguous.
+
+The detector proposal smooths a full-hit histogram (Gaussian sigma 1.2 bins),
+uses Otsu separation in `log(1 + density)` when the density contrast supports a
+core/halo interpretation, otherwise uses a footprint threshold. It fills enclosed
+holes, retains the largest connected component, then maximizes distance to its
+boundary in detector cm. Radius is reduced by 0.75 bin diagonals. Edge-connected
+bites stay outside the support; these thresholds cannot certify an artifact-free
+or composition-neutral ROI. A weak/degenerate result abstains. Details and manual
+overrides are in the [workflow guide](guided_workflow.md#how-the-automatic-crop-proposal-works).
+
+The shared journal records working fits, model/settings state, resets and final
+output fingerprints. It does not change the voltage, bowl, residual, physical
+ToF conversion or Geiser/Bas equations. Exact same-source restoration reads the
+saved output checkpoint after verifying raw measurements and event IDs; it does
+not refit or claim an interchangeable calibration for another acquisition.

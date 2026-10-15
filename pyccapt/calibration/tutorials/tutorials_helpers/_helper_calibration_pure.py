@@ -28,6 +28,8 @@ def reset_on_click(variables, calibration_mode):
         variables.initial_calibration_done_mc = False
     variables.clear_calibration_selection_mask()
     variables.clear_calibration_peak_range()
+    from pyccapt.calibration.core.calibration_metadata import record_step
+    record_step(variables, 'reset_working_correction', parameters={'mode': calibration_mode.value})
 
 
 def reset_back_on_click(variables, calibration_mode):
@@ -38,6 +40,8 @@ def reset_back_on_click(variables, calibration_mode):
         variables.mc_calib = np.copy(variables.mc_calib_backup)
     variables.clear_calibration_selection_mask()
     variables.clear_calibration_peak_range()
+    from pyccapt.calibration.core.calibration_metadata import record_step
+    record_step(variables, 'restore_saved_working_correction', parameters={'mode': calibration_mode.value})
 
 
 def save_on_click(variables, calibration_mode):
@@ -46,6 +50,9 @@ def save_on_click(variables, calibration_mode):
         variables.dld_t_calib_backup = np.copy(variables.dld_t_calib)
     elif calibration_mode.value == 'mc_calib':
         variables.mc_calib_backup = np.copy(variables.mc_calib)
+    from pyccapt.calibration.core.calibration_metadata import record_step
+    record_step(variables, 'save_working_correction', parameters={'mode': calibration_mode.value,
+        'note': 'Working-array backup; exported dataframe remains the result checkpoint.'})
 
 
 def clear_plot_on_click(out, out_status):

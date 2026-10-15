@@ -9,6 +9,12 @@ conditional ICF/kf ratio profiling and resumable sessions. The existing
 [calibration mathematics](calibration_math.md) and [session/export contract](analysis_sessions.md)
 for input requirements, validation and the scope of each new method.
 
+Both notebooks propose editable crop regions and group ICF/kf tuning and compact
+inline reconstruction into two ordered tabs. Their shared `CalibrationMetadata`
+journal automatically records actions and model state in saved results.
+[Same-source restoration](guided_workflow.md#shared-calibration-record-and-exact-saved-result-restoration)
+checks measurements and event IDs before restoring exact exported arrays.
+
 ![Calibration visualization](../pyccapt/files/readme_images/visualization_gif.gif)
 
 ## Core Workflows

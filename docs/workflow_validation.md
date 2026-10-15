@@ -553,3 +553,31 @@ succeeded without warnings, with notebook execution disabled.
 The NeXus export remains a labelled partial mapping, not complete NXapm
 conformance. Checksummed storage proves stored integrity, not correctness of an
 ion identity, calibration model, reconstruction or acquisition completeness.
+
+## Editable crop suggestions and shared journal (15 October 2026)
+
+The legacy Plot callbacks and guided Crop tab now share deterministic, editable
+suggestions; no proposal is automatically applied. A read-only replay on the
+1891 raw Al source (6,058,440 events, SHA-256
+`7d44afdf1d403050cdefb5c3cf7cebd25773ba178075989626f37550dfd2ff9a`)
+proposed source interval `[47331, 6058440)` and detector circle center
+`(-0.04810, 0.31599)` cm, radius `2.32857` cm. Their combined mask would retain
+5,022,390 events. These are data-based starting shapes, not a validated physical
+optimum. Review/resize them before applying. The source checksum was unchanged.
+
+Using the confirmed 110 mm / 38 ns / voltage-mode conversion, the replay saved
+and exactly restored 10,000 selected real events. Its journal fingerprinted the
+complete original analysis input; output masses and uint64 event IDs matched
+exactly. The bounded saved subset tests persistence, not calibration quality.
+The replay took 6.93 seconds including I/O, source checksums and the summary plot.
+Local artifacts are under `analysis_outputs/1891_raw_ui/density_suggestions/`.
+
+The calibration suite passed 807 tests after the provenance and two-tab
+reconstruction changes. A subsequently added legacy-circle handle regression
+passed with the focused storage/UI checks (44 tests). Those checks include
+mouse-event resizing/moving, single widget display, accepted-parameter transfer,
+inline/browser renderer selection, display-only sampling, NeXus hard links,
+same-source restoration and mismatch rejection. This is Python/canvas testing,
+not a live browser end-to-end claim. The full documentation build succeeded
+with 18 warnings; Ruff passed. Physical calibration/reconstruction equations
+and unsupported-evidence gates were preserved.

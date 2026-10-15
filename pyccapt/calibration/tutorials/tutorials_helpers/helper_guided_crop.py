@@ -3,21 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from pyccapt.calibration.core.exceptions import CalibrationInputError, CalibrationStateError
-from pyccapt.calibration.data_tools.selectors_data import CircleSelector
-
-
-class CropCircleSelector(CircleSelector):
-    """Keep a circle's center fixed while resizing any of its handles."""
-
-    def _onmove(self, event):
-        previous = self._state.copy()
-        if self._active_handle and self._active_handle != "C":
-            self._state.update(("square", "center"))
-        try:
-            super()._onmove(event)
-        finally:
-            self._state.clear()
-            self._state.update(previous)
+from pyccapt.calibration.data_tools.selectors_data import CropCircleSelector
 
 
 def source_overview(workflow, selection=None):

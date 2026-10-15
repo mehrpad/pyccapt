@@ -1006,4 +1006,13 @@ def adaptive_residual_calibration(
             f"spatial cells: {spatial_info.get('n_cells', 0)}"
         )
         print(f"[Adaptive residual] rounds: {len(iteration_history)}, stop reason: {stop_reason}")
+    from pyccapt.calibration.core.calibration_metadata import record_step, vector_digest
+    record_step(variables, 'adaptive_residual_correction', status='working', parameters={
+        'mode': calibration_key, 'n_peaks': n_peaks, 'n_windows': n_windows, 'overlap': overlap,
+        'template_bin_size': template_bin_size, 'temporal_smoothing': temporal_smoothing,
+        'apply_spatial': apply_spatial, 'spatial_grid': spatial_grid,
+        'above_ceiling_strategy': above_ceiling_strategy, 'coarse_to_fine_top_k': coarse_to_fine_top_k,
+        'fast_candidate_score': fast_candidate_score, 'diagnostics': result,
+        'output_sha256': vector_digest(current_array),
+        'replay': 'Exact result checkpoint required; no standalone residual model is asserted.'})
     return result

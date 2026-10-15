@@ -62,7 +62,8 @@ def test_legacy_save_roundtrip_and_default_nexus_keep_settings_ids_and_crop(tmp_
     output = tmp_path/'legacy.h5'
     loaded = data_tools.load_data(output, 'pyccapt')
     pd.testing.assert_frame_equal(loaded, data)
-    assert loaded.attrs == attrs
+    assert {key: loaded.attrs[key] for key in attrs} == attrs
+    assert loaded.attrs['pyccapt_calibration_metadata']['checkpoint']['input']['rows'] == len(loaded)
     assert data.attrs == attrs
     with h5py.File(output, 'r') as handle:
         assert 'df' in handle and 'entry' in handle

@@ -147,6 +147,29 @@ project's `.nxs`, `.nx5` or `.h5` exports. The file picker exposes these formats
 integer event IDs and metadata. It deliberately rejects unrelated third-party
 NeXus layouts rather than assuming their fields match this partial mapping.
 
+## Shared processing history
+
+Both processing workflows maintain `CalibrationMetadata` in
+`Variables.calibration_metadata` and `dataframe.attrs['pyccapt_calibration_metadata']`.
+Schema `pyccapt-calibration-history-1` stores software version, original raw-column
+fingerprint, ordered UTC action/model records, and an export checkpoint. The
+checkpoint fingerprints selected raw measurements and each saved mass/ToF/XYZ
+column, preserving numeric types and stable uint64 event IDs. Working corrections
+are labelled separately from accepted outputs. History starts at the current
+import; earlier missing steps and arbitrary notebook edits are not inferred.
+
+HDF5 saves always include UTF-8 JSON at `/calibration_provenance/json`, even with
+NeXus disabled. Its NXcollection group is a project extension, not a full NXapm
+conformance assertion. The partial NeXus mapping hard-links that same group below
+`/entry/pyccapt_data`. Exchange exports write `<filename>.calibration.json` sidecars.
+Models are serialized as safe JSON state; arbitrary Python objects are not loaded
+via pickle by this journal. Existing Pandas range-table storage is unchanged.
+
+`restore_saved_calibration(result_path, original_source_frame)` verifies the full
+original analysis input/order and selected event measurements, then restores saved
+derived arrays without a refit. It rejects mismatches and does not apply a recipe
+to another experiment. See [the workflow guide](../../docs/guided_workflow.md).
+
 ## Range Dataset (HDF5 or Imported `.rrng` / `.rng`)
 
 Range data defines identified ion windows in mass-to-charge space. The workflow

@@ -30,6 +30,9 @@ def apply_crop(variables, out, use_manual_values, start_widget, end_widget):
                 update_backups=False,
                 clear_selection=False,
             )
+            from pyccapt.calibration.core.calibration_metadata import record_step
+            record_step(variables, 'temporal_crop', parameters={'start_inclusive': int(min(variables.selected_x1, variables.selected_x2)),
+                'stop_inclusive': int(max(variables.selected_x1, variables.selected_x2)), 'retained_events': len(variables.data)})
             print(
                 'The crop for start index:',
                 int(min(variables.selected_x1, variables.selected_x2)),
@@ -42,7 +45,7 @@ def apply_crop(variables, out, use_manual_values, start_widget, end_widget):
             print(f'Invalid temporal crop: {exc}')
 
 
-def call_plot_crop_experiment(variables, pulse_mode):
+def call_plot_crop_experiment(variables, pulse_mode, *, display_panel=True):
     max_tof_widget = widgets.FloatText(value=variables.max_tof)
     max_tof_label = widgets.Label(value="Max TOF:", layout=label_layout)
 
@@ -69,6 +72,7 @@ def call_plot_crop_experiment(variables, pulse_mode):
     pulse_mode_label = widgets.Label(value="Pulse Mode:", layout=label_layout)
 
     use_manual_values = widgets.Checkbox(value=False, description='Use manual crop indices')
+    suggest = widgets.Checkbox(value=True, description='Suggest interval from DC voltage')
     use_manual_label = widgets.Label(value="Manual Crop:", layout=label_layout)
     start_widget = widgets.IntText(value=int(min(variables.selected_x1, variables.selected_x2)))
     end_widget = widgets.IntText(value=int(max(variables.selected_x1, variables.selected_x2)))
@@ -94,9 +98,7 @@ def call_plot_crop_experiment(variables, pulse_mode):
             out.clear_output()
             print('Loaded the current drawn crop values into the manual fields.')
 
-    def on_button_click(_, variables):
-        button_plot.disabled = True
-
+    def plot_preview(variables):
         data = variables.data.copy()
         max_tof = max_tof_widget.value
         frac = frac_widget.value
@@ -113,10 +115,19 @@ def call_plot_crop_experiment(variables, pulse_mode):
         if use_manual_values.value:
             _apply_manual_temporal_values(variables, start_widget.value, end_widget.value)
             draw_rect = True
+        elif suggest.value:
+            from pyccapt.calibration.core.crop_suggestions import suggest_temporal_crop
+            proposal = suggest_temporal_crop(data)
+            variables.crop_suggestion_temporal = proposal
+            _apply_manual_temporal_values(variables, proposal['event_start'], max(proposal['event_start'], proposal['event_stop']-1))
+            start_widget.value, end_widget.value = variables.selected_x1, variables.selected_x2
+            draw_rect = True
 
         with out:
             out.clear_output()
             try:
+                if not use_manual_values.value and suggest.value:
+                    print('Suggested interval:', proposal['reason'], 'Review/resize the rectangle before Apply crop.')
                 data_loadcrop.plot_crop_experiment_history(
                     data,
                     variables,
@@ -135,11 +146,19 @@ def call_plot_crop_experiment(variables, pulse_mode):
                 if use_manual_values.value:
                     print('Manual temporal crop preview updated on the experiment-history plot.')
                 else:
-                    print('Draw a rectangle on the plot or enable manual indices and re-plot for a preview.')
+                    print('Resize/move the rectangle, then Apply crop. Load drawn values copies its bounds into the manual fields.')
             except ValueError as exc:
                 print(f'Invalid temporal crop preview: {exc}')
 
-        button_plot.disabled = False
+    def on_button_click(_, variables):
+        button_plot.disabled = True
+        try:
+            plot_preview(variables)
+        except ValueError as exc:
+            with out:
+                print(f'Invalid temporal crop preview: {exc}')
+        finally:
+            button_plot.disabled = False
 
     button_plot.on_click(lambda b: on_button_click(b, variables))
     button_apply.on_click(lambda b: apply_crop(variables, out, use_manual_values, start_widget, end_widget))
@@ -156,11 +175,17 @@ def call_plot_crop_experiment(variables, pulse_mode):
             widgets.HBox([dc_plot_label, dc_plot_widget]),
             widgets.HBox([pulse_mode_label, pulse_mode_widget]),
             widgets.HBox([use_manual_label, use_manual_values]),
+            suggest,
             widgets.HBox([index_label, widgets.HBox([start_widget, end_widget])]),
             widgets.HBox([save_label, save_widget]),
             widgets.HBox([figname_label, figname_widget]),
             widgets.HBox([button_plot, button_sync, button_apply, button_reset]),
         ]
     )
-    display(widget_container)
-    display(out)
+    widget_container.controls = {'Plot': button_plot, 'Apply crop': button_apply, 'suggest': suggest,
+        'manual': use_manual_values, 'start': start_widget, 'stop_inclusive': end_widget, 'output': out}
+    if display_panel:
+        display(widget_container)
+        display(out)
+        return None
+    return widget_container

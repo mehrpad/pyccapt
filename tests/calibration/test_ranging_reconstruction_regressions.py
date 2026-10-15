@@ -183,8 +183,8 @@ def test_accepted_sdm_parameters_reach_actual_reconstruction(monkeypatch):
         training_profile=[], heldout_profile=[], metadata=dict(
             source_hash=rc._hash_source(variables), icf_bounds=[1.1, 1.9], det_eff=.7,
             field_evap=30., avg_dens=60., flight_path_length=110., mode='Geiser')))
-    old_panel = h3.call_x_y_z_calculation(variables, flight, element)
-    panel = hs.call_sdm_icf_kf_calibration(variables, flight, element)
+    old_panel = h3.call_x_y_z_calculation(variables, flight, element, display_panel=False)
+    panel = old_panel.controls['tuning']
     for widget in _widgets(panel):
         if isinstance(widget, widgets.Checkbox):
             widget.value = True
@@ -199,7 +199,8 @@ def test_accepted_sdm_parameters_reach_actual_reconstruction(monkeypatch):
     _button(old_panel, 'Load accepted parameters').click()
     _button(old_panel, 'Reconstruct & plot').click()
     assert calls[-1]['kf'] == pytest.approx(4.125) and calls[-1]['icf'] == 1.65
-    new_panel = h3.call_x_y_z_calculation(variables, flight, element)
+    assert old_panel.reconstruction_tabs.selected_index == 1
+    new_panel = h3.call_x_y_z_calculation(variables, flight, element, display_panel=False)
     _button(new_panel, 'Reconstruct & plot').click()
     assert calls[-1]['kf'] == pytest.approx(4.125) and calls[-1]['icf'] == 1.65
 
@@ -213,7 +214,7 @@ def _background_ratio_panel(monkeypatch, profiler):
     monkeypatch.setattr(hs, 'display', lambda *_: None)
     monkeypatch.setattr(rc, 'profile_icf_kf_ratio', profiler)
     jobs, callbacks = _queued_ratio_jobs(monkeypatch)
-    panel = hs.call_sdm_icf_kf_calibration(variables, flight, SimpleNamespace(value=('Al', 60., 30.)))
+    panel = hs.call_sdm_icf_kf_calibration(variables, flight, SimpleNamespace(value=('Al', 60., 30.)), display_panel=False)
     for widget in _widgets(panel):
         if isinstance(widget, widgets.Checkbox):
             widget.value = True
@@ -282,7 +283,7 @@ def test_showing_density_candidates_preserves_roi_until_review_and_resets_spacin
     monkeypatch.setattr(hs.sc, 'sharp_fdm_map', lambda *args, **kwargs: (
         np.ones((2,2)), np.ones((2,2)), np.array([-1.,0.,1.]), np.array([-1.,0.,1.])))
     monkeypatch.setattr(hs.sc, 'detect_pole_candidates', lambda *args, **kwargs: [(.2,.3,5.)])
-    panel = hs.call_sdm_icf_kf_calibration(variables, widgets.FloatText(value=110.), SimpleNamespace(value=('Al',60.,30.)))
+    panel = hs.call_sdm_icf_kf_calibration(variables, widgets.FloatText(value=110.), SimpleNamespace(value=('Al',60.,30.)), display_panel=False)
     confirmation = next(w for w in _widgets(panel) if isinstance(w, widgets.Checkbox) and 'Indexed spacing' in w.description)
     confirmation.value = True
     _button(panel, 'Show FDMs').click()
@@ -296,7 +297,7 @@ def test_showing_density_candidates_preserves_roi_until_review_and_resets_spacin
 def test_reconstruct_button_recovers_after_downstream_failure(monkeypatch):
     monkeypatch.setattr(h3, 'display', lambda *_: None)
     panel = h3.call_x_y_z_calculation(Variables(), widgets.FloatText(value=110.),
-                                     SimpleNamespace(value=('Al', 60., 30.)))
+                                     SimpleNamespace(value=('Al', 60., 30.)), display_panel=False)
     def fail(**kwargs):
         raise CalibrationInputError('invalid input')
     monkeypatch.setattr(reconstruction, 'x_y_z_calculation_and_plot', fail)

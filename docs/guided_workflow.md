@@ -81,12 +81,13 @@ identify useful data, but they do not establish composition or calibration quali
 - The sequence rectangle uses the full source's event positions. Fractional
   drag bounds are rounded outward (`floor(left)`, `ceil(right)`) and clipped to
   the source length. Exact start/stop fields remain editable.
-- For a fresh source, the rectangle starts across the complete run and the
-  circle encloses the finite detector-map bounds. This starting view is not an
-  automatic choice of a smooth run interval or artifact-free detector region.
-  Both are drafts; source events and accepted calibration stay unchanged until
-  you preview and accept the crop. Existing accepted/preview crop settings are
-  restored rather than replaced with these starting regions.
+- For a fresh source, a data-based proposal selects the longest voltage interval
+  passing jump/drop and local-roughness checks, then a circle inside the main
+  dense detector region for that interval. **Suggest crop from data** repeats
+  this calculation. A message explains the choice or insufficient evidence;
+  similar-length intervals are labelled ambiguous. These are editable drafts,
+  not a guaranteed optimum. Existing accepted/preview settings are preserved
+  when reopening the drawing. See the algorithm and limitations below.
 - The FDM is a logarithmic density histogram using every finite detector hit in
   the draft sequence interval. This is not a subsampled scatter plot. It shows
   that interval before the circle, optional ToF window, or optional voltage
@@ -107,6 +108,74 @@ identify useful data, but they do not establish composition or calibration quali
 The interactive canvas uses `ipympl`, included in the calibration dependencies.
 Use a Jupyter frontend with widget support; no global Matplotlib backend change
 is needed. Numeric crop controls remain usable without the interactive canvas.
+
+### How the automatic crop proposal works
+
+The same heuristic is used by the original notebook's temporal/spatial **Plot**
+buttons and the guided Crop tab. In the original notebook, leave **Suggest
+interval from DC voltage** / **Suggest circle from detector density** enabled.
+Press **Plot**, inspect the pre-drawn handles, drag to adjust, then **Apply crop**.
+Manual crop fields take precedence when **Use manual crop...** is enabled.
+**Load drawn values** only copies the drawing into those fields; it does not crop.
+The original notebook's end index is inclusive. The guided tab's stop is exclusive.
+
+The voltage algorithm divides acquisition order into up to 512 windows and tests
+positive/finite voltage, unusually large adjacent jumps or drops, and robust local
+roughness after removing a linear trend. It proposes the longest passing segment,
+allowing a smooth curved voltage rise. It does not decide whether an interruption
+is physically useful, establish chemistry, or identify a uniquely best interval.
+Short/missing/unusable voltage data leave the full interval for manual review.
+
+For the detector, all finite hits in the proposed interval contribute to a 128 ×
+128 histogram, within robust bounds estimated from at most 200,000 evenly spaced
+hits. Smoothed log density separates a bright core from a weak halo; nearly uniform
+data use a supported-footprint threshold. The largest connected region is used,
+enclosed holes are filled, and a distance transform finds a large interior circle
+with a small bin-resolution margin. Edge-connected bites remain outside that
+region. This favors a clean interior and can discard useful ions: inspect poles,
+edges and any composition bias before accepting. Sparse/degenerate maps abstain;
+the initial editable circle remains available. Thresholds, method version and
+diagnostics are exposed in the proposal. No calibration equation changes here.
+
+## Shared calibration record and exact saved-result restoration
+
+Both workflows use `CalibrationMetadata` on `Variables`. It records crop actions,
+physical-conversion settings, fitted voltage/bowl/joint/reference models, working
+correction resets/restores, accepted guided stages and reconstruction parameters.
+Working fits and proposals are distinguished from accepted workflow outputs; a
+trial followed by a rollback is not an accepted correction. History begins when
+data are imported with this version; missing steps in older files are not invented.
+Arbitrary code entered in notebook cells cannot be inferred automatically.
+
+Saving HDF5 automatically includes `/calibration_provenance/json`, the shared
+dataframe metadata and the result checkpoint. The partial NeXus mapping links
+the same record under `/entry/pyccapt_data/calibration_provenance`. This works
+with the original Save data panel too, even if NeXus export is disabled. CSV,
+POS, EPOS and ATO exports get a `<filename>.calibration.json` sidecar because
+those formats cannot contain this journal. Keep that sidecar with the data.
+
+For an exact repeat, **Resume saved session** restores the guided workflow.
+For either workflow's HDF5/NeXus result, Python can restore the exported calibrated
+arrays on the original raw input after checking measurements, event IDs, order
+and saved-output fingerprints:
+
+```python
+from pyccapt.calibration.data_tools.data_tools import load_data
+from pyccapt.calibration.core.calibration_metadata import restore_saved_calibration
+
+original = load_data("original_run.h5", "pyccapt", mode="raw")
+restored = restore_saved_calibration("saved_result.h5", original)
+variables.sync_from_data(restored)
+```
+
+Supply the complete analysis input used at import, before cropping. The result
+contains the saved selected events and calibrated columns. This **restores exact
+saved outputs without refitting**. It does not silently transfer coefficients to
+a different experiment or guarantee that rerunning a fit reproduces its result.
+Binary exchange formats may also round values or omit raw columns; their sidecars
+are an audit record, not a replacement for the HDF5/session needed for exact
+restoration. The saved output checkpoint is authoritative when exploratory
+working fits appear in the journal.
 
 ## Accepted state and dependencies
 
@@ -278,13 +347,33 @@ Voltage-mode reconstruction uses the existing DC-plus-pulse voltage convention,
 the same convention as ratio profiling. Calibration's effective acceleration
 formula is a distinct documented model and is not substituted for reconstruction.
 
-The optional **Review ICF/kf ratio** panel runs in a separate workspace. Review
+Both processing notebooks now group reconstruction into two tabs: **1. Find /
+tune ICF and kf**, then **2. Reconstruct and plot**. In the guided notebook, open
+**Review ICF/kf ratio** in the first tab. The panel uses a separate workspace. Review
 the acquisition completeness, pole/ROI, indexed spacing, depth-band validation,
 and parameter family. A ratio q = ICF/kf does not uniquely determine both
-parameters; acceptance requires an independently anchored ICF. Capture ratio
-geometry computes coordinates from those accepted settings, then requires
-workflow acceptance. Ratio evidence and selected settings survive session resume.
+parameters; acceptance requires an independently anchored ICF. Accepting a
+reviewed family transfers its settings into the second tab. **Capture ratio
+geometry** also loads an already accepted tuning result. It does not accept
+geometry: click **Preview reconstruction**, inspect it, then **Accept reconstruction**.
+Ratio evidence and selected settings survive session resume.
 The restored controls display saved accepted geometry rather than fresh defaults.
+
+In the original notebook, the reconstruction cell contains the tuning panel too.
+Running the former standalone SDM cell selects that first tab instead of displaying
+another form. **Load accepted parameters** copies the accepted tuning settings into
+the reconstruction fields and shows a status message. It is disabled until a set
+exists. Values typed in the second tab remain a manual choice and need no automatic
+suggestion. The helpers display once; do not wrap their default calls in `display()`.
+
+**Show plot → In this cell** is the default in both workflows. The interactive 3D
+plot is 760 × 480 pixels with at most 50,000 displayed ions by default. Fractions
+and this adjustable limit affect display only, including cluster overlays; all
+coordinates are still calculated with the existing reconstruction equations.
+**Separate browser HTML** opens Plotly's browser renderer instead. Saving a figure
+is a separate option in the original notebook. The guided plot is a preview until
+you explicitly accept it. A Jupyter frontend with Plotly MIME/widget support is
+needed for inline rendering.
 
 Use the detector map to review the ROI before profiling. Detected features are
 unindexed candidates, not crystallographic assignments. Selecting one requires

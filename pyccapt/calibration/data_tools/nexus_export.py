@@ -83,6 +83,12 @@ def write_nexus_mapping(handle, frame, *, metadata=None, ranges=None, reconstruc
         if key in metadata:
             _text(entry, key, metadata[key])
     collection = _group(entry, 'pyccapt_data', 'NXcollection')
+    from pyccapt.calibration.core.calibration_metadata import CalibrationMetadata
+    calibration_metadata = CalibrationMetadata.from_frame(frame)
+    if 'calibration_provenance' not in handle:
+        calibration_metadata.checkpoint(frame)
+        calibration_metadata.write_hdf5(handle)
+    collection['calibration_provenance'] = handle['calibration_provenance']
     collection.attrs.update(source_id=dataset.source_id, source_hash=dataset.source_hash,
                             event_id_origin='source' if had_ids else 'assigned at export; full source order unknown')
     _numeric(collection, 'event_id', dataset.event_ids, '1')

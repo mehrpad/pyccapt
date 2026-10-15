@@ -241,6 +241,9 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             variables.dld_t_calib = np.copy(state)
         else:
             variables.mc_calib = np.copy(state)
+        from pyccapt.calibration.core.calibration_metadata import record_step, vector_digest
+        record_step(variables, 'restore_working_candidate', status='working',
+                    parameters={'mode': _calibration_mode_key(), 'output_sha256': vector_digest(state)})
 
     def _capture_selection():
         mode_key = _calibration_mode_key()
@@ -819,6 +822,11 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             if calibration_mode_widget.value == 'tof_calib':
                 # Step 1: Naive flight-path + voltage factor correction
                 variables.dld_t_calib = calibration.initial_calibration(variables.data, flight_path_length_value)
+                from pyccapt.calibration.core.calibration_metadata import record_step
+                record_step(variables, 'initial_tof_normalization', status='working', parameters={
+                    'flight_path_length_mm': flight_path_length_value, 'input': 'raw t (ns)',
+                    'formula': 't * sqrt(mean(L2+x2+y2)/(L2+x2+y2)) * sqrt(V/mean(V))',
+                    'detector_input_units': 'cm converted to mm'})
                 print('Initial ToF calibration is done')
                 # Step 2: Re-select peak window on the corrected data
                 _force_reselect_peak_window()
@@ -845,6 +853,9 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                 # (which _ensure_initial_calibration now does on every Auto
                 # press) compounds bowl corrections on m/c.
                 variables.mc_calib = variables.data['mc_uc (Da)'].to_numpy()
+                from pyccapt.calibration.core.calibration_metadata import record_step
+                record_step(variables, 'initial_mass_baseline_reset', status='working',
+                            parameters={'input': 'dataframe mc_uc (Da)'})
                 # Always re-pick the peak window for *this* mode before
                 # running bowl correction. Otherwise, when called from the
                 # combined mc+tof FAST/BEST flow, variables.selected_x1/x2

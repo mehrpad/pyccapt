@@ -257,6 +257,9 @@ class SharedVariablesBase:
         self.dataset = dataset
         self.data = frame
         self.event_ids = dataset.event_ids
+        from pyccapt.calibration.core.calibration_metadata import CalibrationMetadata
+        self.calibration_metadata = CalibrationMetadata.from_frame(frame)
+        self.calibration_metadata.attach(frame)
         if update_backups or self.data_backup is None:
             self.data_backup = frame.copy()
 
@@ -324,7 +327,13 @@ class SharedVariablesBase:
         """Restore the original dataframe snapshot and resynchronize shared arrays."""
         if self.data_backup is None:
             raise CalibrationStateError("No backup dataframe is available for restore")
-        return self.sync_from_data(self.data_backup.copy(), update_backups=False, clear_selection=True)
+        metadata = getattr(self, 'calibration_metadata', None)
+        restored = self.sync_from_data(self.data_backup.copy(), update_backups=False, clear_selection=True)
+        if metadata is not None:
+            self.calibration_metadata = metadata
+            from pyccapt.calibration.core.calibration_metadata import record_step
+            record_step(self, 'reset_to_imported_source')
+        return restored
 
     @staticmethod
     def _dir_as_string(directory: str | Path) -> str:

@@ -182,6 +182,7 @@ class GuidedWorkflow:
             replaced.update(("x (nm)", "y (nm)", "z (nm)"))
         frame.attrs["pyccapt_unavailable_columns"] = [name for name in
             frame.attrs.get("pyccapt_unavailable_columns", []) if name not in replaced]
+        v.calibration_metadata.attach(frame)
         v.data = frame
 
     @property
@@ -361,6 +362,10 @@ class GuidedWorkflow:
         self.revision += 1
         self.log.append({"action": "accept", "stage": stage, "revision": self.revision})
         self._sync_outputs()
+        from pyccapt.calibration.core.calibration_metadata import record_step
+        parameters = accepted.get('criteria', accepted.get('receipt', accepted.get('parameters', {})))
+        record_step(self.variables, f'guided_accept_{stage}', parameters=parameters,
+                    model=(accepted.get('model_state') or {}).get('learned_model'))
         return self.status()
 
     def undo(self):
@@ -376,6 +381,8 @@ class GuidedWorkflow:
         self.revision += 1
         self.log.append({"action": "undo", "operation": previous["operation"], "revision": self.revision})
         self._sync_outputs()
+        from pyccapt.calibration.core.calibration_metadata import record_step
+        record_step(self.variables, 'guided_undo', parameters={'operation': previous['operation']})
         return self.status()
 
     def compare(self, stage):
@@ -461,7 +468,8 @@ class GuidedWorkflow:
             "source_path": self.source_path, "source_attrs": self.source.attrs, "source_columns": columns,
             "event_ids": self.event_ids, "accepted": self.accepted, "preview": self.preview,
             "review": None if self.review is None else self.review.to_state(), "history": self.history,
-            "log": self.log, "revision": self.revision, "mass_revision": self.mass_revision, "inspected": self.inspected}, arrays)
+            "log": self.log, "revision": self.revision, "mass_revision": self.mass_revision, "inspected": self.inspected,
+            "calibration_metadata": self.variables.calibration_metadata.to_dict()}, arrays)
         return metadata, arrays
 
     @classmethod
@@ -488,6 +496,9 @@ class GuidedWorkflow:
             workflow.review = PeakReviewQueue.from_state(workflow.accepted["calibration"]["mass"], state["review"])
         from pyccapt.calibration.core.guided_workflow_validation import validate_restored_workflow
         validate_restored_workflow(workflow)
+        if state.get('calibration_metadata'):
+            from pyccapt.calibration.core.calibration_metadata import CalibrationMetadata
+            temporary.calibration_metadata = CalibrationMetadata(state['calibration_metadata'])
         workflow._sync_outputs()
         if variables is not None:
             # Commit only after every source/output/review validation succeeds.

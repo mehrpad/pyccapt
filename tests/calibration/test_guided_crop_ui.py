@@ -35,7 +35,7 @@ def test_drawing_requires_preview_and_accept_and_keeps_sequence_semantics(drawin
     drawing = panel.controller["crop_drawing"]
     drawing.interval(100, 900)
     drawing.circle(0., 0., .2)
-    assert drawing.intervals == [(100, 900)]
+    assert drawing.intervals[-1] == (100, 900)
     assert not panel.controls["crop_voltage"].value
     assert panel.controls["crop_detector"].value
     assert session.active_mask.all() and "crop" not in session.preview

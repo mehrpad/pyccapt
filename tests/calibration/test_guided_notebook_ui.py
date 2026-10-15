@@ -198,12 +198,14 @@ def test_ratio_panel_receives_flight_widget_and_capture_uses_accepted_parameters
     monkeypatch.setattr(helper, "NotebookJob", ImmediateJob)
     monkeypatch.setattr(helper, "display", lambda *_: None)
     captured = {}
-    def fake_ratio(variables, flight, selected, colab=False):
+    def fake_ratio(variables, flight, selected, colab=False, **kwargs):
+        import ipywidgets as widgets
         captured.update(variables=variables, flight=flight.value, density=selected.value[1])
         variables.reconstruction_parameters = dict(projection="Geiser", flight_path_length=125.,
             icf=1.6, kf=4., det_eff=.6, field_evap=31., avg_dens=88.)
         variables.reconstruction_ratio_result = {"q": .4, "method": "synthetic independently anchored ratio"}
         variables.x = variables.y = variables.z = np.full(len(variables.mc), 999.)  # stale sandbox geometry
+        return widgets.VBox()
     monkeypatch.setattr(helper_sdm_calibration, "call_sdm_icf_kf_calibration", fake_ratio)
     session = accepted_mass()
     accept_one_range(session)
@@ -211,6 +213,9 @@ def test_ratio_panel_receives_flight_widget_and_capture_uses_accepted_parameters
     panel.controls["Review ICF/kf ratio"].click()
     assert captured["flight"] == 100. and captured["density"] == 85.
     panel.controls["Capture ratio geometry"].click()
+    assert "reconstruction" not in session.preview
+    assert panel.controls['reconstruction_tabs'].selected_index == 1
+    panel.controls["Preview reconstruction"].click()
     result = session.preview["reconstruction"]
     expected = reconstruct_xyz(captured["variables"], 4., 1.6, .6, 31., 88., 125.)
     np.testing.assert_allclose(result["xyz"], np.column_stack(expected))

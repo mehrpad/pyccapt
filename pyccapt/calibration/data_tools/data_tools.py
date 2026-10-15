@@ -413,6 +413,11 @@ def save_data(
                          criteria={'prior': selection.get('criteria', {}),
                                    'export_input_row_slice': {'start_inclusive': start_index, 'end_inclusive': end_index}})
         export_data.attrs['pyccapt_selection'] = selection
+    from pyccapt.calibration.core.calibration_metadata import CalibrationMetadata
+    calibration_metadata = CalibrationMetadata.from_frame(data)
+    calibration_metadata.record('export_result', parameters={'rows': len(export_data), 'formats':
+        [kind for kind, enabled in [('hdf5', hdf), ('epos', epos), ('pos', pos), ('ato', ato_6v), ('csv', csv)] if enabled]})
+    calibration_metadata.checkpoint(export_data)
     receipt = getattr(variables, 'guided_calibration_receipt', None)
     reconstruction_parameters = getattr(variables, 'reconstruction_parameters', None)
     ratio_result = getattr(variables, 'reconstruction_ratio_result', None)
@@ -491,20 +496,20 @@ def save_data(
                     range_table.to_hdf(tmp_h5_path, key="range", mode="a")
                     range_status = f"{output_h5} (/range, {len(range_table)} rows)"
             # All writes succeeded -- atomically replace the target.
-            if analysis_session is not None or nexus or nexus_metadata is not None or INSTRUMENT_ATTR in export_data.attrs:
-                import h5py
-                with h5py.File(tmp_h5_path, 'a') as handle:
-                    if INSTRUMENT_ATTR in export_data.attrs:
-                        from pyccapt.instrument_metadata import write_instrument_metadata
-                        write_instrument_metadata(handle, export_data.attrs[INSTRUMENT_ATTR])
-                    if analysis_session is not None:
-                        from pyccapt.calibration.data_tools.analysis_session import write_session_group
-                        write_session_group(handle, *analysis_session)
-                    if nexus or nexus_metadata is not None:
-                        from pyccapt.calibration.data_tools.nexus_export import write_nexus_mapping
-                        write_nexus_mapping(handle, export_data, metadata=nexus_metadata,
-                                            ranges=getattr(variables, 'range_data', None),
-                                            reconstruction=getattr(variables, 'reconstruction_parameters', {}))
+            import h5py
+            with h5py.File(tmp_h5_path, 'a') as handle:
+                calibration_metadata.write_hdf5(handle)
+                if INSTRUMENT_ATTR in export_data.attrs:
+                    from pyccapt.instrument_metadata import write_instrument_metadata
+                    write_instrument_metadata(handle, export_data.attrs[INSTRUMENT_ATTR])
+                if analysis_session is not None:
+                    from pyccapt.calibration.data_tools.analysis_session import write_session_group
+                    write_session_group(handle, *analysis_session)
+                if nexus or nexus_metadata is not None:
+                    from pyccapt.calibration.data_tools.nexus_export import write_nexus_mapping
+                    write_nexus_mapping(handle, export_data, metadata=nexus_metadata,
+                                        ranges=getattr(variables, 'range_data', None),
+                                        reconstruction=getattr(variables, 'reconstruction_parameters', {}))
             with tmp_h5_path.open('rb+') as stream:
                 os.fsync(stream.fileno())
             os.replace(tmp_h5_path, output_h5_path)
@@ -557,6 +562,9 @@ def save_data(
         store_df_to_csv(export_data, output_csv)
         saved_outputs["csv"] = output_csv
 
+    for format_name in ("epos", "pos", "ato", "csv"):
+        if format_name in saved_outputs:
+            calibration_metadata.write_json(str(saved_outputs[format_name]) + ".calibration.json")
     for format_name, output_path in saved_outputs.items():
         print(f"Saved {format_name.upper()}: {output_path}")
 

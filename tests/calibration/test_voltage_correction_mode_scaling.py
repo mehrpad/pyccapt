@@ -1,5 +1,6 @@
 """Known-truth recovery across fitting and application, in both domains."""
 import numpy as np
+import pandas as pd
 import pytest
 
 from pyccapt.calibration.core import calibration
@@ -11,6 +12,7 @@ def test_voltage_fit_removes_known_multiplicative_drift(mode):
     voltage = np.repeat(np.linspace(4000.0, 6000.0, 30), 100)
     measured = 100.0 * (1.0 + 0.0001 * (voltage - 5000.0))
     variables = Variables()
+    variables.sync_from_data(pd.DataFrame({'t (ns)': measured, 'high_voltage (V)': voltage}))
     variables.dld_t_calib = measured.copy()
     variables.mc_calib = measured.copy()
     variables.set_calibration_peak_range(mode, 89.0, 111.0)
@@ -21,6 +23,9 @@ def test_voltage_fit_removes_known_multiplicative_drift(mode):
         maximum_cal_method="mean", peak_maximum=100.0,
     )
     np.testing.assert_allclose(variables.get_calibration_array(mode), 100.0, atol=1e-6)
+    step = variables.calibration_metadata.state['steps'][-1]
+    assert step['operation'] == 'voltage_correction' and step['status'] == 'working'
+    assert step['parameters']['calibration_mode'] == mode and len(step['model']) == 3
 
 
 @pytest.mark.parametrize("mode", ["tof", "mc"])

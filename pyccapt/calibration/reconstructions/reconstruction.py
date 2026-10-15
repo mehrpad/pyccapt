@@ -4,7 +4,6 @@ from copy import copy
 import matplotlib.pyplot as plt
 import numpy as np
 import plotly.graph_objects as go
-import plotly.io as pio
 from matplotlib import colors
 from matplotlib.animation import FuncAnimation
 from plotly.subplots import make_subplots
@@ -286,6 +285,8 @@ def reconstruction_plot(
     unranged_alpha=None,
     evaporation_gif_frames=120,
     evaporation_gif_fps=15,
+    display_mode='inline',
+    max_display_points=50000,
 ):
     """
     Generate a 3D plot for atom probe reconstruction data.
@@ -361,6 +362,8 @@ def reconstruction_plot(
     else:
         print('element_percentage should be a list')
 
+    from pyccapt.calibration.reconstructions.display_limits import display_selection, limit_display
+    mask_f &= display_selection(variables, len(mask_f))
     row_colors = _normalize_plotly_colors(variables.range_data['color'].tolist())
     row_ions = variables.range_data['ion'].tolist()
     row_masks, unranged_mask, ranged_indices = range_row_masks_and_unranged(variables.mc, variables.range_data)
@@ -382,15 +385,8 @@ def reconstruction_plot(
             mask = source_masks[index] & mask_f
             sampled_masks.append(sample_mask(mask, element_percentage[index], n_points))
 
-    if sampled_masks:
-        plotted_mask = np.logical_or.reduce(sampled_masks)
-    else:
-        plotted_mask = np.asarray(mask_f, dtype=bool)
-    if cluster_result is not None:
-        cluster_mask = np.asarray(mask_f, dtype=bool)
-        if not cluster_only:
-            cluster_mask = cluster_mask & (cluster_result.labels >= 0)
-        plotted_mask = plotted_mask | cluster_mask
+    mask_f, sampled_masks, plotted_mask = limit_display(mask_f, sampled_masks, cluster_result,
+                                                      cluster_only, max_display_points)
 
     range_cube = range_cube_from_mask(variables, plotted_mask, fallback_mask=mask_f)
 
@@ -554,6 +550,9 @@ def reconstruction_plot(
         )
     )
 
+    if display_mode not in ('inline', 'browser'):
+        raise ValueError('Display mode must be inline or browser')
+    fig.update_layout(height=480, width=760, margin=dict(l=5, r=5, b=5, t=35))
     # Show the plot in the Jupyter cell output.
     # FigureWidget requires the optional `anywidget` package (Plotly >= 6). Fall
     # back to a plain Figure if it is missing so the reconstruction still renders.
@@ -564,11 +563,7 @@ def reconstruction_plot(
 	          "(install it with `pip install anywidget` for the interactive widget).")
 	    variables.plotly_3d_reconstruction = fig
 
-    if not colab:
-        pio.renderers.default = 'browser'
-        fig.show(config=config)
-    else:
-        fig.show(config=config)
+    fig.show(renderer='browser' if display_mode == 'browser' else 'plotly_mimetype', config=config)
 
     if save:
         try:
@@ -1156,6 +1151,8 @@ def x_y_z_calculation_and_plot(
     cluster_result=None,
     unranged_fraction=0.01,
     unranged_alpha=None,
+    display_mode='inline',
+    max_display_points=50000,
 ):
     """
     Calculate the x, y, z coordinates of the atoms and plot them.
@@ -1226,4 +1223,6 @@ def x_y_z_calculation_and_plot(
         cluster_result=cluster_result,
         unranged_fraction=unranged_fraction,
         unranged_alpha=unranged_alpha,
+        display_mode=display_mode,
+        max_display_points=max_display_points,
     )

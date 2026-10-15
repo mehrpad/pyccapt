@@ -37,6 +37,20 @@ class CircleSelector(RectangleSelector):
         return x - radius, y - radius, 2 * radius, 2 * radius
 
 
+class CropCircleSelector(CircleSelector):
+    """Resize a circle around its center with either edge or corner handles."""
+
+    def _onmove(self, event):
+        previous = self._state.copy()
+        if self._active_handle and self._active_handle != 'C':
+            self._state.update(('square', 'center'))
+        try:
+            super()._onmove(event)
+        finally:
+            self._state.clear()
+            self._state.update(previous)
+
+
 def onselect(eclick, erelease, variables):
     """
     Callback function for the selection event.

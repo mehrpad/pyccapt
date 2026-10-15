@@ -35,8 +35,15 @@ _label = widgets.Layout(width='190px')
 _narrow = widgets.Layout(width='90px')
 
 
-def call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected, colab=False):
+def call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected, colab=False, *,
+                              display_panel=True, on_parameters=None):
     import matplotlib.pyplot as plt
+
+    existing = getattr(variables, '_reconstruction_panel', None)
+    if display_panel and existing is not None:
+        existing.reconstruction_tabs.selected_index = 0
+        print('ICF/kf tuning is in the first tab of the reconstruction panel above.')
+        return None
 
     avg_dens0 = element_selected.value[1]
     field_evap0 = element_selected.value[2]
@@ -49,7 +56,7 @@ def call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected,
     det_eff_w = widgets.FloatText(value=saved.get('det_eff', 0.7), step=0.05, layout=_narrow)
     field_evap_w = widgets.FloatText(value=saved.get('field_evap', field_evap0), layout=_narrow)
     avg_dens_w = widgets.FloatText(value=saved.get('avg_dens', avg_dens0), layout=_narrow)
-    mode_w = widgets.Dropdown(options=[('Geiser', 'Geiser'), ('Bas', 'Bas')], value=saved.get('mode', 'Geiser'), layout=_narrow)
+    mode_w = widgets.Dropdown(options=[('Geiser', 'Geiser'), ('Bas', 'Bas')], value=saved.get('mode', saved.get('projection', 'Geiser')), layout=_narrow)
 
     def _parameters():
         return dict(kf=kf_w.value, icf=icf_w.value, det_eff=det_eff_w.value,
@@ -61,7 +68,9 @@ def call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected,
             raise CalibrationStateError('Wait for or cancel the ratio preview before changing accepted parameters')
         variables.reconstruction_parameters = _parameters()
         variables.reconstruction_ratio_result = {}
-        print('Saved reconstruction parameters. Use "Load accepted parameters" in an already-open reconstruction panel.')
+        if on_parameters:
+            on_parameters(dict(variables.reconstruction_parameters))
+        print('Parameters transferred to the reconstruction tab.')
 
     # ---- SDM / FDM parameters --------------------------------------------
     bin_w = widgets.FloatText(value=0.01, step=0.005, layout=_narrow)
@@ -369,7 +378,12 @@ def call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected,
                 parameters = rc.accept_ratio_family(variables, auto_best['result'], icf_anchor=icf_w.value)
                 kf_w.value = parameters['kf']
                 print(f"Accepted q={auto_best['result']['q']:.5f} with chosen ICF={icf_w.value}; kf={kf_w.value:.5f}.")
-                print('Use Load accepted parameters in an already-open reconstruction panel.')
+                if on_parameters:
+                    on_parameters(dict(variables.reconstruction_parameters))
+                from pyccapt.calibration.core.calibration_metadata import record_step
+                record_step(variables, 'accept_icf_kf_family', parameters=parameters,
+                            model=auto_best['result'])
+                print('Accepted parameters transferred to the reconstruction tab.')
             except (CalibrationInputError, CalibrationStateError) as error:
                 print(str(error))
 
@@ -448,5 +462,7 @@ def call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected,
     tabs.set_title(1, 'Manual reconstruction')
     panel = widgets.VBox([widgets.HBox([recon_box, lattice_box]), roi_box, tabs,
                           widgets.HTML('<b>Status</b>'), out_status])
-    display(panel)
+    if display_panel:
+        display(panel)
+        return None
     return panel

@@ -515,6 +515,12 @@ def voltage_corr_main(
             variables.dld_t_calib = calibration_mc_tof
         elif calibration_mode == 'mc':
             variables.mc_calib = calibration_mc_tof
+        from pyccapt.calibration.core.calibration_metadata import record_step
+        record_step(variables, 'voltage_correction', parameters=dict(calibration_mode=calibration_mode,
+            sample_size=sample_size, sampling_mode=mode, fit_mode=model, peak_bounds=[left_edge, right_edge],
+            bin_size=bin_size, fast_calibration=fast_calibration, peak_maximum=peak_maximum,
+            maximum_cal_method=maximum_cal_method, maximum_sample_method=maximum_sample_method,
+            refine_nelder_mead=refine_nelder_mead, formula='active_array / voltage_factor'), model=fitresult, status='working')
     return f_v
 
 def bowl_correction(
@@ -991,6 +997,13 @@ def bowl_correction_main(
             variables.dld_t_calib = calibration_mc_tof
         elif calibration_mode == 'mc':
             variables.mc_calib = calibration_mc_tof
+        from pyccapt.calibration.core.calibration_metadata import record_step
+        record_step(variables, 'bowl_correction', parameters=dict(calibration_mode=calibration_mode,
+            sample_size=sample_size, sampling_mode=sampling_mode, fit_mode=fit_mode,
+            peak_bounds=[left_edge, right_edge], bin_size=bin_size, detector_diameter_mm=det_diam,
+            peak_maximum=peak_maximum, maximum_cal_method=maximum_cal_method,
+            maximum_sample_method=maximum_sample_method, refine_nelder_mead=refine_nelder_mead,
+            detector_input_units='cm converted to mm', formula='active_array / valid_positive_bowl_factor'), model=parameters, status='working')
     return f_bowl
 
 from pyccapt.calibration.core.calibration_advanced import (  # noqa: E402

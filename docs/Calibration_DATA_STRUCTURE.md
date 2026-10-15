@@ -6,6 +6,12 @@ Processed datasets now retain unsigned `event_id` values and source identity
 through cropping and HDF5 round trips. The optional `pyccapt-session-2` group
 stores the full guided analysis, including source data, fitted models, masks,
 accepted outputs and review history. It supplements the legacy dataframe layout.
+Both processing workflows also save a shared journal and result checkpoint at
+`/calibration_provenance/json` (schema `pyccapt-calibration-history-1`), linked in
+the partial NeXus mapping. It records working/applied actions, model settings and
+raw/output fingerprints. Exchange formats get `.calibration.json` sidecars.
+[Exact restoration](guided_workflow.md#shared-calibration-record-and-exact-saved-result-restoration)
+requires the full matching source; it does not refit or transfer to a new run.
 See [analysis sessions](analysis_sessions.md) for checksums, schema migration,
 missing-value status and the explicitly partial NXapm v2026.01 mapping.
 

@@ -172,6 +172,13 @@ workflows preserve these metadata separately from preview and fitted settings.
 The original notebook also reads this project's partial NeXus mapping and writes
 it alongside `/df` by default; `save_data(..., nexus=False)` opts out.
 
+Both notebooks group ICF/kf tuning and reconstruction into ordered tabs, with a
+compact inline 3D plot by default and an optional browser view. Their crop plots
+propose editable voltage intervals and dense-region circles. A shared calibration
+journal is saved automatically in HDF5 (and as a sidecar for exchange formats),
+including model settings and verified same-source result restoration. See the
+[workflow instructions](docs/guided_workflow.md#shared-calibration-record-and-exact-saved-result-restoration).
+
 Reconstruction suggestions estimate **q = ICF/kf** from independently reviewed
 near-axis crystallographic spacing and show compatible ICF/kf pairs. They report
 insufficient evidence instead of forcing a unique answer. See the

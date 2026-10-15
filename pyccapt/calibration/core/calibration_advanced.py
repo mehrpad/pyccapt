@@ -333,6 +333,10 @@ def multi_peak_voltage_corr_main(
     else:
         variables.mc_calib = calibration_mc_tof
 
+    from pyccapt.calibration.core.calibration_metadata import record_step
+    record_step(variables, 'multi_peak_voltage_correction', status='working', model=fitresult,
+        parameters=dict(calibration_mode=calibration_mode, fit_mode=model, peaks=peak_info,
+                        formula='active_array / clipped_positive_voltage_factor'))
     return fitresult, peak_info
 
 def multi_peak_bowl_corr_main(
@@ -478,6 +482,10 @@ def multi_peak_bowl_corr_main(
     else:
         variables.mc_calib = calibration_mc_tof
 
+    from pyccapt.calibration.core.calibration_metadata import record_step
+    record_step(variables, 'multi_peak_bowl_correction', status='working', model=parameters,
+        parameters=dict(calibration_mode=calibration_mode, fit_mode=fit_mode, samples_used=n_used,
+                        detector_input_units='cm converted to mm', formula='finite_xy_array / clipped_positive_bowl_factor'))
     return parameters, n_used
 
 def _joint_feature_matrix(voltage_values, x_values, y_values, voltage_center, voltage_scale, spatial_scale):
@@ -677,4 +685,8 @@ def joint_voltage_bowl_corr_main(
         'spatial_scale': spatial_scale,
         'peaks_used': len(peak_info),
     }
+    from pyccapt.calibration.core.calibration_metadata import record_step
+    record_step(variables, 'joint_voltage_bowl_correction', status='working', model=model,
+        parameters=dict(calibration_mode=calibration_mode, peaks=peak_info,
+                        detector_input_units='cm converted to mm', formula='active_array / predicted_joint_factors'))
     return model, peak_info

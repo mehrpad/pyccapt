@@ -68,6 +68,11 @@ def call_fine_tune_t_0(variables, flightPathLength, pulse_mode, t0):
                 variables.data, flight_path_length_mm=flightPathLength_value, t0_ns=t0_d_value,
                 pulse_mode=pulse_mode.value, source='legacy t0 preview: raw ToF to uncorrected mass',
                 context='conversion_preview')
+            from pyccapt.calibration.core.calibration_metadata import record_step
+            record_step(variables, 'physical_tof_conversion', status='working', parameters={
+                'flight_path_length_mm': flightPathLength_value, 't0_ns': t0_d_value,
+                'pulse_mode': pulse_mode.value, 'input': 'raw t (ns)', 'output': 'working mc_uc',
+                'conversion': 'tof2mc'})
             if target_value == 'mc':
                 mc_hist = mc_plot.AptHistPlotter(variables.mc_uc[variables.mc_uc < lim_value], variables)
                 mc_hist.plot_histogram(

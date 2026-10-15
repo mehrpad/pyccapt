@@ -351,6 +351,9 @@ class GuidedCalibrationSession:
         self._active_hash = _digest(output)
         self.status = "applied"
         self.variables.guided_calibration_receipt = self.receipt()
+        from pyccapt.calibration.core.calibration_metadata import record_step
+        record_step(self.variables, 'apply_validated_reference_model', model=self.model,
+                    parameters=self.variables.guided_calibration_receipt)
         return output
 
     def mass_from_normalized_tof(self, normalized_tof_ns):
@@ -373,6 +376,8 @@ class GuidedCalibrationSession:
         self.variables.initial_calibration_done_mc = True
         self._copied_to_mass = True
         self.variables.guided_calibration_receipt = self.receipt()
+        from pyccapt.calibration.core.calibration_metadata import record_step
+        record_step(self.variables, 'normalized_tof_to_mass', parameters=self.variables.guided_calibration_receipt)
         return result
 
     def receipt(self):

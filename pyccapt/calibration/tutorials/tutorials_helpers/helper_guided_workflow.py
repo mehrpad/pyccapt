@@ -16,7 +16,7 @@ from pyccapt.calibration.core.guided_workflow import GuidedWorkflow, STAGES
 from pyccapt.calibration.tutorials.tutorials_helpers.guided_jobs import NotebookJob
 
 
-GUIDED_UI_API_VERSION = 3
+GUIDED_UI_API_VERSION = 4
 
 
 def show_guided_workflow(workflow=None, *, display_panel=True):
@@ -56,6 +56,8 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
     reset_crop = widgets.Button(description="Preview all events")
     draw_crop = widgets.Button(description="Draw crop regions")
     update_fdm = widgets.Button(description="Update detector map")
+    suggest_crop = widgets.Button(description="Suggest crop from data")
+    crop_suggestion = widgets.HTML()
     drawing_box = widgets.VBox()
     crop_output = widgets.Output()
     flight = widgets.FloatText(value=100., description="Flight mm:")
@@ -95,12 +97,16 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
     ratio = widgets.Button(description="Review ICF/kf ratio")
     capture_ratio = widgets.Button(description="Capture ratio geometry")
     recon_output = widgets.Output()
+    ratio_box = widgets.VBox()
+    plot_mode = widgets.Dropdown(options=[("In this cell", "inline"), ("Separate browser HTML", "browser")], description="Show plot:")
+    plot_points = widgets.BoundedIntText(value=50000, min=100, max=1000000, description="Max shown:")
+    reconstruction_tabs = widgets.Tab()
     analyze = widgets.Button(description="Analyze accepted ranges")
     save = widgets.Button(description="Save resumable session")
     export_path = widgets.Text(value="guided_result.h5", description="Result path:", layout=widgets.Layout(width="850px"))
     export = widgets.Button(description="Export accepted HDF5")
     export_nexus = widgets.Button(description="Export NeXus mapping")
-    buttons = [load, resume, find_sessions, inspect, draw_crop, update_fdm, preview_crop, accept_crop, reset_crop, imported, physical, accept_cal, compare_cal, show_mass, propose_refs, configure,
+    buttons = [load, resume, find_sessions, inspect, draw_crop, update_fdm, suggest_crop, preview_crop, accept_crop, reset_crop, imported, physical, accept_cal, compare_cal, show_mass, propose_refs, configure,
                capture, open_ranges, preview_recon, accept_recon, compare_recon, ratio, capture_ratio, analyze, save, export, export_nexus, undo]
     for button in (*buttons, cancel):
         button.layout.width = "auto"
@@ -204,6 +210,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
         range_box.children = ()
         cal_output.clear_output(wait=False)
         recon_output.clear_output(wait=False)
+        ratio_box.children = ()
         crop_output.clear_output(wait=False)
         mass_output.clear_output(wait=False)
         message(session.inspect())
@@ -360,6 +367,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
             if circle is not None and not crop_detector.value:
                 crop_x.value, crop_y.value, crop_radius.value = circle
                 crop_detector.value = True
+            suggest_crop_regions()
         sync_drawing()
         drawing_box.children = (drawing.widget,)
 
@@ -372,6 +380,27 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
         if drawing is not None:
             drawing.refresh_detector()
             sync_drawing()
+
+    def suggest_crop_regions():
+        from pyccapt.calibration.core.crop_suggestions import suggest_temporal_crop, suggest_detector_circle
+        session = active()
+        temporal = suggest_temporal_crop(session.source)
+        spatial = suggest_detector_circle(session.source, event_start=temporal['event_start'], event_stop=temporal['event_stop'])
+        controller['restoring_crop'] = True
+        try:
+            crop_start.value, crop_stop.value = temporal['event_start'], temporal['event_stop']
+            if spatial['supported']:
+                crop_x.value, crop_y.value, crop_radius.value = spatial['circle_cm']
+                crop_detector.value = True
+        finally:
+            controller['restoring_crop'] = False
+        crop_edited(None)
+        crop_suggestion.value = '<b>Editable heuristic proposal:</b> '+escape(temporal['reason'])+'<br>'+escape(spatial['reason'])
+        from pyccapt.calibration.core.calibration_metadata import record_step
+        record_step(session.variables, 'crop_suggestion', parameters={'temporal': temporal, 'detector': spatial}, status='proposal')
+        if controller['crop_drawing'] is not None:
+            refresh_fdm()
+        return {'temporal': temporal, 'detector': spatial}
 
     def undo_accepted():
         result = active().undo()
@@ -588,8 +617,17 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
                                   mode=parameters.get("projection", parameters.get("mode")))
             report(1., "Geometry preview ready")
             return np.column_stack(xyz)
-        launch(operation, lambda xyz: message(session.preview_reconstruction(xyz, parameters,
-            ratio_result=ratio_result, expected_revision=revision)))
+        def receive(xyz):
+            result = session.preview_reconstruction(xyz, parameters, ratio_result=ratio_result, expected_revision=revision)
+            from pyccapt.calibration.reconstructions.reconstruction import reconstruction_plot
+            working.x, working.y, working.z = xyz.T
+            with recon_output:
+                recon_output.clear_output(wait=True)
+                reconstruction_plot(working, [1.] * len(working.range_data), opacity=.6, rotary_fig_save=False,
+                    figname="guided_preview", save=False,
+                    unranged_fraction=.01, display_mode=plot_mode.value, max_display_points=plot_points.value)
+            message(result)
+        launch(operation, receive)
 
     def reconstruction_preview():
         session = active()
@@ -597,7 +635,15 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
                           icf=icf.value, field_evap=field.value, avg_dens=density.value)
         working = session.working_variables()
         working.pulse_mode = pulse_mode.value
-        compute_reconstruction_preview(working, parameters, session.revision)
+        workspace = controller["reconstruction_workspace"]
+        ratio_result = None
+        if workspace is not None and controller["reconstruction_revision"] == session.revision:
+            accepted = dict(workspace.reconstruction_parameters)
+            if "mode" in accepted:
+                accepted["projection"] = accepted.pop("mode")
+            if accepted == parameters:
+                ratio_result = getattr(workspace, "reconstruction_ratio_result", {})
+        compute_reconstruction_preview(working, parameters, session.revision, ratio_result)
 
     def open_ratio():
         from pyccapt.calibration.tutorials.tutorials_helpers.helper_sdm_calibration import call_sdm_icf_kf_calibration
@@ -605,17 +651,25 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
         working = session.working_variables()
         working.pulse_mode = pulse_mode.value
         controller.update(reconstruction_workspace=working, reconstruction_revision=session.revision)
-        with recon_output:
-            recon_output.clear_output(wait=True)
-            call_sdm_icf_kf_calibration(working, flight, SimpleNamespace(value=(None, density.value, field.value)))
-        return "Ratio profiling runs in an independent workspace. Review compatibility/anchor evidence before capturing its geometry."
+        ratio_box.children = (call_sdm_icf_kf_calibration(working, flight,
+            SimpleNamespace(value=(None, density.value, field.value)), display_panel=False,
+            on_parameters=lambda _: capture_geometry()),)
+        reconstruction_tabs.selected_index = 0
+        return "Tune in this tab, then accept reviewed parameters to transfer them to the reconstruction tab."
 
     def capture_geometry():
         working = controller["reconstruction_workspace"]
         if working is None or not getattr(working, "reconstruction_parameters", {}):
             raise CalibrationStateError("Apply a reviewed reconstruction in the ratio workspace first")
-        compute_reconstruction_preview(working, dict(working.reconstruction_parameters), controller["reconstruction_revision"],
-                                       getattr(working, "reconstruction_ratio_result", {}))
+        if active().revision != controller["reconstruction_revision"]:
+            raise CalibrationStateError("The workflow changed; reopen ICF/kf tuning for the current selection")
+        parameters = working.reconstruction_parameters
+        for name, widget in (("icf", icf), ("kf", kf), ("det_eff", efficiency), ("field_evap", field), ("avg_dens", density)):
+            widget.value = parameters[name]
+        recon_kind.value = parameters.get("projection", parameters.get("mode", "Geiser"))
+        flight.value = parameters["flight_path_length"]
+        reconstruction_tabs.selected_index = 1
+        return "Reviewed parameters loaded. Click Preview reconstruction, inspect the cell plot, then Accept reconstruction."
 
     def export_accepted(nexus=False):
         session = active()
@@ -641,7 +695,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
         return str(target.parent / (target.stem+".h5"))
 
     actions = {load: import_data, resume: resume_data, find_sessions: search_sessions, inspect: inspect_source,
-        draw_crop: open_crop_drawing, update_fdm: refresh_fdm,
+        draw_crop: open_crop_drawing, update_fdm: refresh_fdm, suggest_crop: suggest_crop_regions,
         preview_crop: crop_preview, accept_crop: accept_selection, reset_crop: lambda: crop_preview(True),
         # Imported mass has unknown historical instrument settings unless the
         # source supplies them; do not stamp current widget defaults as provenance.
@@ -659,17 +713,24 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
         row([crop_voltage, crop_voltage_min, crop_voltage_max]),
         row([crop_detector, crop_x, crop_y, crop_radius])])], selected_index=None)
     exact_crop.set_title(0, "Exact values and optional filters")
+    reconstruction_tabs.children = (
+        widgets.VBox([widgets.HTML("First review geometry and evidence. Manual parameters remain available in the next tab."),
+                      row([ratio, capture_ratio]), ratio_box]),
+        widgets.VBox([row([recon_kind, icf, kf]), row([efficiency, field, density]), row([plot_mode, plot_points]),
+                      row([preview_recon, compare_recon, accept_recon]), recon_output]))
+    reconstruction_tabs.set_title(0, "1. Find / tune ICF and kf")
+    reconstruction_tabs.set_title(1, "2. Reconstruct and plot")
     tabs = widgets.Tab(children=[
         widgets.VBox([path, row([kind, mode, load]), row([session_directory, session_query, find_sessions]),
                       session_list, session_path, resume]),
         widgets.VBox([widgets.HTML("Inspect units, finite capabilities and source identity before calibration."), inspect]),
         widgets.VBox([widgets.HTML("<b>Crop with the mouse.</b> A rectangle and circle appear automatically. "
             "Drag the orange rectangle's left/right handles to select the useful voltage interval. Drag the cyan circle's center to move it and its handles to resize it. "
-            "Only the rectangle's horizontal span filters events. The initial circle covers finite detector hits; adjust it to exclude unwanted areas. "
+            "Only the rectangle's horizontal span filters events. The initial shapes suggest a smooth voltage interval and the dense detector interior; inspect and adjust them. "
             "Numeric controls are under <b>Exact values and optional filters</b>. After typing an interval, click <b>Update detector map</b>. "
             "Start is included; stop is excluded. Preview shows what stays. Accepting a crop clears later results; Undo restores them. "
             "The original source remains in the session so reconstruction retains the earlier evaporation history."),
-            row([draw_crop, update_fdm]), drawing_box,
+            row([draw_crop, update_fdm, suggest_crop]), crop_suggestion, drawing_box,
             row([preview_crop, accept_crop, reset_crop]), exact_crop, crop_output]),
         widgets.VBox([widgets.HTML("<b>Preview first; accept separately.</b> Set actual instrument values; control defaults are not instrument measurements."),
             calibration_help, row([flight, t0, pulse_mode]), instrument_confirmed,
@@ -678,8 +739,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
             widgets.HTML("Optional refinement: choose windows in the initial mass spectrum when voltage variation makes raw ToF peaks overlap. Fill independently known mass_Da identities. Neither window choice nor a correlated holdout proves chemistry."),
             reference_domain, propose_refs, reference_windows, reference_confirmed, roles, row([configure, capture]), cal_output]),
         widgets.VBox([open_ranges, range_box]),
-        widgets.VBox([row([recon_kind, icf, kf]), row([efficiency, field, density]),
-            row([preview_recon, compare_recon, accept_recon]), row([ratio, capture_ratio]), recon_output]),
+        reconstruction_tabs,
         widgets.VBox([widgets.HTML("Composition uses accepted integer interval assignments; ambiguous mixtures require review."), analyze]),
         widgets.VBox([session_path, save, export_path, row([export, export_nexus]),
             widgets.HTML("Session files retain source, accepted outputs, masks, model snapshots, review history and stable event IDs. NeXus output reports its partial mapping and missing context.")])])
@@ -698,6 +758,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
                           crop_tof_max=crop_tof_max, crop_voltage=crop_voltage, crop_voltage_min=crop_voltage_min,
                           crop_voltage_max=crop_voltage_max, crop_detector=crop_detector, crop_x=crop_x, crop_y=crop_y, crop_radius=crop_radius,
                           icf=icf, kf=kf, efficiency=efficiency, field=field, density=density,
+                          reconstruction_tabs=reconstruction_tabs, plot_mode=plot_mode, plot_points=plot_points,
                           reference_windows=reference_windows, reference_confirmed=reference_confirmed, roles=roles)
     panel.controls["Propose ToF windows"] = propose_refs  # Compatibility for existing scripted click paths.
     panel.controls.update(reference_domain=reference_domain, mass_view_min=mass_view_min, mass_view_max=mass_view_max)

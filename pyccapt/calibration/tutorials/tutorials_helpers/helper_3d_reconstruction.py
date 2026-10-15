@@ -14,7 +14,7 @@ from pyccapt.calibration.reconstructions.species_display import (
 label_layout = widgets.Layout(width='200px')
 
 
-def call_x_y_z_calculation(variables, flight_path_length, element_selected, colab=False):
+def call_x_y_z_calculation(variables, flight_path_length, element_selected, colab=False, *, display_panel=True):
     out = Output()
     avg_dens = element_selected.value[1]
     field_evap = element_selected.value[2]
@@ -32,18 +32,28 @@ def call_x_y_z_calculation(variables, flight_path_length, element_selected, cola
     mode_widget = widgets.Dropdown(options=[('Geiser', 'Geiser'), ('Bas', 'Bas')])
     opacity_widget = widgets.BoundedFloatText(value=0.5, min=0, max=1, step=0.1)
     save_widget = widgets.Dropdown(options=[('True', True), ('False', False)], value=False)
+    display_widget = widgets.Dropdown(options=[('In this cell', 'inline'), ('Separate browser HTML', 'browser')], value='inline')
+    max_points = widgets.BoundedIntText(value=50000, min=100, max=1000000)
+    status = widgets.HTML()
 
     # Create a button widget to trigger the function
     button_calculate_plot = widgets.Button(description="Reconstruct & plot", button_style='primary')
     button_load = widgets.Button(description='Load accepted parameters')
+    button_load.layout.width = 'auto'
+    button_load.tooltip = 'Copy an explicitly accepted tuning result into the reconstruction fields.'
     parameter_widgets = dict(kf=kf_widget, icf=icf_widget, det_eff=det_eff_widget,
                              field_evap=field_evap_widget, avg_dens=avg_dens_widget,
                              mode=mode_widget, flight_path_length=flight_path_length)
 
     def load_accepted(_=None):
-        for name, value in getattr(variables, 'reconstruction_parameters', {}).items():
+        accepted = getattr(variables, 'reconstruction_parameters', {})
+        for name, value in accepted.items():
+            name = 'mode' if name == 'projection' else name
             if name in parameter_widgets:
                 parameter_widgets[name].value = value
+        button_load.disabled = not bool(accepted)
+        status.value = ('Accepted parameters loaded into the reconstruction controls.' if accepted else
+                        'No accepted parameter set yet. Tune in the first tab, or enter reviewed values here.')
 
     load_accepted()
     button_load.on_click(load_accepted)
@@ -79,11 +89,16 @@ def call_x_y_z_calculation(variables, flight_path_length, element_selected, cola
                     figname=figname_value, mode=mode_value, opacity=opacity_value,
                     save=save_value, colab=colab, cluster_result=None,
                     unranged_fraction=unranged_fraction,
+                    display_mode=display_widget.value, max_display_points=max_points.value,
                 )
                 actual_parameters = {name: widget.value for name, widget in parameter_widgets.items()}
                 if actual_parameters != variables.reconstruction_parameters:
                     variables.reconstruction_ratio_result = {}
                 variables.reconstruction_parameters = actual_parameters
+                button_load.disabled = False
+                status.value = 'Reconstruction complete with the parameters shown above.'
+                from pyccapt.calibration.core.calibration_metadata import record_step
+                record_step(variables, 'reconstruction', parameters=actual_parameters)
         finally:
             button_calculate_plot.disabled = False
 
@@ -105,10 +120,28 @@ def call_x_y_z_calculation(variables, flight_path_length, element_selected, cola
             widgets.HBox([widgets.Label(value='Save fig:', layout=label_layout), save_widget]),
             widgets.HBox([widgets.Label(value='Mode:', layout=label_layout), mode_widget]),
             widgets.HBox([widgets.Label(value='Opacity:', layout=label_layout), opacity_widget]),
+            widgets.HBox([widgets.Label(value='Show plot:', layout=label_layout), display_widget]),
+            widgets.HBox([widgets.Label(value='Max displayed ions:', layout=label_layout), max_points]),
             widgets.HBox([button_load, button_calculate_plot]),
+            status, out,
         ]
     )
 
-    display(widget_container)
-    display(out)
-    return widget_container
+    from pyccapt.calibration.tutorials.tutorials_helpers.helper_sdm_calibration import call_sdm_icf_kf_calibration
+    def transfer(parameters):
+        load_accepted()
+        tabs.selected_index = 1
+    tuning = call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected, colab,
+                                       display_panel=False, on_parameters=transfer)
+    tabs = widgets.Tab(children=[tuning, widget_container])
+    tabs.set_title(0, '1. Find / tune ICF and kf')
+    tabs.set_title(1, '2. Reconstruct and plot')
+    panel = widgets.VBox([widgets.HTML('Tune or explicitly choose geometry in the first tab, then reconstruct. Display sampling does not change coordinates.'), tabs])
+    panel.reconstruction_tabs = tabs
+    panel.controls = {'load': button_load, 'reconstruct': button_calculate_plot, 'display_mode': display_widget,
+                      'max_points': max_points, 'parameters': parameter_widgets, 'status': status, 'tuning': tuning}
+    variables._reconstruction_panel = panel
+    if display_panel:
+        display(panel)
+        return None
+    return panel

@@ -5,7 +5,7 @@ import sys
 
 
 EXPECTED_STAGES = ("Import", "Inspect", "Crop", "Calibrate", "Range", "Reconstruct", "Analyze", "Export")
-GUIDED_UI_API_VERSION = 3
+GUIDED_UI_API_VERSION = 4
 
 
 def load_guided_workflow(*, repository_root=None):

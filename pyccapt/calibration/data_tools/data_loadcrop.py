@@ -502,15 +502,18 @@ def plot_crop_experiment_history(
 
     if data_crop:
         if dc_plot and pulse_plot:
-            rectangle_box_selector(ax3, variables)
+            selector = rectangle_box_selector(ax3, variables)
         elif dc_plot and not pulse_plot:
-            rectangle_box_selector(ax2, variables)
+            selector = rectangle_box_selector(ax2, variables)
         elif not dc_plot and pulse_plot:
-            rectangle_box_selector(ax3, variables)
+            selector = rectangle_box_selector(ax3, variables)
         elif not pulse_plot and not dc_plot:
-            rectangle_box_selector(ax1, variables)
+            selector = rectangle_box_selector(ax1, variables)
         plt.connect('key_press_event', selectors_data.toggle_selector(variables))
-    if draw_rect:
+    if draw_rect and data_crop:
+        selector.set_visible(True)
+        selector.extents = (variables.selected_x1, variables.selected_x2, *selector.ax.get_ylim())
+    elif draw_rect:
         left, bottom, width, height = (variables.selected_x1, 0, variables.selected_x2 - variables.selected_x1, np.max(tof))
         rect = Rectangle((left, bottom), width, height, fill=True, alpha=0.3, color="r", linewidth=5)
         ax1.add_patch(rect)
@@ -672,8 +675,12 @@ def plot_crop_fdm(
 
     if variables is not None:
         if data_crop:
-            elliptical_shape_selector(ax1, fig1, variables, mode=mode_selector)
-        if draw_circle:
+            selector = elliptical_shape_selector(ax1, fig1, variables, mode=mode_selector)
+            if draw_circle and variables.roi_fdm > 0:
+                x0, y0, radius = variables.selected_x_fdm, variables.selected_y_fdm, variables.roi_fdm
+                selector.set_visible(True)
+                selector.extents = (x0-radius, x0+radius, y0-radius, y0+radius)
+        if draw_circle and not data_crop:
             print('x:', variables.selected_x_fdm, 'y:', variables.selected_y_fdm, 'roi:', variables.roi_fdm)
             circ = Circle(
                 (variables.selected_x_fdm, variables.selected_y_fdm),
@@ -775,6 +782,7 @@ def rectangle_box_selector(axisObject, variables):
         spancoords='pixels',
         interactive=True,
     )
+    return selectors_data.toggle_selector.RS
 
 def crop_dataset(dld_master_dataframe, variables):
     """
@@ -819,7 +827,7 @@ def elliptical_shape_selector(axisObject, figureObject, variables, mode='circle'
         None
     """
     if mode == 'circle':
-        selectors_data.toggle_selector.ES = selectors_data.CircleSelector(
+        selectors_data.toggle_selector.ES = selectors_data.CropCircleSelector(
             axisObject,
             lambda eclick, erelease: selectors_data.onselect(eclick, erelease, variables),
             useblit=True,
@@ -828,6 +836,8 @@ def elliptical_shape_selector(axisObject, figureObject, variables, mode='circle'
             minspany=1,
             spancoords='pixels',
             interactive=True,
+            use_data_coordinates=True,
+            drag_from_anywhere=True,
         )
     elif mode == 'ellipse':
         selectors_data.toggle_selector.ES = EllipseSelector(
@@ -842,6 +852,7 @@ def elliptical_shape_selector(axisObject, figureObject, variables, mode='circle'
         )
 
     figureObject.canvas.mpl_connect('key_press_event', selectors_data.toggle_selector)
+    return selectors_data.toggle_selector.ES
 
 def crop_data_after_selection(data_crop, variables):
     """

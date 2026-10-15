@@ -175,7 +175,8 @@ workflows preserve these metadata separately from preview and fitted settings.
 The original notebook also reads this project's partial NeXus mapping and writes
 it alongside `/df` by default; `save_data(..., nexus=False)` opts out.
 
-Both notebooks group ICF/kf tuning and reconstruction into ordered tabs, with a
+Both notebooks combine **3D reconstruction** (first tab) and optional **ICF/kf
+calibration** (second tab) in one panel with shared parameters, a
 compact inline 3D plot by default and an optional browser view. Their crop plots
 propose editable voltage intervals and dense-region circles. A shared calibration
 journal is saved automatically in HDF5 (and as a sidecar for exchange formats),

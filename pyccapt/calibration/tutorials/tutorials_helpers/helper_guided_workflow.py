@@ -16,7 +16,7 @@ from pyccapt.calibration.core.guided_workflow import GuidedWorkflow, STAGES
 from pyccapt.calibration.tutorials.tutorials_helpers.guided_jobs import NotebookJob
 
 
-GUIDED_UI_API_VERSION = 5
+GUIDED_UI_API_VERSION = 6
 
 
 def show_guided_workflow(workflow=None, *, display_panel=True):
@@ -25,6 +25,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
                   "reconstruction_workspace": None, "calibration_panel": None, "range_panel": None,
                   "crop_drawing": None, "restoring_crop": False,
                   "crop_dirty": not bool(workflow and workflow.accepted.get("crop")), "crop_error": None,
+                  "reconstruction_generation": 0, "restoring_reconstruction": False,
                   "physical_generation": 0, "restoring_instrument": False,
                   "crop_seeded": bool(workflow and (workflow.accepted.get("crop") or workflow.preview.get("crop")))}
     job = NotebookJob()
@@ -90,8 +91,8 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
     open_ranges = widgets.Button(description="Open peak-review queue")
     range_box = widgets.VBox()
     recon_kind = widgets.Dropdown(options=["Geiser", "Bas"], description="Projection:")
-    icf = widgets.BoundedFloatText(value=1.4, min=.1, max=10., description="ICF:")
-    kf = widgets.BoundedFloatText(value=3.3, min=.1, max=20., description="kf:")
+    icf = widgets.FloatText(value=1.4, description="ICF:")
+    kf = widgets.FloatText(value=3.3, description="kf:")
     efficiency = widgets.BoundedFloatText(value=.5, min=.001, max=1., description="Efficiency:")
     field = widgets.BoundedFloatText(value=30., min=.01, max=1000., description="Field V/nm:")
     density = widgets.BoundedFloatText(value=85., min=.01, max=1000., description="Atoms/nm³:")
@@ -273,7 +274,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
         from pyccapt.instrument_metadata import extract_instrument_settings
         known = extract_instrument_settings(session.source)
         cal = session.accepted["calibration"]
-        spatial = session.accepted["reconstruction"]
+        spatial = session.preview.get("reconstruction", session.accepted["reconstruction"])
         receipt = cal["receipt"] if cal else {}
         pending = session.preview.get("calibration", {}).get("receipt", {})
         physical_pending = pending.get("method") == "tof2mc physical conversion"
@@ -292,12 +293,16 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
         selected_crop = session.preview.get("crop", session.accepted.get("crop"))
         criteria = selected_crop["criteria"] if selected_crop else {}
         restore_crop_controls(criteria, session.n)
-        for widget, key in ((icf, "icf"), (kf, "kf"), (efficiency, "det_eff"), (field, "field_evap"), (density, "avg_dens")):
-            if key in parameters:
-                widget.value = parameters[key]
-        projection = parameters.get("projection", parameters.get("mode"))
-        if projection in ("Geiser", "Bas"):
-            recon_kind.value = projection
+        controller["restoring_reconstruction"] = True
+        try:
+            for widget, key in ((icf, "icf"), (kf, "kf"), (efficiency, "det_eff"), (field, "field_evap"), (density, "avg_dens")):
+                if key in parameters:
+                    widget.value = parameters[key]
+            projection = parameters.get("projection", parameters.get("mode"))
+            if projection in ("Geiser", "Bas"):
+                recon_kind.value = projection
+        finally:
+            controller["restoring_reconstruction"] = False
 
     def restore_crop_controls(criteria, n):
         controller["restoring_crop"] = True
@@ -377,6 +382,18 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
     for setting in (flight, t0, pulse_mode):
         setting.observe(instrument_edited, names="value")
     instrument_confirmed.observe(confirmation_edited, names="value")
+
+    def reconstruction_edited(_):
+        if controller["restoring_instrument"] or controller["restoring_reconstruction"]:
+            return
+        controller["reconstruction_generation"] += 1
+        session = controller["workflow"]
+        if session is not None and session.preview.pop("reconstruction", None) is not None:
+            recon_output.clear_output(wait=False)
+        refresh()
+
+    for setting in (icf, kf, efficiency, field, density, recon_kind, flight, pulse_mode):
+        setting.observe(reconstruction_edited, names="value")
 
     def sync_drawing():
         drawing = controller["crop_drawing"]
@@ -689,6 +706,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
     def compute_reconstruction_preview(working, parameters, revision, ratio_result=None):
         from pyccapt.calibration.reconstructions.sdm_calibration import reconstruct_xyz
         session = active()
+        generation = controller["reconstruction_generation"]
         parameters = dict(parameters, pulse_mode=getattr(working, "pulse_mode", "laser"))
         def operation(cancel_event, report):
             report(.05, "Computing geometry; cancellation discards this preview when the kernel returns")
@@ -698,6 +716,8 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
             report(1., "Geometry preview ready")
             return np.column_stack(xyz)
         def receive(xyz):
+            if controller["workflow"] is not session or generation != controller["reconstruction_generation"]:
+                raise CalibrationStateError("Reconstruction settings changed during calculation; preview again")
             result = session.preview_reconstruction(xyz, parameters, ratio_result=ratio_result, expected_revision=revision)
             from pyccapt.calibration.reconstructions.reconstruction import reconstruction_plot
             working.x, working.y, working.z = xyz.T
@@ -733,8 +753,9 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
         controller.update(reconstruction_workspace=working, reconstruction_revision=session.revision)
         ratio_box.children = (call_sdm_icf_kf_calibration(working, flight,
             SimpleNamespace(value=(None, density.value, field.value)), display_panel=False,
-            on_parameters=lambda _: capture_geometry()),)
-        reconstruction_tabs.selected_index = 0
+            on_parameters=lambda _: capture_geometry(), parameter_widgets=dict(
+                icf=icf, kf=kf, det_eff=efficiency, field_evap=field, avg_dens=density, mode=recon_kind)),)
+        reconstruction_tabs.selected_index = 1
         return "Tune in this tab, then accept reviewed parameters to transfer them to the reconstruction tab."
 
     def capture_geometry():
@@ -748,7 +769,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
             widget.value = parameters[name]
         recon_kind.value = parameters.get("projection", parameters.get("mode", "Geiser"))
         flight.value = parameters["flight_path_length"]
-        reconstruction_tabs.selected_index = 1
+        reconstruction_tabs.selected_index = 0
         return "Reviewed parameters loaded. Click Preview reconstruction, inspect the cell plot, then Accept reconstruction."
 
     def export_accepted(nexus=False):
@@ -794,12 +815,17 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
         row([crop_detector, crop_x, crop_y, crop_radius])])], selected_index=None)
     exact_crop.set_title(0, "Exact values and optional filters")
     reconstruction_tabs.children = (
-        widgets.VBox([widgets.HTML("First review geometry and evidence. Manual parameters remain available in the next tab."),
-                      row([ratio, capture_ratio]), ratio_box]),
-        widgets.VBox([row([recon_kind, icf, kf]), row([efficiency, field, density]), row([plot_mode, plot_points]),
-                      row([preview_recon, compare_recon, accept_recon]), recon_output]))
-    reconstruction_tabs.set_title(0, "1. Find / tune ICF and kf")
-    reconstruction_tabs.set_title(1, "2. Reconstruct and plot")
+        widgets.VBox([widgets.HTML("<b>3D reconstruction.</b> Enter reviewed parameters, preview the coordinates, "
+            "inspect the plot, then accept. The optional ICF/kf calibration tab shares these parameter values. "
+            "After tuning, preview again to update the 3D result."), row([recon_kind, icf, kf]),
+            row([efficiency, field, density]), row([plot_mode, plot_points]),
+            row([preview_recon, compare_recon, accept_recon]), recon_output]),
+        widgets.VBox([widgets.HTML("<b>Optional ICF/kf calibration.</b> Open the tuning controls below. "
+            "Review the ROI, indexed spacing and an independent ICF anchor. Parameters are shared with the first tab; "
+            "accepted suggestions return there. Click Preview reconstruction and accept separately to update geometry."),
+            row([ratio, capture_ratio]), ratio_box]))
+    reconstruction_tabs.set_title(0, "3D reconstruction")
+    reconstruction_tabs.set_title(1, "ICF/kf calibration")
     tabs = widgets.Tab(children=[
         widgets.VBox([row([browse, path]), row([kind, mode, load]), format_hint, row([session_directory, session_query, find_sessions]),
                       session_list, session_path, resume]),

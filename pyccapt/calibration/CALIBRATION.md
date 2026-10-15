@@ -17,7 +17,8 @@ notebook remains a separate entry point.
 
 Both workflows propose editable crop rectangles/circles using the measured voltage
 trace and detector density. Reconstruction groups ICF/kf tuning and plotting in
-ordered tabs, with compact inline output and an optional browser view. A shared
+one panel: 3D reconstruction first, optional ICF/kf calibration second, with shared
+parameters, compact inline output and an optional browser view. A shared
 `CalibrationMetadata` journal follows applied/working actions and model state into
 HDF5/NeXus outputs and exchange-format JSON sidecars. Exact same-source restoration
 is documented in the workflow guide; it does not refit or transfer to new runs.

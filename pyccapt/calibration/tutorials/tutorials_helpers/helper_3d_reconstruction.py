@@ -53,7 +53,7 @@ def call_x_y_z_calculation(variables, flight_path_length, element_selected, cola
                 parameter_widgets[name].value = value
         button_load.disabled = not bool(accepted)
         status.value = ('Accepted parameters loaded into the reconstruction controls.' if accepted else
-                        'No accepted parameter set yet. Tune in the first tab, or enter reviewed values here.')
+                        'No accepted parameter set yet. Enter reviewed values here, or use optional ICF/kf calibration in the second tab.')
 
     load_accepted()
     button_load.on_click(load_accepted)
@@ -104,6 +104,12 @@ def call_x_y_z_calculation(variables, flight_path_length, element_selected, cola
 
     button_calculate_plot.on_click(lambda b: on_button_click(b, variables, flight_path_length))
 
+    def parameters_edited(_):
+        status.value = 'Parameters changed. Click Reconstruct & plot to update the coordinates and 3D plot.'
+
+    for widget in parameter_widgets.values():
+        widget.observe(parameters_edited, names='value')
+
     widget_container = widgets.VBox(
         [
             widgets.HBox([widgets.Label(value='KF:', layout=label_layout), kf_widget, widgets.Label(value='(dimensionless)')]),
@@ -130,13 +136,21 @@ def call_x_y_z_calculation(variables, flight_path_length, element_selected, cola
     from pyccapt.calibration.tutorials.tutorials_helpers.helper_sdm_calibration import call_sdm_icf_kf_calibration
     def transfer(parameters):
         load_accepted()
-        tabs.selected_index = 1
+        status.value = 'Calibrated parameters loaded. Click Reconstruct & plot to recompute the 3D coordinates.'
+        tabs.selected_index = 0
     tuning = call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected, colab,
-                                       display_panel=False, on_parameters=transfer)
-    tabs = widgets.Tab(children=[tuning, widget_container])
-    tabs.set_title(0, '1. Find / tune ICF and kf')
-    tabs.set_title(1, '2. Reconstruct and plot')
-    panel = widgets.VBox([widgets.HTML('Tune or explicitly choose geometry in the first tab, then reconstruct. Display sampling does not change coordinates.'), tabs])
+                                       display_panel=False, on_parameters=transfer, parameter_widgets=parameter_widgets)
+    tabs = widgets.Tab(children=[widget_container, widgets.VBox([widgets.HTML(
+        '<b>Optional ICF/kf calibration.</b> These parameters are shared with the 3D reconstruction tab. '
+        'Review the detector ROI, lattice/plane spacing and ICF anchor before accepting a suggestion. '
+        'Accepting returns to the first tab; click Reconstruct & plot again to update the 3D result. '
+        'An unsupported ratio leaves manual reconstruction available.'), tuning])])
+    tabs.set_title(0, '3D reconstruction')
+    tabs.set_title(1, 'ICF/kf calibration')
+    panel = widgets.VBox([widgets.HTML('Use 3D reconstruction to calculate and plot coordinates. '
+        'ICF/kf calibration is optional and shares the same parameter controls. '
+        'Changing parameters does not update an existing plot until you reconstruct again. '
+        'Display sampling changes only the plotted points.'), tabs])
     panel.reconstruction_tabs = tabs
     panel.controls = {'load': button_load, 'reconstruct': button_calculate_plot, 'display_mode': display_widget,
                       'max_points': max_points, 'parameters': parameter_widgets, 'status': status, 'tuning': tuning}

@@ -36,27 +36,28 @@ _narrow = widgets.Layout(width='90px')
 
 
 def call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected, colab=False, *,
-                              display_panel=True, on_parameters=None):
+                              display_panel=True, on_parameters=None, parameter_widgets=None):
     import matplotlib.pyplot as plt
 
     existing = getattr(variables, '_reconstruction_panel', None)
     if display_panel and existing is not None:
-        existing.reconstruction_tabs.selected_index = 0
-        print('ICF/kf tuning is in the first tab of the reconstruction panel above.')
+        existing.reconstruction_tabs.selected_index = 1
+        print('Optional ICF/kf calibration is in the second tab of the reconstruction panel above.')
         return None
 
     avg_dens0 = element_selected.value[1]
     field_evap0 = element_selected.value[2]
     saved = getattr(variables, 'reconstruction_parameters', {})
+    shared = parameter_widgets or {}
     ratio_job = NotebookJob()
 
     # ---- shared reconstruction parameters --------------------------------
-    kf_w = widgets.FloatText(value=saved.get('kf', 3.3), step=0.05, layout=_narrow)
-    icf_w = widgets.FloatText(value=saved.get('icf', 1.65), step=0.05, layout=_narrow)
-    det_eff_w = widgets.FloatText(value=saved.get('det_eff', 0.7), step=0.05, layout=_narrow)
-    field_evap_w = widgets.FloatText(value=saved.get('field_evap', field_evap0), layout=_narrow)
-    avg_dens_w = widgets.FloatText(value=saved.get('avg_dens', avg_dens0), layout=_narrow)
-    mode_w = widgets.Dropdown(options=[('Geiser', 'Geiser'), ('Bas', 'Bas')], value=saved.get('mode', saved.get('projection', 'Geiser')), layout=_narrow)
+    kf_w = shared['kf'] if 'kf' in shared else widgets.FloatText(value=saved.get('kf', 3.3), step=0.05, layout=_narrow)
+    icf_w = shared['icf'] if 'icf' in shared else widgets.FloatText(value=saved.get('icf', 1.65), step=0.05, layout=_narrow)
+    det_eff_w = shared['det_eff'] if 'det_eff' in shared else widgets.FloatText(value=saved.get('det_eff', 0.7), step=0.05, layout=_narrow)
+    field_evap_w = shared['field_evap'] if 'field_evap' in shared else widgets.FloatText(value=saved.get('field_evap', field_evap0), layout=_narrow)
+    avg_dens_w = shared['avg_dens'] if 'avg_dens' in shared else widgets.FloatText(value=saved.get('avg_dens', avg_dens0), layout=_narrow)
+    mode_w = shared['mode'] if 'mode' in shared else widgets.Dropdown(options=[('Geiser', 'Geiser'), ('Bas', 'Bas')], value=saved.get('mode', saved.get('projection', 'Geiser')), layout=_narrow)
 
     def _parameters():
         return dict(kf=kf_w.value, icf=icf_w.value, det_eff=det_eff_w.value,
@@ -251,6 +252,7 @@ def call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected,
     full_source_w = widgets.Checkbox(value=False, description='Full acquisition loaded from event zero', indent=False)
     spacing_confirmed_w = widgets.Checkbox(value=False, description='Indexed spacing independently known', indent=False)
     anchor_confirmed_w = widgets.Checkbox(value=False, description='ICF above is my chosen independent/manual anchor', indent=False)
+    icf_w.observe(lambda _: setattr(anchor_confirmed_w, 'value', False), names='value')
     def reference_changed(_):
         spacing_confirmed_w.value = False
     for reference in (cx_w, cy_w, r_w, a_w, b_w, c_w, al_w, be_w, ga_w, h_w, k_w, l_w):
@@ -409,7 +411,7 @@ def call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected,
         return widgets.HBox([widgets.Label(lbl, layout=_label), *w])
 
     recon_box = widgets.VBox([
-        widgets.HTML('<b>Reconstruction parameters</b>'),
+        widgets.HTML('<b>Shared reconstruction parameters</b>' if shared else '<b>Reconstruction parameters</b>'),
         _row('kf / icf:', kf_w, icf_w),
         _row('det_eff:', det_eff_w),
         _row('field_evap / avg_dens:', field_evap_w, avg_dens_w),
@@ -459,9 +461,11 @@ def call_sdm_icf_kf_calibration(variables, flight_path_length, element_selected,
     ])
     tabs = widgets.Tab(children=[auto_tab, manual_tab])
     tabs.set_title(0, 'ICF/kf ratio suggestion')
-    tabs.set_title(1, 'Manual reconstruction')
+    tabs.set_title(1, 'Manual SDM tuning')
     panel = widgets.VBox([widgets.HBox([recon_box, lattice_box]), roi_box, tabs,
                           widgets.HTML('<b>Status</b>'), out_status])
+    panel.parameter_widgets = dict(kf=kf_w, icf=icf_w, det_eff=det_eff_w,
+                                  field_evap=field_evap_w, avg_dens=avg_dens_w, mode=mode_w)
     if display_panel:
         display(panel)
         return None

@@ -603,3 +603,23 @@ an unreviewed crop enabled for acceptance. Crop/calibration mathematics are unch
 The relevant regression run passed 152 tests, with 42 focused checks repeated
 after the final format-label and preview-error refinements. Ruff passed and the
 documentation build succeeded with 13 warnings; notebook execution was disabled.
+
+## One reconstruction cell with optional calibration (15 October 2026)
+
+The original notebook now has one reconstruction call cell; the separate SDM
+call and its obsolete instructions were merged into that section. Both workflows
+open **3D reconstruction** first and **ICF/kf calibration** second. Parameter
+widgets are shared across the two views, so opening optional tuning does not
+substitute different default values. Accepted tuning returns to the first tab;
+reconstruction remains an explicit action. Existing standalone SDM calls route
+to the second tab without displaying another copy.
+
+All 121 relevant reconstruction, notebook, session, crop and metadata regressions
+passed. New checks cover single-cell/single-display construction, shared values,
+anchor re-confirmation after an ICF edit, accepted-parameter transfer, preservation
+of pending geometry on resume, invalidation after parameter edits, rejection of
+stale calculation results, and numerical input validation. The UI no longer
+silently clips a reviewed kf to an arbitrary limit of 20; the existing mathematical
+validators reject invalid geometry. Ruff and the documentation build passed; no
+calibration or reconstruction equation was changed. These checks exercise Python
+and widget callbacks, not a live browser session.

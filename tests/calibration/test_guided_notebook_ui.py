@@ -214,13 +214,88 @@ def test_ratio_panel_receives_flight_widget_and_capture_uses_accepted_parameters
     assert captured["flight"] == 100. and captured["density"] == 85.
     panel.controls["Capture ratio geometry"].click()
     assert "reconstruction" not in session.preview
-    assert panel.controls['reconstruction_tabs'].selected_index == 1
+    assert panel.controls['reconstruction_tabs'].selected_index == 0
     panel.controls["Preview reconstruction"].click()
     result = session.preview["reconstruction"]
     expected = reconstruct_xyz(captured["variables"], 4., 1.6, .6, 31., 88., 125.)
     np.testing.assert_allclose(result["xyz"], np.column_stack(expected))
     assert result["ratio_result"]["q"] == .4
     assert session.accepted["reconstruction"] is None
+
+
+def test_guided_reconstruction_first_and_optional_calibration_share_controls(monkeypatch):
+    from pyccapt.calibration.reconstructions import reconstruction
+    monkeypatch.setattr(helper, 'NotebookJob', ImmediateJob)
+    monkeypatch.setattr(reconstruction, 'reconstruction_plot', lambda *a, **k: None)
+    session = accepted_mass()
+    accept_one_range(session)
+    panel = helper.show_guided_workflow(session, display_panel=False)
+    tabs = panel.controls['reconstruction_tabs']
+    assert tabs.get_title(0) == '3D reconstruction' and tabs.get_title(1) == 'ICF/kf calibration'
+    assert tabs.selected_index == 0
+    panel.controls['Review ICF/kf ratio'].click()
+    assert tabs.selected_index == 1
+    calibration = tabs.children[1].children[-1].children[0]
+    for key, control_key in [('icf', 'icf'), ('kf', 'kf'), ('det_eff', 'efficiency'), ('field_evap', 'field'), ('avg_dens', 'density')]:
+        assert calibration.parameter_widgets[key] is panel.controls[control_key]
+    panel.controls['Preview reconstruction'].click()
+    assert 'reconstruction' in session.preview and not panel.controls['Accept reconstruction'].disabled
+    calibration.parameter_widgets['kf'].value = 30.  # A reviewed value must not silently clamp to the former UI max of 20.
+    assert panel.controls['kf'].value == 30.
+    assert 'reconstruction' not in session.preview and panel.controls['Accept reconstruction'].disabled
+    assert session.accepted['reconstruction'] is None
+    panel.controls['Preview reconstruction'].click()
+    assert session.preview['reconstruction']['parameters']['kf'] == 30.
+    assert not panel.controls['Accept reconstruction'].disabled
+
+
+def test_geometry_settings_changed_during_calculation_discard_pending_result(monkeypatch):
+    from pyccapt.calibration.reconstructions import reconstruction, sdm_calibration
+    original = sdm_calibration.reconstruct_xyz
+    monkeypatch.setattr(helper, 'NotebookJob', ImmediateJob)
+    monkeypatch.setattr(reconstruction, 'reconstruction_plot', lambda *a, **k: None)
+    session = accepted_mass()
+    accept_one_range(session)
+    panel = helper.show_guided_workflow(session, display_panel=False)
+    def compute(*args, **kwargs):
+        panel.controls['icf'].value = 1.8  # New notebook input before the queued result is delivered.
+        return original(*args, **kwargs)
+    monkeypatch.setattr(sdm_calibration, 'reconstruct_xyz', compute)
+    panel.controls['Preview reconstruction'].click()
+    assert 'reconstruction' not in session.preview and session.accepted['reconstruction'] is None
+    assert panel.controls['Accept reconstruction'].disabled
+    assert panel.controls['progress'].bar_style == 'warning'
+
+
+def test_reopening_reconstruction_preview_restores_its_parameters_without_discarding_it(monkeypatch):
+    from pyccapt.calibration.reconstructions import reconstruction
+    monkeypatch.setattr(helper, 'NotebookJob', ImmediateJob)
+    monkeypatch.setattr(reconstruction, 'reconstruction_plot', lambda *a, **k: None)
+    session = accepted_mass()
+    accept_one_range(session)
+    panel = helper.show_guided_workflow(session, display_panel=False)
+    panel.controls['kf'].value = 4.7
+    panel.controls['icf'].value = 1.8
+    panel.controls['Preview reconstruction'].click()
+    restored = GuidedWorkflow.from_state(*session.to_state())
+    reopened = helper.show_guided_workflow(restored, display_panel=False)
+    assert reopened.controls['kf'].value == 4.7 and reopened.controls['icf'].value == 1.8
+    assert 'reconstruction' in restored.preview
+    assert not reopened.controls['Accept reconstruction'].disabled
+
+
+def test_unbounded_geometry_fields_still_require_physically_valid_positive_inputs(monkeypatch):
+    monkeypatch.setattr(helper, 'NotebookJob', ImmediateJob)
+    session = accepted_mass()
+    accept_one_range(session)
+    panel = helper.show_guided_workflow(session, display_panel=False)
+    for key, invalid in [('kf', 0.), ('icf', -1.)]:
+        panel.controls['kf'].value, panel.controls['icf'].value = 3.3, 1.4
+        panel.controls[key].value = invalid
+        panel.controls['Preview reconstruction'].click()
+        assert 'reconstruction' not in session.preview and session.accepted['reconstruction'] is None
+        assert panel.controls['Accept reconstruction'].disabled
+        assert panel.controls['progress'].bar_style == 'warning'
 
 
 def test_physical_preview_refuses_zero_filled_unavailable_detector_measurement(monkeypatch):

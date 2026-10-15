@@ -369,24 +369,53 @@ Voltage-mode reconstruction uses the existing DC-plus-pulse voltage convention,
 the same convention as ratio profiling. Calibration's effective acceleration
 formula is a distinct documented model and is not substituted for reconstruction.
 
-Both processing notebooks now group reconstruction into two tabs: **1. Find /
-tune ICF and kf**, then **2. Reconstruct and plot**. In the guided notebook, open
-**Review ICF/kf ratio** in the first tab. The panel uses a separate workspace. Review
+Both processing notebooks group these operations into one panel with **3D
+reconstruction** first and **ICF/kf calibration** second. The first tab opens by
+default: enter reviewed geometry and material parameters and calculate the 3D
+result. The second tab is optional; use it when you want crystallographic
+evidence to help tune ICF/kf. Both tabs share the same geometry controls, so a
+value edited in either tab is visible in the other. Edits do not recompute an
+existing plot automatically.
+
+ICF controls the angular projection; kf is the field factor in
+`tip radius = voltage / (kf * evaporation field)`. Detector efficiency is the
+detected fraction of evaporated ions, evaporation field is in V/nm, atomic density
+in atoms/nm³ and flight length in mm. These inputs need experimental/material
+justification; the initial widget values are not calibration evidence.
+
+In the guided notebook, open **Review ICF/kf ratio** in the second tab. Its
+calculations use a separate workspace while sharing parameter controls. Review
 the acquisition completeness, pole/ROI, indexed spacing, depth-band validation,
 and parameter family. A ratio q = ICF/kf does not uniquely determine both
 parameters; acceptance requires an independently anchored ICF. Accepting a
-reviewed family transfers its settings into the second tab. **Capture ratio
+reviewed family returns to the first tab with its settings loaded. **Capture ratio
 geometry** also loads an already accepted tuning result. It does not accept
 geometry: click **Preview reconstruction**, inspect it, then **Accept reconstruction**.
 Ratio evidence and selected settings survive session resume.
 The restored controls display saved accepted geometry rather than fresh defaults.
 
-In the original notebook, the reconstruction cell contains the tuning panel too.
-Running the former standalone SDM cell selects that first tab instead of displaying
-another form. **Load accepted parameters** copies the accepted tuning settings into
-the reconstruction fields and shows a status message. It is disabled until a set
-exists. Values typed in the second tab remain a manual choice and need no automatic
-suggestion. The helpers display once; do not wrap their default calls in `display()`.
+In the original notebook, one code cell opens both tabs:
+
+```python
+helper_3d_reconstruction.call_x_y_z_calculation(
+    variables, flight_path_length, element_selected=element_selected)
+```
+
+The separate SDM call cell has been removed. Existing notebooks that still call
+`call_sdm_icf_kf_calibration(...)` select the second tab of an existing panel
+instead of displaying another form. **Load accepted parameters** copies an
+accepted set into the shared controls and reports the action; it is disabled
+until a set exists. Manual reconstruction needs no automatic suggestion.
+The helpers display once; do not wrap their default calls in `display()`.
+
+After accepting a tuning result, click **Reconstruct & plot** in the original
+notebook, or **Preview reconstruction → Accept reconstruction** in the guided
+notebook, to update the 3D geometry. Until then the previous plot/accepted result
+still represents its previous parameters. In the guided notebook, parameter edits
+clear an older reconstruction preview; an in-flight calculation is discarded if
+settings changed before delivery. Changing the ICF clears its anchor confirmation.
+In the original notebook, rerun the following coordinate-save cell after the final
+reconstruction if you need a new temporary checkpoint.
 
 **Show plot → In this cell** is the default in both workflows. The interactive 3D
 plot is 760 × 480 pixels with at most 50,000 displayed ions by default. Fractions

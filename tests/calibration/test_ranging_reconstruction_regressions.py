@@ -185,6 +185,7 @@ def test_accepted_sdm_parameters_reach_actual_reconstruction(monkeypatch):
             field_evap=30., avg_dens=60., flight_path_length=110., mode='Geiser')))
     old_panel = h3.call_x_y_z_calculation(variables, flight, element, display_panel=False)
     panel = old_panel.controls['tuning']
+    old_panel.controls['parameters']['icf'].value = 1.65  # Explicitly choose the anchor shared by both tabs.
     for widget in _widgets(panel):
         if isinstance(widget, widgets.Checkbox):
             widget.value = True
@@ -199,7 +200,7 @@ def test_accepted_sdm_parameters_reach_actual_reconstruction(monkeypatch):
     _button(old_panel, 'Load accepted parameters').click()
     _button(old_panel, 'Reconstruct & plot').click()
     assert calls[-1]['kf'] == pytest.approx(4.125) and calls[-1]['icf'] == 1.65
-    assert old_panel.reconstruction_tabs.selected_index == 1
+    assert old_panel.reconstruction_tabs.selected_index == 0
     new_panel = h3.call_x_y_z_calculation(variables, flight, element, display_panel=False)
     _button(new_panel, 'Reconstruct & plot').click()
     assert calls[-1]['kf'] == pytest.approx(4.125) and calls[-1]['icf'] == 1.65

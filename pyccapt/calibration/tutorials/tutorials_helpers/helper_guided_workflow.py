@@ -16,6 +16,9 @@ from pyccapt.calibration.core.guided_workflow import GuidedWorkflow, STAGES
 from pyccapt.calibration.tutorials.tutorials_helpers.guided_jobs import NotebookJob
 
 
+GUIDED_UI_API_VERSION = 2
+
+
 def show_guided_workflow(workflow=None, *, display_panel=True):
     """Render controls only. Loading, fitting, acceptance and file writes require clicks."""
     controller = {"workflow": workflow, "calibration_workspace": None, "calibration_session": None,
@@ -98,6 +101,16 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
     export_nexus = widgets.Button(description="Export NeXus mapping")
     buttons = [load, resume, find_sessions, inspect, draw_crop, update_fdm, preview_crop, accept_crop, reset_crop, imported, physical, accept_cal, compare_cal, show_mass, propose_refs, configure,
                capture, open_ranges, preview_recon, accept_recon, compare_recon, ratio, capture_ratio, analyze, save, export, export_nexus, undo]
+    for button in (*buttons, cancel):
+        button.layout.width = "auto"
+        button.layout.min_width = "170px"
+        button.layout.flex = "0 0 auto"
+    for checkbox in (instrument_confirmed, reference_confirmed, crop_tof, crop_voltage, crop_detector):
+        checkbox.layout.width = "auto"
+        checkbox.style.description_width = "initial"
+
+    def row(children):
+        return widgets.Box(children, layout=widgets.Layout(display="flex", flex_flow="row wrap", grid_gap="6px"))
 
     def active():
         if controller["workflow"] is None:
@@ -153,9 +166,22 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
         return callback
 
     def launch(operation, consume):
-        job.start(operation, on_result=consume, on_error=lambda error: message(f"{type(error).__name__}: {error}"),
+        outcome = {"failed": False}
+
+        def failed(error):
+            outcome["failed"] = True
+            message(f"{type(error).__name__}: {error}")
+
+        def finished():
+            progress.bar_style = "warning" if outcome["failed"] else "success"
+            progress_text.value = "Operation stopped; see the message below." if outcome["failed"] else "Operation complete; review the result below."
+            refresh()
+
+        progress.value, progress.bar_style = 0., ""
+        progress_text.value = "Operation running…"
+        job.start(operation, on_result=consume, on_error=failed,
             on_progress=lambda fraction, text: (setattr(progress, "value", fraction), setattr(progress_text, "value", text)),
-            on_finished=refresh)
+            on_finished=finished)
         refresh()
 
     def replace_workflow(session):
@@ -611,7 +637,7 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
     for button, operation in actions.items():
         button.on_click(act(operation))
     tabs = widgets.Tab(children=[
-        widgets.VBox([path, widgets.HBox([kind, mode, load]), widgets.HBox([session_directory, session_query, find_sessions]),
+        widgets.VBox([path, row([kind, mode, load]), row([session_directory, session_query, find_sessions]),
                       session_list, session_path, resume]),
         widgets.VBox([widgets.HTML("Inspect units, finite capabilities and source identity before calibration."), inspect]),
         widgets.VBox([widgets.HTML("<b>Keep the useful part of the run.</b> Click <b>Draw crop regions</b>. Draw a rectangle across the smooth part of the DC-voltage curve; "
@@ -620,30 +646,31 @@ def show_guided_workflow(workflow=None, *, display_panel=True):
             "You can also enter exact positions and optional raw ToF or voltage limits below. "
             "Start is included; stop is excluded. Preview shows what stays. Accepting a crop clears later results; Undo restores them. "
             "The original source remains in the session so reconstruction retains the earlier evaporation history."),
-            widgets.HBox([draw_crop, update_fdm]), drawing_box,
-            widgets.HBox([crop_start, crop_stop]), widgets.HBox([crop_tof, crop_tof_min, crop_tof_max]),
-            widgets.HBox([crop_voltage, crop_voltage_min, crop_voltage_max]),
-            widgets.HBox([crop_detector, crop_x, crop_y, crop_radius]),
-            widgets.HBox([preview_crop, accept_crop, reset_crop]), crop_output]),
+            row([draw_crop, update_fdm]), drawing_box,
+            row([crop_start, crop_stop]), row([crop_tof, crop_tof_min, crop_tof_max]),
+            row([crop_voltage, crop_voltage_min, crop_voltage_max]),
+            row([crop_detector, crop_x, crop_y, crop_radius]),
+            row([preview_crop, accept_crop, reset_crop]), crop_output]),
         widgets.VBox([widgets.HTML("<b>Preview first; accept separately.</b> Set actual instrument values; control defaults are not instrument measurements."),
-            calibration_help, widgets.HBox([flight, t0, pulse_mode]), instrument_confirmed,
-            widgets.HBox([imported, physical, compare_cal, accept_cal]),
-            widgets.HBox([mass_view_min, mass_view_max, show_mass]), mass_output,
+            calibration_help, row([flight, t0, pulse_mode]), instrument_confirmed,
+            row([imported, physical, compare_cal, accept_cal]),
+            row([mass_view_min, mass_view_max, show_mass]), mass_output,
             widgets.HTML("Optional refinement: choose windows in the initial mass spectrum when voltage variation makes raw ToF peaks overlap. Fill independently known mass_Da identities. Neither window choice nor a correlated holdout proves chemistry."),
-            reference_domain, propose_refs, reference_windows, reference_confirmed, roles, widgets.HBox([configure, capture]), cal_output]),
+            reference_domain, propose_refs, reference_windows, reference_confirmed, roles, row([configure, capture]), cal_output]),
         widgets.VBox([open_ranges, range_box]),
-        widgets.VBox([widgets.HBox([recon_kind, icf, kf]), widgets.HBox([efficiency, field, density]),
-            widgets.HBox([preview_recon, compare_recon, accept_recon]), widgets.HBox([ratio, capture_ratio]), recon_output]),
+        widgets.VBox([row([recon_kind, icf, kf]), row([efficiency, field, density]),
+            row([preview_recon, compare_recon, accept_recon]), row([ratio, capture_ratio]), recon_output]),
         widgets.VBox([widgets.HTML("Composition uses accepted integer interval assignments; ambiguous mixtures require review."), analyze]),
-        widgets.VBox([session_path, save, export_path, widgets.HBox([export, export_nexus]),
+        widgets.VBox([session_path, save, export_path, row([export, export_nexus]),
             widgets.HTML("Session files retain source, accepted outputs, masks, model snapshots, review history and stable event IDs. NeXus output reports its partial mapping and missing context.")])])
     for index, title in enumerate(STAGES):
         tabs.set_title(index, title)
-    panel = widgets.VBox([status, widgets.HBox([undo, cancel]), progress, progress_text, tabs, output])
+    panel = widgets.VBox([status, row([undo, cancel]), progress, progress_text, tabs, output])
     panel.controller = controller
     panel.controls = {button.description: button for button in (*buttons, cancel)}
     panel.controls.update(path=path, kind=kind, mode=mode, session_path=session_path, export_path=export_path,
                           tabs=tabs, job=job, refresh=refresh, pulse_mode=pulse_mode, flight=flight, t0=t0,
+                          progress=progress, progress_text=progress_text,
                           instrument_confirmed=instrument_confirmed, calibration_help=calibration_help,
                           crop_start=crop_start, crop_stop=crop_stop, crop_tof=crop_tof, crop_tof_min=crop_tof_min,
                           crop_tof_max=crop_tof_max, crop_voltage=crop_voltage, crop_voltage_min=crop_voltage_min,

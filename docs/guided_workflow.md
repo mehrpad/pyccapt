@@ -5,6 +5,30 @@ with the calibration dependencies installed (`pip install -e ".[calibration]"`
 or the project's full environment). Run the two code cells. The panel is a
 separate, optional workflow; the original processing notebook is preserved.
 
+## If the Crop tab is missing
+
+After updating PyCCAPT, choose **Kernel → Restart Kernel and Run All**. Python
+keeps imported modules in the running kernel, so rerunning an ordinary import
+cell can keep an older panel even when this notebook's instructions are current.
+Save a resumable session first if you need to retain work from that kernel.
+
+The startup cell now checks the loaded workflow and displays its source folder
+and Python executable. The tabs must read **Import → Inspect → Crop → Calibrate →
+Range → Reconstruct → Analyze → Export**. A stale or mixed runtime stops with an
+instruction to restart. If the loaded source folder differs from your checkout,
+select the kernel for that installation. Existing saved widget output may still
+show an older panel until you rerun the launch cell.
+
+For the raw 1891 Al file, reimport after restarting, accept your sequence/detector
+crop, then enter **110 mm**, **38 ns**, and **voltage** mode. Tick the instrument
+confirmation checkbox, click **Preview physical mass**, inspect the spectrum,
+then **Accept calibration**. **Preview imported mass** requires a saved mass
+column and is disabled for this raw source. The physical conversion supplies an
+initial spectrum; optional reference fitting is a later refinement. Proposed
+reference rows with `mass_Da: null` still require independently identified masses.
+The comparison's `finite_accepted_values: 0` means you have not yet accepted a
+mass calibration; it does not mean that the finite preview failed.
+
 ## Start here: raw data with no mass column
 
 A raw event tells us **when an ion arrived**, its detector position and the
@@ -148,6 +172,22 @@ time zero and positive voltage/spatial/time scale as described in
 [calibration_math.md](calibration_math.md). The existing guided protocol enforces
 training → selection validation → single confirmation → acceptance → application.
 Capture the applied model as a workflow preview and accept it separately.
+For the button-by-button sequence:
+
+1. Keep **Window basis** on **Accepted initial mass** and click **Propose reference
+   windows**. Review the limits, remove contaminated proposals, and replace each
+   `mass_Da: null` with an independently identified mass-to-charge value.
+2. Confirm the identities and instrument settings, then click **Create reference
+   session**. This opens the fitting panel below the main controls.
+3. Click **Fit training**, **Validate selection**, then **Confirm once**, inspecting
+   the reports at each step. A failing report stops the sequence.
+4. When the checks pass, click **Accept model**, then **Apply accepted**. Leave
+   **Apply mode** on **Mass (Da)** for this route.
+5. Click **Capture applied model** in the main panel, inspect the new spectrum,
+   then **Accept calibration** to replace the initial conversion.
+
+The initial physical spectrum is enough to start selecting reference peaks; it
+does not establish that voltage and detector-position corrections are complete.
 Reference-window construction excludes invalid source rows and reports the
 excluded count; every required reference/validation group must still meet the
 model's coverage rules. Validation checks both absolute errors and changes

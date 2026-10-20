@@ -193,6 +193,24 @@ Restart PyCCAPT once after installing this code to load the updated handlers.
 Subsequent mode switches do not require a software restart. Hardware round-trip
 verification remains necessary; regression tests use simulated serial ports.
 
+The 2026-10-20 GUI log found OXPS at `0x0F` on COM9 but returned SDK result
+`6:RegResultTimeout` from the `0x39 = 1` write. The protocol change resets the
+mainboard (manual p166), so an absent bus acknowledgement is ambiguous. Both
+the CLI button and IR-watt restore now close the SDK port first, wait for the
+reset, and retry read-only CLI status queries. SDK result 6 is accepted only
+when a valid numeric CLI status is subsequently received; NACK/CRC/type errors
+still fail. Even an acknowledged write is not reported as a completed switch
+without CLI verification. Probes close their serial handles after each attempt,
+and a shutdown cancels further retries.
+
+A separate live diagnostic process encountered a native SDK access violation
+in `deviceGetType` during address probing. Discovery now reads the SDK's
+auto-scan table through `deviceGetAllTypes`, whose byte indexes are the module
+addresses. It does not issue type queries to absent addresses. Read-only COM9
+and SDK checks in this session did not establish working communication, so
+the live round trip is not yet verified. Regression tests cover the reported
+reset timeout, boot delays, absent CLI replies and exclusive port ownership.
+
 ## IR watt control alongside relative AOM
 
 **IR power control (W)** and **Apply W (Listen)** provide an explicit watt request

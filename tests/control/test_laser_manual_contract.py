@@ -776,7 +776,7 @@ def test_cli_handover_closes_sdk_before_reconnect_and_retries(mode_gui, monkeypa
     old = ui.laser_device
     monkeypatch.setattr(nktpbus_switch, 'is_cli_responding', Mock(return_value=False))
 
-    def sdk_switch(port):
+    def sdk_switch(port, **options):
         assert not ui._laser_status_timer.isActive()
         assert ui.laser_device is None
         old.close_port.assert_called_once()
@@ -868,7 +868,7 @@ def test_shutdown_during_settle_does_not_reopen_port(mode_gui, monkeypatch):
     from pyccapt.control.nkt_photonics import nktpbus_switch
     ui = mode_gui
     monkeypatch.setattr(nktpbus_switch, 'is_cli_responding', Mock(return_value=False))
-    monkeypatch.setattr(nktpbus_switch, 'switch_to_cli', Mock())
+    monkeypatch.setattr(nktpbus_switch, 'switch_to_cli', lambda port, **options: options['wait'](1.))
     def shutdown(seconds):
         ui._laser_stopping = True
     ui._wait_with_gui_pump = shutdown
@@ -894,7 +894,8 @@ def test_failed_listen_handshake_releases_cli_instead_of_claiming_connection(mod
     assert 'initialization failed' in ui.laser_connection_banner.text()
 
 
-def test_repeated_gui_round_trips_with_exclusive_port_and_external_control(mode_gui, monkeypatch):
+@pytest.mark.parametrize('switch_result', [0, 6])
+def test_repeated_gui_round_trips_with_exclusive_port_and_external_control(mode_gui, monkeypatch, switch_result):
     from pyccapt.control.nkt_photonics import nktpbus_switch, origamiClassCLI
     ui = mode_gui
     state = SimpleNamespace(owner=None, mode='cli', elapsed=0.)
@@ -954,14 +955,17 @@ def test_repeated_gui_round_trips_with_exclusive_port_and_external_control(mode_
             state.owner = self
             return 0
 
-        def deviceGetType(self, port, address):
-            return 0, 0x95
+        def deviceGetAllTypes(self, port):
+            return 0, b'\x00\x95' + bytes(253)
 
         def registerWriteU8(self, port, address, register, value, index):
             assert state.owner is self
             assert (register, value, index) == (0x39, 1, -1)
             state.mode = 'cli'
-            return 0
+            return switch_result
+
+        def RegisterResultTypes(self, result):
+            return '6:RegResultTimeout' if result == 6 else '0:RegResultSuccess'
 
         def closePorts(self, port):
             assert state.owner is self

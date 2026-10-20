@@ -79,10 +79,10 @@ OXPS_MODULE_TYPE = 0x95
 OXPS_INTERFACE_MODE_REGISTER = 0x39
 INTERFACE_MODE_NKTPBUS = 0
 INTERFACE_MODE_CLI = 1
+REGISTER_RESULT_TIMEOUT = 6  # NKT SDK RegisterResultTypes: RegResultTimeout
 
-# Default Interbus device addresses to try when scanning fails. The OXPS
-# is most commonly at address 1 or 15 (0x0F) in shipped systems; we try
-# both and fall back to a sweep across plausible values.
+# Preferred addresses when selecting OXPS from the SDK's scan table.
+# These are table lookups, not direct reads from possibly absent devices.
 _DEFAULT_PROBE_ADDRESSES: tuple[int, ...] = (1, 15, 16, 10, 0x60, 0x67)
 
 
@@ -155,7 +155,7 @@ def _expand_probe_addresses(extra: Iterable[int] | None = None) -> list[int]:
         for value in extra:
             if value not in addresses:
                 addresses.append(int(value))
-    # Final fallback: sweep the small-address range. Slow but reliable.
+    # Remaining low addresses in the cached scan, without serial transactions.
     for value in range(1, 32):
         if value not in addresses:
             addresses.append(value)
@@ -163,19 +163,21 @@ def _expand_probe_addresses(extra: Iterable[int] | None = None) -> list[int]:
 
 
 def _find_oxps_address(nkt, port: str, extra_addresses: Iterable[int] | None) -> int:
-    """Probe a port for the OXPS module address.
+    """Use the SDK's completed auto-scan table, indexed by module address.
 
-    Tries the well-known addresses first, then sweeps. Uses the
-    ``deviceGetType`` lightweight call which returns the 16-bit module
-    type code — we match against ``OXPS_MODULE_TYPE``.
+    Do not issue deviceGetType reads to absent addresses: the installed DLL
+    can crash natively on those reads, which Python cannot catch.
     """
-    for dev_id in _expand_probe_addresses(extra_addresses):
-        try:
-            result, dev_type = nkt.deviceGetType(port, dev_id)
-        except Exception:
-            continue
-        # 0 = success in NKT's result enum; dev_type 0 means "no module".
-        if result == 0 and dev_type and (dev_type & 0xFF) == OXPS_MODULE_TYPE:
+    result, types = nkt.deviceGetAllTypes(port)
+    if result != 0:
+        raise NKTPSwitchError(
+            f'Could not read the NKTPBus scan on {port}: {nkt.DeviceResultTypes(result)}. '
+            'The SDK may have closed the port after finding no responding devices. '
+            'Check controller power, the serial cable and the NKT CONTROL connection.'
+        )
+    candidates = list(extra_addresses or ()) + _expand_probe_addresses() + list(range(len(types)))
+    for dev_id in candidates:
+        if 0 < dev_id < len(types) and types[dev_id] == OXPS_MODULE_TYPE:
             _log.info("Found OXPS module at devId=0x%02X on %s", dev_id, port)
             return dev_id
     raise NKTPSwitchError(
@@ -186,12 +188,56 @@ def _find_oxps_address(nkt, port: str, extra_addresses: Iterable[int] | None) ->
 # ---------------------------------------------------------------- public API
 
 
+def request_cli_protocol(nkt, port: str, device_address: int) -> int:
+    """Request the resetting protocol change; its ACK can disappear mid-reset.
+
+    Callers must close the SDK port and verify CLI before claiming success.
+    Only the SDK's timeout is ambiguous; NACK/CRC/type errors still fail here.
+    """
+    result = nkt.registerWriteU8(port, device_address, OXPS_INTERFACE_MODE_REGISTER, INTERFACE_MODE_CLI, -1)
+    if result not in (0, REGISTER_RESULT_TIMEOUT):
+        raise NKTPSwitchError(f'registerWriteU8 failed: {nkt.RegisterResultTypes(result)}')
+    if result == REGISTER_RESULT_TIMEOUT:
+        _log.warning(
+            'CLI protocol write on %s (devId=0x%02X) returned %s; '
+            'the laser may reset before acknowledging. Releasing NKTPBus and verifying CLI.',
+            port, device_address, nkt.RegisterResultTypes(result),
+        )
+    return result
+
+
+def wait_for_cli(port: str, *, settle_seconds: float = 1.0, attempts: int = 3,
+                 wait=None, cancelled=None) -> None:
+    """Verify numeric CLI status after SDK closure, never by writing again."""
+    wait = time.sleep if wait is None else wait
+    wait(max(0.0, float(settle_seconds)))
+    last_error = 'no valid numeric CLI status reply'
+    for attempt in range(1, attempts + 1):
+        if cancelled is not None and cancelled():
+            raise NKTPSwitchError('CLI reconnect cancelled during shutdown.')
+        _log.info('Verifying CLI on %s: attempt %d of %d', port, attempt, attempts)
+        try:
+            if is_cli_responding(port, raise_on_port_error=True):
+                _log.info('CLI verified on %s at 38400 baud', port)
+                return
+        except NKTPSwitchError as exc:
+            last_error = str(exc)
+        if attempt < attempts:
+            wait(0.5)
+    raise NKTPSwitchError(
+        f'CLI was not verified on {port} after {attempts} attempts: {last_error}. '
+        'Disconnect NKT CONTROL/serial terminals and click Switch to CLI again.'
+    )
+
+
 def switch_to_cli(
     port: str,
     *,
     device_address: int | None = None,
     extra_addresses: Iterable[int] | None = None,
     settle_seconds: float = 1.0,
+    wait=None,
+    cancelled=None,
 ) -> int:
     """Switch the OXPS at ``port`` from NKTPBus mode to CLI mode.
 
@@ -201,12 +247,12 @@ def switch_to_cli(
                     None (the default), the function probes well-known
                     addresses and sweeps low values.
             extra_addresses: Additional addresses to try before the sweep.
-            settle_seconds: How long to wait after the register write before
-                    closing the port — gives the laser firmware time to switch
-                    its UART driver to 38 400 baud.
+            settle_seconds: Initial reset delay after closing the SDK port.
+            wait: Optional GUI-friendly delay function.
+            cancelled: Optional shutdown predicate, checked before each probe.
 
     Returns:
-            The device address that was used.
+            The device address that was used, after CLI status is verified.
 
     Raises:
             NKTPSwitchError: if NKTPDLL is not installed, the laser cannot
@@ -226,26 +272,14 @@ def switch_to_cli(
                 "before retrying; PyCCAPT can stay open."
             )
         dev_id = device_address if device_address is not None else _find_oxps_address(nkt, port, extra_addresses)
-        write_result = nkt.registerWriteU8(
-            port,
-            dev_id,
-            OXPS_INTERFACE_MODE_REGISTER,
-            INTERFACE_MODE_CLI,
-            -1,
-        )
-        if write_result != 0:
-            raise NKTPSwitchError(f"registerWriteU8 failed: {nkt.RegisterResultTypes(write_result)}")
-        # Best-effort: give the laser a moment to flip the UART before
-        # we close the host side and let CLI try to talk to it.
-        time.sleep(max(0.0, float(settle_seconds)))
+        write_result = request_cli_protocol(nkt, port, dev_id)
         _log.info(
-            "Wrote reg 0x%02X = %d (CLI) to OXPS on %s (devId=0x%02X)",
+            "Requested reg 0x%02X = %d (CLI) on %s (devId=0x%02X)",
             OXPS_INTERFACE_MODE_REGISTER,
             INTERFACE_MODE_CLI,
             port,
             dev_id,
         )
-        return dev_id
     finally:
         had_error = sys.exc_info()[0] is not None
         try:
@@ -258,6 +292,13 @@ def switch_to_cli(
             if not had_error:
                 raise NKTPSwitchError(f"Could not release NKTPBus port {port}: {exc}") from exc
             _log.warning('NKTPBus cleanup on %s failed: %s', port, exc)
+    try:
+        wait_for_cli(port, settle_seconds=settle_seconds, wait=wait, cancelled=cancelled)
+    except NKTPSwitchError as exc:
+        raise NKTPSwitchError(
+            f'CLI protocol request returned {nkt.RegisterResultTypes(write_result)}; {exc}'
+        ) from exc
+    return dev_id
 
 
 def switch_to_nktpbus(port: str) -> None:

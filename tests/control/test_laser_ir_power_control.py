@@ -22,6 +22,7 @@ def sdk(monkeypatch):
     monkeypatch.setattr(nktpbus_switch, '_find_oxps_address', lambda *args: 15)
     bus = Mock()
     monkeypatch.setattr(nktpbus_switch, 'switch_to_nktpbus', bus)
+    monkeypatch.setattr(nktpbus_switch, 'is_cli_responding', Mock(return_value=True))
     return nkt, values, bus
 
 
@@ -92,5 +93,24 @@ def test_partial_sdk_open_failure_is_closed(sdk):
     nkt, _, _ = sdk
     nkt.openPorts.return_value = 1
     with pytest.raises(nktpbus_switch.NKTPSwitchError):
+        convert()
+    nkt.closePorts.assert_called_once_with('FAKE')
+
+
+def test_watt_conversion_accepts_reset_timeout_only_after_cli_is_verified(sdk, monkeypatch):
+    nkt, _, _ = sdk
+    nkt.registerWriteU8.return_value = 6
+    def probe(port, **options):
+        nkt.closePorts.assert_called_once_with('FAKE')
+        return True
+    monkeypatch.setattr(nktpbus_switch, 'is_cli_responding', probe)
+    assert convert() == (1., 640)
+
+
+def test_watt_conversion_cannot_succeed_when_cli_restore_is_unverified(sdk, monkeypatch):
+    nkt, _, _ = sdk
+    nkt.registerWriteU8.return_value = 6
+    monkeypatch.setattr(nktpbus_switch, 'is_cli_responding', Mock(return_value=False))
+    with pytest.raises(nktpbus_switch.NKTPSwitchError, match='CLI was not verified'):
         convert()
     nkt.closePorts.assert_called_once_with('FAKE')

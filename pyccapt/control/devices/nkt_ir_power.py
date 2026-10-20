@@ -64,10 +64,10 @@ def calibrated_aom(port, watts, *, max_watts, max_aom_percent, base_hz, divider,
         had_error = sys.exc_info()[0] is not None
         try:
             if address is not None:
-                restored = nkt.registerWriteU8(port, address, 0x39, 1, -1)
-                if restored != 0:
-                    raise nktpbus_switch.NKTPSwitchError('Could not restore CLI; click Switch to CLI to recover.')
+                nktpbus_switch.request_cli_protocol(nkt, port, address)
         finally:
             closed = nkt.closePorts(port)
             if closed != 0 and not had_error:
                 raise nktpbus_switch.NKTPSwitchError(f'Could not release {port} after IR watt conversion.')
+        if address is not None:
+            nktpbus_switch.wait_for_cli(port, wait=wait, cancelled=cancelled)

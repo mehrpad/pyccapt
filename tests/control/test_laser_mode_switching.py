@@ -85,11 +85,12 @@ def test_busy_cli_probe_reports_port_ownership_without_loading_sdk(monkeypatch):
 def sdk(monkeypatch):
     nkt = Mock()
     nkt.openPorts.return_value = 0
-    nkt.deviceGetType.return_value = (0, 0x95)
+    nkt.deviceGetAllTypes.return_value = (0, b'\x00\x95' + bytes(253))
     nkt.registerWriteU8.return_value = 0
     nkt.closePorts.return_value = 0
     monkeypatch.setattr(nktpbus_switch, '_load_nktp_dll_module', lambda: nkt)
     monkeypatch.setattr(nktpbus_switch.time, 'sleep', lambda seconds: None)
+    monkeypatch.setattr(nktpbus_switch, 'is_cli_responding', Mock(return_value=True))
     return nkt
 
 
@@ -105,7 +106,7 @@ def test_sdk_releases_port_on_each_failed_switch_step(sdk, failure):
     if failure == 'open':
         sdk.openPorts.return_value = 1
     elif failure == 'scan':
-        sdk.deviceGetType.return_value = (1, 0)
+        sdk.deviceGetAllTypes.return_value = (0, bytes(255))
     else:
         sdk.registerWriteU8.return_value = 1
     with pytest.raises(nktpbus_switch.NKTPSwitchError):
@@ -117,6 +118,72 @@ def test_failed_sdk_release_is_reported_before_reopening_cli(sdk):
     sdk.closePorts.return_value = 1
     with pytest.raises(nktpbus_switch.NKTPSwitchError, match='Could not release NKTPBus port'):
         nktpbus_switch.switch_to_cli('FAKE')
+
+
+def test_discovery_uses_scan_at_address_fifteen_without_native_absent_device_reads(sdk):
+    types = bytearray(255)
+    types[15] = 0x95
+    sdk.deviceGetAllTypes.return_value = (0, bytes(types))
+    sdk.deviceGetType.side_effect = AssertionError('Do not probe absent device addresses')
+    assert nktpbus_switch.switch_to_cli('FAKE') == 15
+    sdk.deviceGetType.assert_not_called()
+
+
+@pytest.mark.parametrize('ack', [0, 6])
+def test_protocol_write_closes_sdk_then_verifies_cli_even_after_reset_timeout(sdk, monkeypatch, ack):
+    sdk.registerWriteU8.return_value = ack
+    events = []
+    def close(port):
+        events.append('sdk closed')
+        return 0
+    sdk.closePorts.side_effect = close
+    def probe(port, **options):
+        assert events[0] == 'sdk closed'
+        assert options['raise_on_port_error']
+        events.append('cli probe')
+        return len(events) >= 3  # One boot-time silence, then valid CLI.
+    monkeypatch.setattr(nktpbus_switch, 'is_cli_responding', probe)
+    assert nktpbus_switch.switch_to_cli('FAKE', device_address=15) == 15
+    assert events == ['sdk closed', 'cli probe', 'cli probe']
+    sdk.registerWriteU8.assert_called_once_with('FAKE', 15, 0x39, 1, -1)
+
+
+@pytest.mark.parametrize('ack', [0, 6])
+def test_timeout_or_ack_without_cli_status_is_not_success(sdk, monkeypatch, ack):
+    sdk.registerWriteU8.return_value = ack
+    probe = Mock(return_value=False)
+    monkeypatch.setattr(nktpbus_switch, 'is_cli_responding', probe)
+    with pytest.raises(nktpbus_switch.NKTPSwitchError, match='CLI was not verified'):
+        nktpbus_switch.switch_to_cli('FAKE', device_address=15)
+    assert probe.call_count == 3
+    sdk.registerWriteU8.assert_called_once()
+    sdk.closePorts.assert_called_once()
+
+
+def test_non_timeout_protocol_error_is_not_ignored(sdk, monkeypatch):
+    sdk.registerWriteU8.return_value = 4  # RegResultNacked, not a reset timeout.
+    probe = Mock(return_value=True)
+    monkeypatch.setattr(nktpbus_switch, 'is_cli_responding', probe)
+    with pytest.raises(nktpbus_switch.NKTPSwitchError, match='registerWriteU8 failed'):
+        nktpbus_switch.switch_to_cli('FAKE')
+    probe.assert_not_called()
+    sdk.closePorts.assert_called_once()
+
+
+def test_transient_port_open_failure_is_retried_only_after_sdk_closes(sdk, monkeypatch):
+    probe = Mock(side_effect=[nktpbus_switch.NKTPSwitchError('port settling'), True])
+    monkeypatch.setattr(nktpbus_switch, 'is_cli_responding', probe)
+    assert nktpbus_switch.switch_to_cli('FAKE') == 1
+    assert probe.call_count == 2
+
+
+def test_shutdown_during_cli_settle_cancels_probe(sdk, monkeypatch):
+    probe = Mock()
+    monkeypatch.setattr(nktpbus_switch, 'is_cli_responding', probe)
+    with pytest.raises(nktpbus_switch.NKTPSwitchError, match='cancelled'):
+        nktpbus_switch.switch_to_cli('FAKE', wait=lambda delay: None, cancelled=lambda: True)
+    sdk.closePorts.assert_called_once()
+    probe.assert_not_called()
 
 
 def test_failed_sdk_import_does_not_poison_next_attempt(monkeypatch, tmp_path):

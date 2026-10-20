@@ -1757,8 +1757,11 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             if not nktpbus_switch.is_cli_responding(port, raise_on_port_error=True):
                 self.error_message(f'Switching {port} from NKTPBus to CLI...')
                 # SDK closes its own handle before any CLI reconnect attempt.
-                nktpbus_switch.switch_to_cli(port)
-                self._wait_with_gui_pump(self.CLI_SWITCH_INITIAL_DELAY_S)
+                nktpbus_switch.switch_to_cli(
+                    port, settle_seconds=self.CLI_SWITCH_INITIAL_DELAY_S,
+                    wait=self._wait_with_gui_pump,
+                    cancelled=lambda: getattr(self, '_laser_stopping', False),
+                )
             for attempt in range(1, self.CLI_SWITCH_NUM_ATTEMPTS + 1):
                 if getattr(self, '_laser_stopping', False):
                     return

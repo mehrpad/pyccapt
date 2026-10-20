@@ -200,3 +200,37 @@ def test_failed_sdk_import_does_not_poison_next_attempt(monkeypatch, tmp_path):
     module = nktpbus_switch._load_nktp_dll_module()
     assert module.loaded_successfully
     sys.modules.pop('_pyccapt_NKTP_DLL', None)
+
+
+def test_new_cli_session_clears_partial_input_and_drains_help_before_status(monkeypatch):
+    class Port:
+        elapsed = 0.
+        pending = b''
+        commands = []
+        partial = b'garbage left by bus traffic'
+        def write(self, command):
+            self.commands.append(command)
+            if command == b'\n':
+                self.partial = b''
+                self.pending = b'Error: Wrong command\nBasic command list for the laser\n' * 20
+            else:
+                assert not self.partial and not self.pending
+                self.pending = b'ly_oxp2_dev_status?\r\nly_oxp2_dev_status 17\n'
+        def flush(self): pass
+        def reset_input_buffer(self): self.pending = b''
+        @property
+        def in_waiting(self): return min(200, len(self.pending))
+        def read(self, count):
+            self.elapsed += .05
+            data, self.pending = self.pending[:count], self.pending[count:]
+            return data
+        def close(self): pass
+    port = Port()
+    monkeypatch.setattr(origamiClassCLI.serial, 'Serial', lambda **options: port)
+    monkeypatch.setattr(origamiClassCLI, 'time', SimpleNamespace(monotonic=lambda: port.elapsed))
+    device = origamiClassCLI.origClass('FAKE')
+    assert device.open_port() == 0
+    assert device.StatusRead() == 'ly_oxp2_dev_status 17'
+    assert device.StatusRead() == 'ly_oxp2_dev_status 17'
+    assert port.commands == [b'\n', b'ly_oxp2_dev_status?\r\n', b'ly_oxp2_dev_status?\r\n']
+    device.close_port()

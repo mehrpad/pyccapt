@@ -88,15 +88,21 @@ class FragmentedPort:
         self.elapsed = 0.
         self.commands = []
         self.closed = False
+        self.syncing = False
 
     def reset_input_buffer(self): pass
-    def write(self, command): self.commands.append(command)
+    def write(self, command):
+        self.commands.append(command)
+        self.syncing = command == b'\n'
+    def flush(self): pass
     def close(self): self.closed = True
     @property
     def in_waiting(self): return 0
 
     def read(self, count):
         self.elapsed += .05
+        if self.syncing:
+            return b''
         return self.chunks.pop(0) if self.chunks else b''
 
 
@@ -182,7 +188,7 @@ def test_cli_probe_requires_valid_status_and_closes_port(monkeypatch, reply, exp
     port = device.ser
     monkeypatch.setattr(origamiClassCLI.serial, 'Serial', lambda **kwargs: port)
     assert nktpbus_switch.is_cli_responding('FAKE', timeout_s=.5) is expected
-    assert port.commands == [b'ly_oxp2_dev_status?\r\n']
+    assert port.commands == [b'\n', b'ly_oxp2_dev_status?\r\n']
     assert port.closed
 
 
@@ -914,6 +920,9 @@ def test_repeated_gui_round_trips_with_exclusive_port_and_external_control(mode_
 
         def write(self, command):
             commands.append(command)
+            if command == b'\n':
+                self.pending = b''
+                return len(command)
             if state.mode != 'cli':
                 return len(command)
             if command == b'ly_oxp2_nktpbus=1\n':

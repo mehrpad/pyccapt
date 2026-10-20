@@ -207,9 +207,22 @@ A separate live diagnostic process encountered a native SDK access violation
 in `deviceGetType` during address probing. Discovery now reads the SDK's
 auto-scan table through `deviceGetAllTypes`, whose byte indexes are the module
 addresses. It does not issue type queries to absent addresses. Read-only COM9
-and SDK checks in this session did not establish working communication, so
-the live round trip is not yet verified. Regression tests cover the reported
-reset timeout, boot delays, absent CLI replies and exclusive port ownership.
+and SDK checks initially did not establish communication; the operator then
+confirmed the controller had been powered on. At 38400 baud a read-only status
+query returned status 11 after a standalone newline cleared partial input.
+New CLI sessions now terminate partial ASCII input and drain boot/help output
+until a quiet interval before their first query. Clearing only the host RX
+buffer cannot clear a partial command buffered by the laser itself.
+
+With the controller powered, a live CLI -> NKTPBus -> CLI cycle found module
+`0x0F`, reproduced SDK result `6:RegResultTimeout`, then verified CLI status on
+the first probe after closing the SDK port. The final status was 17 (setup).
+No emission-enable, interlock-reset or stage-motion commands were issued.
+Two further complete cycles succeeded in one process using the same cached
+SDK module. Each reproduced result 6 and verified CLI on the first status
+probe; the laser was left in CLI mode with all diagnostic port handles closed.
+Regression tests cover the reported reset timeout, boot delays, partial input,
+help output, absent CLI replies and exclusive port ownership.
 
 ## IR watt control alongside relative AOM
 

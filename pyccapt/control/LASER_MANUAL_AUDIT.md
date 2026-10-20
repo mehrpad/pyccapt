@@ -148,9 +148,82 @@ frequency alone is insufficient. A valid `0.00W` reply displays numeric zero;
 unsupported, ambiguous or missing monitor readings display dashes. IR monitor
 values retain their IR meaning and are not presented as measured DUV output.
 
+The laser GUI displays **Measured IR power (W)** separately from **Selected
+output power (W)**, **Pulse energy (µJ)** and **Output rate (kHz)**. The AOM
+control remains a relative percentage. The IR readout uses the existing
+`e_mlp?` query and stays available when the selected harmonic monitor is
+unsupported or times out. Conversely, an IR-monitor failure does not hide a
+valid selected-harmonic reading. Missing, disconnected or stale readings show
+dashes; an explicit zero remains zero. When `e_mlp?` returns energy units, the
+IR label changes to **IR power estimate (W)** and its tooltip explains the
+energy/rate conversion. These values describe internal monitors, not specimen
+power or pulse energy.
+
 The local `Oxcart Laser Safty Turn On.docx` describes the external curtain,
 cover/key/arm interlocks and physical shutter. Software status is not a readback
 of those external interlocks; this audit does not claim they are instrumented.
+
+## Switching between PyCCAPT and NKT CONTROL
+
+In the Laser Control window, enable **Override Access** and click **Nktpbus
+mode** to hand the laser to NKT Photonics CONTROL. PyCCAPT suspends CLI polling,
+clears pending laser actions, closes its current session, then sends the same
+`ly_oxp2_nktpbus=1\n` command as `python -m
+pyccapt.control.nkt_photonics.nktpbus_activate`. The command is flushed and the
+port closed without waiting for a CLI reply: this instrument can switch
+protocols without acknowledging it. The banner reports that the command was
+sent and the port released; it does not claim a verified NKTPBus readback.
+
+PyCCAPT can remain open while CONTROL operates the laser. Disconnect the laser
+in CONTROL (or close CONTROL) before clicking **Switch to CLI**. Windows permits
+only one serial-port owner. If another application holds the port, PyCCAPT
+reports that and allows another attempt without restarting. Switching is
+blocked during an experiment or laser alignment.
+
+The CLI button first releases any previous PyCCAPT session and probes CLI. If
+CLI does not respond, it uses the NKT SDK to write OXPS register `0x39 = 1`
+(documented in the installed SDK's `Register Files/95.txt`). The SDK port is
+closed before the GUI reconnects at 38400 baud. Reconnection requests Listen
+and refreshes device readbacks; failed handshakes close their port before a
+retry. Polling resumes after the transition, and repeated mode clicks cannot
+overlap. Failed SDK imports are removed from the cache so a later click can
+retry loading the SDK.
+
+Restart PyCCAPT once after installing this code to load the updated handlers.
+Subsequent mode switches do not require a software restart. Hardware round-trip
+verification remains necessary; regression tests use simulated serial ports.
+
+## IR watt control alongside relative AOM
+
+**IR power control (W)** and **Apply W (Listen)** provide an explicit watt request
+without replacing the AOM percentage. The instrument-specific ceiling is
+`laser_ir_max_power_w` (5.2 W for this setup); requests use 0.001 W resolution.
+The NKT SDK must be installed. This is a requested IR setpoint, distinct from
+the measured IR display and the selected harmonic's power/energy.
+
+The CLI's `e_power` command is relative; it is not converted to watts using
+the configured maximum. The vendor manual 800-621-01 p165 documents OXPS
+NKTPBus register `0x20` (U16, 0.001 W) as a firmware conversion into the
+linearized AOM amplitude in `0x05`. PyCCAPT uses that conversion, confirms
+the accepted watt setpoint and reads the calibrated AOM value. Both protocol
+changes reset the laser to Listen (manual pp133,166), so the GUI restores
+CLI, verifies the same base-rate index, divider and wavelength, and reapplies
+the calibrated AOM amplitude only after confirming internal mode and Listen.
+Its AOM readback must match before the GUI reports success.
+
+Apply is available only in Listen or ready Standby, outside experiments and
+alignment; it leaves the laser in Listen and sends no emission-enable command.
+Polling is paused and each serial/SDK handle is released before the next open.
+Rejected requests attempt CLI recovery and never reapply an unverified AOM
+value. Firmware refusals, changed timing/wavelength, the AOM limit, external
+modulation, shutdown and reconnect failures prevent successful application.
+
+The watt request is not a continuous power feedback loop. Subsequent manual
+AOM edits and firmware resets/settings changes can override it. Readbacks
+remain authoritative; the GUI never automatically restores a previous power
+request after a state or frequency change. Live watt accuracy and round-trip
+behavior still require instrument verification; automated tests use simulated
+SDK and serial responses.
 
 ## Verification
 

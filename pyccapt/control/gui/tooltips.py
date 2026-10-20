@@ -224,6 +224,7 @@ LASER_TOOLTIPS = {
     "led_laser_on": "Emission indicator.  Green = laser is emitting, orange = transitioning.",
     "led_laser_enable": "Output-enable indicator.  Green = AOM open.",
     # --- Live readouts ---------------------------------------------------
+    "laser_ir_power_disp": "IR internal-monitor power (W), separate from the selected harmonic. Unknown readings show dashes.",
     "laser_power_disp": "Selected output internal-monitor power (W). Unknown readings show dashes.",
     "laser_pulse_energy_disp": "Selected output pulse energy (microjoules). Internal-monitor estimate, not specimen energy.",
     "laser_repetion_rate_disp": "Laser output repetition rate (kHz), computed from actual base rate / divider. "
@@ -233,11 +234,12 @@ LASER_TOOLTIPS = {
     "laser_focus_mode": "Focus-mode selector.  Currently only 'Standard' is implemented.",
     "scanning_disp": "Visualisation of the active scanning pattern.",
     "start_scanning": "Start / stop the scanning routine using the selected scan and focus modes.",
-    "nktpbus_mode_switch": "Switch the laser from CLI to NKTPBus mode - "
-    "hands control over to NKT's own software.  "
-    "Once switched, you must use the NKT control "
-    "tool to bring it back to CLI mode.  Disabled "
-    "until Override Access is granted.",
+    "nktpbus_mode_switch": "Send the NKTPBus mode command and release the port for NKT CONTROL. "
+    "PyCCAPT can stay open. Disconnect in CONTROL before using Switch to CLI. "
+    "Requires Override Access and a stopped experiment/alignment.",
+    "switch_to_cli_button": "Disconnect the laser in NKT CONTROL first, then switch to CLI "
+    "and reconnect in PyCCAPT. Requests Listen and refreshes device readbacks. "
+    "Requires Override Access and a stopped experiment/alignment.",
     # --- SmarAct laser focusing stage: position display ------------------
     "laser_x_mm": "Laser-stage X position, millimetres digit.  Read-only.  "
     "Combined with µm and nm columns: total X = mm.µm.nm.",

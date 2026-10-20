@@ -174,7 +174,21 @@ class origClass:
         return self._query('ly_oxp2_output?')
 
     def InterbusEnable(self):
-        return self._command('ly_oxp2_nktpbus=1')
+        """Hand the UART to NKTPBus and release it, even without a reply.
+
+        Switching protocol can immediately silence the CLI. This is a write,
+        not a query: waiting for an ASCII acknowledgement would time out after
+        a successful switch and leave the old serial session open.
+        """
+        with self._lock:
+            try:
+                if self.ser is None:
+                    raise ConnectionError('Laser CLI is not connected')
+                self.ser.write(b'ly_oxp2_nktpbus=1\n')
+                self.ser.flush()
+                return ''
+            finally:
+                self.close_port()
 
     def wavelength_read(self):
         return self._query('ls_wavelength?')

@@ -189,6 +189,7 @@ def test_cli_probe_requires_valid_status_and_closes_port(monkeypatch, reply, exp
 class Laser:
     def __init__(self):
         self.calls = []
+        self.close_port = Mock()
         self.code = 33
         self.aom = 800
         self.harmonic = 'NKT FHG Output power=0.53W'
@@ -221,13 +222,16 @@ def laser_gui():
     ui.laser_device = Laser()
     ui.errors = []
     ui.error_message = ui.errors.append
+    ui.laser_connection_banner = QtWidgets.QLabel()
+    ui._reset_laser_message_scroll = Mock()
     ui.laser_rate = QtWidgets.QComboBox()
     ui.laser_wavelegnth = QtWidgets.QComboBox()
     ui.laser_wavelegnth.addItems(['IR', 'Green', 'DUV'])
     ui.laser_wavelegnth_nm_label = QtWidgets.QLabel()
     ui.laser_power = QtWidgets.QDoubleSpinBox(); ui.laser_power.setRange(0, 100)
     ui.laser_divition_factor = QtWidgets.QSpinBox(); ui.laser_divition_factor.setRange(1, 10000000)
-    for name in ('laser_power_disp', 'laser_pulse_energy_disp', 'laser_repetion_rate_disp'):
+    ui.laser_ir_power_label = QtWidgets.QLabel()
+    for name in ('laser_ir_power_disp', 'laser_power_disp', 'laser_pulse_energy_disp', 'laser_repetion_rate_disp'):
         setattr(ui, name, QtWidgets.QLCDNumber())
     for name in ('laser_listen', 'laser_standby', 'laser_on', 'laser_enable'):
         setattr(ui, name, QtWidgets.QPushButton())
@@ -253,11 +257,76 @@ def test_actual_harmonic_frequency_divider_and_power_are_displayed(laser_gui):
     assert ui.laser_repetion_rate_disp.value() == 40.
     assert ui.laser_power_disp.value() == .53
     assert ui.laser_pulse_energy_disp.value() == 13.25
+    assert ui.laser_ir_power_disp.value() == pytest.approx(.492)
+    assert ui.laser_ir_power_label.text() == 'IR power estimate (W)'
+    assert 'not a direct watt measurement' in ui.laser_ir_power_disp.toolTip()
     assert ui.laser_rate.itemData(1) == 6
     assert ui.laser_rate.itemText(0) == '400'
     assert ui.laser_rate.itemText(1) == '579.71'
     assert data['base_frequency_hz'] == 400000.
     assert not ui.laser_device.calls
+
+
+@pytest.mark.parametrize('reply,watts', [('4.65 W', 4.65), ('4650 mW', 4.65), ('0 mW', 0.)])
+def test_measured_ir_power_is_separate_from_selected_output_and_aom(laser_gui, reply, watts):
+    ui = laser_gui
+    ui.laser_device.read_average_power = lambda: reply
+    ui._sync_controls_from_device(initial=True)
+    assert ui.laser_ir_power_disp.value() == pytest.approx(watts)
+    assert ui.laser_ir_power_label.text() == 'Measured IR power (W)'
+    assert ui.laser_power_disp.value() == .53
+    assert ui.laser_pulse_energy_disp.value() == 13.25
+    assert ui.laser_power.value() == 20.
+    assert 'e_mlp?' in ui.laser_ir_power_disp.toolTip()
+    assert 'not a direct watt measurement' not in ui.laser_ir_power_disp.toolTip()
+    assert not ui.laser_device.calls
+
+
+@pytest.mark.parametrize('failure', ['unsupported', 'timeout'])
+def test_unavailable_harmonic_monitor_keeps_independent_ir_reading(laser_gui, failure):
+    ui = laser_gui
+    ui.laser_device.read_average_power = lambda: '4.65 W'
+    if failure == 'unsupported':
+        ui.laser_device.harmonic = 'Unknown command'
+    else:
+        ui.laser_device.power_read_dv_green = Mock(side_effect=TimeoutError('harmonic timeout'))
+    ui.laser_power_disp.display = Mock(wraps=ui.laser_power_disp.display)
+    ui.laser_pulse_energy_disp.display = Mock(wraps=ui.laser_pulse_energy_disp.display)
+    ui._sync_controls_from_device(initial=True)
+    assert ui.laser_ir_power_disp.value() == 4.65
+    assert not ui.variables.laser_telemetry['valid']
+    ui.laser_power_disp.display.assert_called_with('-----')
+    ui.laser_pulse_energy_disp.display.assert_called_with('-----')
+    assert 'harmonic timeout' not in ui.laser_ir_power_disp.toolTip()
+    assert 'Unknown command' not in ui.laser_ir_power_disp.toolTip()
+
+
+@pytest.mark.parametrize('failure', ['unsupported', 'timeout'])
+def test_unavailable_ir_monitor_keeps_selected_output_reading(laser_gui, failure):
+    ui = laser_gui
+    ui.laser_device.read_average_power = (lambda: 'Unknown command') if failure == 'unsupported' else Mock(
+        side_effect=TimeoutError('IR timeout'))
+    ui.laser_ir_power_disp.display = Mock(wraps=ui.laser_ir_power_disp.display)
+    ui._sync_controls_from_device(initial=True)
+    ui.laser_ir_power_disp.display.assert_called_with('-----')
+    assert ui.variables.laser_telemetry['valid']
+    assert ui.laser_power_disp.value() == .53
+    assert ui.laser_pulse_energy_disp.value() == 13.25
+    assert 'no usable unit-bearing reading' in ui.laser_ir_power_disp.toolTip()
+
+
+def test_separate_ir_readout_is_cleared_after_disconnect_or_stale_reading(laser_gui):
+    ui = laser_gui
+    ui.laser_device.read_average_power = lambda: '4.65 W'
+    ui._sync_controls_from_device(initial=True)
+    ui.laser_ir_power_disp.display = Mock(wraps=ui.laser_ir_power_disp.display)
+    ui.variables.laser_telemetry['monotonic'] -= 11
+    ui._recompute_derived_readouts()
+    ui.laser_ir_power_disp.display.assert_called_with('-----')
+    assert 'No fresh IR monitor' in ui.laser_ir_power_disp.toolTip()
+    ui._invalidate_laser_readouts('CLI disconnected')
+    ui.laser_ir_power_disp.display.assert_called_with('-----')
+    assert 'CLI disconnected' in ui.laser_ir_power_disp.toolTip()
 
 
 def test_rejected_divider_uses_actual_readback_and_does_not_open_aom(laser_gui):
@@ -624,8 +693,9 @@ def test_cli_switch_releases_existing_session_before_probe(laser_gui, monkeypatc
     old_device = ui.laser_device
     ui._open_laser_cli = Mock(return_value=True)
 
-    def probe(port):
+    def probe(port, *, raise_on_port_error):
         assert port == 'FAKE'
+        assert raise_on_port_error
         old_device.close_port.assert_called_once()
         assert ui.laser_device is None
         return True
@@ -636,3 +706,388 @@ def test_cli_switch_releases_existing_session_before_probe(laser_gui, monkeypatc
     ui.switch_to_cli_clicked()
     ui._open_laser_cli.assert_called_once_with('FAKE')
     switch.assert_not_called()
+
+
+@pytest.fixture
+def mode_gui(laser_gui):
+    from PyQt6 import QtCore
+    ui = laser_gui
+    ui.com_port_laser = 'FAKE'
+    ui.flag_super_user_stage = True
+    ui._laser_status_in_progress = False
+    ui.laser_device.close_port = Mock()
+    ui.laser_connection_banner = QtWidgets.QLabel()
+    ui._reset_laser_message_scroll = Mock()
+    ui.nktpbus_mode_switch = QtWidgets.QPushButton()
+    ui.switch_to_cli_button = QtWidgets.QPushButton()
+    ui._laser_status_timer = QtCore.QTimer()
+    ui._laser_status_timer.start(1000)
+    yield ui
+    ui._laser_status_timer.stop()
+
+
+@pytest.mark.parametrize('connected', [True, False])
+def test_gui_bus_handover_releases_cli_and_does_not_need_a_reply(mode_gui, monkeypatch, connected):
+    from pyccapt.control.nkt_photonics import nktpbus_switch
+    ui = mode_gui
+    old = ui.laser_device
+    if not connected:
+        ui.laser_device = None
+    ui.on_mode = ui.change_laser_power = True
+    if connected:
+        ui._sync_controls_from_device(initial=True)
+
+    def handover(port):
+        assert port == 'FAKE'
+        assert ui.laser_device is None
+        if connected:
+            old.close_port.assert_called_once()
+        assert not ui._laser_status_timer.isActive()
+        assert not ui.nktpbus_mode_switch.isEnabled()
+        assert not ui.switch_to_cli_button.isEnabled()
+        assert not ui.on_mode and not ui.change_laser_power
+        # Simulate a queued timer callback and a second button click while
+        # Qt processes events: neither can open/poll the port mid-handover.
+        ui.check_laser_status = Mock()
+        ui._poll_laser_status()
+        ui.check_laser_status.assert_not_called()
+        ui.switch_to_cli_clicked()
+
+    bus = Mock(side_effect=handover)
+    cli = Mock()
+    monkeypatch.setattr(nktpbus_switch, 'switch_to_nktpbus', bus)
+    monkeypatch.setattr(nktpbus_switch, 'is_cli_responding', cli)
+    ui.switch_to_nktpbus_mode()
+    bus.assert_called_once_with('FAKE')
+    cli.assert_not_called()
+    assert ui.laser_device is None
+    assert not ui.variables.flag_laser_connected
+    assert not ui.variables.laser_telemetry['valid']
+    assert not ui.laser_on.isEnabled()
+    assert ui._laser_status_timer.isActive()
+    assert ui.switch_to_cli_button.isEnabled()
+    assert 'released' in ui.errors[-1]
+
+
+def test_cli_handover_closes_sdk_before_reconnect_and_retries(mode_gui, monkeypatch):
+    from pyccapt.control.nkt_photonics import nktpbus_switch
+    ui = mode_gui
+    events = []
+    old = ui.laser_device
+    monkeypatch.setattr(nktpbus_switch, 'is_cli_responding', Mock(return_value=False))
+
+    def sdk_switch(port):
+        assert not ui._laser_status_timer.isActive()
+        assert ui.laser_device is None
+        old.close_port.assert_called_once()
+        events.append('sdk released')
+
+    monkeypatch.setattr(nktpbus_switch, 'switch_to_cli', sdk_switch)
+    ui._wait_with_gui_pump = Mock()
+
+    def reopen(port):
+        assert events[0] == 'sdk released'
+        assert not ui._laser_status_timer.isActive()
+        events.append('reopen')
+        if len(events) == 2:
+            return False
+        ui.laser_device = old
+        ui._last_laser_status = 'ly_oxp2_dev_status 9'
+        ui._set_laser_disconnected_banner('')
+        return True
+
+    ui._open_laser_cli = Mock(side_effect=reopen)
+    ui.switch_to_cli_clicked()
+    assert events == ['sdk released', 'reopen', 'reopen']
+    assert ui.variables.flag_laser_connected
+    assert ui.laser_standby.isEnabled()
+    assert ui._laser_status_timer.isActive()
+    assert not ui._laser_mode_switch_in_progress
+
+
+@pytest.mark.parametrize('method', ['switch_to_nktpbus_mode', 'switch_to_cli_clicked'])
+def test_handover_failure_is_retryable_without_restart(mode_gui, monkeypatch, method):
+    from pyccapt.control.nkt_photonics import nktpbus_switch
+    ui = mode_gui
+    failed = Mock(side_effect=nktpbus_switch.NKTPSwitchError('Disconnect NKT CONTROL'))
+    monkeypatch.setattr(nktpbus_switch, 'switch_to_nktpbus', failed)
+    monkeypatch.setattr(nktpbus_switch, 'is_cli_responding', failed)
+    getattr(ui, method)()
+    assert ui.laser_device is None
+    assert not ui._laser_mode_switch_in_progress
+    assert ui._laser_status_timer.isActive()
+    assert ui.nktpbus_mode_switch.isEnabled()
+    assert ui.switch_to_cli_button.isEnabled()
+    assert 'Disconnect NKT CONTROL' in ui.errors[-1]
+    # Retry in the same GUI instance.
+    monkeypatch.setattr(nktpbus_switch, 'switch_to_nktpbus', Mock())
+    ui.switch_to_nktpbus_mode()
+    assert 'released' in ui.errors[-1]
+
+
+def test_close_failure_prevents_opening_another_handle_and_is_retryable(mode_gui, monkeypatch):
+    from pyccapt.control.nkt_photonics import nktpbus_switch
+    ui = mode_gui
+    ui.laser_device.close_port.side_effect = OSError('close failed')
+    bus = Mock()
+    monkeypatch.setattr(nktpbus_switch, 'switch_to_nktpbus', bus)
+    ui.switch_to_nktpbus_mode()
+    bus.assert_not_called()
+    assert 'close failed' in ui.errors[-1]
+    assert not ui._laser_mode_switch_in_progress
+    assert ui._laser_status_timer.isActive()
+    ui.laser_device.close_port.side_effect = None
+    ui.switch_to_nktpbus_mode()
+    bus.assert_called_once_with('FAKE')
+
+
+@pytest.mark.parametrize('method', ['switch_to_nktpbus_mode', 'switch_to_cli_clicked'])
+@pytest.mark.parametrize('busy', ['experiment', 'alignment', 'poll', 'shutdown'])
+def test_handover_does_not_interrupt_other_laser_work(mode_gui, monkeypatch, method, busy):
+    from pyccapt.control.nkt_photonics import nktpbus_switch
+    ui = mode_gui
+    if busy == 'experiment':
+        ui.variables.start_flag = True
+    elif busy == 'alignment':
+        ui.variables.laser_alignment_status = {'active': True}
+    elif busy == 'poll':
+        ui._laser_status_in_progress = True
+    else:
+        ui._laser_stopping = True
+    bus, probe = Mock(), Mock()
+    monkeypatch.setattr(nktpbus_switch, 'switch_to_nktpbus', bus)
+    monkeypatch.setattr(nktpbus_switch, 'is_cli_responding', probe)
+    old = ui.laser_device
+    getattr(ui, method)()
+    bus.assert_not_called()
+    probe.assert_not_called()
+    old.close_port.assert_not_called()
+
+
+def test_shutdown_during_settle_does_not_reopen_port(mode_gui, monkeypatch):
+    from pyccapt.control.nkt_photonics import nktpbus_switch
+    ui = mode_gui
+    monkeypatch.setattr(nktpbus_switch, 'is_cli_responding', Mock(return_value=False))
+    monkeypatch.setattr(nktpbus_switch, 'switch_to_cli', Mock())
+    def shutdown(seconds):
+        ui._laser_stopping = True
+    ui._wait_with_gui_pump = shutdown
+    ui._open_laser_cli = Mock()
+    ui.switch_to_cli_clicked()
+    ui._open_laser_cli.assert_not_called()
+    assert not ui._laser_status_timer.isActive()
+    assert not ui.switch_to_cli_button.isEnabled()
+
+
+def test_failed_listen_handshake_releases_cli_instead_of_claiming_connection(mode_gui, monkeypatch):
+    from pyccapt.control.nkt_photonics import origamiClassCLI
+    ui = mode_gui
+    device = Mock(last_error=None)
+    device.open_port.return_value = 0
+    device.StatusRead.return_value = 'ly_oxp2_dev_status 33'
+    device.Listen.side_effect = TimeoutError('no Listen reply')
+    monkeypatch.setattr(origamiClassCLI, 'origClass', lambda port: device)
+    assert not ui._open_laser_cli('FAKE')
+    device.close_port.assert_called_once()
+    assert ui.laser_device is None
+    assert not ui.variables.flag_laser_connected
+    assert 'initialization failed' in ui.laser_connection_banner.text()
+
+
+def test_repeated_gui_round_trips_with_exclusive_port_and_external_control(mode_gui, monkeypatch):
+    from pyccapt.control.nkt_photonics import nktpbus_switch, origamiClassCLI
+    ui = mode_gui
+    state = SimpleNamespace(owner=None, mode='cli', elapsed=0.)
+    commands = []
+
+    class Port:
+        def __init__(self, **options):
+            if state.owner is not None:
+                raise PermissionError('Access denied: port is already owned')
+            assert options['baudrate'] == 38400
+            state.owner = self
+            self.pending = b''
+
+        def reset_input_buffer(self):
+            self.pending = b''
+
+        def write(self, command):
+            commands.append(command)
+            if state.mode != 'cli':
+                return len(command)
+            if command == b'ly_oxp2_nktpbus=1\n':
+                state.mode = 'bus'
+                return len(command)  # Real firmware supplies no CLI reply.
+            replies = {
+                b'ly_oxp2_dev_status?\r\n': 'ly_oxp2_dev_status 9',
+                b'ly_oxp2_listen\r\n': 'ly_oxp2_listen=ok',
+                b'e_freq_available?\r\n': 'e_freq=4 --> 400000 Hz',
+                b'e_freq?\r\n': 'Frequency index parameter: 4',
+                b'e_div?\r\n': 'Division factor for PCAOM is 10',
+                b'e_power?\r\n': 'Setted laser power in relative unit: 800',
+                b'ls_wavelength?\r\n': 'NKT FHG Current position=DUV',
+                b'e_mlp?\r\n': '12300 nJ',
+                b'ls_output_power?\r\n': 'NKT FHG Output power=0.53W',
+            }
+            self.pending = (replies[command]+'\n>').encode('ascii')
+            return len(command)
+
+        @property
+        def in_waiting(self):
+            return len(self.pending)
+
+        def read(self, count):
+            state.elapsed += .05
+            data, self.pending = self.pending[:count], self.pending[count:]
+            return data
+
+        def flush(self):
+            pass
+
+        def close(self):
+            assert state.owner is self
+            state.owner = None
+
+    class SDK:
+        def openPorts(self, port, auto, live):
+            assert state.owner is None and state.mode == 'bus'
+            state.owner = self
+            return 0
+
+        def deviceGetType(self, port, address):
+            return 0, 0x95
+
+        def registerWriteU8(self, port, address, register, value, index):
+            assert state.owner is self
+            assert (register, value, index) == (0x39, 1, -1)
+            state.mode = 'cli'
+            return 0
+
+        def closePorts(self, port):
+            assert state.owner is self
+            state.owner = None
+            return 0
+
+    monkeypatch.setattr(origamiClassCLI.serial, 'Serial', Port)
+    monkeypatch.setattr(origamiClassCLI, 'time', SimpleNamespace(monotonic=lambda: state.elapsed))
+    monkeypatch.setattr(nktpbus_switch, '_load_nktp_dll_module', SDK)
+    monkeypatch.setattr(nktpbus_switch.time, 'sleep', lambda seconds: None)
+    ui._wait_with_gui_pump = Mock()
+    assert ui._open_laser_cli('FAKE')
+    for _ in range(3):
+        ui.on_mode = ui.change_laser_power = True
+        ui.switch_to_nktpbus_mode()
+        assert state.mode == 'bus' and state.owner is None
+        assert not ui.on_mode and not ui.change_laser_power
+        assert not ui.variables.flag_laser_connected
+        # Another application can acquire the port while PyCCAPT stays open.
+        state.owner = 'NKT CONTROL'
+        ui.switch_to_cli_clicked()
+        assert state.owner == 'NKT CONTROL' and state.mode == 'bus'
+        assert 'Disconnect the laser in NKT CONTROL' in ui.errors[-1]
+        state.owner = None
+        ui.switch_to_cli_clicked()
+        assert state.mode == 'cli' and state.owner is ui.laser_device.ser
+        assert ui.variables.flag_laser_connected
+        assert ui._laser_status_timer.isActive()
+        assert ui.laser_standby.isEnabled()
+        assert ui.variables.laser_telemetry['valid']
+    assert commands.count(b'ly_oxp2_nktpbus=1\n') == 3
+    assert not any(command.startswith(b'ly_oxp2_enabled') for command in commands)
+    ui._close_laser_device()
+    assert state.owner is None
+
+
+@pytest.fixture
+def watt_gui(mode_gui, monkeypatch):
+    from pyccapt.control.devices import nkt_ir_power
+    ui = mode_gui
+    ui._laser_stopping = False
+    ui._sync_controls_from_device(initial=True)
+    ui.laser_ir_power_control = QtWidgets.QDoubleSpinBox()
+    ui.laser_ir_power_control.setRange(0, 5.2)
+    ui.laser_ir_power_control.setDecimals(3)
+    ui.laser_ir_power_control.setValue(1.)
+    ui.laser_ir_power_apply = QtWidgets.QPushButton()
+    ui._wait_with_gui_pump = Mock()
+    device = ui.laser_device
+    conversion = Mock(return_value=(1., 640))
+    monkeypatch.setattr(nkt_ir_power, 'calibrated_aom', conversion)
+    def reconnect(port):
+        assert ui.laser_device is None
+        assert not ui._laser_status_timer.isActive()
+        ui.laser_device = device
+        device.code = 9
+        ui._set_laser_disconnected_banner('')
+        return True
+    ui._open_laser_cli = Mock(side_effect=reconnect)
+    return ui, device, conversion
+
+
+def test_watt_apply_uses_firmware_conversion_and_confirms_aom_in_listen(watt_gui):
+    ui, device, conversion = watt_gui
+    ui._apply_ir_power_watts()
+    assert device.calls == [('AOM', 640)]
+    assert ui.laser_power.value() == 16.
+    assert ui.laser_ir_power_control.value() == 1.
+    assert ui.laser_device is device and device.code == 9
+    assert ui._laser_status_timer.isActive()
+    assert ui.laser_ir_power_apply.isEnabled()
+    assert '1 W applied as calibrated AOM 16%' in ui.errors[-1]
+    options = conversion.call_args.kwargs
+    assert options['base_hz'] == 400000 and options['divider'] == 10
+    assert options['max_watts'] == 5.2
+    assert ui.laser_power_disp.value() == .53  # Selected DUV monitor stays separate.
+
+
+@pytest.mark.parametrize('busy', ['experiment', 'alignment', 'emitting', 'external', 'pending', 'switch'])
+def test_watt_request_is_blocked_without_touching_hardware_when_not_allowed(watt_gui, busy):
+    ui, device, conversion = watt_gui
+    if busy == 'experiment':
+        ui.variables.start_flag = True
+    elif busy == 'alignment':
+        ui.variables.laser_alignment_status = {'active': True}
+    elif busy == 'emitting':
+        device.code = 129
+    elif busy == 'external':
+        device.ModeRead = lambda: 'e_mode of AOM: 3'
+    elif busy == 'pending':
+        ui.change_laser_power = True
+    else:
+        ui._laser_mode_switch_in_progress = True
+    ui._apply_ir_power_watts()
+    conversion.assert_not_called()
+    device.close_port.assert_not_called()
+    assert not device.calls
+
+
+@pytest.mark.parametrize('failure', ['conversion', 'timing', 'wavelength', 'aom', 'reconnect'])
+def test_failed_watt_request_is_not_reported_as_applied(watt_gui, failure):
+    ui, device, conversion = watt_gui
+    if failure == 'conversion':
+        conversion.side_effect = ValueError('Firmware refused watts')
+    elif failure in ('timing', 'wavelength'):
+        def changing(port):
+            if failure == 'timing':
+                device.FreqRead = lambda: 'Frequency index parameter: 6'
+            else:
+                device.wavelength_read = lambda: 'Current position=IR'
+            ui.laser_device = device
+            device.code = 9
+            return True
+        ui._open_laser_cli.side_effect = changing
+    elif failure == 'aom':
+        device.AOM = lambda value: device.calls.append(('AOM', value))  # Simulate firmware refusing it.
+    else:
+        ui._open_laser_cli.side_effect = None
+        ui._open_laser_cli.return_value = False
+    ui._apply_ir_power_watts()
+    assert 'applied as calibrated' not in ui.errors[-1]
+    assert not ui._laser_mode_switch_in_progress
+    assert ui._laser_status_timer.isActive()
+    if failure != 'aom':
+        assert not device.calls
+    if failure == 'conversion':
+        ui._open_laser_cli.assert_called_once()
+        assert 'Firmware refused watts' in ui.errors[-1]
+        assert ui.variables.flag_laser_connected

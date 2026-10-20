@@ -44,11 +44,14 @@ class LaserLayoutMixin:
         readouts = QtWidgets.QGridLayout()
         readouts.setSpacing(3)
         for column, (label, lcd) in enumerate((
+            (self.laser_ir_power_label, self.laser_ir_power_disp),
             (self.label_9, self.laser_power_disp),
             (self.label_10, self.laser_pulse_energy_disp),
             (self.label_11, self.laser_repetion_rate_disp),
         )):
             label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            label.setWordWrap(True)
+            label.setMaximumWidth(130)
             lcd.setFixedSize(100, 40)
             readouts.addWidget(label, 0, column)
             readouts.addWidget(lcd, 1, column, alignment=QtCore.Qt.AlignmentFlag.AlignCenter)

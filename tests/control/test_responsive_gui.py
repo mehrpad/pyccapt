@@ -456,11 +456,13 @@ def test_laser_compact_layout_preserves_controls_and_readouts(instrument_window,
         app.processEvents()
     print(f'Laser GUI size: {window.size()}, preview: {tmp_path}')
     assert window.width() <= 1000
-    assert window.height() <= 700
+    # One extra settings row for the calibrated IR watt request and Apply.
+    assert window.height() <= 740
     viewport = window._responsive_window.scroll.viewport()
     assert window._responsive_window.scroll.horizontalScrollBar().maximum() == 0
     assert window._responsive_window.scroll.verticalScrollBar().maximum() == 0
     controls = [ui.laser_wavelegnth, ui.laser_wavelegnth_nm_label, ui.laser_power,
+                ui.laser_ir_power_control_label, ui.laser_ir_power_control, ui.laser_ir_power_apply,
                 ui.laser_rate, ui.laser_divition_factor, ui.laser_enable, ui.laser_on,
                 ui.laser_standby, ui.laser_listen, ui.laser_state_label, ui.laser_auto_alignment, ui.laser_tracking,
                 *ui.laser_alignment_fields.values(), *ui.laser_alignment_buttons,
@@ -468,7 +470,7 @@ def test_laser_compact_layout_preserves_controls_and_readouts(instrument_window,
                 ui.laser_home, ui.laser_stage_reference, ui.laser_stage_stop, ui.laser_stage_superuser,
                 ui.switch_to_cli_button, ui.nktpbus_mode_switch, ui.laser_message_area,
                 ui.laser_up, ui.laser_down, ui.laser_left, ui.laser_right,
-                ui.laser_forward, ui.laser_backward, ui.laser_power_disp,
+                ui.laser_forward, ui.laser_backward, ui.laser_ir_power_label, ui.laser_ir_power_disp, ui.laser_power_disp,
                 ui.laser_pulse_energy_disp, ui.laser_repetion_rate_disp]
     for axis in ('x', 'y', 'z'):
         controls.extend(getattr(ui, f'laser_{axis}_{unit}') for unit in ('mm', 'um', 'nm'))
@@ -489,7 +491,8 @@ def test_laser_compact_layout_preserves_controls_and_readouts(instrument_window,
         assert field.width() >= field.fontMetrics().horizontalAdvance(field.text()) + 30
     assert not ui.laser_stage_reference.isEnabled()
     assert not ui.switch_to_cli_button.isEnabled()
-    assert ui.label_9.text() == 'Selected output (W)'
+    assert ui.laser_ir_power_label.text() == 'Measured IR power (W)'
+    assert ui.label_9.text() == 'Selected output power (W)'
     assert ui.label_10.text() == 'Pulse energy (µJ)'
     assert ui.label_2.text() == 'Base rate (kHz)'
     assert ui.label_11.text() == 'Output rate (kHz)'

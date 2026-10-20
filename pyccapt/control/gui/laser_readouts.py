@@ -15,7 +15,8 @@ class LaserReadoutMixin:
         self.variables.laser_telemetry = {'monotonic': time.monotonic(), 'valid': False, 'error': str(reason)}
         for name in ('laser_average_power', 'laser_pulse_energy', 'laser_freq', 'laser_intensity'):
             setattr(self.variables, name, math.nan)
-        for widget in (self.laser_power_disp, self.laser_pulse_energy_disp, self.laser_repetion_rate_disp):
+        for widget in (self.laser_ir_power_disp, self.laser_power_disp,
+                       self.laser_pulse_energy_disp, self.laser_repetion_rate_disp):
             widget.display('-----')
         self._update_wavelength_nm_label()
         self._report_optical_readback_error(str(reason))
@@ -56,16 +57,29 @@ class LaserReadoutMixin:
                 raise ValueError('Incomplete laser frequency, divider, AOM or wavelength readback')
             output_hz = hz/div
             # e_mlp is the IR monitor. Never relabel it as Green/DUV output.
-            raw['e_mlp'] = device.read_average_power()
+            try:
+                raw['e_mlp'] = device.read_average_power()
+            except Exception as exc:
+                raw['e_mlp'] = f'Read failed: {exc}'
             ir_mw, ir_nj = readback.optical_values(raw['e_mlp'], output_hz)
+            ir_quantity = readback.quantity(raw['e_mlp'])
+            ir_basis = 'unavailable'
+            if ir_quantity:
+                ir_basis = 'measured' if ir_quantity[1].endswith('W') else 'estimated'
+            ir_error = '' if math.isfinite(ir_mw) else (
+                f'IR monitor has no usable unit-bearing reading; e_mlp? reply: {raw["e_mlp"][:256]!r}'
+            )
             optical_error = ''
             if wl == 0:
                 mw, nj = ir_mw, ir_nj
                 source = 'e_mlp (IR monitor; explicit reply unit)'
                 if not math.isfinite(mw) or not math.isfinite(nj):
-                    optical_error = f"IR monitor has no usable unit-bearing reading; e_mlp? reply: {raw['e_mlp'][:256]!r}"
+                    optical_error = ir_error
             else:
-                raw['ls_output_power'] = device.power_read_dv_green()
+                try:
+                    raw['ls_output_power'] = device.power_read_dv_green()
+                except Exception as exc:
+                    raw['ls_output_power'] = f'Read failed: {exc}'
                 measured = readback.quantity(raw['ls_output_power'])
                 # Manual defines harmonic monitor in W. Accept explicit power
                 # units only; unsupported FHG replies remain unknown.
@@ -82,13 +96,16 @@ class LaserReadoutMixin:
             code = readback.scalar(raw['status'])
             if code not in (9, 33, 65, 129):
                 optical_error = f'Laser state {code} is not stable; optical readings unavailable. '+optical_error
+                ir_error = f'Laser state {code} is not stable; IR reading unavailable.'
+                ir_mw = math.nan
             valid = code in (9, 33, 65, 129) and math.isfinite(mw) and math.isfinite(nj)
             snapshot = dict(monotonic=time.monotonic(), utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 valid=valid, raw=raw, source=source, wavelength=readback.WAVELENGTHS[wl][0],
                 wavelength_index=wl, wavelength_nm=readback.WAVELENGTHS[wl][1],
                 wavelength_basis='nominal selected harmonic, not a live spectral measurement',
                 base_frequency_hz=hz, frequency_index=index, divider=int(div), output_frequency_hz=output_hz,
-                aom_percent=aom/40., ir_power_mw=ir_mw, output_power_mw=mw if valid else math.nan,
+                aom_percent=aom/40., ir_power_mw=ir_mw, ir_power_basis=ir_basis,
+                ir_power_error=ir_error, output_power_mw=mw if valid else math.nan,
                 pulse_energy_nj=nj if valid else math.nan, status_code=code,
                 location='laser internal monitor; not calibrated energy delivered to specimen',
                 frequency_table=dict(self._frequency_table))
@@ -124,6 +141,7 @@ class LaserReadoutMixin:
     def _recompute_derived_readouts(self):
         data = readback.fresh_snapshot(self.variables)
         for widget, key, scale in (
+            (self.laser_ir_power_disp, 'ir_power_mw', .001),
             (self.laser_power_disp, 'output_power_mw', .001),
             (self.laser_pulse_energy_disp, 'pulse_energy_nj', .001),
             (self.laser_repetion_rate_disp, 'output_frequency_hz', .001),
@@ -138,6 +156,22 @@ class LaserReadoutMixin:
             tooltip += '\nNo fresh optical readback is available.'
         self.laser_power_disp.setToolTip(tooltip)
         self.laser_pulse_energy_disp.setToolTip(tooltip)
+        estimated = data.get('ir_power_basis') == 'estimated'
+        self.laser_ir_power_label.setText('IR power estimate (W)' if estimated else 'Measured IR power (W)')
+        ir_tooltip = ('IR internal monitor (e_mlp?); independent of the selected harmonic. '
+                      'This is not the power delivered to the specimen.')
+        if estimated:
+            ir_tooltip += '\nCalculated from the returned IR pulse energy and output repetition rate; not a direct watt measurement.'
+        if data.get('ir_power_error'):
+            ir_tooltip += '\n'+data['ir_power_error']
+        elif not math.isfinite(data.get('ir_power_mw', math.nan)) and data.get('error'):
+            ir_tooltip += '\n'+data['error']
+        if not data:
+            ir_tooltip += '\nNo fresh IR monitor readback is available.'
+        elif data.get('raw', {}).get('e_mlp'):
+            ir_tooltip += '\nRaw IR monitor reply: '+data['raw']['e_mlp'][:256]
+        self.laser_ir_power_disp.setToolTip(ir_tooltip)
+        self.laser_ir_power_label.setToolTip(ir_tooltip)
 
     def _clamp_divider_to_min_output_rate(self):
         # Manual p123 permits 1..10,000,000. QSG p6 explicitly uses 40 kHz.

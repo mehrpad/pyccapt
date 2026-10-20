@@ -129,10 +129,16 @@ def _load_nktp_dll_module():
     if spec is None or spec.loader is None:
         raise NKTPSwitchError(f"Could not load module spec for {module_file}")
     module = importlib.util.module_from_spec(spec)
+    # The vendor wrapper loads its DLL using this environment variable, even
+    # when we found the SDK through the default install location.
+    os.environ['NKTP_SDK_PATH'] = str(sdk)
     sys.modules["_pyccapt_NKTP_DLL"] = module
     try:
         spec.loader.exec_module(module)
-    except OSError as exc:  # DLL load failure
+    except Exception as exc:
+        # A failed import must not poison subsequent button clicks with a
+        # partially initialized module cached for the rest of the GUI session.
+        sys.modules.pop("_pyccapt_NKTP_DLL", None)
         raise NKTPSwitchError(
             f"Could not load NKTPDLL: {exc}. Confirm the SDK matches "
             "your Python architecture (64-bit Python needs the x64 DLL)."
@@ -209,16 +215,16 @@ def switch_to_cli(
     """
     nkt = _load_nktp_dll_module()
 
-    # autoMode=1, liveMode=0 — scan once, no continuous monitoring.
-    open_result = nkt.openPorts(port, 1, 0)
-    if open_result != 0:
-        raise NKTPSwitchError(
-            f"openPorts({port}) failed: {nkt.PortResultTypes(open_result)}. "
-            "Either the port name is wrong, another process owns the "
-            "port (e.g. NKT CONTROL is open), or the laser is in CLI "
-            "mode already."
-        )
     try:
+        # autoMode=1, liveMode=0 — scan once, no continuous monitoring.
+        # Even a failed/partial open must go through closePorts below.
+        open_result = nkt.openPorts(port, 1, 0)
+        if open_result != 0:
+            raise NKTPSwitchError(
+                f"openPorts({port}) failed: {nkt.PortResultTypes(open_result)}. "
+                "Disconnect the laser in NKT CONTROL or any serial terminal "
+                "before retrying; PyCCAPT can stay open."
+            )
         dev_id = device_address if device_address is not None else _find_oxps_address(nkt, port, extra_addresses)
         write_result = nkt.registerWriteU8(
             port,
@@ -241,10 +247,17 @@ def switch_to_cli(
         )
         return dev_id
     finally:
+        had_error = sys.exc_info()[0] is not None
         try:
-            nkt.closePorts(port)
-        except Exception:
-            pass
+            close_result = nkt.closePorts(port)
+            if close_result != 0:
+                raise NKTPSwitchError(
+                    f"Could not release NKTPBus port {port}: {nkt.PortResultTypes(close_result)}"
+                )
+        except Exception as exc:
+            if not had_error:
+                raise NKTPSwitchError(f"Could not release NKTPBus port {port}: {exc}") from exc
+            _log.warning('NKTPBus cleanup on %s failed: %s', port, exc)
 
 
 def switch_to_nktpbus(port: str) -> None:
@@ -253,32 +266,29 @@ def switch_to_nktpbus(port: str) -> None:
     Pure CLI command — no DLL needed. Provided here so both directions
     live in the same place. Equivalent to ``ly_oxp2_nktpbus=1``.
     """
-    import serial as _serial  # local import keeps the heavy import optional
+    from pyccapt.control.nkt_photonics.origamiClassCLI import origClass
 
-    with _serial.Serial(
-        port=port,
-        baudrate=38400,
-        stopbits=_serial.STOPBITS_ONE,
-        bytesize=_serial.EIGHTBITS,
-        rtscts=False,
-        timeout=1.0,
-    ) as ser:
-        ser.write(b"ly_oxp2_nktpbus=1\n")
-        # Drain reply if any so the next opener does not see stale bytes.
-        time.sleep(0.2)
-        try:
-            ser.read(ser.in_waiting or 0)
-        except Exception:
-            pass
+    device = origClass(port)
+    try:
+        if device.open_port() != 0:
+            raise NKTPSwitchError(
+                f"Could not open {port}: {device.last_error}. Disconnect the laser "
+                "in NKT CONTROL or any serial terminal before retrying."
+            )
+        device.InterbusEnable()
+    finally:
+        device.close_port()
     _log.info("Sent CLI -> NKTPBus switch on %s", port)
 
 
-def is_cli_responding(port: str, *, timeout_s: float = 2.0) -> bool:
+def is_cli_responding(port: str, *, timeout_s: float = 2.0, raise_on_port_error: bool = False) -> bool:
     """Quick probe: open the port at 38 400 baud and ask for status.
 
     Requires a parsed numeric status, rather than just a command echo.
     False means CLI communication was not established; it does not prove
     NKTPBus mode. Uses the same framing as the GUI, including promptless replies.
+    With ``raise_on_port_error``, an unavailable/busy port raises instead of
+    being mistaken for a different protocol and passed to the SDK.
     """
     try:
         from pyccapt.control.nkt_photonics.origamiClassCLI import origClass
@@ -287,8 +297,15 @@ def is_cli_responding(port: str, *, timeout_s: float = 2.0) -> bool:
     device = origClass(port)
     try:
         if device.open_port() != 0:
+            if raise_on_port_error:
+                raise NKTPSwitchError(
+                    f"Could not open {port}: {device.last_error}. Disconnect the laser "
+                    "in NKT CONTROL or any serial terminal before retrying; PyCCAPT can stay open."
+                )
             return False
         return bool(device.StatusRead(timeout=timeout_s))
+    except NKTPSwitchError:
+        raise
     except Exception:
         return False
     finally:

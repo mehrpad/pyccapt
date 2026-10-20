@@ -33,6 +33,7 @@ max_laser_power = 5.2
 # Legacy max_laser_power was ambiguous (W vs mW vs nJ); it is no longer used
 # for the laser GUI. Modern e_power is an AOM relative setting, not watts.
 laser_aom_max_percent = 100.0 # e_power 0..4000 displayed as 0..100% (manual p120)
+laser_ir_max_power_w = 5.2 # IR watt-request ceiling for this instrument; firmware calibration via NKTPBus
 
 # Laser optics alignment. Values below are commissioning defaults, not calibrated
 # beam motion. Measure referenced stage bounds and allowable travel before enabling.

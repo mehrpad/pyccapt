@@ -463,6 +463,7 @@ def test_laser_compact_layout_preserves_controls_and_readouts(instrument_window,
     assert window._responsive_window.scroll.verticalScrollBar().maximum() == 0
     controls = [ui.laser_wavelegnth, ui.laser_wavelegnth_nm_label, ui.laser_power,
                 ui.laser_ir_power_control_label, ui.laser_ir_power_control, ui.laser_ir_power_apply,
+                ui.laser_native_control_button,
                 ui.laser_rate, ui.laser_divition_factor, ui.laser_enable, ui.laser_on,
                 ui.laser_standby, ui.laser_listen, ui.laser_state_label, ui.laser_auto_alignment, ui.laser_tracking,
                 *ui.laser_alignment_fields.values(), *ui.laser_alignment_buttons,

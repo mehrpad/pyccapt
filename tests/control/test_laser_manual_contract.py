@@ -1104,3 +1104,110 @@ def test_failed_watt_request_is_not_reported_as_applied(watt_gui, failure):
         ui._open_laser_cli.assert_called_once()
         assert 'Firmware refused watts' in ui.errors[-1]
         assert ui.variables.flag_laser_connected
+
+
+@pytest.mark.parametrize('code', [65,129])
+def test_native_gui_watts_while_on_do_not_handover_or_send_state_commands(watt_gui, code):
+    ui, device, conversion = watt_gui
+    device.protocol = 'nktpbus'
+    device.code = code
+    device.wavelength_basis = 'IR selected before native handover'
+    device.supports_wavelength_changes = False
+    device.wavelength_read = lambda: 'Current position=IR'
+    device.set_ir_power_watts = Mock(return_value=1.)
+    ui._apply_button_locks_for_status(f'ly_oxp2_dev_status {code}')
+    assert ui.laser_ir_power_apply.isEnabled()
+    assert ui.laser_ir_power_apply.text() == 'Apply W'
+    ui._apply_ir_power_watts()
+    device.set_ir_power_watts.assert_called_once_with(1.)
+    assert device.code == code
+    assert not device.calls
+    device.close_port.assert_not_called()
+    conversion.assert_not_called()
+    ui._open_laser_cli.assert_not_called()
+    assert 'operating state retained' in ui.errors[-1]
+    assert 'Listen' not in ui.laser_ir_power_control.toolTip()
+
+
+def test_native_handover_is_refused_while_emitting(watt_gui, monkeypatch):
+    from pyccapt.control.nkt_photonics import nktpbus_switch
+    ui, device, conversion = watt_gui
+    device.code = 129
+    device.wavelength_read = lambda: 'Current position=IR'
+    switch = Mock()
+    monkeypatch.setattr(nktpbus_switch, 'switch_to_nktpbus', switch)
+    ui._use_native_ir_control()
+    switch.assert_not_called()
+    device.close_port.assert_not_called()
+    assert 'Listen or ready Standby' in ui.errors[-1]
+
+
+def test_native_handover_requires_verified_ir_selection(watt_gui, monkeypatch):
+    from pyccapt.control.nkt_photonics import nktpbus_switch
+    ui, device, conversion = watt_gui
+    switch = Mock()
+    monkeypatch.setattr(nktpbus_switch, 'switch_to_nktpbus', switch)
+    ui._use_native_ir_control()
+    switch.assert_not_called()
+    device.close_port.assert_not_called()
+    assert 'Select IR' in ui.errors[-1]
+
+
+def test_native_handover_opens_one_owned_sdk_session_then_restores_polling(watt_gui, monkeypatch):
+    from pyccapt.control.gui import laser_power_control
+    from pyccapt.control.nkt_photonics import nktpbus_switch
+    ui, old, conversion = watt_gui
+    old.wavelength_read = lambda: 'Current position=IR'
+    native = Laser()
+    native.code = 9
+    native.protocol = 'nktpbus'
+    native.wavelength_basis = 'IR verified before handover'
+    native.supports_wavelength_changes = False
+    native.wavelength_read = lambda: 'Current position=IR'
+    native.open_port = Mock(return_value=0)
+    monkeypatch.setattr(nktpbus_switch, '_load_nktp_dll_module', Mock())
+    def switch(port):
+        old.close_port.assert_called_once()
+        assert ui.laser_device is None
+        assert not ui._laser_status_timer.isActive()
+    monkeypatch.setattr(nktpbus_switch, 'switch_to_nktpbus', switch)
+    monkeypatch.setattr(laser_power_control, 'NativeLaser', lambda *args, **options: native)
+    ui._use_native_ir_control()
+    assert ui.laser_device is native
+    native.open_port.assert_called_once()
+    native.close_port.assert_not_called()
+    assert ui.variables.flag_laser_connected
+    assert ui._laser_status_timer.isActive()
+    assert not ui.laser_wavelegnth.isEnabled()
+    assert not native.calls  # Opening and reading did not enable emission.
+
+
+def test_native_release_to_official_software_stops_output_and_releases_handle(watt_gui, monkeypatch):
+    from pyccapt.control.nkt_photonics import nktpbus_switch
+    ui, device, conversion = watt_gui
+    device.protocol = 'nktpbus'
+    device.code = 129
+    switch = Mock()
+    monkeypatch.setattr(nktpbus_switch, 'switch_to_nktpbus', switch)
+    ui.switch_to_nktpbus_mode()
+    switch.assert_not_called()  # Already in the binary protocol; no reset needed.
+    assert device.calls == [('Listen',)]
+    device.close_port.assert_called_once()
+    assert ui.laser_device is None
+
+
+@pytest.mark.parametrize('editing', [False, True])
+def test_native_watt_readback_updates_field_without_overwriting_active_edit(watt_gui, monkeypatch, editing):
+    ui, device, _ = watt_gui
+    device.protocol = 'nktpbus'
+    device.wavelength_basis = 'IR selected before native handover'
+    device.wavelength_read = lambda: 'Current position=IR'
+    device.ir_power_setpoint_watts = lambda: 1.4
+    monkeypatch.setattr(ui.laser_ir_power_control, 'hasFocus', lambda: editing)
+    changed = Mock()
+    ui.laser_ir_power_control.valueChanged.connect(changed)
+    ui._sync_controls_from_device()
+    assert ui.variables.laser_telemetry['ir_power_setpoint_w'] == 1.4
+    assert ui.laser_ir_power_control.value() == (1. if editing else 1.4)
+    changed.assert_not_called()
+    assert not device.calls

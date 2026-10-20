@@ -1428,10 +1428,12 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
 
     def switch_to_nktpbus_mode(self):
         """Send the same LF-terminated command as the standalone helper."""
+        already_native = getattr(self.laser_device, 'protocol', None) == 'nktpbus'
         with self._laser_mode_transition('NKTPBus') as port:
             if not port:
                 return
-            nktpbus_switch.switch_to_nktpbus(port)
+            if not already_native:
+                nktpbus_switch.switch_to_nktpbus(port)
             self._set_laser_disconnected_banner(
                 f"NKTPBus command sent on {port}; CLI port released for NKT Photonics CONTROL."
             )
@@ -1488,6 +1490,8 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             if emission_pending:
                 label = 'Emission requested / '+state.value
             self.laser_state_label.setText('Laser: '+(label if self.laser_device is not None else 'Disconnected'))
+            if getattr(self.laser_device, 'protocol', None) == 'nktpbus':
+                self.laser_state_label.setText(self.laser_state_label.text()+' (native IR)')
         known = code in (9, 33, 65, 129) and not pending and not emission_pending
         idle = code in (9, 33) and not pending and not emission_pending
         running = bool(self.variables.start_flag)
@@ -1504,14 +1508,22 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
                                      else 'Open AOM output only after the laser is on.')
         self.laser_listen.setToolTip('Request Listen (no emission), including while warming or after a status-read failure.')
         self.laser_on.setToolTip('Close AOM output.' if code == 129 else 'Enable emission only after confirmed ready Standby.')
-        self.laser_wavelegnth.setEnabled(idle and not running)
+        self.laser_wavelegnth.setEnabled(idle and not running
+            and getattr(self.laser_device, 'supports_wavelength_changes', True))
         self.laser_rate.setEnabled(idle and not running and bool(getattr(self, '_frequency_table', {})))
         self.laser_divition_factor.setEnabled(known and not running)
         self.laser_power.setEnabled(known and not self._laser_alignment_busy())
         if hasattr(self, 'laser_ir_power_apply'):
-            watt_enabled = idle and not running and not self._laser_alignment_busy()
+            native = getattr(self.laser_device, 'protocol', None) == 'nktpbus'
+            watt_enabled = (known if native else idle) and not running and not self._laser_alignment_busy()
             self.laser_ir_power_control.setEnabled(watt_enabled)
             self.laser_ir_power_apply.setEnabled(watt_enabled)
+            self.laser_ir_power_apply.setText('Apply W' if native else 'Apply W (Listen)')
+            tip = ('Apply the native IR watt setpoint on the existing connection. '
+                   'Operating state and shutter are not changed. Manual AOM edits override this setpoint.'
+                   if native else getattr(self, '_legacy_ir_power_tooltip', 'CLI watt requests return to Listen.'))
+            self.laser_ir_power_apply.setToolTip(tip)
+            self.laser_ir_power_control.setToolTip(tip)
         for widget, active in ((self.led_laser_listen, code == 9),
                                (self.led_laser_laser_standby, code == 33),
                                (self.led_laser_on, code in (65, 129)),
@@ -1570,10 +1582,11 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
                    and not getattr(self, '_laser_mode_switch_in_progress', False)
                    and not getattr(self, '_laser_stopping', False)
                    and not self.variables.start_flag and not self._laser_alignment_busy())
-        for name in ('nktpbus_mode_switch', 'switch_to_cli_button'):
+        for name in ('nktpbus_mode_switch', 'switch_to_cli_button', 'laser_native_control_button'):
             button = getattr(self, name, None)
             if button is not None:
-                button.setEnabled(enabled)
+                button.setEnabled(enabled and (name != 'laser_native_control_button'
+                    or getattr(self.laser_device, 'protocol', None) != 'nktpbus'))
 
     @contextmanager
     def _laser_mode_transition(self, target):
@@ -1604,13 +1617,18 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
                          'change_laser_power', 'change_laser_rate', 'change_laser_divition_factor'):
                 setattr(self, flag, False)
             self._last_laser_status = None
+            if getattr(self.laser_device, 'protocol', None) == 'nktpbus':
+                # An explicit mode handover releases ownership. Native watt
+                # edits never enter this context and retain their on state.
+                self.laser_device.Listen()
             self._close_laser_device()
             self._apply_button_locks_for_status(None)
             self._set_laser_disconnected_banner(f'Switching to {target} on {port}...')
             yielded = True
             yield port
         except Exception as exc:
-            if yielded and self.laser_device is not None:
+            if (yielded and self.laser_device is not None
+                    and getattr(self.laser_device, 'connected', True)):
                 # A watt request can be refused after CLI has been recovered.
                 # Report the command failure without claiming the port is lost.
                 self._set_laser_disconnected_banner('')

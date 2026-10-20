@@ -226,6 +226,38 @@ help output, absent CLI replies and exclusive port ownership.
 
 ## IR watt control alongside relative AOM
 
+### Persistent native IR control
+
+For watt adjustment while emitting, select IR and Listen/Standby, grant
+Override Access, then choose **Native IR control** before enabling emission.
+This performs one CLI -> NKTPBus handover and retains the SDK connection.
+The state label identifies native IR control. **Apply W** then writes only
+the native `0x20` power setpoint and verifies its readback; repeated watt
+changes do not write the FSM, shutter, modulation mode or protocol registers.
+Relative AOM remains editable using `0x05`. Telemetry refreshes the firmware
+watt setpoint as well as the relative AOM setting without issuing new writes.
+
+The persistent adapter maps the documented main-board FSM, interlock, fault,
+frequency, divider, IR monitor and power registers into the existing GUI
+state contract. Connection and polling never reset an interlock or enable
+emission. Explicit Laser On/Output Enable buttons retain their emission
+semantics. Manual watt requests remain blocked during experiments/alignment,
+warmup, external modulation and faults. A relative AOM ceiling below 100%
+blocks nonzero native watt requests because its amplitude cannot be predicted
+before the firmware applies its calibration; a watt ceiling is enforced
+independently.
+
+Native control currently supports the IR selection verified before handover;
+wavelength editing is locked until returning to CLI. The installed harmonic
+register map does not establish FHG/DUV scaling, so no harmonic watt values
+are guessed. Existing CLI harmonic controls remain available. **Switch to CLI**
+and **Nktpbus mode** release the SDK session; these explicit ownership handovers
+request Listen, unlike watt-only changes. Native shutdown uses the existing
+safe-off sequence before closing the handle. No live emission was enabled to
+test this feature; repeated updates in emitting FSM states are simulated.
+
+### Legacy CLI watt requests
+
 **IR power control (W)** and **Apply W (Listen)** provide an explicit watt request
 without replacing the AOM percentage. The instrument-specific ceiling is
 `laser_ir_max_power_w` (5.2 W for this setup); requests use 0.001 W resolution.

@@ -109,6 +109,13 @@ class LaserReadoutMixin:
                 pulse_energy_nj=nj if valid else math.nan, status_code=code,
                 location='laser internal monitor; not calibrated energy delivered to specimen',
                 frequency_table=dict(self._frequency_table))
+            if getattr(device, 'protocol', None) == 'nktpbus':
+                snapshot['protocol'] = 'nktpbus'
+                snapshot['wavelength_basis'] = device.wavelength_basis
+                snapshot['source'] = 'NKTPBus register 0x10 (IR internal monitor, 0.001 W)'
+                setpoint = getattr(device, 'ir_power_setpoint_watts', None)
+                if callable(setpoint):
+                    snapshot['ir_power_setpoint_w'] = setpoint()
             if optical_error:
                 snapshot['error'] = optical_error
             self.variables.laser_telemetry = snapshot
@@ -122,6 +129,13 @@ class LaserReadoutMixin:
                 widget.blockSignals(True)
                 widget.setValue(value)
                 widget.blockSignals(False)
+            watt_field = getattr(self, 'laser_ir_power_control', None)
+            target_w = snapshot.get('ir_power_setpoint_w', math.nan)
+            if (watt_field is not None and not watt_field.hasFocus()
+                    and math.isfinite(target_w) and watt_field.minimum() <= target_w <= watt_field.maximum()):
+                watt_field.blockSignals(True)
+                watt_field.setValue(target_w)
+                watt_field.blockSignals(False)
             self.laser_rate.blockSignals(True)
             self.laser_rate.setCurrentIndex(self.laser_rate.findData(int(index)))
             self.laser_rate.blockSignals(False)
@@ -158,7 +172,8 @@ class LaserReadoutMixin:
         self.laser_pulse_energy_disp.setToolTip(tooltip)
         estimated = data.get('ir_power_basis') == 'estimated'
         self.laser_ir_power_label.setText('IR power estimate (W)' if estimated else 'Measured IR power (W)')
-        ir_tooltip = ('IR internal monitor (e_mlp?); independent of the selected harmonic. '
+        monitor = 'NKTPBus register 0x10' if data.get('protocol') == 'nktpbus' else 'e_mlp?'
+        ir_tooltip = (f'IR internal monitor ({monitor}); independent of the selected harmonic. '
                       'This is not the power delivered to the specimen.')
         if estimated:
             ir_tooltip += '\nCalculated from the returned IR pulse energy and output repetition rate; not a direct watt measurement.'

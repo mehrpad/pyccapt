@@ -101,7 +101,7 @@ class LaserLayoutMixin:
         main.addWidget(stage, 1, 0, 1, 2)
         connection = QtWidgets.QHBoxLayout()
         connection.setSpacing(4)
-        for button in (self.switch_to_cli_button, self.nktpbus_mode_switch):
+        for button in (self.switch_to_cli_button, self.laser_native_control_button, self.nktpbus_mode_switch):
             button.setFixedSize(115, 28)
             connection.addWidget(button)
         self.laser_connection_banner.setMinimumWidth(0)

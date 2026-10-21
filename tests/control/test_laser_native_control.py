@@ -18,6 +18,8 @@ def native(monkeypatch, request):
     sdk.deviceGetAllTypes.return_value = (0, bytes(15) + b'\x95' + bytes(239))
     sdk.registerRead.return_value = (0, struct.pack('<13I', *([0]*4 + [400000] + [0]*8)))
     def read(port, address, register, index):
+        if register == 0x0E and register not in registers:
+            return 4, 0
         return 0, registers[register]
     def write(port, address, register, value, index):
         registers[register] = value
@@ -51,6 +53,67 @@ def test_watts_preserve_state_shutter_and_sdk_session(native, state):
     sdk.registerWriteU8.assert_not_called()  # No FSM, shutter, mode or protocol write.
     sdk.registerWriteU32.assert_not_called()
     assert [call.args[2:4] for call in sdk.registerWriteU16.call_args_list] == [(0x20, 1200), (0x20, 1400)]
+
+
+@pytest.mark.parametrize('native', [None], indirect=True)
+def test_native_attach_without_cli_wavelength_does_not_invent_selected_output(native):
+    laser, sdk, registers = native
+    assert readback.wavelength(laser.wavelength_read()) is None
+    assert 'not been verified' in laser.wavelength_basis
+    assert readback.scalar(laser.StatusRead()) == 129
+    sdk.registerWriteU8.assert_not_called()
+    sdk.registerWriteU16.assert_not_called()
+    assert laser.set_ir_power_watts(1.4) == 1.4
+    assert registers[0x01] == 6
+    sdk.registerWriteU8.assert_not_called()
+
+
+@pytest.mark.parametrize('native', [None], indirect=True)
+@pytest.mark.parametrize('wavelength', [0, 1, 3])
+def test_existing_native_wavelength_is_read_without_a_protocol_change(native, wavelength):
+    laser, sdk, registers = native
+    registers[0x0E] = wavelength
+    assert readback.wavelength(laser.wavelength_read()) == wavelength
+    assert 'register 0x0E' in laser.wavelength_basis
+    sdk.registerWriteU8.assert_not_called()
+    sdk.registerWriteU16.assert_not_called()
+
+
+def test_persistent_native_session_keeps_vendor_watchdog_monitoring_active(native):
+    _, sdk, _ = native
+    sdk.openPorts.assert_called_once_with('FAKE', 1, 1)
+
+
+def test_explicit_interlock_reset_only_writes_vendor_reset_and_waits_for_later_readback(native):
+    laser, sdk, registers = native
+    registers.update({0x01: 1, 0x32: 1})
+    laser.StatusRead()
+    assert laser.interlock_reset_available
+    laser.reset_interlock()
+    sdk.registerWriteU8.assert_called_once_with('FAKE', 15, 0x32, 1, -1)
+    sdk.registerWriteU16.assert_not_called()
+    assert readback.scalar(laser.StatusRead()) == 9
+    assert registers[0x32] == 1  # An ACK is not relay confirmation.
+    registers[0x32] = 2
+    assert readback.scalar(laser.StatusRead()) == 9
+    assert not laser.status_fault and not laser.interlock_reset_available
+    assert registers[0x01] == 1
+
+
+@pytest.mark.parametrize('state,interlock,error', [
+    (1, 0, 0), (1, 2, 0), (1, 0x0300, 0), (1, 0x3000, 0), (1, 1, 7),
+    (2, 1, 0), (3, 1, 0), (5, 1, 0), (6, 1, 0),
+])
+def test_reset_rechecks_state_and_never_overrides_open_or_failed_interlock(native, state, interlock, error):
+    laser, sdk, registers = native
+    registers.update({0x01: 1, 0x32: 1})
+    laser.StatusRead()
+    assert laser.interlock_reset_available
+    registers.update({0x01: state, 0x32: interlock, 0x67: error})
+    with pytest.raises(ValueError):
+        laser.reset_interlock()
+    sdk.registerWriteU8.assert_not_called()
+    sdk.registerWriteU16.assert_not_called()
 
 
 @pytest.mark.parametrize('watts', [-1., 5.201, float('inf'), float('nan')])
@@ -150,8 +213,10 @@ def test_listen_is_observable_during_fault_but_cannot_raise_power(native, interl
     assert readback.scalar(laser.StatusRead()) == 9
     assert laser.status_fault
     assert laser.status_details == dict(fsm=1, interlock=interlock, error=error)
-    for action in (laser.Standby, laser.Enable, laser.AOMEnable,
-                   lambda: laser.AOM(800), lambda: laser.set_ir_power_watts(1.)):
+    actions = [laser.Enable, laser.AOMEnable, lambda: laser.AOM(800), lambda: laser.set_ir_power_watts(1.)]
+    if interlock != 1 or error:
+        actions.append(laser.Standby)
+    for action in actions:
         with pytest.raises(ValueError):
             action()
     sdk.registerWriteU8.assert_not_called()
@@ -163,7 +228,7 @@ def test_listen_is_observable_during_fault_but_cannot_raise_power(native, interl
     assert laser.set_ir_power_watts(1.) == 1.
 
 
-@pytest.mark.parametrize('interlock,error', [(1, 0), (0, 0), (0x3000, 0), (0x4000, 0), (0xFF00, 0), (1, 7)])
+@pytest.mark.parametrize('interlock,error', [(0, 0), (0x0300, 0), (0x3000, 0), (0x4000, 0), (0xFF00, 0), (1, 7)])
 def test_standby_never_resets_open_or_failed_interlock(native, interlock, error):
     laser, sdk, registers = native
     registers.update({0x01: 1, 0x32: interlock, 0x67: error})
@@ -171,6 +236,18 @@ def test_standby_never_resets_open_or_failed_interlock(native, interlock, error)
         laser.Standby()
     sdk.registerWriteU16.assert_not_called()
     sdk.registerWriteU8.assert_not_called()
+
+
+def test_standby_matches_vendor_listen_to_warmup_sequence_without_a_reset(native):
+    laser, sdk, registers = native
+    registers.update({0x01: 1, 0x32: 1})
+    laser.Standby()
+    sdk.registerWriteU8.assert_called_once_with('FAKE', 15, 0x30, 3, -1)
+    sdk.registerWriteU16.assert_not_called()
+    registers[0x01] = 2
+    assert readback.scalar(laser.StatusRead()) == 17  # Closed-loop warm-up remains warming.
+    registers.update({0x01: 3, 0x32: 2})
+    assert readback.scalar(laser.StatusRead()) == 33
 
 
 @pytest.mark.parametrize('close_result', [0, 2])

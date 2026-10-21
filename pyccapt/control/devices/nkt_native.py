@@ -1,9 +1,10 @@
 """Persistent OXPS NKTPBus control, using the vendor's 0x95 register map.
 
 Main-board registers are documented in 800-621-01 pp163-166. The IR setpoint
-controls the fundamental feeding any selected harmonic. The wavelength is
-read back via CLI before handover and locked for this session; it is not
-queried through an unverified harmonic register map.
+controls the fundamental feeding any selected harmonic. A CLI-verified
+wavelength is retained across explicit handover. An existing bus can report
+its selected wavelength through native register 0x0E; unsupported readings
+remain unknown.
 Opening/reading never enables emission or resets an interlock.
 """
 import logging
@@ -18,14 +19,18 @@ from pyccapt.control.nkt_photonics.origamiClassCLI import origClass
 class NativeLaser:
     protocol = 'nktpbus'
     supports_wavelength_changes = False
+    supports_harmonic_power_readback = False
 
-    def __init__(self, port, *, wavelength, max_watts=5.2, max_aom_percent=100.):
+    def __init__(self, port, *, wavelength=None, max_watts=5.2, max_aom_percent=100.):
         self.comPort = port
-        self._wavelength_index = origClass._integer(wavelength, 0, 3)
-        name = readback.WAVELENGTHS[self._wavelength_index][0]
-        self.wavelength_basis = (
-            f'{name} selection read back via CLI before native handover; '
-            'selection locked; no live native harmonic-position readback')
+        self._wavelength_index = None if wavelength is None else origClass._integer(wavelength, 0, 3)
+        if self._wavelength_index is None:
+            self.wavelength_basis = 'Current native wavelength has not been verified; return to CLI to read/change it.'
+        else:
+            name = readback.WAVELENGTHS[self._wavelength_index][0]
+            self.wavelength_basis = (
+                f'{name} selection read back via CLI before native handover; '
+                'selection locked; no live native harmonic-position readback')
         self.max_watts = float(max_watts)
         self.max_aom_percent = float(max_aom_percent)
         if not math.isfinite(self.max_watts) or not 0 < self.max_watts <= 65.535:
@@ -51,7 +56,10 @@ class NativeLaser:
                 return -1
             try:
                 self.nkt = nktpbus_switch._load_nktp_dll_module()
-                result = self.nkt.openPorts(self.comPort, 1, 0)
+                # The SDK's live monitoring maintains the module watchdog for
+                # the lifetime of this persistent connection. Protocol-switch
+                # helpers use a short-lived, non-monitoring session instead.
+                result = self.nkt.openPorts(self.comPort, 1, 1)
                 self._opened = True  # Also clean up partial SDK opens.
                 if result != 0:
                     raise ConnectionError(f'Native port open failed: {self.nkt.PortResultTypes(result)}')
@@ -75,11 +83,13 @@ class NativeLaser:
                 self._opened = False
                 self.address = None
 
-    def _read(self, register, kind='U16', index=-1):
+    def _read(self, register, kind='U16', index=-1, *, allow_unsupported=False):
         with self._lock:
             if not self._opened or self.address is None:
                 raise ConnectionError('Native laser is not connected')
             result, value = getattr(self.nkt, 'registerRead'+kind)(self.comPort, self.address, register, index)
+            if allow_unsupported and result in (4, 8, 11):  # NACK, type unsupported, register absent.
+                return None
             if result != 0:
                 if result == 13:  # SDK auto-scan may have closed an empty port.
                     self._port_missing = True
@@ -114,9 +124,12 @@ class NativeLaser:
         code = {0: 1, 1: 9, 2: 17, 3: 33, 4: 17, 5: 65, 6: 129}.get(state)
         if code is None:
             raise ValueError(f'Unknown native laser FSM state {state}')
-        interlock_text = {0: 'interlock loop open', 1: 'interlock waiting for reset',
-                          2: '', 0x3000: 'external module interlock open',
-                          0x4000: 'front-panel interlock open'}.get(
+        interlock_text = {0: 'interlock loop open', 1: 'interlock waiting for reset', 2: '',
+                          0x0100: 'key-switch interlock open', 0x0200: 'door interlock open',
+                          0x0300: 'external module interlock open', 0x0400: 'interlock power failure',
+                          0x0500: 'internal controller interlock open',
+                          0x1000: 'interlock power failure', 0x2000: 'internal interlock open',
+                          0x3000: 'external module interlock open', 0x4000: 'front-panel interlock open'}.get(
                               interlock, f'interlock 0x{interlock:04X}')
         self.status_fault = '; '.join(filter(None, (
             f'laser error {error}' if error else '', interlock_text)))
@@ -128,10 +141,10 @@ class NativeLaser:
                 self.comPort, state, error, interlock,
                 f' ({self.status_fault})' if self.status_fault else '')
         # Listen is a real stopped state even with an interlock awaiting reset.
-        # Retain its fault separately; it must still block upward commands.
+        # Retain its fault separately; emission still requires a clear interlock.
         if error and state != 1:
             code = 3
-        elif interlock != 2 and state != 1:
+        elif interlock != 2 and state != 1 and not (interlock == 1 and state in (2, 4)):
             code = 5  # Recovery Listen remains available; never auto-reset it.
         return f'ly_oxp2_dev_status {code}'
 
@@ -146,9 +159,35 @@ class NativeLaser:
 
     def Standby(self):
         self.StatusRead()
-        if self.status_fault and self.status_details['fsm'] < 3:
+        if self.status_fault and self.status_details['fsm'] < 3 and not self.standby_available:
             raise ValueError(self.status_fault)
         return self._write(0x30, 3)
+
+    @property
+    def standby_available(self):
+        # Vendor manual 800-621-01 Procedure 7 (pp85-86) and CONTROL's
+        # standbyChanged handler request target 3 directly from Listen.
+        # Closed-loop "waiting for reset" is not a prerequisite failure.
+        return (self.connected and self.status_details.get('fsm') == 1
+                and self.status_details.get('error') == 0
+                and self.status_details.get('interlock') in (1, 2))
+
+    @property
+    def interlock_reset_available(self):
+        return self.connected and self.status_details == dict(fsm=1, error=0, interlock=1)
+
+    def reset_interlock(self):
+        """Request only the closed-loop reset; later status reads confirm it.
+
+        The installed NKT CONTROL Origami plugin writes U8=1 to 0x32
+        asynchronously. It does not require the relay to close in the command
+        transaction. Never request a state transition or enable output here.
+        """
+        with self._lock:
+            self.StatusRead()
+            if not self.interlock_reset_available:
+                raise ValueError(self.status_fault or 'Interlock reset is only available in Listen while awaiting reset')
+            return self._write(0x32, 1, 'U8')
 
     def _require_clear_interlock(self):
         self.StatusRead()
@@ -191,6 +230,15 @@ class NativeLaser:
             return '\n'.join(f'e_freq={i} --> {hz} Hz' for i, (hz,) in enumerate(struct.iter_unpack('<I', data)) if hz)
 
     def wavelength_read(self):
+        if self._wavelength_index is None:
+            # NKT CONTROL's onRegDynamicWavelengthRead uses main-board 0x0E
+            # (U8): 0=IR, 1=SHG, 2=THG, 3=FHG. Older firmware may NACK it.
+            selected = self._read(0x0E, 'U8', allow_unsupported=True)
+            if selected in readback.WAVELENGTHS:
+                name = readback.WAVELENGTHS[selected][0]
+                self.wavelength_basis = f'{name} selected wavelength read from native register 0x0E'
+                return f'Native wavelength position={name}'
+            return 'Unknown: current native wavelength has not been verified'
         return f'CLI-verified position={readback.WAVELENGTHS[self._wavelength_index][0]}'
     def wavelength_change(self, value):
         raise ValueError('Return to CLI to change wavelength, then reconnect native watt control.')

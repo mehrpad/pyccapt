@@ -198,7 +198,7 @@ def request_cli_protocol(nkt, port: str, device_address: int) -> int:
     if result not in (0, REGISTER_RESULT_TIMEOUT):
         raise NKTPSwitchError(f'registerWriteU8 failed: {nkt.RegisterResultTypes(result)}')
     if result == REGISTER_RESULT_TIMEOUT:
-        _log.warning(
+        _log.info(
             'CLI protocol write on %s (devId=0x%02X) returned %s; '
             'the laser may reset before acknowledging. Releasing NKTPBus and verifying CLI.',
             port, device_address, nkt.RegisterResultTypes(result),

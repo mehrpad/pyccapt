@@ -2,6 +2,7 @@
 import datetime
 import logging
 import math
+import re
 import time
 
 from pyccapt.control.nkt_photonics import readback
@@ -33,17 +34,35 @@ class LaserReadoutMixin:
         previous = getattr(self, '_last_optical_readback_error', '')
         self._last_optical_readback_error = reason
         if reason and reason != previous:
-            logging.getLogger('pyccapt.laser').warning('Laser optical readback unavailable: %s', reason)
+            expected = (
+                reason == 'Waiting for laser readback'
+                or reason.startswith(('Switching to CLI on ', 'Switching to NKTPBus on ',
+                                      'Switching to native watt control on ', 'Detecting laser interface on ',
+                                      'Current wavelength not verified;',
+                                      'Native selected-harmonic power monitor is unavailable;'))
+                or (re.match(r'^Laser (?:status|state) (?:1|17)(?:\.0)?(?:[:; ]|$)', reason) is not None
+                    and not any(marker in reason for marker in
+                                ('Read failed:', 'unsupported or ambiguous', 'no usable unit-bearing')))
+            )
+            logging.getLogger('pyccapt.laser').log(
+                logging.INFO if expected else logging.WARNING, 'Laser optical readback unavailable: %s', reason)
         elif previous and not reason:
             logging.getLogger('pyccapt.laser').info('Laser optical readback restored')
 
-    def _sync_controls_from_device(self, *, initial=False):
+    def _sync_controls_from_device(self, *, initial=False, status_text=None):
         if getattr(self, '_laser_stopping', False):
             return False
         if self.laser_device is None:
             self._invalidate_laser_readouts('CLI disconnected')
             return
         device = self.laser_device
+        known_code = readback.scalar(status_text)
+        if known_code in (1, 17):
+            state = 'Power / booting' if known_code == 1 else 'Setup / warming'
+            fault = getattr(device, 'status_fault', '')
+            self._invalidate_laser_readouts(fault or f'Laser status {known_code}: {state}')
+            self._apply_button_locks_for_status(status_text)
+            return False
         raw = {}
         try:
             frequency_table = getattr(self, '_frequency_table', {})
@@ -60,9 +79,10 @@ class LaserReadoutMixin:
                     return False
             index, div, aom = (readback.scalar(raw[k]) for k in ('e_freq', 'e_div', 'e_power'))
             wl = readback.wavelength(raw['ls_wavelength'])
+            unknown_native_wavelength = wl is None and getattr(device, 'protocol', None) == 'nktpbus'
             hz = frequency_table.get(index, math.nan)
             if (not math.isfinite(hz) or div is None or div != int(div) or not 1 <= div <= 10000000
-                    or aom is None or not 0 <= aom <= 4000 or wl is None):
+                    or aom is None or not 0 <= aom <= 4000 or (wl is None and not unknown_native_wavelength)):
                 raise ValueError('Incomplete laser frequency, divider, AOM or wavelength readback')
             output_hz = hz/div
             # e_mlp is the IR monitor. Never relabel it as Green/DUV output.
@@ -81,11 +101,22 @@ class LaserReadoutMixin:
                 f'IR monitor has no usable unit-bearing reading; e_mlp? reply: {raw["e_mlp"][:256]!r}'
             )
             optical_error = ''
-            if wl == 0:
+            if unknown_native_wavelength:
+                mw = nj = math.nan
+                source = 'Selected wavelength unverified; independent IR monitor only'
+                optical_error = ('Current wavelength not verified; selected output power and pulse energy '
+                                 'are unavailable.')
+            elif wl == 0:
                 mw, nj = ir_mw, ir_nj
                 source = 'e_mlp (IR monitor; explicit reply unit)'
                 if not math.isfinite(mw) or not math.isfinite(nj):
                     optical_error = ir_error
+            elif (getattr(device, 'protocol', None) == 'nktpbus'
+                  and getattr(device, 'supports_harmonic_power_readback', True) is False):
+                mw = nj = math.nan
+                source = 'Selected harmonic monitor unavailable: native scaling unverified'
+                optical_error = ('Native selected-harmonic power monitor is unavailable; '
+                                 'its register scaling has not been verified.')
             else:
                 try:
                     raw['ls_output_power'] = device.power_read_dv_green()
@@ -114,12 +145,13 @@ class LaserReadoutMixin:
             fault = getattr(device, 'status_fault', '')
             if code not in (9, 33, 65, 129) or fault:
                 optical_error = (fault or f'Laser state {code} is not stable')+'; optical readings unavailable. '+optical_error
-                ir_error = f'Laser state {code} is not stable; IR reading unavailable.'
+                ir_error = (ir_error+'; ' if ir_error else '')+f'Laser state {code} is not stable; IR reading unavailable.'
                 ir_mw = math.nan
             valid = code in (9, 33, 65, 129) and not fault and math.isfinite(mw) and math.isfinite(nj)
+            wavelength_name, wavelength_nm = readback.WAVELENGTHS.get(wl, (None, None))
             snapshot = dict(monotonic=time.monotonic(), utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                valid=valid, raw=raw, source=source, wavelength=readback.WAVELENGTHS[wl][0],
-                wavelength_index=wl, wavelength_nm=readback.WAVELENGTHS[wl][1],
+                valid=valid, raw=raw, source=source, wavelength=wavelength_name,
+                wavelength_index=wl, wavelength_nm=wavelength_nm,
                 wavelength_basis='nominal selected harmonic, not a live spectral measurement',
                 base_frequency_hz=hz, frequency_index=index, divider=int(div), output_frequency_hz=output_hz,
                 aom_percent=aom/40., ir_power_mw=ir_mw, ir_power_basis=ir_basis,
@@ -131,6 +163,7 @@ class LaserReadoutMixin:
                 snapshot['protocol'] = 'nktpbus'
                 snapshot['wavelength_basis'] = device.wavelength_basis
                 snapshot['source'] = ('NKTPBus register 0x10 (IR internal monitor, 0.001 W)' if wl == 0
+                    else 'Selected wavelength unverified; independent IR monitor only' if wl is None
                     else 'Selected harmonic monitor unavailable: native scaling unverified')
                 setpoint = getattr(device, 'ir_power_setpoint_watts', None)
                 if callable(setpoint):
@@ -147,7 +180,10 @@ class LaserReadoutMixin:
                     self.laser_rate.addItem(f'{available_hz/1000:g}', available_index)
                 self.laser_rate.blockSignals(False)
             self.variables.laser_telemetry = snapshot
-            self._report_optical_readback_error(optical_error)
+            diagnostic = optical_error
+            if ir_error and ir_error != optical_error:
+                diagnostic = ir_error+('; '+optical_error if optical_error else '')
+            self._report_optical_readback_error(diagnostic)
             self.variables.laser_average_power = snapshot['output_power_mw']
             self.variables.laser_pulse_energy = snapshot['pulse_energy_nj']  # nJ; detector writer converts to pJ.
             self.variables.laser_intensity = snapshot['pulse_energy_nj']
@@ -169,10 +205,12 @@ class LaserReadoutMixin:
             self.laser_rate.setCurrentIndex(self.laser_rate.findData(int(index)))
             self.laser_rate.blockSignals(False)
             self.laser_wavelegnth.blockSignals(True)
-            name = readback.WAVELENGTHS[wl][0]
-            if self.laser_wavelegnth.findText(name) < 0:
-                self.laser_wavelegnth.addItem(name)
-            self.laser_wavelegnth.setCurrentText(name)
+            if wavelength_name is None:
+                self.laser_wavelegnth.setCurrentIndex(-1)
+            else:
+                if self.laser_wavelegnth.findText(wavelength_name) < 0:
+                    self.laser_wavelegnth.addItem(wavelength_name)
+                self.laser_wavelegnth.setCurrentText(wavelength_name)
             self.laser_wavelegnth.blockSignals(False)
             self._update_wavelength_nm_label()
             self._recompute_derived_readouts()

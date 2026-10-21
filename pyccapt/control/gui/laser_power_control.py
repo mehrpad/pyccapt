@@ -1,6 +1,7 @@
 """Primary watt control with an advanced relative AOM override."""
 import logging
 import math
+import time
 
 from PyQt6 import QtWidgets
 
@@ -77,6 +78,8 @@ class LaserPowerControlMixin:
 
     def _use_native_ir_control(self):
         if getattr(self.laser_device, 'protocol', None) == 'nktpbus':
+            if getattr(self.laser_device, 'interlock_reset_available', False):
+                return self._reset_native_interlock()
             return getattr(self.laser_device, 'connected', True)
         if (self.laser_device is None or self.variables.start_flag or self._laser_alignment_busy()
                 or getattr(self, '_laser_mode_switch_in_progress', False)
@@ -149,13 +152,52 @@ class LaserPowerControlMixin:
             self._set_laser_disconnected_banner('')
             fault = getattr(device, 'status_fault', '')
             if fault:
+                recovery = ('Select Standby to begin warm-up; Reset interlock is also available as a separate action.'
+                            if getattr(device, 'interlock_reset_available', False)
+                            else 'Resolve the reported interlock/error before requesting Standby.')
                 self.error_message(f'Listen confirmed; W control connected. {fault}. '
-                                   'Use Switch to CLI to restore normal laser controls. No interlock reset requested.')
+                                   f'{recovery} No interlock reset requested automatically.')
                 return False
             name = readback.WAVELENGTHS[wavelength][0]
             self.error_message(f'W control connected ({name} selected in CLI). '
                 'Output stopped; select Standby, then Laser On. Further watt changes keep the connection and operating state.')
             return True
+
+    def _reset_native_interlock(self):
+        """Explicit operator reset; status polling confirms the relay later."""
+        if (self.laser_device is None or self.variables.start_flag or self._laser_alignment_busy()
+                or getattr(self, '_laser_mode_switch_in_progress', False)
+                or getattr(self, '_laser_stopping', False) or getattr(self, '_laser_status_in_progress', False)
+                or getattr(self, '_laser_interlock_reset_deadline', None) is not None):
+            return False
+        try:
+            self.laser_device.reset_interlock()
+        except Exception as exc:
+            self.error_message(f'Interlock reset not requested: {exc}')
+            logging.getLogger('pyccapt.laser').warning('Interlock reset not requested: %s', exc)
+            self._apply_button_locks_for_status(getattr(self, '_last_laser_status', None))
+            return False
+        self._laser_interlock_reset_deadline = time.monotonic() + 5.
+        logging.getLogger('pyccapt.laser').info('Interlock reset requested; waiting for device readback')
+        self.error_message('Interlock reset requested; waiting for confirmation. Standby and emission were not requested.')
+        self._update_laser_mode_buttons()
+        return True
+
+    def _check_native_interlock_reset(self):
+        deadline = getattr(self, '_laser_interlock_reset_deadline', None)
+        if deadline is None:
+            return
+        device = self.laser_device
+        details = getattr(device, 'status_details', {})
+        if not getattr(device, 'status_fault', '') and details.get('interlock') == 2:
+            self._laser_interlock_reset_deadline = None
+            logging.getLogger('pyccapt.laser').info('Interlock reset confirmed by device readback')
+            self.error_message('Interlock reset confirmed. Select Standby, then Laser On when ready.')
+        elif (details.get('error') or details.get('interlock') != 1 or time.monotonic() >= deadline):
+            self._laser_interlock_reset_deadline = None
+            reason = getattr(device, 'status_fault', '') or 'interlock readback unavailable'
+            logging.getLogger('pyccapt.laser').warning('Interlock reset was not confirmed: %s', reason)
+            self.error_message(f'Interlock reset was not confirmed: {reason}. Standby and emission were not requested.')
 
     def _apply_native_ir_watts(self):
         try:

@@ -226,9 +226,6 @@ def laser_gui():
     ui.variables = SimpleNamespace(start_flag=False, laser_telemetry={})
     ui.conf = {'laser_aom_max_percent': 100.}
     ui.laser_device = Laser()
-    # State/button unit tests use a ready transport. Handover integration
-    # tests below exercise the real preparation method with simulated SDKs.
-    ui._prepare_laser_watts = Mock(return_value=True)
     ui.errors = []
     ui.error_message = ui.errors.append
     ui.laser_connection_banner = QtWidgets.QLabel()
@@ -854,22 +851,24 @@ def test_startup_retries_a_settling_cli_without_changing_protocol(mode_gui, monk
     monkeypatch.setattr(origamiClassCLI, 'origClass', lambda port: device)
     assert ui._open_laser_cli('FAKE', initial_open=True)
     assert ui.laser_device is device
-    assert device.calls == [('Listen',)]
+    assert not device.calls
     device.open_port.assert_called_once()
     device.close_port.assert_not_called()
 
 
 @pytest.mark.parametrize('blocked', [None, 'connected', 'shutdown', 'handover', 'experiment', 'alignment'])
-def test_startup_recovery_uses_cli_button_path_once_when_idle(mode_gui, blocked):
+def test_startup_recovery_only_retries_cli_without_switching_protocol(mode_gui, blocked):
     ui = mode_gui
     ui.laser_device = ui.laser_device if blocked == 'connected' else None
     ui._laser_stopping = blocked == 'shutdown'
     ui._laser_mode_switch_in_progress = blocked == 'handover'
     ui.variables.start_flag = blocked == 'experiment'
     ui.variables.laser_alignment_status = {'active': blocked == 'alignment'}
-    ui.switch_to_cli_clicked = Mock()
+    ui.switch_to_cli_clicked = Mock(side_effect=AssertionError('No startup protocol changes'))
+    ui._open_laser_cli = Mock(return_value=False)
     ui._recover_laser_startup()
-    assert ui.switch_to_cli_clicked.call_count == (1 if blocked is None else 0)
+    assert ui._open_laser_cli.call_count == (1 if blocked is None else 0)
+    ui.switch_to_cli_clicked.assert_not_called()
 
 
 def test_manual_mode_handover_cancels_pending_startup_recovery(mode_gui):
@@ -1077,19 +1076,37 @@ def test_shutdown_during_settle_does_not_reopen_port(mode_gui, monkeypatch):
     assert not ui.switch_to_cli_button.isEnabled()
 
 
-def test_failed_listen_handshake_releases_cli_instead_of_claiming_connection(mode_gui, monkeypatch):
+@pytest.mark.parametrize('code', [9, 17, 33, 65, 129])
+def test_cli_connection_preserves_observed_state_without_setters(mode_gui, monkeypatch, code):
     from pyccapt.control.nkt_photonics import origamiClassCLI
     ui = mode_gui
-    device = Mock(last_error=None)
-    device.open_port.return_value = 0
-    device.StatusRead.return_value = 'ly_oxp2_dev_status 33'
-    device.Listen.side_effect = TimeoutError('no Listen reply')
+    ui._laser_last_stable_code = 9  # A previous connection must not color this one.
+    device = Laser()
+    device.code = code
+    device.open_port = Mock(return_value=0)
+    device.Listen = Mock(side_effect=AssertionError('Connecting must not request Listen'))
     monkeypatch.setattr(origamiClassCLI, 'origClass', lambda port: device)
-    assert not ui._open_laser_cli('FAKE')
-    device.close_port.assert_called_once()
-    assert ui.laser_device is None
-    assert not ui.variables.flag_laser_connected
-    assert 'initialization failed' in ui.laser_connection_banner.text()
+    assert ui._open_laser_cli('FAKE', initial_open=True)
+    assert ui.laser_device is device and device.code == code
+    assert not device.calls
+    device.Listen.assert_not_called()
+    device.close_port.assert_not_called()
+    if code == 17:
+        assert ui.led_laser_listen.pixmap().cacheKey() == ui.led_red.cacheKey()
+
+
+@pytest.mark.parametrize('code', [17, 33, 129])
+def test_cli_connection_keeps_latest_status_during_settings_refresh(mode_gui, monkeypatch, code):
+    from pyccapt.control.nkt_photonics import origamiClassCLI
+    ui = mode_gui
+    device = Laser()
+    device.open_port = Mock(return_value=0)
+    device.StatusRead = Mock(side_effect=['ly_oxp2_dev_status 9', f'ly_oxp2_dev_status {code}'])
+    monkeypatch.setattr(origamiClassCLI, 'origClass', lambda port: device)
+    assert ui._open_laser_cli('FAKE', initial_open=True)
+    assert readback.scalar(ui._last_laser_status) == code
+    assert ui.laser_on.isEnabled() is (code in (33, 129))
+    assert not device.calls
 
 
 @pytest.mark.parametrize('switch_result', [0, 6])
@@ -1382,79 +1399,58 @@ def test_native_handover_opens_one_owned_sdk_session_then_restores_polling(watt_
     assert ui.laser_wavelegnth.currentText() == wavelength
 
 
-@pytest.mark.parametrize('initial,handler', [(9,'laser_standby_clicked'), (33,'laser_on_clicked')])
-@pytest.mark.parametrize('valid_readbacks', [True, False])
-def test_normal_startup_prepares_watts_before_emission(watt_gui, monkeypatch, initial, handler, valid_readbacks):
+@pytest.mark.parametrize('wavelength', ['IR', 'Green', 'DUV'])
+@pytest.mark.parametrize('optics_available', [True, False])
+def test_cli_standby_and_laser_on_keep_the_working_connection(watt_gui, monkeypatch, wavelength, optics_available):
     from pyccapt.control.gui import laser_power_control
     from pyccapt.control.nkt_photonics import nktpbus_switch
-    ui, old, _ = watt_gui
-    del ui._prepare_laser_watts  # Exercise the real transport preparation, not the unit-test stub.
-    old.code = initial
-    old.wavelength_read = lambda: 'Current position=IR'
-    native = Laser()
-    native.protocol = 'nktpbus'
-    native.code = 9
-    native.wavelength_basis = 'IR read back before handover'
-    native.wavelength_read = lambda: 'CLI-verified position=IR'
-    native.open_port = Mock(return_value=0)
-    native.set_ir_power_watts = Mock(return_value=1.25)
-    if not valid_readbacks:
-        native.freq_avaliable = lambda: 'Unknown command'
+    ui, device, _ = watt_gui
+    device.code = 9
+    device.wavelength_read = lambda: f'Current position={wavelength}'
+    if not optics_available:
+        device.read_average_power = Mock(side_effect=ValueError('Monitor unavailable'))
     def warmup():
-        native.calls.append(('Standby',))
-        native.code = 17
-    native.Standby = warmup
-    factory = Mock(return_value=native)
-    switch = Mock()
-    monkeypatch.setattr(laser_power_control, 'NativeLaser', factory)
-    monkeypatch.setattr(nktpbus_switch, '_load_nktp_dll_module', Mock())
-    monkeypatch.setattr(nktpbus_switch, 'switch_to_nktpbus', switch)
-    ui._apply_button_locks_for_status(f'ly_oxp2_dev_status {initial}')
-    getattr(ui, handler)()
-    assert ui.laser_device is native
-    if not valid_readbacks:
-        assert not ui.standby_mode and not ui.on_mode
-        assert native.calls == [('Listen',)]
-        assert 'readback is incomplete' in ui.errors[-1]
-        native.close_port.assert_not_called()
-        return
-    assert ui.standby_mode and not ui.on_mode
+        device.calls.append(('Standby',))
+        device.code = 17
+    device.Standby = warmup
+    native_factory = Mock(side_effect=AssertionError('Standby must not open native watts'))
+    load_sdk = Mock(side_effect=AssertionError('CLI controls must not require the SDK'))
+    bus_switch = Mock(side_effect=AssertionError('State buttons must not switch protocols'))
+    monkeypatch.setattr(laser_power_control, 'NativeLaser', native_factory)
+    monkeypatch.setattr(nktpbus_switch, '_load_nktp_dll_module', load_sdk)
+    monkeypatch.setattr(nktpbus_switch, 'switch_to_nktpbus', bus_switch)
+    ui._publish_laser_state(device.StatusRead())
+    ui._apply_button_locks_for_status(device.StatusRead())
+    ui.laser_standby_clicked()
     ui.check_laser_status()
-    assert native.code == 17 and not ui.laser_ir_power_control.isEnabled()
-    native.code = 33
+    assert device.code == 17 and ui._laser_standby_pending
+    assert device.calls == [('Standby',)]
+    assert ui.led_laser_listen.pixmap().cacheKey() == ui.led_green.cacheKey()
+    before = ui.led_laser_laser_standby.pixmap().cacheKey()
+    ui._blink_laser_indicators()
+    assert {before, ui.led_laser_laser_standby.pixmap().cacheKey()} == {
+        ui.led_red.cacheKey(), ui.led_orange.cacheKey()}
+    device.code = 33
     ui.check_laser_status()
-    assert native.calls == [('Listen',), ('Standby',)]  # Never auto-enable after handover/warmup.
-    assert ui.laser_ir_power_control.isEnabled()
+    assert ui.laser_on.isEnabled()
+    assert ui.led_laser_laser_standby.pixmap().cacheKey() == ui.led_green.cacheKey()
     ui.laser_on_clicked()
     ui.check_laser_status()
-    assert native.code == 129 and ui.laser_ir_power_control.isEnabled()
-    ui.laser_ir_power_control.setValue(1.25)
-    ui._mark_laser_watt_edit(1.25)
-    ui._commit_laser_watt_edit()
-    native.set_ir_power_watts.assert_called_once_with(1.25)
-    assert native.calls == [('Listen',), ('Standby',), ('Enable',)]
-    factory.assert_called_once()
-    switch.assert_called_once()
-    old.close_port.assert_called_once()
-    native.close_port.assert_not_called()
-    assert ui.laser_on.text() == 'Laser Off' and ui.laser_enable.text() == 'Close Output'
-
-
-def test_failed_watt_preparation_cannot_queue_emission(laser_gui):
-    ui = laser_gui
-    ui._prepare_laser_watts.return_value = False
-    ui._apply_button_locks_for_status('ly_oxp2_dev_status 33')
-    ui.laser_on_clicked()
-    ui.check_laser_status()
-    assert not ui.laser_device.calls and not ui.on_mode
+    assert device.code == 129 and ui.laser_device is device
+    assert device.calls == [('Standby',), ('Enable',)]
+    assert not ui.laser_ir_power_control.isEnabled()  # Explicit native connection is separate.
+    device.close_port.assert_not_called()
+    ui._open_laser_cli.assert_not_called()
+    native_factory.assert_not_called()
+    load_sdk.assert_not_called()
+    bus_switch.assert_not_called()
 
 
 @pytest.mark.parametrize('accepted', [True, False])
-def test_automatic_watt_preparation_restores_verified_timing_in_listen(watt_gui, monkeypatch, accepted):
+def test_explicit_watt_connection_restores_verified_timing_in_listen(watt_gui, monkeypatch, accepted):
     from pyccapt.control.gui import laser_power_control
     from pyccapt.control.nkt_photonics import nktpbus_switch
     ui, old, _ = watt_gui
-    del ui._prepare_laser_watts
     old.code = 9
     old.DivRead = lambda: 'Division factor: 4'
     divider = [1]  # Simulate the reset restoring a default divider.
@@ -1474,10 +1470,11 @@ def test_automatic_watt_preparation_restores_verified_timing_in_listen(watt_gui,
     monkeypatch.setattr(nktpbus_switch, '_load_nktp_dll_module', Mock())
     monkeypatch.setattr(nktpbus_switch, 'switch_to_nktpbus', Mock())
     ui._apply_button_locks_for_status('ly_oxp2_dev_status 9')
-    ui.laser_standby_clicked()
+    connected = bool(ui._use_native_ir_control())
     assert native.calls == [('Listen',), ('Div', 4)]
     assert not ui.on_mode
-    assert ui.standby_mode is accepted
+    assert connected is accepted
+    assert not ui.standby_mode
     if accepted:
         assert ui.laser_divition_factor.value() == 4
     else:
@@ -1527,7 +1524,6 @@ def test_native_handover_confirms_listen_and_reports_interlock_without_starting(
     from pyccapt.control.gui import laser_power_control
     from pyccapt.control.nkt_photonics import nktpbus_switch
     ui, old, _ = watt_gui
-    del ui._prepare_laser_watts
     native = Laser()
     native.protocol = 'nktpbus'
     native.code = 9
@@ -1539,7 +1535,7 @@ def test_native_handover_confirms_listen_and_reports_interlock_without_starting(
     monkeypatch.setattr(nktpbus_switch, 'switch_to_nktpbus', Mock())
     monkeypatch.setattr(laser_power_control, 'NativeLaser', Mock(return_value=native))
     ui._apply_button_locks_for_status('ly_oxp2_dev_status 9')
-    ui.laser_standby_clicked()
+    ui._use_native_ir_control()
     assert ui.laser_device is native and ui.variables.flag_laser_connected
     assert native.calls == [('Listen',)]
     assert not ui.standby_mode and not ui.on_mode
@@ -1557,86 +1553,6 @@ def test_native_handover_confirms_listen_and_reports_interlock_without_starting(
     ui.check_laser_status()
     assert native.calls == [('Listen',), ('Standby',)]
     native.open_port.assert_called_once()
-
-
-@pytest.mark.parametrize('wavelength', ['IR', 'Green', 'DUV'])
-@pytest.mark.parametrize('reset_accepted', [True, False])
-def test_standby_handover_with_real_native_adapter_and_reset_waiting(watt_gui, monkeypatch, wavelength, reset_accepted):
-    import struct
-    from functools import partial
-    from pyccapt.control.devices import nkt_native
-    from pyccapt.control.nkt_photonics import nktpbus_switch
-    ui, cli, _ = watt_gui
-    del ui._prepare_laser_watts
-    cli.code = 9
-    cli.wavelength_read = lambda: f'Current position={wavelength}'
-    ui._publish_laser_state(cli.StatusRead())
-    ui._apply_button_locks_for_status(cli.StatusRead())
-    registers = {0x01: 0, 0x67: 0, 0x32: 1, 0x37: 0, 0x20: 0,
-                 0x05: 0, 0x35: 4, 0x36: 10, 0x10: 0, 0x11: 0}
-    writes, frames = [], []
-    boot_reads = [2]
-    def read(port, address, register, index):
-        if register == 0x01 and registers[register] == 0:
-            boot_reads[0] -= 1
-            if boot_reads[0] < 0:
-                registers[register] = 1
-        return 0, registers[register]
-    def write(kind, port, address, register, value, index):
-        writes.append((register, value))
-        if register == 0x32:
-            assert kind == 'U8'  # NKT Origami reset wire format, independent of H16 readback.
-            assert registers[0x01] == 1 and value == 1
-            registers[register] = 2 if reset_accepted else 1
-        elif register == 0x30 and value == 3:
-            assert registers[0x32] == 2
-            registers[0x01] = 2
-        return 0
-    sdk = Mock()
-    sdk.openPorts.return_value = sdk.closePorts.return_value = 0
-    sdk.deviceGetAllTypes.return_value = (0, bytes(15) + b'\x95' + bytes(239))
-    sdk.registerRead.return_value = (0, struct.pack('<13I', *([0]*4 + [400000] + [0]*8)))
-    for kind in ('U8', 'U16', 'U32'):
-        getattr(sdk, 'registerRead'+kind).side_effect = read
-        getattr(sdk, 'registerWrite'+kind).side_effect = partial(write, kind)
-    monkeypatch.setattr(nktpbus_switch, '_load_nktp_dll_module', lambda: sdk)
-    monkeypatch.setattr(nktpbus_switch, 'switch_to_nktpbus', Mock())
-    monkeypatch.setattr(nkt_native.time, 'sleep', lambda _: None)
-    def wait(_seconds):
-        if getattr(ui.laser_device, 'protocol', None) == 'nktpbus':
-            assert ui.led_laser_listen.pixmap().cacheKey() == ui.led_green.cacheKey()
-            before = ui.led_laser_laser_standby.pixmap().cacheKey()
-            ui._blink_laser_indicators()
-            assert {before, ui.led_laser_laser_standby.pixmap().cacheKey()} == {
-                ui.led_red.cacheKey(), ui.led_orange.cacheKey()}
-            frames.append(True)
-    ui._wait_with_gui_pump = wait
-    ui.laser_standby_clicked()
-    assert frames and ui.standby_mode
-    assert writes == [(0x30, 1)]  # Connection alone never acknowledges the interlock.
-    assert ui.led_laser_listen.pixmap().cacheKey() == ui.led_green.cacheKey()
-    ui._poll_laser_status()
-    assert (0x32, 1) in writes
-    if reset_accepted:
-        assert writes == [(0x30, 1), (0x32, 1), (0x30, 3)]
-        assert ui._laser_standby_pending
-        assert ui.led_laser_listen.pixmap().cacheKey() == ui.led_green.cacheKey()
-        assert not ui.laser_on.isEnabled()
-        registers[0x01] = 3
-        ui.check_laser_status()
-        assert not ui._laser_indicator_requests
-        assert ui.led_laser_laser_standby.pixmap().cacheKey() == ui.led_green.cacheKey()
-        assert ui.laser_on.isEnabled() and ui.laser_ir_power_control.isEnabled()
-    else:
-        assert writes == [(0x30, 1), (0x32, 1)]
-        assert not ui._laser_standby_pending and not ui.on_mode
-        assert 'reset was not confirmed' in ui.errors[-1]
-        ui.check_laser_status()
-        assert ui.laser_standby.isEnabled()  # A failed reset does not strand recovery.
-        assert writes == [(0x30, 1), (0x32, 1)]  # No automatic retry or warm-up.
-    assert not any(register in (0x20, 0x34) for register, _ in writes)
-    sdk.openPorts.assert_called_once()
-    sdk.closePorts.assert_not_called()
 
 
 def test_native_handover_waits_for_queued_wavelength_request(watt_gui, monkeypatch):

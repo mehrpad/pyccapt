@@ -36,9 +36,7 @@ class LaserIndicatorMixin:
             self._laser_indicator_requests = {
                 name: request for name, request in
                 getattr(self, '_laser_indicator_requests', {}).items()
-                if (name == 'listen' and code in (3, 5)) or
-                (name == 'standby' and getattr(self, '_laser_preparing_standby', False)
-                 and code in (1, 5))}
+                if name == 'listen' and code in (3, 5)}
             self._laser_standby_pending = self._laser_emission_pending = False
         else:
             self._laser_indicator_requests = {
@@ -54,12 +52,9 @@ class LaserIndicatorMixin:
         connected = getattr(self, 'laser_device', None) is not None
         code = readback.scalar(getattr(self, '_last_laser_status', None)) if connected else None
         waiting = set(getattr(self, '_laser_indicator_requests', {}))
-        preparing = getattr(self, '_laser_preparing_standby', False)
-        if preparing:
-            waiting.add('standby')
         if code == 17 and not waiting:
             waiting = {'on', 'output'} if getattr(self, '_laser_emission_pending', False) else {'standby'}
-        if (not connected and not preparing) or getattr(self, '_laser_stopping', False):
+        if not connected or getattr(self, '_laser_stopping', False):
             waiting.clear()
         # Preserve the last confirmed stopped state while the requested
         # Standby transition blinks; the state caption reports live warm-up.

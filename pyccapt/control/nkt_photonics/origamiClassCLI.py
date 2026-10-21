@@ -28,8 +28,6 @@ import time
 
 import serial
 
-from pyccapt.control.nkt_photonics.readback import scalar
-
 
 class origClass:
     """NKT CLI wrapper. Transactions return complete replies, including units."""
@@ -147,10 +145,16 @@ class origClass:
 
     def StatusRead(self, timeout=2.):
         response = self._query('ly_oxp2_dev_status?', timeout=timeout)
-        value = scalar(response)
-        if value is None or value != int(value) or not 0 <= value <= 255:
+        # Boot announcements can arrive alongside the requested status and
+        # contain serial/version numbers. Only the named status response is
+        # evidence of state; neither a query echo nor another numeric line is.
+        status_lines = [line.strip() for line in response.splitlines()
+                        if re.match(r'^ly_oxp2_dev_status(?:\s|$)', line.strip())]
+        match = (re.fullmatch(r'ly_oxp2_dev_status[ \t]+([0-9]+)', status_lines[0])
+                 if len(status_lines) == 1 else None)
+        if match is None or not 0 <= int(match[1]) <= 255:
             raise ValueError(f'Unrecognised laser status: {response!r}')
-        return f'ly_oxp2_dev_status {int(value)}'
+        return f'ly_oxp2_dev_status {int(match[1])}'
 
     def Temp(self, comPort=None):
         return self._query('ly_oxp2_temp_status')

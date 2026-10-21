@@ -11,7 +11,13 @@ class LaserReadoutMixin:
     def get_frequency(self, index):
         return getattr(self, '_frequency_table', {}).get(index, math.nan)
 
+    def _laser_readout_is_current(self, device):
+        # Device queries can process Qt close/protocol-change events while waiting.
+        return not getattr(self, '_laser_stopping', False) and self.laser_device is device
+
     def _invalidate_laser_readouts(self, reason):
+        if getattr(self, '_laser_stopping', False):
+            return
         self.variables.laser_telemetry = {'monotonic': time.monotonic(), 'valid': False, 'error': str(reason)}
         for name in ('laser_average_power', 'laser_pulse_energy', 'laser_freq', 'laser_intensity'):
             setattr(self.variables, name, math.nan)
@@ -32,26 +38,29 @@ class LaserReadoutMixin:
             logging.getLogger('pyccapt.laser').info('Laser optical readback restored')
 
     def _sync_controls_from_device(self, *, initial=False):
+        if getattr(self, '_laser_stopping', False):
+            return False
         if self.laser_device is None:
             self._invalidate_laser_readouts('CLI disconnected')
             return
         device = self.laser_device
         raw = {}
         try:
-            if initial or not getattr(self, '_frequency_table', {}):
+            frequency_table = getattr(self, '_frequency_table', {})
+            refresh_frequency_table = initial or not frequency_table
+            if refresh_frequency_table:
                 raw['e_freq_available'] = device.freq_avaliable()
-                self._frequency_table = readback.frequency_table(raw['e_freq_available'])
-                self.laser_rate.blockSignals(True)
-                self.laser_rate.clear()
-                for index, hz in sorted(self._frequency_table.items()):
-                    self.laser_rate.addItem(f'{hz/1000:g}', index)
-                self.laser_rate.blockSignals(False)
+                if not self._laser_readout_is_current(device):
+                    return False
+                frequency_table = readback.frequency_table(raw['e_freq_available'])
             for key, method in (('e_freq', device.FreqRead), ('e_div', device.DivRead),
                                 ('e_power', device.AOMRead), ('ls_wavelength', device.wavelength_read)):
                 raw[key] = method()
+                if not self._laser_readout_is_current(device):
+                    return False
             index, div, aom = (readback.scalar(raw[k]) for k in ('e_freq', 'e_div', 'e_power'))
             wl = readback.wavelength(raw['ls_wavelength'])
-            hz = self.get_frequency(index)
+            hz = frequency_table.get(index, math.nan)
             if (not math.isfinite(hz) or div is None or div != int(div) or not 1 <= div <= 10000000
                     or aom is None or not 0 <= aom <= 4000 or wl is None):
                 raise ValueError('Incomplete laser frequency, divider, AOM or wavelength readback')
@@ -61,6 +70,8 @@ class LaserReadoutMixin:
                 raw['e_mlp'] = device.read_average_power()
             except Exception as exc:
                 raw['e_mlp'] = f'Read failed: {exc}'
+            if not self._laser_readout_is_current(device):
+                return False
             ir_mw, ir_nj = readback.optical_values(raw['e_mlp'], output_hz)
             ir_quantity = readback.quantity(raw['e_mlp'])
             ir_basis = 'unavailable'
@@ -80,6 +91,8 @@ class LaserReadoutMixin:
                     raw['ls_output_power'] = device.power_read_dv_green()
                 except Exception as exc:
                     raw['ls_output_power'] = f'Read failed: {exc}'
+                if not self._laser_readout_is_current(device):
+                    return False
                 selected_reply = readback.selected_harmonic_reply(raw['ls_output_power'], wl)
                 raw['ls_selected_output_power'] = selected_reply
                 measured = readback.quantity(selected_reply)
@@ -95,6 +108,8 @@ class LaserReadoutMixin:
                     mw, nj = readback.optical_values(selected_reply, output_hz)
                 source = 'ls_output_power (selected harmonic monitor)'
             raw['status'] = device.StatusRead()
+            if not self._laser_readout_is_current(device):
+                return False
             code = readback.scalar(raw['status'])
             fault = getattr(device, 'status_fault', '')
             if code not in (9, 33, 65, 129) or fault:
@@ -111,7 +126,7 @@ class LaserReadoutMixin:
                 ir_power_error=ir_error, output_power_mw=mw if valid else math.nan,
                 pulse_energy_nj=nj if valid else math.nan, status_code=code,
                 location='laser internal monitor; not calibrated energy delivered to specimen',
-                frequency_table=dict(self._frequency_table))
+                frequency_table=dict(frequency_table))
             if getattr(device, 'protocol', None) == 'nktpbus':
                 snapshot['protocol'] = 'nktpbus'
                 snapshot['wavelength_basis'] = device.wavelength_basis
@@ -120,8 +135,17 @@ class LaserReadoutMixin:
                 setpoint = getattr(device, 'ir_power_setpoint_watts', None)
                 if callable(setpoint):
                     snapshot['ir_power_setpoint_w'] = setpoint()
+            if not self._laser_readout_is_current(device):
+                return False
             if optical_error:
                 snapshot['error'] = optical_error
+            self._frequency_table = frequency_table
+            if refresh_frequency_table:
+                self.laser_rate.blockSignals(True)
+                self.laser_rate.clear()
+                for available_index, available_hz in sorted(frequency_table.items()):
+                    self.laser_rate.addItem(f'{available_hz/1000:g}', available_index)
+                self.laser_rate.blockSignals(False)
             self.variables.laser_telemetry = snapshot
             self._report_optical_readback_error(optical_error)
             self.variables.laser_average_power = snapshot['output_power_mw']
@@ -155,11 +179,15 @@ class LaserReadoutMixin:
             self._apply_button_locks_for_status(raw['status'])
             return True
         except Exception as exc:
+            if not self._laser_readout_is_current(device):
+                return False
             self._invalidate_laser_readouts(exc)
             self.error_message(f'Laser readback unavailable: {exc}')
             return False
 
     def _recompute_derived_readouts(self):
+        if getattr(self, '_laser_stopping', False):
+            return
         data = readback.fresh_snapshot(self.variables)
         for widget, key, scale in (
             (self.laser_ir_power_disp, 'ir_power_mw', .001),
@@ -200,6 +228,8 @@ class LaserReadoutMixin:
         self.laser_divition_factor.setMaximum(10_000_000)
 
     def _update_wavelength_nm_label(self):
+        if getattr(self, '_laser_stopping', False):
+            return
         data = readback.fresh_snapshot(self.variables)
         nm = data.get('wavelength_nm')
         if hasattr(self, 'laser_wavelegnth_nm_label'):

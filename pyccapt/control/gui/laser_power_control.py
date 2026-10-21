@@ -28,8 +28,7 @@ class LaserPowerControlMixin:
         self.laser_native_control_button.setFixedHeight(25)
         self.laser_native_control_button.setEnabled(False)
         self.laser_native_control_button.setToolTip(
-            'Standby prepares watt control automatically. This button also connects it manually: '
-            'it stops output and leaves the laser in Listen. '
+            'Connect native watt control explicitly: this stops output and leaves the laser in Listen. '
             'Then select Standby and Laser On; watt changes use the same connection while on. '
             'The selected wavelength is retained from CLI and locked until returning to CLI. '
             'Stage Override Access is not required.'
@@ -76,25 +75,7 @@ class LaserPowerControlMixin:
         self._laser_watt_edit_pending = False
         self._apply_ir_power_watts()
 
-    def _prepare_laser_watts(self):
-        """Prepare watts before warming; never restart emission after a reset."""
-        if getattr(self.laser_device, 'protocol', None) == 'nktpbus':
-            return getattr(self.laser_device, 'connected', True)
-        return bool(self._use_native_ir_control(automatic=True))
-
-    def _use_native_ir_control(self, *, automatic=False):
-        self._laser_preparing_standby = automatic
-        prepared = False
-        try:
-            prepared = bool(self._connect_native_ir_control(automatic=automatic))
-            return prepared
-        finally:
-            self._laser_preparing_standby = False
-            if automatic and not prepared:
-                self._laser_standby_pending = False
-                self._clear_laser_indicator_requests()
-
-    def _connect_native_ir_control(self, *, automatic=False):
+    def _use_native_ir_control(self):
         if getattr(self.laser_device, 'protocol', None) == 'nktpbus':
             return getattr(self.laser_device, 'connected', True)
         if (self.laser_device is None or self.variables.start_flag or self._laser_alignment_busy()
@@ -134,14 +115,9 @@ class LaserPowerControlMixin:
                 raise ConnectionError(f'Native watt connection failed: {device.last_error}; use Switch to CLI to recover.')
             # The Connect W action explicitly stops output. Never resume an
             # emission request automatically after changing port ownership.
-            if automatic:
-                self._laser_standby_pending = True
-                self._queue_laser_indicator('standby', (33,))
-            else:
-                self._queue_laser_indicator('listen', (9,))
+            self._queue_laser_indicator('listen', (9,))
             device.Listen()
-            if not automatic:
-                self._mark_laser_indicators_sent()
+            self._mark_laser_indicators_sent()
             for _ in range(50):
                 if self._laser_stopping:
                     return
@@ -172,14 +148,13 @@ class LaserPowerControlMixin:
                 raise ConnectionError('W control settings/status readback is incomplete; emission was not requested.')
             self._set_laser_disconnected_banner('')
             fault = getattr(device, 'status_fault', '')
-            if fault and not getattr(device, 'standby_reset_available', False):
+            if fault:
                 self.error_message(f'Listen confirmed; W control connected. {fault}. '
-                                   'Resolve the interlock/error before Standby; no reset or emission requested.')
+                                   'Use Switch to CLI to restore normal laser controls. No interlock reset requested.')
                 return False
             name = readback.WAVELENGTHS[wavelength][0]
-            self.error_message(f'W control connected ({name} selected in CLI). '+
-                ('Preparing Standby; its explicit request will acknowledge a pending interlock reset.' if automatic else
-                 'Output stopped; select Standby, then Laser On. Further watt changes keep the connection and operating state.'))
+            self.error_message(f'W control connected ({name} selected in CLI). '
+                'Output stopped; select Standby, then Laser On. Further watt changes keep the connection and operating state.')
             return True
 
     def _apply_native_ir_watts(self):

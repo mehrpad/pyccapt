@@ -456,13 +456,13 @@ def test_laser_compact_layout_preserves_controls_and_readouts(instrument_window,
         app.processEvents()
     print(f'Laser GUI size: {window.size()}, preview: {tmp_path}')
     assert window.width() <= 1000
-    # One extra settings row for the calibrated IR watt request and Apply.
+    # Primary watts and an advanced AOM menu fit in the compact window.
     assert window.height() <= 740
     viewport = window._responsive_window.scroll.viewport()
     assert window._responsive_window.scroll.horizontalScrollBar().maximum() == 0
     assert window._responsive_window.scroll.verticalScrollBar().maximum() == 0
-    controls = [ui.laser_wavelegnth, ui.laser_wavelegnth_nm_label, ui.laser_power,
-                ui.laser_ir_power_control_label, ui.laser_ir_power_control, ui.laser_ir_power_apply,
+    controls = [ui.laser_wavelegnth, ui.laser_wavelegnth_nm_label, ui.laser_aom_advanced_button,
+                ui.laser_ir_power_control_label, ui.laser_ir_power_control,
                 ui.laser_native_control_button,
                 ui.laser_rate, ui.laser_divition_factor, ui.laser_enable, ui.laser_on,
                 ui.laser_standby, ui.laser_listen, ui.laser_state_label, ui.laser_auto_alignment, ui.laser_tracking,
@@ -492,6 +492,16 @@ def test_laser_compact_layout_preserves_controls_and_readouts(instrument_window,
         assert field.width() >= field.fontMetrics().horizontalAdvance(field.text()) + 30
     assert not ui.laser_stage_reference.isEnabled()
     assert not ui.switch_to_cli_button.isEnabled()
+    assert ui.laser_ir_power_control_label.text() == 'Laser power (W)'
+    assert not hasattr(ui, 'laser_ir_power_apply')
+    assert not ui.laser_power.isVisible()
+    assert ui.gridLayout_3.itemAtPosition(1, 1).widget() is ui.laser_ir_power_control
+    ui.laser_aom_menu.popup(ui.laser_aom_advanced_button.mapToGlobal(QtCore.QPoint(0, 25)))
+    app.processEvents()
+    assert ui.laser_power.isVisible() and ui.label.isVisible()
+    assert ui.label.text() == 'AOM override (%)'
+    ui.laser_aom_menu.close()
+    app.processEvents()
     assert ui.laser_ir_power_label.text() == 'Measured IR power (W)'
     assert ui.label_9.text() == 'Selected output power (W)'
     assert ui.label_10.text() == 'Pulse energy (µJ)'
@@ -526,6 +536,54 @@ def test_laser_compact_layout_preserves_controls_and_readouts(instrument_window,
     assert ui.laser_connection_banner.isVisible()
     assert area.verticalScrollBar().value() == 0
     window.grab().save(str(tmp_path/'laser.png'))
+
+
+@pytest.mark.parametrize('instrument_window', ['laser'], indirect=True)
+def test_primary_watts_commit_once_and_polling_does_not_send_power(instrument_window):
+    from unittest.mock import Mock
+    from PyQt6.QtTest import QTest
+    window, ui, app = instrument_window
+    target = SimpleNamespace(watts=1.)
+    def set_watts(value):
+        target.watts = value
+        return value
+    setter = Mock(side_effect=set_watts)
+    ui.laser_device = SimpleNamespace(
+        protocol='nktpbus', supports_wavelength_changes=False,
+        wavelength_basis='Green read back through CLI before native handover; selection locked',
+        freq_avaliable=lambda: 'e_freq=4 --> 400000 Hz',
+        FreqRead=lambda: 'Frequency index parameter: 4', DivRead=lambda: 'Division factor: 1',
+        AOMRead=lambda: 'AOM relative setting: 800', wavelength_read=lambda: 'CLI-verified position=Green',
+        read_average_power=lambda: '1.0 W', power_read_dv_green=lambda: 'Unknown: native harmonic monitor',
+        StatusRead=lambda: 'ly_oxp2_dev_status 129',
+        ir_power_setpoint_watts=lambda: target.watts, set_ir_power_watts=setter,
+    )
+    ui._sync_controls_from_device(initial=True)
+    window.show()
+    app.processEvents()
+    field = ui.laser_ir_power_control
+    assert field.isEnabled() and field.value() == 1.
+    field.setFocus()
+    QTest.keyClick(field, QtCore.Qt.Key.Key_A, QtCore.Qt.KeyboardModifier.ControlModifier)
+    QTest.keyClicks(field, '1.25')
+    setter.assert_not_called()  # Typing is not a hardware request.
+    QTest.keyClick(field, QtCore.Qt.Key.Key_Return)
+    setter.assert_called_once_with(1.25)
+    ui.laser_divition_factor.setFocus()
+    app.processEvents()
+    assert setter.call_count == 1  # Focus-out following Enter is not a second write.
+    target.watts = 1.3
+    ui._sync_controls_from_device()
+    assert field.value() == 1.3
+    ui._commit_laser_watt_edit()
+    assert setter.call_count == 1  # Firmware readbacks never queue another request.
+    field.setFocus()
+    field.setValue(1.4)
+    ui.variables.start_flag = True
+    ui._commit_laser_watt_edit()
+    ui.variables.start_flag = False
+    ui._commit_laser_watt_edit()
+    assert setter.call_count == 1  # A refused edit cannot replay after the experiment.
 
 
 @pytest.mark.parametrize('instrument_window', ['visualization'], indirect=True)

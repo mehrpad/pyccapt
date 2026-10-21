@@ -1021,7 +1021,6 @@ def watt_gui(mode_gui, monkeypatch):
     ui.laser_ir_power_control.setRange(0, 5.2)
     ui.laser_ir_power_control.setDecimals(3)
     ui.laser_ir_power_control.setValue(1.)
-    ui.laser_ir_power_apply = QtWidgets.QPushButton()
     ui._wait_with_gui_pump = Mock()
     device = ui.laser_device
     conversion = Mock(return_value=(1., 640))
@@ -1037,73 +1036,62 @@ def watt_gui(mode_gui, monkeypatch):
     return ui, device, conversion
 
 
-def test_watt_apply_uses_firmware_conversion_and_confirms_aom_in_listen(watt_gui):
+@pytest.mark.parametrize('code', [9,33,65,129])
+def test_cli_watt_control_is_disabled_without_protocol_handover(watt_gui, code):
     ui, device, conversion = watt_gui
+    device.code = code
+    ui._apply_button_locks_for_status(f'ly_oxp2_dev_status {code}')
+    assert not ui.laser_ir_power_control.isEnabled()
     ui._apply_ir_power_watts()
-    assert device.calls == [('AOM', 640)]
-    assert ui.laser_power.value() == 16.
-    assert ui.laser_ir_power_control.value() == 1.
-    assert ui.laser_device is device and device.code == 9
+    conversion.assert_not_called()
+    device.close_port.assert_not_called()
+    ui._open_laser_cli.assert_not_called()
+    assert not device.calls
+    assert ui.laser_device is device and device.code == code
     assert ui._laser_status_timer.isActive()
-    assert ui.laser_ir_power_apply.isEnabled()
-    assert '1 W applied as calibrated AOM 16%' in ui.errors[-1]
-    options = conversion.call_args.kwargs
-    assert options['base_hz'] == 400000 and options['divider'] == 10
-    assert options['max_watts'] == 5.2
-    assert ui.laser_power_disp.value() == .53  # Selected DUV monitor stays separate.
+    assert 'Connect Native W control' in ui.errors[-1]
 
 
-@pytest.mark.parametrize('busy', ['experiment', 'alignment', 'emitting', 'external', 'pending', 'switch'])
+@pytest.mark.parametrize('busy', ['experiment', 'alignment', 'pending', 'switch', 'stopping', 'poll'])
 def test_watt_request_is_blocked_without_touching_hardware_when_not_allowed(watt_gui, busy):
     ui, device, conversion = watt_gui
+    device.protocol = 'nktpbus'
+    device.set_ir_power_watts = Mock()
     if busy == 'experiment':
         ui.variables.start_flag = True
     elif busy == 'alignment':
         ui.variables.laser_alignment_status = {'active': True}
-    elif busy == 'emitting':
-        device.code = 129
-    elif busy == 'external':
-        device.ModeRead = lambda: 'e_mode of AOM: 3'
     elif busy == 'pending':
         ui.change_laser_power = True
-    else:
+    elif busy == 'switch':
         ui._laser_mode_switch_in_progress = True
+    elif busy == 'stopping':
+        ui._laser_stopping = True
+    else:
+        ui._laser_status_in_progress = True
     ui._apply_ir_power_watts()
     conversion.assert_not_called()
+    device.set_ir_power_watts.assert_not_called()
     device.close_port.assert_not_called()
     assert not device.calls
 
 
-@pytest.mark.parametrize('failure', ['conversion', 'timing', 'wavelength', 'aom', 'reconnect'])
-def test_failed_watt_request_is_not_reported_as_applied(watt_gui, failure):
+def test_failed_native_watt_request_is_not_replayed_or_reported_as_applied(watt_gui):
     ui, device, conversion = watt_gui
-    if failure == 'conversion':
-        conversion.side_effect = ValueError('Firmware refused watts')
-    elif failure in ('timing', 'wavelength'):
-        def changing(port):
-            if failure == 'timing':
-                device.FreqRead = lambda: 'Frequency index parameter: 6'
-            else:
-                device.wavelength_read = lambda: 'Current position=IR'
-            ui.laser_device = device
-            device.code = 9
-            return True
-        ui._open_laser_cli.side_effect = changing
-    elif failure == 'aom':
-        device.AOM = lambda value: device.calls.append(('AOM', value))  # Simulate firmware refusing it.
-    else:
-        ui._open_laser_cli.side_effect = None
-        ui._open_laser_cli.return_value = False
-    ui._apply_ir_power_watts()
-    assert 'applied as calibrated' not in ui.errors[-1]
-    assert not ui._laser_mode_switch_in_progress
+    device.protocol = 'nktpbus'
+    device.set_ir_power_watts = Mock(side_effect=ValueError('Firmware refused watts'))
+    ui._mark_laser_watt_edit(1.)
+    ui._commit_laser_watt_edit()
+    ui._commit_laser_watt_edit()  # Another focus-out must not repeat a refused write.
+    device.set_ir_power_watts.assert_called_once_with(1.)
+    assert 'Firmware refused watts' in ui.errors[-1]
+    assert 'accepted' not in ui.errors[-1]
+    assert not getattr(ui, '_laser_mode_switch_in_progress', False)
     assert ui._laser_status_timer.isActive()
-    if failure != 'aom':
-        assert not device.calls
-    if failure == 'conversion':
-        ui._open_laser_cli.assert_called_once()
-        assert 'Firmware refused watts' in ui.errors[-1]
-        assert ui.variables.flag_laser_connected
+    assert not device.calls
+    conversion.assert_not_called()
+    ui._open_laser_cli.assert_not_called()
+    device.close_port.assert_not_called()
 
 
 @pytest.mark.parametrize('code', [65,129])
@@ -1119,8 +1107,7 @@ def test_native_gui_watts_while_on_do_not_handover_or_send_state_commands(watt_g
     device.power_read_dv_green = lambda: 'Unknown: native harmonic monitor scaling unverified'
     device.set_ir_power_watts = Mock(return_value=1.)
     ui._apply_button_locks_for_status(f'ly_oxp2_dev_status {code}')
-    assert ui.laser_ir_power_apply.isEnabled()
-    assert ui.laser_ir_power_apply.text() == 'Apply W'
+    assert ui.laser_ir_power_control.isEnabled()
     ui._apply_ir_power_watts()
     device.set_ir_power_watts.assert_called_once_with(1.)
     assert device.code == code

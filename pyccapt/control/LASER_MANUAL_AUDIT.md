@@ -224,7 +224,7 @@ probe; the laser was left in CLI mode with all diagnostic port handles closed.
 Regression tests cover the reported reset timeout, boot delays, partial input,
 help output, absent CLI replies and exclusive port ownership.
 
-## IR watt control alongside relative AOM
+## Primary laser power control in watts
 
 ### Persistent native IR control
 
@@ -232,14 +232,25 @@ For watt adjustment while emitting, select IR, Green or DUV through CLI and
 use Listen/Standby, grant Override Access, then choose **Native W control**
 before enabling emission. Wait for any queued wavelength edit to be read back.
 This performs one CLI -> NKTPBus handover and retains the SDK connection.
-The state label identifies native watt control. **Apply W** then writes only
-the native `0x20` power setpoint and verifies its readback; repeated watt
+The state label identifies native watt control. **Laser power (W)** is the
+primary power field; press Enter or leave the field to commit an edited value.
+There is no separate Apply button or GUI watt conversion through CLI/Listen.
+Typing waits for commit; readback refreshes and repeated focus-out events do
+not send another request. A refused edit is discarded rather than replayed.
+The request writes only the native `0x20` power setpoint and verifies its
+readback; repeated watt
 changes do not write the FSM, shutter, modulation mode or protocol registers.
-Relative AOM remains editable using `0x05`. Telemetry refreshes the firmware
+The original relative AOM control remains available in **Advanced AOM (%)**,
+using `0x05`; alignment and existing percentage controls retain their units.
+Telemetry refreshes the firmware
 watt setpoint as well as the relative AOM setting without issuing new writes.
 The requested watts always refer to the fundamental IR power feeding the
 converter, including while Green or DUV is selected. They are not a calibrated
 Green/DUV output-power target and do not use a fixed conversion efficiency.
+The watt ceiling is `laser_ir_max_power_w` (5.2 W for this instrument), with
+0.001 W resolution. The installed NKT SDK is required for native control.
+In CLI mode, the primary watt field is disabled until native control is
+explicitly connected; advanced relative AOM remains available as before.
 
 The persistent adapter maps the documented main-board FSM, interlock, fault,
 frequency, divider, IR monitor and power registers into the existing GUI
@@ -268,30 +279,13 @@ DUV selected are simulated. Physical wavelength retention across the initial
 protocol reset and harmonic conversion efficiency still need instrument
 verification; individual watt updates perform no protocol reset.
 
-### Legacy CLI watt requests
+### CLI compatibility helper
 
-**IR power control (W)** and **Apply W (Listen)** provide an explicit watt request
-without replacing the AOM percentage. The instrument-specific ceiling is
-`laser_ir_max_power_w` (5.2 W for this setup); requests use 0.001 W resolution.
-The NKT SDK must be installed. This is a requested IR setpoint, distinct from
-the measured IR display and the selected harmonic's power/energy.
-
-The CLI's `e_power` command is relative; it is not converted to watts using
-the configured maximum. The vendor manual 800-621-01 p165 documents OXPS
-NKTPBus register `0x20` (U16, 0.001 W) as a firmware conversion into the
-linearized AOM amplitude in `0x05`. PyCCAPT uses that conversion, confirms
-the accepted watt setpoint and reads the calibrated AOM value. Both protocol
-changes reset the laser to Listen (manual pp133,166), so the GUI restores
-CLI, verifies the same base-rate index, divider and wavelength, and reapplies
-the calibrated AOM amplitude only after confirming internal mode and Listen.
-Its AOM readback must match before the GUI reports success.
-
-Apply is available only in Listen or ready Standby, outside experiments and
-alignment; it leaves the laser in Listen and sends no emission-enable command.
-Polling is paused and each serial/SDK handle is released before the next open.
-Rejected requests attempt CLI recovery and never reapply an unverified AOM
-value. Firmware refusals, changed timing/wavelength, the AOM limit, external
-modulation, shutdown and reconnect failures prevent successful application.
+The previous **Apply W (Listen)** GUI workflow has been removed. The standalone
+`devices.nkt_ir_power.calibrated_aom` helper remains for compatibility, with its
+own simulated serial/SDK tests. It converts via the firmware and restores CLI;
+it is not called by the laser GUI. The CLI's relative `e_power` setting is
+never interpreted as watts or scaled by the configured maximum.
 
 The watt request is not a continuous power feedback loop. Subsequent manual
 AOM edits and firmware resets/settings changes can override it. Readbacks

@@ -137,6 +137,7 @@ class LaserReadoutMixin:
                 watt_field.blockSignals(True)
                 watt_field.setValue(target_w)
                 watt_field.blockSignals(False)
+                self._laser_watt_edit_pending = False
             self.laser_rate.blockSignals(True)
             self.laser_rate.setCurrentIndex(self.laser_rate.findData(int(index)))
             self.laser_rate.blockSignals(False)

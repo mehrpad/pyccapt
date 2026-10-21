@@ -1,16 +1,15 @@
-"""Explicit IR watt requests alongside the independent relative AOM control."""
+"""Primary watt control with an advanced relative AOM override."""
 import math
 
 from PyQt6 import QtWidgets
 
-from pyccapt.control.devices import nkt_ir_power
 from pyccapt.control.devices.nkt_native import NativeLaser
 from pyccapt.control.nkt_photonics import nktpbus_switch, readback
 
 
 class LaserPowerControlMixin:
     def _setup_ir_power_control(self, parent):
-        self.laser_ir_power_control_label = QtWidgets.QLabel('IR power control (W)', parent)
+        self.laser_ir_power_control_label = QtWidgets.QLabel('Laser power (W)', parent)
         self.laser_ir_power_control_label.setFont(self.label.font())
         self.laser_ir_power_control = QtWidgets.QDoubleSpinBox(parent)
         self.laser_ir_power_control.setObjectName('laser_ir_power_control')
@@ -22,9 +21,6 @@ class LaserPowerControlMixin:
         self.laser_ir_power_control.setSingleStep(.01)
         self.laser_ir_power_control.setKeyboardTracking(False)
         self.laser_ir_power_control.setFixedSize(159, 25)
-        self.laser_ir_power_apply = QtWidgets.QPushButton('Apply W (Listen)', parent)
-        self.laser_ir_power_apply.setObjectName('laser_ir_power_apply')
-        self.laser_ir_power_apply.setFixedHeight(25)
         self.laser_native_control_button = QtWidgets.QPushButton('Native W control', parent)
         self.laser_native_control_button.setObjectName('laser_native_control_button')
         self.laser_native_control_button.setEnabled(False)
@@ -34,17 +30,45 @@ class LaserPowerControlMixin:
             'The CLI-verified wavelength is locked; changes require returning to CLI.'
         )
         self.laser_native_control_button.clicked.connect(self._use_native_ir_control)
-        tooltip = ('Request IR watts using the NKT firmware calibration. Stop the experiment and use Listen or Standby. '
-                   'Applying changes protocols and leaves the laser in Listen; enable emission separately. '
-                   'The entered value is a requested setpoint, not measured power. AOM edits override it.')
-        self._legacy_ir_power_tooltip = tooltip
-        for widget in (self.laser_ir_power_control, self.laser_ir_power_apply):
-            widget.setToolTip(tooltip)
-            widget.setEnabled(False)
-        self.gridLayout_3.addWidget(self.laser_ir_power_control_label, 4, 0)
-        self.gridLayout_3.addWidget(self.laser_ir_power_control, 4, 1)
-        self.gridLayout_3.addWidget(self.laser_ir_power_apply, 4, 2)
-        self.laser_ir_power_apply.clicked.connect(self._apply_ir_power_watts)
+        self.laser_ir_power_control.setEnabled(False)
+        # Move the relative control out of the primary power row. Keep the
+        # original widget/signals for alignment and existing AOM commands.
+        self.gridLayout_3.removeWidget(self.label)
+        self.gridLayout_3.removeWidget(self.laser_power)
+        self.laser_aom_advanced_button = QtWidgets.QToolButton(parent)
+        self.laser_aom_advanced_button.setObjectName('laser_aom_advanced_button')
+        self.laser_aom_advanced_button.setText('Advanced AOM (%)')
+        self.laser_aom_advanced_button.setFixedHeight(25)
+        self.laser_aom_advanced_button.setPopupMode(QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.laser_aom_menu = QtWidgets.QMenu(self.laser_aom_advanced_button)
+        panel = QtWidgets.QWidget()
+        layout = QtWidgets.QGridLayout(panel)
+        layout.addWidget(self.label, 0, 0)
+        layout.addWidget(self.laser_power, 0, 1)
+        help_text = QtWidgets.QLabel('Relative AOM override. Changing this overrides the watt setpoint.', panel)
+        help_text.setWordWrap(True)
+        help_text.setMaximumWidth(330)
+        layout.addWidget(help_text, 1, 0, 1, 2)
+        action = QtWidgets.QWidgetAction(self.laser_aom_menu)
+        action.setDefaultWidget(panel)
+        self.laser_aom_menu.addAction(action)
+        self.laser_aom_advanced_button.setMenu(self.laser_aom_menu)
+        self.gridLayout_3.addWidget(self.laser_ir_power_control_label, 1, 0)
+        self.gridLayout_3.addWidget(self.laser_ir_power_control, 1, 1)
+        self.gridLayout_3.addWidget(self.laser_aom_advanced_button, 4, 0, 1, 2)
+        self._laser_watt_edit_pending = False
+        self.laser_ir_power_control.valueChanged.connect(self._mark_laser_watt_edit)
+        self.laser_ir_power_control.editingFinished.connect(self._commit_laser_watt_edit)
+
+    def _mark_laser_watt_edit(self, _value):
+        self._laser_watt_edit_pending = True
+
+    def _commit_laser_watt_edit(self):
+        if not getattr(self, '_laser_watt_edit_pending', False):
+            return
+        # A rejected request must not be replayed on a later focus change.
+        self._laser_watt_edit_pending = False
+        self._apply_ir_power_watts()
 
     def _use_native_ir_control(self):
         if getattr(self.laser_device, 'protocol', None) == 'nktpbus':
@@ -95,7 +119,11 @@ class LaserPowerControlMixin:
         try:
             accepted = self.laser_device.set_ir_power_watts(self.laser_ir_power_control.value())
             self._sync_controls_from_device()
-            self.laser_ir_power_control.setValue(accepted)
+            previous = self.laser_ir_power_control.blockSignals(True)
+            try:
+                self.laser_ir_power_control.setValue(accepted)
+            finally:
+                self.laser_ir_power_control.blockSignals(previous)
             self.error_message(f'IR request {accepted:g} W accepted; native connection and operating state retained.')
         except Exception as exc:
             self.error_message(f'IR watt request failed: {exc}')
@@ -118,55 +146,7 @@ class LaserPowerControlMixin:
                 'change_laser_divition_factor', 'change_laser_wavelegnth')):
             self.error_message('Wait for pending laser settings to be read back before applying IR watts.')
             return
-        if getattr(self.laser_device, 'protocol', None) == 'nktpbus':
-            self._apply_native_ir_watts()
+        if getattr(self.laser_device, 'protocol', None) != 'nktpbus':
+            self.error_message('Connect Native W control in Listen/Standby before editing laser power in watts.')
             return
-        watts = self.laser_ir_power_control.value()
-        try:
-            status, mode, index, divider, wavelength = self._ir_power_conditions()
-            base_hz = self.get_frequency(index)
-            if status not in (9, 33) or mode != 2:
-                raise ValueError('Select Listen or ready Standby with internal power control before applying IR watts.')
-            if not math.isfinite(base_hz) or divider is None or divider < 1 or wavelength is None:
-                raise ValueError('Read valid laser timing and wavelength before applying IR watts.')
-        except Exception as exc:
-            self.error_message(f'IR watt request rejected: {exc}')
-            return
-        with self._laser_mode_transition('IR watt control') as port:
-            if not port:
-                return
-            try:
-                accepted, aom = nkt_ir_power.calibrated_aom(
-                    port, watts, max_watts=self.laser_ir_power_control.maximum(),
-                    max_aom_percent=float(self.conf.get('laser_aom_max_percent', 100.)),
-                    base_hz=base_hz, divider=divider, wait=self._wait_with_gui_pump,
-                    cancelled=lambda: self._laser_stopping or self.variables.start_flag,
-                )
-            finally:
-                # Even a refused setpoint must release SDK ownership and recover
-                # a fresh CLI session; never reuse a pre-switch serial handle.
-                self._wait_with_gui_pump(self.CLI_SWITCH_INITIAL_DELAY_S)
-                reconnected = False
-                for _ in range(self.CLI_SWITCH_NUM_ATTEMPTS):
-                    if self._laser_stopping:
-                        break
-                    if self._open_laser_cli(port):
-                        reconnected = True
-                        break
-                    self._wait_with_gui_pump(self.CLI_SWITCH_RETRY_DELAY_S)
-                if not reconnected:
-                    raise ConnectionError('IR power handover could not reconnect; use Switch to CLI to recover.')
-            current = self._ir_power_conditions()
-            if (self.variables.start_flag or self._laser_stopping or current[:2] != (9, 2)
-                    or current[2:] != (index, divider, wavelength)):
-                raise ValueError('Laser state/timing/wavelength changed; calibrated AOM value was not applied.')
-            self.laser_device.AOM(aom)
-            actual = readback.scalar(self.laser_device.AOMRead())
-            if actual != aom:
-                raise ValueError(f'IR watt request was not confirmed by AOM readback ({actual!r}, expected {aom}).')
-            self._sync_controls_from_device(initial=True)
-            self.laser_ir_power_control.setValue(accepted)
-            self.error_message(
-                f'IR request {accepted:g} W applied as calibrated AOM {aom / 40:g}%. '
-                'Laser remains in Listen. Measured power is displayed separately.'
-            )
+        self._apply_native_ir_watts()

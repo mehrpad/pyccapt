@@ -643,7 +643,8 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         self.retranslateUi(Laser_Control)
         QtCore.QMetaObject.connectSlotsByName(Laser_Control)
         tooltips.apply_tooltips(self, tooltips.LASER_TOOLTIPS)
-        Laser_Control.setTabOrder(self.laser_wavelegnth, self.laser_rate)
+        Laser_Control.setTabOrder(self.laser_wavelegnth, self.laser_ir_power_control)
+        Laser_Control.setTabOrder(self.laser_ir_power_control, self.laser_rate)
         Laser_Control.setTabOrder(self.laser_rate, self.laser_enable)
         Laser_Control.setTabOrder(self.laser_enable, self.laser_on)
         Laser_Control.setTabOrder(self.laser_on, self.laser_standby)
@@ -1152,7 +1153,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         self.laser_enable.setText(_translate("Laser_Control", "Output Enable"))
         self.led_laser_listen.setText(_translate("Laser_Control", "Listen"))
         self.led_laser_laser_standby.setText(_translate("Laser_Control", "Standby"))
-        self.label.setText(_translate("Laser_Control", "IR AOM setting (%)"))
+        self.label.setText(_translate("Laser_Control", "AOM override (%)"))
         self.laser_listen.setText(_translate("Laser_Control", "Listen"))
         self.label_4.setText(_translate("Laser_Control", "Wavelength"))
         self.label_12.setText(_translate("Laser_Control", "Scan mode"))
@@ -1513,17 +1514,17 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         self.laser_rate.setEnabled(idle and not running and bool(getattr(self, '_frequency_table', {})))
         self.laser_divition_factor.setEnabled(known and not running)
         self.laser_power.setEnabled(known and not self._laser_alignment_busy())
-        if hasattr(self, 'laser_ir_power_apply'):
+        if hasattr(self, 'laser_ir_power_control'):
             native = getattr(self.laser_device, 'protocol', None) == 'nktpbus'
-            watt_enabled = (known if native else idle) and not running and not self._laser_alignment_busy()
+            watt_enabled = native and known and not running and not self._laser_alignment_busy()
             self.laser_ir_power_control.setEnabled(watt_enabled)
-            self.laser_ir_power_apply.setEnabled(watt_enabled)
-            self.laser_ir_power_apply.setText('Apply W' if native else 'Apply W (Listen)')
-            tip = ('Apply the native IR watt setpoint on the existing connection. '
+            if not watt_enabled:
+                self._laser_watt_edit_pending = False
+            tip = ('Press Enter or leave the field to set laser power on the existing connection. '
                    'This adjusts the IR feeding the selected wavelength, not a Green/DUV watt setpoint. '
                    'Operating state and shutter are not changed. Manual AOM edits override this setpoint.'
-                   if native else getattr(self, '_legacy_ir_power_tooltip', 'CLI watt requests return to Listen.'))
-            self.laser_ir_power_apply.setToolTip(tip)
+                   if native else 'Select the desired wavelength in CLI, then connect Native W control in Listen/Standby. '
+                   'Laser power (W) controls the IR feeding the selected output. AOM percent is under Advanced AOM (%).')
             self.laser_ir_power_control.setToolTip(tip)
         for widget, active in ((self.led_laser_listen, code == 9),
                                (self.led_laser_laser_standby, code == 33),
@@ -1618,6 +1619,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
                          'change_laser_power', 'change_laser_rate', 'change_laser_divition_factor'):
                 setattr(self, flag, False)
             self._last_laser_status = None
+            self._laser_watt_edit_pending = False
             if getattr(self.laser_device, 'protocol', None) == 'nktpbus':
                 # An explicit mode handover releases ownership. Native watt
                 # edits never enter this context and retain their on state.
@@ -1630,8 +1632,8 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         except Exception as exc:
             if (yielded and self.laser_device is not None
                     and getattr(self.laser_device, 'connected', True)):
-                # A watt request can be refused after CLI has been recovered.
-                # Report the command failure without claiming the port is lost.
+                # Keep a recovered connection owned if later validation fails.
+                # Report the failure without claiming that the port is lost.
                 self._set_laser_disconnected_banner('')
             else:
                 self._set_laser_disconnected_banner(f'{target} handover failed: {exc}')

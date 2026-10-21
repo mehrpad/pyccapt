@@ -212,17 +212,18 @@ LASER_TOOLTIPS = {
     "For example, 400 kHz / 4 = 100 kHz. Firmware readback confirms the accepted value.",
     # --- Mode buttons + LEDs ---------------------------------------------
     "laser_listen": "Put the laser into Listen mode (lowest activity, safe).  No emission, ready to receive commands.",
-    "laser_standby": "Warm up in Standby. Residual seed emission remains Class 4 (manual p116).",
+    "laser_standby": "Prepare watt control automatically, then warm up in Standby. "
+    "The LED blinks red/orange until ready. Residual seed emission remains Class 4 (manual p116).",
     "laser_on": "From Standby: enables emission and opens output (manual pp116-117). "
-    "From Output Enabled: closes the output gate while leaving the amplifier on.",
+    "While on: Laser Off returns to Standby and stops output.",
     "laser_enable": "Enable / disable the AOM output gate.  "
     "Toggles the actual output at the sample "
     "without changing the laser's emission "
     "state.",
-    "led_laser_listen": "Listen-mode indicator.  Green = active.",
-    "led_laser_laser_standby": "Standby-mode indicator.  Green = active, orange = transitioning.",
-    "led_laser_on": "Emission indicator.  Green = laser is emitting, orange = transitioning.",
-    "led_laser_enable": "Output-enable indicator.  Green = AOM open.",
+    "led_laser_listen": "Listen indicator: red/orange blinking = request pending; green = confirmed Listen.",
+    "led_laser_laser_standby": "Standby indicator: red/orange blinking = request pending/warming; green = confirmed ready.",
+    "led_laser_on": "Laser On indicator: red/orange blinking = transition pending; green = confirmed on.",
+    "led_laser_enable": "Output indicator: red/orange blinking = opening/closing pending; green = confirmed open, red = closed.",
     # --- Live readouts ---------------------------------------------------
     "laser_ir_power_disp": "IR internal-monitor power (W), separate from the selected harmonic. Unknown readings show dashes.",
     "laser_power_disp": "Selected output internal-monitor power (W). Unknown readings show dashes.",

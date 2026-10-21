@@ -28,7 +28,8 @@ class LaserPowerControlMixin:
         self.laser_native_control_button.setFixedHeight(25)
         self.laser_native_control_button.setEnabled(False)
         self.laser_native_control_button.setToolTip(
-            'Connect once to enable laser power in watts. This stops output and leaves the laser in Listen. '
+            'Standby prepares watt control automatically. This button also connects it manually: '
+            'it stops output and leaves the laser in Listen. '
             'Then select Standby and Laser On; watt changes use the same connection while on. '
             'The selected wavelength is retained from CLI and locked until returning to CLI. '
             'Stage Override Access is not required.'
@@ -75,9 +76,15 @@ class LaserPowerControlMixin:
         self._laser_watt_edit_pending = False
         self._apply_ir_power_watts()
 
-    def _use_native_ir_control(self):
+    def _prepare_laser_watts(self):
+        """Prepare watts before warming; never restart emission after a reset."""
         if getattr(self.laser_device, 'protocol', None) == 'nktpbus':
-            return
+            return getattr(self.laser_device, 'connected', True)
+        return bool(self._use_native_ir_control(automatic=True))
+
+    def _use_native_ir_control(self, *, automatic=False):
+        if getattr(self.laser_device, 'protocol', None) == 'nktpbus':
+            return getattr(self.laser_device, 'connected', True)
         if (self.laser_device is None or self.variables.start_flag or self._laser_alignment_busy()
                 or getattr(self, '_laser_mode_switch_in_progress', False)
                 or getattr(self, '_laser_stopping', False) or getattr(self, '_laser_status_in_progress', False)):
@@ -128,14 +135,23 @@ class LaserPowerControlMixin:
             logging.getLogger('pyccapt.laser').info(
                 'W control connected on %s; Listen confirmed; CLI-selected wavelength=%s',
                 port, readback.WAVELENGTHS[wavelength][0])
-            self._sync_controls_from_device(initial=True)
-            self._set_laser_disconnected_banner('')
+            # The protocol reset may restore default timing. Restore only
+            # verified timing while Listen is confirmed; never restore power.
+            if readback.scalar(device.FreqRead()) != index:
+                device.Freq(index)
+            if readback.scalar(device.DivRead()) != divider:
+                device.Div(divider)
             if (readback.scalar(device.FreqRead()), readback.scalar(device.DivRead())) != (index, divider):
-                self.error_message('Native watt control connected; timing changed during reset. Review base rate/divider before Laser On.')
-            else:
-                name = readback.WAVELENGTHS[wavelength][0]
-                self.error_message(f'W control connected ({name} selected in CLI). Output stopped; select Standby, then Laser On. '
-                                   'Further watt changes keep the connection and operating state.')
+                raise ValueError('Laser timing was not restored after handover; review base rate/divider before continuing.')
+            self._sync_controls_from_device(initial=True)
+            if readback.scalar(getattr(self, '_last_laser_status', None)) != 9:
+                raise ConnectionError('W control settings/status readback is incomplete; emission was not requested.')
+            self._set_laser_disconnected_banner('')
+            name = readback.WAVELENGTHS[wavelength][0]
+            self.error_message(f'W control connected ({name} selected in CLI). '+
+                ('Preparing Standby; no emission requested.' if automatic else
+                 'Output stopped; select Standby, then Laser On. Further watt changes keep the connection and operating state.'))
+            return True
 
     def _apply_native_ir_watts(self):
         try:

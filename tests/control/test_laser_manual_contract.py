@@ -226,6 +226,9 @@ def laser_gui():
     ui.variables = SimpleNamespace(start_flag=False, laser_telemetry={})
     ui.conf = {'laser_aom_max_percent': 100.}
     ui.laser_device = Laser()
+    # State/button unit tests use a ready transport. Handover integration
+    # tests below exercise the real preparation method with simulated SDKs.
+    ui._prepare_laser_watts = Mock(return_value=True)
     ui.errors = []
     ui.error_message = ui.errors.append
     ui.laser_connection_banner = QtWidgets.QLabel()
@@ -243,7 +246,10 @@ def laser_gui():
         setattr(ui, name, QtWidgets.QPushButton())
     for name in ('led_laser_listen', 'led_laser_laser_standby', 'led_laser_on', 'led_laser_enable'):
         setattr(ui, name, QtWidgets.QLabel())
-    ui.led_green = ui.led_red = QtGui.QPixmap(1, 1)
+    for name, color in (('led_red', 'red'), ('led_green', 'green'), ('led_orange', 'orange')):
+        pixmap = QtGui.QPixmap(2, 2)
+        pixmap.fill(QtGui.QColor(color))
+        setattr(ui, name, pixmap)
     for flag in ('listen_mode', 'standby_mode', 'on_mode', 'enable_ouput_mode',
                  'change_laser_wavelegnth', 'change_laser_power', 'change_laser_rate', 'change_laser_divition_factor'):
         setattr(ui, flag, False)
@@ -484,7 +490,7 @@ def test_already_standby_request_still_cancels_queued_on(laser_gui):
 
 @pytest.mark.parametrize('code,actions', [
     (9, {'standby'}), (17, {'listen'}), (33, {'listen', 'on'}),
-    (65, {'listen', 'standby', 'output'}), (129, {'listen', 'standby', 'on', 'output'}),
+    (65, {'listen', 'standby', 'on', 'output'}), (129, {'listen', 'standby', 'on', 'output'}),
     (1, {'listen'}), (3, {'listen'}), (5, {'listen'}), (None, {'listen'}), (255, {'listen'}),
 ])
 def test_laser_action_permissions_match_observed_state(laser_gui, code, actions):
@@ -570,6 +576,76 @@ def test_pending_standby_preserves_cancel_until_ready_status(laser_gui):
     assert not ui._laser_standby_pending
     assert ui.laser_listen.isEnabled()
     assert ui.laser_on.isEnabled()
+
+
+@pytest.mark.parametrize('start,handler,command,target,led,green', [
+    (9, 'laser_standby_clicked', 'Standby', 33, 'led_laser_laser_standby', True),
+    (33, 'laser_on_clicked', 'Enable', 129, 'led_laser_on', True),
+    (65, 'laser_enable_clicked', 'AOMEnable', 129, 'led_laser_enable', True),
+    (129, 'laser_enable_clicked', 'AOMDisable', 65, 'led_laser_enable', False),
+    (129, 'laser_listen_clicked', 'Listen', 9, 'led_laser_listen', True),
+    (129, 'laser_on_clicked', 'Standby', 33, 'led_laser_on', False),
+])
+def test_pending_leds_blink_until_fresh_target_readback(laser_gui, start, handler, command, target, led, green):
+    ui = laser_gui
+    device = ui.laser_device
+    device.code = start
+    setattr(device, command, lambda: device.calls.append((command,)))  # Delayed firmware transition.
+    ui._apply_button_locks_for_status(f'ly_oxp2_dev_status {start}')
+    getattr(ui, handler)()
+    ui.check_laser_status()
+    widget = getattr(ui, led)
+    before = widget.pixmap().cacheKey()
+    ui._blink_laser_indicators()
+    after = widget.pixmap().cacheKey()
+    assert {before, after} == {ui.led_red.cacheKey(), ui.led_orange.cacheKey()}
+    # Re-rendering a cached UI state must not confirm a hardware request.
+    ui._apply_button_locks_for_status(f'ly_oxp2_dev_status {target}')
+    before = widget.pixmap().cacheKey()
+    ui._blink_laser_indicators()
+    assert {before, widget.pixmap().cacheKey()} == {ui.led_red.cacheKey(), ui.led_orange.cacheKey()}
+    assert device.calls == [(command,)]  # Animation never performs hardware I/O.
+    device.code = target
+    ui.check_laser_status()
+    expected = ui.led_green if green else ui.led_red
+    assert widget.pixmap().cacheKey() == expected.cacheKey()
+    ui._blink_laser_indicators()
+    assert widget.pixmap().cacheKey() == expected.cacheKey()
+
+
+def test_failed_status_stops_blinking_and_discards_requests(laser_gui):
+    ui = laser_gui
+    parent = QtWidgets.QWidget()
+    ui._setup_laser_indicators(parent)
+    ui.laser_device.code = 9
+    ui._apply_button_locks_for_status('ly_oxp2_dev_status 9')
+    ui.laser_standby_clicked()
+    assert ui._laser_led_timer.isActive()
+    before = ui.led_laser_laser_standby.pixmap().cacheKey()
+    ui._laser_led_timer.timeout.emit()
+    assert {before, ui.led_laser_laser_standby.pixmap().cacheKey()} == {
+        ui.led_red.cacheKey(), ui.led_orange.cacheKey()}
+    assert not ui.laser_device.calls
+    ui.laser_device.StatusRead = Mock(side_effect=TimeoutError('Lost status'))
+    ui._laser_status_in_progress = False
+    ui._poll_laser_status()
+    assert not ui._laser_led_timer.isActive()
+    assert not ui._laser_indicator_requests
+    assert ui.led_laser_laser_standby.pixmap().cacheKey() == ui.led_red.cacheKey()
+    parent.deleteLater()
+
+
+@pytest.mark.parametrize('code', [65,129])
+def test_laser_off_and_output_gate_have_distinct_actions(laser_gui, code):
+    ui = laser_gui
+    ui.laser_device.code = code
+    ui._apply_button_locks_for_status(f'ly_oxp2_dev_status {code}')
+    assert ui.laser_on.text() == 'Laser Off'
+    assert ui.laser_enable.text() == ('Close Output' if code == 129 else 'Open Output')
+    ui.laser_on_clicked()
+    ui.check_laser_status()
+    assert ui.laser_device.calls == [('Standby',)]
+    assert ui.laser_device.code == 33
 
 
 def test_on_request_can_be_cancelled_to_standby_before_status_changes(laser_gui):
@@ -1227,6 +1303,108 @@ def test_native_handover_opens_one_owned_sdk_session_then_restores_polling(watt_
     assert native.calls == [('Listen',)]  # Connecting explicitly stops; never resumes emission.
     assert native.code == 9
     assert ui.laser_wavelegnth.currentText() == wavelength
+
+
+@pytest.mark.parametrize('initial,handler', [(9,'laser_standby_clicked'), (33,'laser_on_clicked')])
+@pytest.mark.parametrize('valid_readbacks', [True, False])
+def test_normal_startup_prepares_watts_before_emission(watt_gui, monkeypatch, initial, handler, valid_readbacks):
+    from pyccapt.control.gui import laser_power_control
+    from pyccapt.control.nkt_photonics import nktpbus_switch
+    ui, old, _ = watt_gui
+    del ui._prepare_laser_watts  # Exercise the real transport preparation, not the unit-test stub.
+    old.code = initial
+    old.wavelength_read = lambda: 'Current position=IR'
+    native = Laser()
+    native.protocol = 'nktpbus'
+    native.code = 9
+    native.wavelength_basis = 'IR read back before handover'
+    native.wavelength_read = lambda: 'CLI-verified position=IR'
+    native.open_port = Mock(return_value=0)
+    native.set_ir_power_watts = Mock(return_value=1.25)
+    if not valid_readbacks:
+        native.freq_avaliable = lambda: 'Unknown command'
+    def warmup():
+        native.calls.append(('Standby',))
+        native.code = 17
+    native.Standby = warmup
+    factory = Mock(return_value=native)
+    switch = Mock()
+    monkeypatch.setattr(laser_power_control, 'NativeLaser', factory)
+    monkeypatch.setattr(nktpbus_switch, '_load_nktp_dll_module', Mock())
+    monkeypatch.setattr(nktpbus_switch, 'switch_to_nktpbus', switch)
+    ui._apply_button_locks_for_status(f'ly_oxp2_dev_status {initial}')
+    getattr(ui, handler)()
+    assert ui.laser_device is native
+    if not valid_readbacks:
+        assert not ui.standby_mode and not ui.on_mode
+        assert native.calls == [('Listen',)]
+        assert 'readback is incomplete' in ui.errors[-1]
+        native.close_port.assert_not_called()
+        return
+    assert ui.standby_mode and not ui.on_mode
+    ui.check_laser_status()
+    assert native.code == 17 and not ui.laser_ir_power_control.isEnabled()
+    native.code = 33
+    ui.check_laser_status()
+    assert native.calls == [('Listen',), ('Standby',)]  # Never auto-enable after handover/warmup.
+    assert ui.laser_ir_power_control.isEnabled()
+    ui.laser_on_clicked()
+    ui.check_laser_status()
+    assert native.code == 129 and ui.laser_ir_power_control.isEnabled()
+    ui.laser_ir_power_control.setValue(1.25)
+    ui._mark_laser_watt_edit(1.25)
+    ui._commit_laser_watt_edit()
+    native.set_ir_power_watts.assert_called_once_with(1.25)
+    assert native.calls == [('Listen',), ('Standby',), ('Enable',)]
+    factory.assert_called_once()
+    switch.assert_called_once()
+    old.close_port.assert_called_once()
+    native.close_port.assert_not_called()
+    assert ui.laser_on.text() == 'Laser Off' and ui.laser_enable.text() == 'Close Output'
+
+
+def test_failed_watt_preparation_cannot_queue_emission(laser_gui):
+    ui = laser_gui
+    ui._prepare_laser_watts.return_value = False
+    ui._apply_button_locks_for_status('ly_oxp2_dev_status 33')
+    ui.laser_on_clicked()
+    ui.check_laser_status()
+    assert not ui.laser_device.calls and not ui.on_mode
+
+
+@pytest.mark.parametrize('accepted', [True, False])
+def test_automatic_watt_preparation_restores_verified_timing_in_listen(watt_gui, monkeypatch, accepted):
+    from pyccapt.control.gui import laser_power_control
+    from pyccapt.control.nkt_photonics import nktpbus_switch
+    ui, old, _ = watt_gui
+    del ui._prepare_laser_watts
+    old.code = 9
+    old.DivRead = lambda: 'Division factor: 4'
+    divider = [1]  # Simulate the reset restoring a default divider.
+    native = Laser()
+    native.protocol = 'nktpbus'
+    native.code = 9
+    native.wavelength_basis = 'DUV read back before handover'
+    native.open_port = Mock(return_value=0)
+    native.DivRead = lambda: f'Division factor: {divider[0]}'
+    def set_divider(value):
+        assert native.code == 9
+        native.calls.append(('Div', value))
+        if accepted:
+            divider[0] = value
+    native.Div = set_divider
+    monkeypatch.setattr(laser_power_control, 'NativeLaser', Mock(return_value=native))
+    monkeypatch.setattr(nktpbus_switch, '_load_nktp_dll_module', Mock())
+    monkeypatch.setattr(nktpbus_switch, 'switch_to_nktpbus', Mock())
+    ui._apply_button_locks_for_status('ly_oxp2_dev_status 9')
+    ui.laser_standby_clicked()
+    assert native.calls == [('Listen',), ('Div', 4)]
+    assert not ui.on_mode
+    assert ui.standby_mode is accepted
+    if accepted:
+        assert ui.laser_divition_factor.value() == 4
+    else:
+        assert 'timing was not restored' in ui.errors[-1]
 
 
 @pytest.mark.parametrize('code,label', [(9,'Connect W control'), (33,'Connect W control'),

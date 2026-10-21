@@ -8,7 +8,7 @@ no serial port, laser emission or stage motion was operated during the audit.
 
 | Area | Manual evidence | Implemented correction |
 | --- | --- | --- |
-| Power setting | 800-621-01 p119: `ly_oxp2_power` is legacy pre-5.0 pulse energy in nJ; p120: `e_power` is relative AOM amplitude 0–4000 | Modern GUI uses **IR AOM setting (%)**, converted to 0–4000. Never presents this as W or mW. `laser_aom_max_percent` limits commands; old `max_laser_power` is not reused. |
+| Power setting | 800-621-01 p119: `ly_oxp2_power` is legacy pre-5.0 pulse energy in nJ; p120: `e_power` is relative AOM amplitude 0–4000 | Primary **Laser power (W)** uses native calibrated register 0x20. **Advanced AOM (%)** converts percent to 0–4000; it is never presented as W. `laser_aom_max_percent` limits commands; old `max_laser_power` is not reused. |
 | IR monitor | p119 `e_mlp?` description mentions average power and a factory energy option; both examples explicitly return nJ | Parse the response unit (W/mW/µW or J/mJ/µJ/nJ/pJ). Unitless or ambiguous readings are unavailable. |
 | Harmonic monitor | pp139–140 `ls_output_power?` returns selected harmonic average power in W | Green/UV/DUV use this monitor, never substitute the IR monitor. Unsupported FHG replies remain unavailable. FHG firmware compatibility still needs a real readback. |
 | Energy arithmetic | E=P/f, with f=base/divider | Monitor power produces energy in nJ; energy replies produce estimated power. GUI shows W and µJ. These are internal-monitor estimates, not measured energy at the specimen. |
@@ -238,13 +238,23 @@ help output, absent CLI replies and exclusive port ownership.
 ### Persistent native IR control
 
 For watt adjustment while emitting, select IR, Green or DUV through CLI, then
-choose **Connect W control**, directly below the primary power field. Stage
-Override Access is not required. Wait for any queued wavelength edit to be
-read back. The action is available in stable Listen, Standby and On states;
-when already on, it explicitly says **Connect W (stops output)**. It performs
-one CLI -> NKTPBus handover, requests Listen and retains the SDK connection.
-It never resumes emission automatically. Select Standby and Laser On after
-connecting; further watt edits retain the connection and operating state.
+press **Standby** from Listen. Standby automatically prepares native watt
+control before warming, so Laser On no longer starts an AOM-only CLI session.
+Preparation performs one CLI -> NKTPBus handover, confirms Listen, restores
+and verifies the previous base-rate index/divider, then queues Standby.
+Power/AOM values are never automatically restored. If preparation or timing
+verification fails, no warm-up or emission is queued. Once Standby is confirmed
+ready, an explicit **Laser On** request enables emission with watt control
+already connected. Watt edits retain the connection and operating state.
+
+If Laser On is pressed from an existing CLI-ready Standby, preparation first
+returns to Listen and queues a new warm-up; the operator presses Laser On
+again after ready confirmation. Emission is never automatically resumed after
+the handover. **Connect W control** remains as manual recovery; while already
+on it explicitly says **Connect W (stops output)**. Stage Override Access is
+not required. Wait for queued wavelength edits to be read back before preparing
+power control. Lower-state requests from an already-on laser remain available
+without depending on SDK setup.
 The state label identifies native watt control. **Laser power (W)** is the
 primary power field; press Enter or leave the field to commit an edited value.
 There is no separate Apply button or GUI watt conversion through CLI/Listen.
@@ -291,6 +301,23 @@ test this feature; repeated updates in emitting FSM states with IR, Green and
 DUV selected are simulated. Physical wavelength retention across the initial
 protocol reset and harmonic conversion efficiency still need instrument
 verification; individual watt updates perform no protocol reset.
+
+### Distinct state buttons and pending LEDs
+
+**Open/Close Output** toggles only the AOM gate while the amplifier remains on.
+The separate **Laser Off** button requests Standby from either output-open or
+output-closed On states; it no longer duplicates Close Output. From ready
+Standby, **Laser On (emits)** retains the documented emission-enable behavior.
+
+The Listen, Standby, Laser On and Output LEDs alternate red/orange every
+500 ms while their requested transitions are pending. Standby warm-up also
+blinks instead of displaying a fixed orange light. Green always represents
+an observed active state; closing output or turning the laser off settles
+the corresponding indicator to red. A command must be sent and confirmed by
+a fresh status read before its pending indicator settles. Cached UI refreshes
+do not acknowledge commands. New lower-state requests cancel superseded
+indicators; faults, lost status, handovers and shutdown clear pending requests.
+The animation timer updates only pixmaps and never performs hardware I/O.
 
 ### CLI compatibility helper
 

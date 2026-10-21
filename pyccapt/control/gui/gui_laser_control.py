@@ -28,6 +28,7 @@ from pyccapt.control.gui.laser_readouts import LaserReadoutMixin
 from pyccapt.control.gui.laser_alignment_gui import LaserAlignmentGuiMixin
 from pyccapt.control.gui.laser_layout import LaserLayoutMixin
 from pyccapt.control.gui.laser_power_control import LaserPowerControlMixin
+from pyccapt.control.gui.laser_indicators import LaserIndicatorMixin
 from pyccapt.control.smaract_mcs2 import mcs2_stage
 
 
@@ -72,7 +73,7 @@ def _available_serial_ports_text():
 _parse_first_number = readback.scalar
 
 
-class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMixin, LaserPowerControlMixin):
+class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMixin, LaserPowerControlMixin, LaserIndicatorMixin):
     def __init__(self, variables, conf):
         """
         Initialize the Ui_Laser_Control class.
@@ -672,6 +673,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         self.led_laser_on.setPixmap(self.led_red)
         self.led_laser_enable.setPixmap(self.led_red)
         self.led_laser_listen.setPixmap(self.led_red)
+        self._setup_laser_indicators(Laser_Control)
 
         self.laser_enable.setEnabled(False)
         self.laser_on.setEnabled(False)
@@ -1201,8 +1203,19 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         # Manual p123: integer divider 1..10,000,000.
         self._clamp_divider_to_min_output_rate()
 
-    def _request_laser_state(self, target):
+    def _request_laser_state(self, target, *, indicator=None):
         self._control_laser_request = request(self.variables, "laser", "main", target)
+        self._clear_laser_indicator_requests()
+        if target == LaserState.LISTEN.value:
+            self._queue_laser_indicator('listen', (9,))
+        elif target == LaserState.STANDBY.value:
+            self._queue_laser_indicator('standby', (33,))
+        elif target == LaserState.ON_DISABLED.value:
+            self._queue_laser_indicator('output', (65,))
+        elif target == LaserState.ON_ENABLED.value:
+            if indicator != 'output':
+                self._queue_laser_indicator('on', (65, 129))
+            self._queue_laser_indicator('output', (129,))
 
     def laser_enable_clicked(self):
         """
@@ -1221,7 +1234,8 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         else:
             self.enable_ouput_mode = True
             self._laser_emission_pending = True
-        self._request_laser_state(LaserState.ON_DISABLED.value if getattr(self, "close_output_mode", False) else LaserState.ON_ENABLED.value)
+        self._request_laser_state(LaserState.ON_DISABLED.value if getattr(self, "close_output_mode", False) else LaserState.ON_ENABLED.value,
+                                  indicator='output')
         self._apply_button_locks_for_status(getattr(self, '_last_laser_status', None))
 
     def laser_on_clicked(self):
@@ -1233,14 +1247,21 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         Return:
             None
         """
-        if readback.scalar(getattr(self, '_last_laser_status', None)) == 129:
-            self.close_output_mode = True
-            self.on_mode = self.enable_ouput_mode = False
-            self._laser_emission_pending = False
-        else:
-            self.on_mode = True
-            self._laser_emission_pending = True
-        self._request_laser_state(LaserState.ON_DISABLED.value if getattr(self, "close_output_mode", False) else LaserState.ON_ENABLED.value)
+        code = readback.scalar(getattr(self, '_last_laser_status', None))
+        if code in (65, 129):
+            self.laser_standby_clicked()
+            self._queue_laser_indicator('on', (33,))
+            return
+        if code == 33:
+            if not self._prepare_laser_watts():
+                return
+            if readback.scalar(getattr(self, '_last_laser_status', None)) == 9:
+                self.laser_standby_clicked()
+                self.error_message('Watt control prepared. Wait for ready Standby, then press Laser On.')
+                return
+        self.on_mode = True
+        self._laser_emission_pending = True
+        self._request_laser_state(LaserState.ON_ENABLED.value)
         self._apply_button_locks_for_status(getattr(self, '_last_laser_status', None))
 
     def laser_standby_clicked(self):
@@ -1252,6 +1273,9 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         Return:
             None
         """
+        code = readback.scalar(getattr(self, '_last_laser_status', None))
+        if code in (9, 33) and not self._prepare_laser_watts():
+            return
         self.standby_mode = True
         if self.on_mode or self.enable_ouput_mode:
             self._laser_emission_pending = False
@@ -1275,6 +1299,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         self._laser_emission_pending = False
         self._laser_standby_pending = False
         self._request_laser_state(LaserState.LISTEN.value)
+        self._apply_button_locks_for_status(getattr(self, '_last_laser_status', None))
 
     def laser_wavelegnth_changed(self):
         """
@@ -1339,6 +1364,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             # Failed requests must not replay later when communication recovers.
             self._laser_standby_pending = False
             self._laser_emission_pending = False
+            self._clear_laser_indicator_requests()
             for flag in ('listen_mode', 'standby_mode', 'on_mode', 'enable_ouput_mode', 'close_output_mode',
                          'change_laser_wavelegnth', 'change_laser_power', 'change_laser_rate',
                          'change_laser_divition_factor'):
@@ -1379,6 +1405,8 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             if request == 'close_output' and code in (65, 129):
                 actions = actions | {'close_output'}
             if request is not None and request not in actions:
+                self._clear_laser_indicator_requests()
+                self._laser_standby_pending = self._laser_emission_pending = False
                 self.error_message(f'Laser command unavailable in {LaserState.from_code(code).value}; request cancelled.')
                 command = getattr(self, "_control_laser_request", None)
                 if command is not None:
@@ -1415,6 +1443,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         if changed:
             status = self.laser_device.StatusRead()
         if requested:
+            self._mark_laser_indicators_sent()
             command = getattr(self, "_control_laser_request", None)
             if command is not None:
                 result(self.variables, "laser", "main", command.command_id, CommandStatus.SENT)
@@ -1454,6 +1483,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
     def _publish_laser_state(self, status_text):
         """Publish only real serial reads; cached UI refreshes are not new evidence."""
         code = readback.scalar(status_text)
+        self._observe_laser_indicators(code)
         state = LaserState.from_code(code)
         actions = allowed_actions(state, connected=self.laser_device is not None)
         observed = observe(self.variables, "laser", "main", state.value, evidence=Evidence.READBACK,
@@ -1469,7 +1499,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         code = readback.scalar(status_text) if self.laser_device is not None else None
         state = LaserState.from_code(code)
         actions = allowed_actions(state, connected=self.laser_device is not None)
-        if self.laser_device is None or code in (33, 65, 129):
+        if self.laser_device is None or code == 33:
             self._laser_standby_pending = False
         if self.laser_device is None or code == 129:
             self._laser_emission_pending = False
@@ -1494,7 +1524,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             if getattr(self.laser_device, 'protocol', None) == 'nktpbus':
                 self.laser_state_label.setText(self.laser_state_label.text()+' (native W)')
             elif self.laser_device is not None:
-                self.laser_state_label.setText(self.laser_state_label.text()+' (connect W control to set power)')
+                self.laser_state_label.setText(self.laser_state_label.text()+' (Standby prepares watt control)')
         known = code in (9, 33, 65, 129) and not pending and not emission_pending
         idle = code in (9, 33) and not pending and not emission_pending
         running = bool(self.variables.start_flag)
@@ -1503,14 +1533,16 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             known = idle = False
         self.laser_listen.setEnabled('listen' in actions)
         self.laser_standby.setEnabled('standby' in actions)
-        self.laser_on.setEnabled('on' in actions)
+        self.laser_on.setEnabled('standby' in actions if code in (65, 129) else 'on' in actions)
         self.laser_enable.setEnabled('output' in actions)
-        self.laser_on.setText('Close Output' if code == 129 else 'Laser On (emits)')
-        self.laser_enable.setText('Close Output' if code == 129 or (emission_pending and code == 65) else 'Output Enable')
+        self.laser_on.setText('Laser Off' if code in (65, 129) else 'Laser On (emits)')
+        self.laser_enable.setText('Close Output' if code == 129 or (emission_pending and code == 65) else
+                                  'Open Output' if code == 65 else 'Output Enable')
         self.laser_enable.setToolTip('Close AOM output.' if self.laser_enable.text() == 'Close Output'
                                      else 'Open AOM output only after the laser is on.')
         self.laser_listen.setToolTip('Request Listen (no emission), including while warming or after a status-read failure.')
-        self.laser_on.setToolTip('Close AOM output.' if code == 129 else 'Enable emission only after confirmed ready Standby.')
+        self.laser_on.setToolTip('Return the laser to Standby and stop output.' if code in (65, 129) else
+                                 'Enable emission only after confirmed ready Standby; watt control is prepared first.')
         self.laser_wavelegnth.setEnabled(idle and not running
             and getattr(self.laser_device, 'supports_wavelength_changes', True))
         self.laser_rate.setEnabled(idle and not running and bool(getattr(self, '_frequency_table', {})))
@@ -1525,18 +1557,11 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             tip = ('Press Enter or leave the field to set laser power on the existing connection. '
                    'This adjusts the IR feeding the selected wavelength, not a Green/DUV watt setpoint. '
                    'Operating state and shutter are not changed. Manual AOM edits override this setpoint.'
-                   if native else 'Click Connect W control below. Connecting stops output and leaves Listen; '
-                   'then select Standby and Laser On. '
+                   if native else 'Select Standby to prepare watt control automatically, then Laser On. '
+                   'Preparing watts from CLI stops output once. Connect W control is also available for manual recovery. '
                    'Laser power (W) controls the IR feeding the selected output. AOM percent is under Advanced AOM (%).')
             self.laser_ir_power_control.setToolTip(tip)
-        for widget, active in ((self.led_laser_listen, code == 9),
-                               (self.led_laser_laser_standby, code == 33),
-                               (self.led_laser_on, code in (65, 129)),
-                               (self.led_laser_enable, code == 129)):
-            if widget is self.led_laser_laser_standby and state == LaserState.SETUP:
-                widget.setPixmap(getattr(self, 'led_orange', self.led_red))
-            else:
-                widget.setPixmap(self.led_green if active else self.led_red)
+        self._render_laser_indicators()
         self._update_laser_mode_buttons()
 
     # ------------------------------------------------------------------
@@ -1632,6 +1657,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
                          'change_laser_power', 'change_laser_rate', 'change_laser_divition_factor'):
                 setattr(self, flag, False)
             self._last_laser_status = None
+            self._clear_laser_indicator_requests()
             self._laser_watt_edit_pending = False
             if getattr(self.laser_device, 'protocol', None) == 'nktpbus':
                 # An explicit mode handover releases ownership. Native watt
@@ -1865,6 +1891,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         Python process from exiting cleanly.
         """
         self._laser_stopping = True
+        self._clear_laser_indicator_requests()
         # Stop the laser-status QTimer (now a main-thread timer instead of
         # a Worker QThread; see _poll_laser_status). Stopping the timer is
         # synchronous so there's no thread to join.

@@ -10,6 +10,7 @@ import logging
 import math
 import struct
 import threading
+import time
 
 from pyccapt.control.nkt_photonics import nktpbus_switch, readback
 from pyccapt.control.nkt_photonics.origamiClassCLI import origClass
@@ -145,10 +146,35 @@ class NativeLaser:
         return self._write(0x30, 1)
 
     def Standby(self):
+        return self._standby(reset_interlock=False)
+
+    def standby_with_interlock_reset(self):
+        """Operator Standby action; never used by shutdown or connection code."""
+        return self._standby(reset_interlock=True)
+
+    def _standby(self, *, reset_interlock):
         self.StatusRead()
+        if reset_interlock and self.standby_reset_available:
+            # NKT CONTROL 1.3.7.1569 PubOrigamiLib: the reset slot writes
+            # value 1 to its register 0x32. A closed loop awaiting reset is
+            # acknowledged only by this explicit operator Standby action.
+            self._write(0x32, 1, 'U16')
+            for _ in range(10):
+                self.StatusRead()
+                if self.status_details['error'] or self.status_details['interlock'] not in (1, 2):
+                    raise ValueError(self.status_fault)
+                if self.status_details['interlock'] == 2:
+                    break
+                time.sleep(.05)
+            else:
+                raise ValueError('Interlock reset was not confirmed; Standby was not requested')
         if self.status_fault and self.status_details['fsm'] < 3:
             raise ValueError(self.status_fault)
         return self._write(0x30, 3)
+
+    @property
+    def standby_reset_available(self):
+        return self.status_details == dict(fsm=1, error=0, interlock=1)
 
     def _require_clear_interlock(self):
         self.StatusRead()

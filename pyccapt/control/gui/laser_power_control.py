@@ -83,6 +83,18 @@ class LaserPowerControlMixin:
         return bool(self._use_native_ir_control(automatic=True))
 
     def _use_native_ir_control(self, *, automatic=False):
+        self._laser_preparing_standby = automatic
+        prepared = False
+        try:
+            prepared = bool(self._connect_native_ir_control(automatic=automatic))
+            return prepared
+        finally:
+            self._laser_preparing_standby = False
+            if automatic and not prepared:
+                self._laser_standby_pending = False
+                self._clear_laser_indicator_requests()
+
+    def _connect_native_ir_control(self, *, automatic=False):
         if getattr(self.laser_device, 'protocol', None) == 'nktpbus':
             return getattr(self.laser_device, 'connected', True)
         if (self.laser_device is None or self.variables.start_flag or self._laser_alignment_busy()
@@ -102,6 +114,7 @@ class LaserPowerControlMixin:
             if wavelength not in readback.WAVELENGTHS:
                 raise ValueError('Read back a valid selected wavelength through CLI before entering native watt control.')
             nktpbus_switch._load_nktp_dll_module()  # Preflight before releasing CLI.
+            self._observe_laser_indicators(status)
         except Exception as exc:
             self.error_message(f'Native watt handover rejected: {exc}')
             return
@@ -121,9 +134,14 @@ class LaserPowerControlMixin:
                 raise ConnectionError(f'Native watt connection failed: {device.last_error}; use Switch to CLI to recover.')
             # The Connect W action explicitly stops output. Never resume an
             # emission request automatically after changing port ownership.
-            self._queue_laser_indicator('listen', (9,))
+            if automatic:
+                self._laser_standby_pending = True
+                self._queue_laser_indicator('standby', (33,))
+            else:
+                self._queue_laser_indicator('listen', (9,))
             device.Listen()
-            self._mark_laser_indicators_sent()
+            if not automatic:
+                self._mark_laser_indicators_sent()
             for _ in range(50):
                 if self._laser_stopping:
                     return
@@ -154,13 +172,13 @@ class LaserPowerControlMixin:
                 raise ConnectionError('W control settings/status readback is incomplete; emission was not requested.')
             self._set_laser_disconnected_banner('')
             fault = getattr(device, 'status_fault', '')
-            if fault:
+            if fault and not getattr(device, 'standby_reset_available', False):
                 self.error_message(f'Listen confirmed; W control connected. {fault}. '
                                    'Resolve the interlock/error before Standby; no reset or emission requested.')
                 return False
             name = readback.WAVELENGTHS[wavelength][0]
             self.error_message(f'W control connected ({name} selected in CLI). '+
-                ('Preparing Standby; no emission requested.' if automatic else
+                ('Preparing Standby; its explicit request will acknowledge a pending interlock reset.' if automatic else
                  'Output stopped; select Standby, then Laser On. Further watt changes keep the connection and operating state.'))
             return True
 

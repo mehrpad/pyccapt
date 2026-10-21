@@ -141,3 +141,53 @@ def test_unaccepted_setpoint_is_reported_without_state_commands(native):
         laser.set_ir_power_watts(1.4)
     sdk.registerWriteU8.assert_not_called()
     sdk.closePorts.assert_not_called()
+
+
+@pytest.mark.parametrize('interlock,error', [(1, 0), (0x3000, 0), (2, 7)])
+def test_listen_is_observable_during_fault_but_cannot_raise_power(native, interlock, error):
+    laser, sdk, registers = native
+    registers.update({0x01: 1, 0x32: interlock, 0x67: error})
+    assert readback.scalar(laser.StatusRead()) == 9
+    assert laser.status_fault
+    assert laser.status_details == dict(fsm=1, interlock=interlock, error=error)
+    for action in (laser.Standby, laser.Enable, laser.AOMEnable,
+                   lambda: laser.AOM(800), lambda: laser.set_ir_power_watts(1.)):
+        with pytest.raises(ValueError):
+            action()
+    sdk.registerWriteU8.assert_not_called()
+    sdk.registerWriteU16.assert_not_called()
+    laser.Listen()
+    sdk.registerWriteU8.assert_called_once_with('FAKE', 15, 0x30, 1, -1)
+    registers.update({0x32: 2, 0x67: 0})
+    assert readback.scalar(laser.StatusRead()) == 9 and not laser.status_fault
+    assert laser.set_ir_power_watts(1.) == 1.
+
+
+@pytest.mark.parametrize('close_result', [0, 2])
+@pytest.mark.parametrize('failure', ['read', 'write'])
+def test_only_explicit_listen_reopens_a_lost_sdk_port(native, close_result, failure):
+    laser, sdk, registers = native
+    registers[0x01] = 1
+    read = sdk.registerReadU8.side_effect
+    write = sdk.registerWriteU8.side_effect
+    if failure == 'write':
+        sdk.registerWriteU8.side_effect = lambda *args: 13
+        with pytest.raises(ConnectionError):
+            laser.Listen()
+        sdk.registerWriteU8.side_effect = write
+        sdk.registerWriteU8.reset_mock()
+    sdk.registerReadU8.side_effect = lambda *args: (13, 0)
+    with pytest.raises(ConnectionError):
+        laser.StatusRead()
+    assert not laser.connected and not laser.status_details
+    with pytest.raises(ConnectionError):
+        laser.set_ir_power_watts(1.)
+    assert sdk.openPorts.call_count == 1
+    sdk.registerWriteU16.assert_not_called()
+    sdk.registerReadU8.side_effect = read
+    sdk.closePorts.return_value = close_result
+    laser.Listen()
+    assert sdk.openPorts.call_count == 2
+    sdk.closePorts.assert_called_once_with('FAKE')
+    sdk.registerWriteU8.assert_called_once_with('FAKE', 15, 0x30, 1, -1)
+    assert laser.connected

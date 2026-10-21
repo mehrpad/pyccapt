@@ -66,6 +66,10 @@ class LaserAlignmentGuiMixin:
         layout.addWidget(self.laser_alignment_stop, 5, 3)
         self.laser_alignment_label = QtWidgets.QLabel('Start a Laser-mode experiment to scan. Ranges are laser-stage travel.')
         self.laser_alignment_label.setWordWrap(True)
+        self.laser_alignment_label.setTextFormat(QtCore.Qt.TextFormat.PlainText)
+        self.laser_alignment_label.setMinimumHeight(3 * self.laser_alignment_label.fontMetrics().lineSpacing() + 6)
+        self.laser_alignment_label.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum)
         layout.addWidget(self.laser_alignment_label, 6, 0, 1, 4)
         self.gridLayout_5.addWidget(panel, 6, 0, 1, 7)
         self.laser_auto_alignment.toggled.connect(self._set_laser_auto_alignment)
@@ -141,7 +145,8 @@ class LaserAlignmentGuiMixin:
             text = status.get('phase', 'idle')+': '+status.get('reason', '')
             if status.get('target_voltage') is not None:
                 text += f" | DC target {status['target_voltage']:.0f} V"
-            self.laser_alignment_label.setText(text+'\nScan: coarse → fine XY → focus Z → fine XY. Stop Alignment leaves acquisition running.')
+            self.laser_alignment_label.setText(text+'\nScan: coarse → fine XY → focus Z → fine XY.'
+                                                 '\nStop Alignment leaves acquisition running.')
             self.alignment_plot.append(self.variables.laser_alignment_plot)
         except Exception:
             self.variables.laser_alignment_cancel = True

@@ -1394,6 +1394,8 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         status = self.laser_device.StatusRead()
         code = readback.scalar(status)
         actions = allowed_actions(LaserState.from_code(code), connected=True)
+        if getattr(self.laser_device, 'status_fault', '') and code == 9:
+            actions = frozenset({'listen'})
         if standby and (code == 33 or (code == 17 and getattr(self, '_laser_emission_pending', False))):
             actions = actions | {'standby'}
         if not listen:
@@ -1486,11 +1488,15 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         self._observe_laser_indicators(code)
         state = LaserState.from_code(code)
         actions = allowed_actions(state, connected=self.laser_device is not None)
+        fault = getattr(self.laser_device, 'status_fault', '') or (state.value if code in (3, 5) else '')
+        if fault and code == 9:
+            actions = frozenset({'listen'})
         observed = observe(self.variables, "laser", "main", state.value, evidence=Evidence.READBACK,
                            valid=code in (1, 3, 5, 9, 17, 33, 65, 129),
                            connection=Connection.CONNECTED if self.laser_device is not None else Connection.DISCONNECTED,
-                           fault=state.value if code in (3, 5) else "",
-                           details={"status_code": code, "observed_state_actions": sorted(actions)})
+                           fault=fault,
+                           details={"status_code": code, "observed_state_actions": sorted(actions),
+                                    "native_status": getattr(self.laser_device, 'status_details', {})})
         if (observed is not None and observed.command_status == CommandStatus.SENT
                 and observed.valid and not observed.fault and observed.requested == state.value):
             result(self.variables, "laser", "main", observed.command_id, CommandStatus.CONFIRMED)
@@ -1499,6 +1505,9 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         code = readback.scalar(status_text) if self.laser_device is not None else None
         state = LaserState.from_code(code)
         actions = allowed_actions(state, connected=self.laser_device is not None)
+        fault = getattr(self.laser_device, 'status_fault', '')
+        if fault and code == 9:
+            actions = frozenset({'listen'})
         if self.laser_device is None or code == 33:
             self._laser_standby_pending = False
         if self.laser_device is None or code == 129:
@@ -1523,10 +1532,13 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             self.laser_state_label.setText('Laser: '+(label if self.laser_device is not None else 'Disconnected'))
             if getattr(self.laser_device, 'protocol', None) == 'nktpbus':
                 self.laser_state_label.setText(self.laser_state_label.text()+' (native W)')
+                if fault:
+                    self.laser_state_label.setText(self.laser_state_label.text()+'; '+fault)
+                self.laser_state_label.setToolTip(str(getattr(self.laser_device, 'status_details', {})))
             elif self.laser_device is not None:
                 self.laser_state_label.setText(self.laser_state_label.text()+' (Standby prepares watt control)')
-        known = code in (9, 33, 65, 129) and not pending and not emission_pending
-        idle = code in (9, 33) and not pending and not emission_pending
+        known = code in (9, 33, 65, 129) and not pending and not emission_pending and not fault
+        idle = code in (9, 33) and not pending and not emission_pending and not fault
         running = bool(self.variables.start_flag)
         if getattr(self, '_laser_mode_switch_in_progress', False):
             actions = frozenset()

@@ -6,6 +6,7 @@ read back via CLI before handover and locked for this session; it is not
 queried through an unverified harmonic register map.
 Opening/reading never enables emission or resets an interlock.
 """
+import logging
 import math
 import struct
 import threading
@@ -36,6 +37,9 @@ class NativeLaser:
         self.last_error = None
         self._opened = False
         self.connected = False
+        self.status_details = {}
+        self.status_fault = ''
+        self._port_missing = False
         self._lock = threading.RLock()
 
     def open_port(self):
@@ -66,7 +70,7 @@ class NativeLaser:
             self.connected = False
             if self._opened:
                 result = self.nkt.closePorts(self.comPort)
-                if result != 0:
+                if result not in (0, 2):  # OPPortNotFound also confirms no owned handle.
                     raise ConnectionError(f'Native port close failed: {self.nkt.PortResultTypes(result)}')
                 self._opened = False
                 self.address = None
@@ -77,7 +81,11 @@ class NativeLaser:
                 raise ConnectionError('Native laser is not connected')
             result, value = getattr(self.nkt, 'registerRead'+kind)(self.comPort, self.address, register, index)
             if result != 0:
+                if result == 13:  # SDK auto-scan may have closed an empty port.
+                    self._port_missing = True
+                    self.connected = False
                 raise ConnectionError(f'Native register 0x{register:02X}: {self.nkt.RegisterResultTypes(result)}')
+            self._port_missing = False
             return value
 
     def _write(self, register, value, kind='U8'):
@@ -86,28 +94,75 @@ class NativeLaser:
                 raise ConnectionError('Native laser is not connected')
             result = getattr(self.nkt, 'registerWrite'+kind)(self.comPort, self.address, register, value, -1)
             if result != 0:
+                if result == 13:
+                    self._port_missing = True
+                    self.connected = False
                 raise ConnectionError(f'Native register 0x{register:02X}: {self.nkt.RegisterResultTypes(result)}')
             return ''
 
     def StatusRead(self, timeout=2.):
+        with self._lock:
+            return self._read_status()
+
+    def _read_status(self):
+        previous = self.status_details
+        self.status_details = {}
+        self.status_fault = 'Native status unavailable'
         state = self._read(0x01, 'U8')
         error = self._read(0x67, 'U8')
         interlock = self._read(0x32)
-        if error:
+        code = {0: 1, 1: 9, 2: 17, 3: 33, 4: 17, 5: 65, 6: 129}.get(state)
+        if code is None:
+            raise ValueError(f'Unknown native laser FSM state {state}')
+        interlock_text = {0: 'interlock loop open', 1: 'interlock waiting for reset',
+                          2: '', 0x3000: 'external module interlock open',
+                          0x4000: 'front-panel interlock open'}.get(
+                              interlock, f'interlock 0x{interlock:04X}')
+        self.status_fault = '; '.join(filter(None, (
+            f'laser error {error}' if error else '', interlock_text)))
+        self.status_details = dict(fsm=state, error=error, interlock=interlock)
+        self.connected = True
+        if self.status_details != previous:
+            logging.getLogger('pyccapt.laser').info(
+                'Native laser on %s: FSM=%s, error=%s, interlock=0x%04X%s',
+                self.comPort, state, error, interlock,
+                f' ({self.status_fault})' if self.status_fault else '')
+        # Listen is a real stopped state even with an interlock awaiting reset.
+        # Retain its fault separately; it must still block upward commands.
+        if error and state != 1:
             code = 3
-        elif interlock != 2:
+        elif interlock != 2 and state != 1:
             code = 5  # Recovery Listen remains available; never auto-reset it.
-        else:
-            code = {0: 1, 1: 9, 2: 17, 3: 33, 4: 17, 5: 65, 6: 129}.get(state)
-            if code is None:
-                raise ValueError(f'Unknown native laser FSM state {state}')
         return f'ly_oxp2_dev_status {code}'
 
-    def Listen(self): return self._write(0x30, 1)
-    def Standby(self): return self._write(0x30, 3)
-    def Enable(self): return self._write(0x30, 6)  # Only explicit Laser On action.
+    def Listen(self):
+        # Reacquire a lost SDK handle only for this explicit stop request.
+        # Polling and power commands must never reconnect/replay themselves.
+        if self._port_missing:
+            self.close_port()
+            if self.open_port() != 0:
+                raise ConnectionError(f'Cannot reconnect for Listen: {self.last_error}')
+        return self._write(0x30, 1)
+
+    def Standby(self):
+        self.StatusRead()
+        if self.status_fault and self.status_details['fsm'] < 3:
+            raise ValueError(self.status_fault)
+        return self._write(0x30, 3)
+
+    def _require_clear_interlock(self):
+        self.StatusRead()
+        if self.status_fault:
+            raise ValueError(self.status_fault)
+
+    def Enable(self):
+        self._require_clear_interlock()
+        return self._write(0x30, 6)  # Only explicit Laser On action.
+
     def AOMDisable(self): return self._write(0x34, 0)
-    def AOMEnable(self): return self._write(0x34, 1)
+    def AOMEnable(self):
+        self._require_clear_interlock()
+        return self._write(0x34, 1)
     def AOMRead(self): return f'AOM relative setting: {self._read(0x05)}'
     def FreqRead(self): return f'Frequency index parameter: {self._read(0x35, "U8")}'
     def DivRead(self): return f'Division factor: {self._read(0x36, "U32")}'
@@ -119,6 +174,8 @@ class NativeLaser:
 
     def AOM(self, value):
         value = origClass._integer(value, 0, min(4000, round(self.max_aom_percent * 40)))
+        if value:
+            self._require_clear_interlock()
         return self._write(0x05, value, 'U16')
 
     def Freq(self, value): return self._write(0x35, origClass._integer(value, 0, 12))
@@ -152,6 +209,8 @@ class NativeLaser:
                 raise ValueError('Native watt adjustment requires internal power control')
             if self.StatusRead() not in tuple(f'ly_oxp2_dev_status {i}' for i in (9, 33, 65, 129)):
                 raise ValueError('Wait for a stable laser state before adjusting watts')
+            if self.status_fault:
+                raise ValueError(self.status_fault)
             # The firmware applies its calibrated AOM immediately. A restrictive
             # relative cap cannot be predicted from watts without calibration.
             if watts and self.max_aom_percent < 100:

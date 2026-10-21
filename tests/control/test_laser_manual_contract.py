@@ -635,6 +635,43 @@ def test_failed_status_stops_blinking_and_discards_requests(laser_gui):
     parent.deleteLater()
 
 
+def test_listen_keeps_blinking_through_warning_until_stopped_fsm(laser_gui):
+    ui = laser_gui
+    parent = QtWidgets.QWidget()
+    ui._setup_laser_indicators(parent)
+    device = ui.laser_device
+    device.protocol = 'nktpbus'
+    device.code = 5
+    device.status_fault = 'interlock waiting for reset'
+    device.status_details = dict(fsm=2, error=0, interlock=1)
+    device.Listen = lambda: device.calls.append(('Listen',))
+    ui.laser_state_label = QtWidgets.QLabel()
+    ui._apply_button_locks_for_status(device.StatusRead())
+    ui.laser_listen_clicked()
+    for _ in range(2):
+        ui.check_laser_status()
+        assert ui._laser_led_timer.isActive()
+        before = ui.led_laser_listen.pixmap().cacheKey()
+        ui._laser_led_timer.timeout.emit()
+        assert {before, ui.led_laser_listen.pixmap().cacheKey()} == {
+            ui.led_red.cacheKey(), ui.led_orange.cacheKey()}
+    assert device.calls == [('Listen',)]
+    device.code = 9  # Native FSM now says Listen; interlock still needs reset.
+    device.status_details['fsm'] = 1
+    ui.check_laser_status()
+    assert not ui._laser_led_timer.isActive()
+    assert ui.led_laser_listen.pixmap().cacheKey() == ui.led_green.cacheKey()
+    assert ui.laser_listen.isEnabled()
+    assert not ui.laser_standby.isEnabled() and not ui.laser_on.isEnabled()
+    assert not ui.laser_power.isEnabled()
+    assert 'interlock waiting for reset' in ui.laser_state_label.text()
+    # A queued/programmatic request cannot bypass the fault lock.
+    ui.standby_mode = True
+    ui.check_laser_status()
+    assert device.calls == [('Listen',)]
+    parent.deleteLater()
+
+
 @pytest.mark.parametrize('code', [65,129])
 def test_laser_off_and_output_gate_have_distinct_actions(laser_gui, code):
     ui = laser_gui
@@ -1444,6 +1481,42 @@ def test_watt_connection_does_not_claim_stopped_if_listen_is_not_confirmed(watt_
     assert 'Listen was not confirmed' in ui.errors[-1]
     assert 'Output stopped' not in ui.errors[-1]
     assert not native.calls
+
+
+def test_native_handover_confirms_listen_and_reports_interlock_without_starting(watt_gui, monkeypatch):
+    from pyccapt.control.gui import laser_power_control
+    from pyccapt.control.nkt_photonics import nktpbus_switch
+    ui, old, _ = watt_gui
+    del ui._prepare_laser_watts
+    native = Laser()
+    native.protocol = 'nktpbus'
+    native.code = 9
+    native.wavelength_basis = 'DUV read back before handover'
+    native.open_port = Mock(return_value=0)
+    native.status_fault = 'interlock waiting for reset'
+    native.status_details = dict(fsm=1, error=0, interlock=1)
+    monkeypatch.setattr(nktpbus_switch, '_load_nktp_dll_module', Mock())
+    monkeypatch.setattr(nktpbus_switch, 'switch_to_nktpbus', Mock())
+    monkeypatch.setattr(laser_power_control, 'NativeLaser', Mock(return_value=native))
+    ui._apply_button_locks_for_status('ly_oxp2_dev_status 9')
+    ui.laser_standby_clicked()
+    assert ui.laser_device is native and ui.variables.flag_laser_connected
+    assert native.calls == [('Listen',)]
+    assert not ui.standby_mode and not ui.on_mode
+    assert 'Listen confirmed' in ui.errors[-1]
+    assert 'interlock waiting for reset' in ui.errors[-1]
+    assert not ui.laser_ir_power_control.isEnabled()
+    assert ui.led_laser_listen.pixmap().cacheKey() == ui.led_green.cacheKey()
+    assert ui.laser_listen.isEnabled() and not ui.laser_standby.isEnabled()
+    assert not ui.variables.laser_telemetry['valid']
+    # After the fault actually clears, a new explicit Standby uses this session.
+    native.status_fault = ''
+    ui.check_laser_status()
+    assert ui.laser_standby.isEnabled()
+    ui.laser_standby_clicked()
+    ui.check_laser_status()
+    assert native.calls == [('Listen',), ('Standby',)]
+    native.open_port.assert_called_once()
 
 
 def test_native_handover_waits_for_queued_wavelength_request(watt_gui, monkeypatch):

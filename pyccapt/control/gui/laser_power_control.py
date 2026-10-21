@@ -121,17 +121,23 @@ class LaserPowerControlMixin:
                 raise ConnectionError(f'Native watt connection failed: {device.last_error}; use Switch to CLI to recover.')
             # The Connect W action explicitly stops output. Never resume an
             # emission request automatically after changing port ownership.
+            self._queue_laser_indicator('listen', (9,))
             device.Listen()
-            for _ in range(5):
+            self._mark_laser_indicators_sent()
+            for _ in range(50):
                 if self._laser_stopping:
                     return
-                stopped_status = readback.scalar(device.StatusRead())
+                status_reply = device.StatusRead()
+                stopped_status = readback.scalar(status_reply)
+                self._publish_laser_state(status_reply)
+                self._apply_button_locks_for_status(status_reply)
                 if stopped_status == 9:
                     break
                 self._wait_with_gui_pump(.2)
             else:
                 raise ConnectionError(f'W control opened, but Listen was not confirmed (status {stopped_status}); '
-                                      'check the laser state and request Listen again.')
+                                      f'{getattr(device, "status_fault", "") or "check the laser state"}; '
+                                      'request Listen again.')
             logging.getLogger('pyccapt.laser').info(
                 'W control connected on %s; Listen confirmed; CLI-selected wavelength=%s',
                 port, readback.WAVELENGTHS[wavelength][0])
@@ -143,10 +149,15 @@ class LaserPowerControlMixin:
                 device.Div(divider)
             if (readback.scalar(device.FreqRead()), readback.scalar(device.DivRead())) != (index, divider):
                 raise ValueError('Laser timing was not restored after handover; review base rate/divider before continuing.')
-            self._sync_controls_from_device(initial=True)
-            if readback.scalar(getattr(self, '_last_laser_status', None)) != 9:
+            settings_confirmed = self._sync_controls_from_device(initial=True)
+            if not settings_confirmed or readback.scalar(getattr(self, '_last_laser_status', None)) != 9:
                 raise ConnectionError('W control settings/status readback is incomplete; emission was not requested.')
             self._set_laser_disconnected_banner('')
+            fault = getattr(device, 'status_fault', '')
+            if fault:
+                self.error_message(f'Listen confirmed; W control connected. {fault}. '
+                                   'Resolve the interlock/error before Standby; no reset or emission requested.')
+                return False
             name = readback.WAVELENGTHS[wavelength][0]
             self.error_message(f'W control connected ({name} selected in CLI). '+
                 ('Preparing Standby; no emission requested.' if automatic else

@@ -28,6 +28,7 @@ class LaserLayoutMixin:
         settings_layout.addLayout(self.gridLayout_3)
         self.laser_state_label = QtWidgets.QLabel('Laser: Status unavailable', settings)
         self.laser_state_label.setObjectName('laser_state_label')
+        self.laser_state_label.setWordWrap(True)
         settings_layout.addWidget(self.laser_state_label)
         self._apply_button_locks_for_status(getattr(self, '_last_laser_status', None))
         for field in (self.laser_power, self.laser_rate, self.laser_divition_factor):

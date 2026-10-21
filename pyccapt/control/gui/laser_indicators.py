@@ -29,7 +29,12 @@ class LaserIndicatorMixin:
 
     def _observe_laser_indicators(self, code):
         if code not in (1, 9, 17, 33, 65, 129):
-            self._laser_indicator_requests = {}
+            # Warnings can persist while the controller is stopping. Keep
+            # the explicit Listen request blinking until its FSM confirms it.
+            self._laser_indicator_requests = {
+                name: request for name, request in
+                getattr(self, '_laser_indicator_requests', {}).items()
+                if name == 'listen' and code in (3, 5)}
             self._laser_standby_pending = self._laser_emission_pending = False
         else:
             self._laser_indicator_requests = {

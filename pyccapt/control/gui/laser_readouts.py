@@ -96,11 +96,12 @@ class LaserReadoutMixin:
                 source = 'ls_output_power (selected harmonic monitor)'
             raw['status'] = device.StatusRead()
             code = readback.scalar(raw['status'])
-            if code not in (9, 33, 65, 129):
-                optical_error = f'Laser state {code} is not stable; optical readings unavailable. '+optical_error
+            fault = getattr(device, 'status_fault', '')
+            if code not in (9, 33, 65, 129) or fault:
+                optical_error = (fault or f'Laser state {code} is not stable')+'; optical readings unavailable. '+optical_error
                 ir_error = f'Laser state {code} is not stable; IR reading unavailable.'
                 ir_mw = math.nan
-            valid = code in (9, 33, 65, 129) and math.isfinite(mw) and math.isfinite(nj)
+            valid = code in (9, 33, 65, 129) and not fault and math.isfinite(mw) and math.isfinite(nj)
             snapshot = dict(monotonic=time.monotonic(), utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 valid=valid, raw=raw, source=source, wavelength=readback.WAVELENGTHS[wl][0],
                 wavelength_index=wl, wavelength_nm=readback.WAVELENGTHS[wl][1],
@@ -152,9 +153,11 @@ class LaserReadoutMixin:
             self._update_wavelength_nm_label()
             self._recompute_derived_readouts()
             self._apply_button_locks_for_status(raw['status'])
+            return True
         except Exception as exc:
             self._invalidate_laser_readouts(exc)
             self.error_message(f'Laser readback unavailable: {exc}')
+            return False
 
     def _recompute_derived_readouts(self):
         data = readback.fresh_snapshot(self.variables)
@@ -215,6 +218,9 @@ class LaserReadoutMixin:
             setattr(self, flag, False)
             changed = True
             try:
+                fault = getattr(self.laser_device, 'status_fault', '')
+                if fault:
+                    raise ValueError(fault)
                 if (code not in (9, 33, 65, 129) or getattr(self, '_laser_standby_pending', False)
                         or getattr(self, '_laser_emission_pending', False)):
                     raise ValueError('Wait for a stable laser state before changing settings.')

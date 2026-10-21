@@ -457,10 +457,15 @@ def test_laser_compact_layout_preserves_controls_and_readouts(instrument_window,
     print(f'Laser GUI size: {window.size()}, preview: {tmp_path}')
     assert window.width() <= 1000
     # Primary watts and an advanced AOM menu fit in the compact window.
-    assert window.height() <= 740
+    assert window.height() <= 780  # Three readable alignment lines need vertical space.
     viewport = window._responsive_window.scroll.viewport()
     assert window._responsive_window.scroll.horizontalScrollBar().maximum() == 0
     assert window._responsive_window.scroll.verticalScrollBar().maximum() == 0
+    status = ui.laser_alignment_label
+    assert status.text().count('\n') == 2
+    assert status.height() >= status.heightForWidth(status.width())
+    assert status.height() >= 3 * status.fontMetrics().lineSpacing()
+    assert ui.laser_alignment_panel.rect().contains(status.geometry())
     controls = [ui.laser_wavelegnth, ui.laser_wavelegnth_nm_label, ui.laser_aom_advanced_button,
                 ui.laser_ir_power_control_label, ui.laser_ir_power_control,
                 ui.laser_native_control_button,

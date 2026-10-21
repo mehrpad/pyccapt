@@ -10,6 +10,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import QTimer
 
 # Local module and scripts
+from pyccapt.control.gui import app_icon
 from pyccapt.control.gui.responsive import make_window_responsive
 from pyccapt.control.gui.visualization_layout import VisualizationLayoutMixin
 from pyccapt.control.core import live_calibration, runtime, tof2mc_simple
@@ -803,7 +804,7 @@ class Ui_Visualization(VisualizationLayoutMixin):
         ###
         # Visualization.setWindowTitle(_translate("Visualization", "Form"))
         Visualization.setWindowTitle(_translate("Visualization", "PyCCAPT Visualization"))
-        Visualization.setWindowIcon(QtGui.QIcon('./files/logo.png'))
+        app_icon.apply_application_icon(window=Visualization)
         ###
         self.label_200.setText(_translate("Visualization", "Voltage"))
         self.voltage.setText(_translate("Visualization", "0"))

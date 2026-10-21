@@ -11,6 +11,7 @@ from PyQt6.QtCore import QThread
 from PyQt6.QtGui import QPixmap
 
 # Local module and scripts
+from pyccapt.control.gui import app_icon
 from pyccapt.control.gui.responsive import make_window_responsive
 from pyccapt.control.core import runtime
 from pyccapt.control.core.control_state import (
@@ -1147,7 +1148,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         ###
         # Laser_Control.setWindowTitle(_translate("Laser_Control", "Form"))
         Laser_Control.setWindowTitle(_translate("Laser_Control", "PyCCAPT Laser Control"))
-        Laser_Control.setWindowIcon(QtGui.QIcon('./files/logo.png'))
+        app_icon.apply_application_icon(window=Laser_Control)
         ###
         Laser_Control.setToolTip(_translate("Laser_Control", "<html><head/><body><p>1</p></body></html>"))
         self.laser_wavelegnth.setItemText(0, _translate("Laser_Control", "IR"))

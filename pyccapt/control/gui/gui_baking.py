@@ -22,6 +22,7 @@ except Exception as e:
     print(e)
 
 # Local module and scripts
+from pyccapt.control.gui import app_icon
 from pyccapt.control.gui.responsive import make_window_responsive
 from pyccapt.control.core import runtime
 from pyccapt.control.gui import gui_pumps_vacuum, tooltips
@@ -86,7 +87,7 @@ class Ui_Baking(object):
         Returns:
                 None
         """
-        Baking.setWindowIcon(QtGui.QIcon('./files/logo.png'))
+        app_icon.apply_application_icon(window=Baking)
         Baking.setObjectName("Baking")
         Baking.resize(820, 757)
         self.gridLayout_2 = QtWidgets.QGridLayout(Baking)
@@ -159,7 +160,7 @@ class Ui_Baking(object):
         ###
         #  Baking.setWindowTitle(_translate("Baking", "Form"))
         Baking.setWindowTitle(_translate("Baking", "PyCCAPT Baking"))
-        Baking.setWindowIcon(QtGui.QIcon(str(runtime.project_path("files", "logo.png"))))
+        app_icon.apply_application_icon(window=Baking)
         ###
         self.save_data.setText(_translate("Baking", "Save CSV"))
 

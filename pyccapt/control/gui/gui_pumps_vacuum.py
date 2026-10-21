@@ -25,6 +25,7 @@ else:
     WEBENGINE_IMPORT_ERROR = None
 
 # Local module and scripts
+from pyccapt.control.gui import app_icon
 from pyccapt.control.gui.responsive import make_window_responsive
 from pyccapt.control.core import runtime
 from pyccapt.control.devices import initialize_devices
@@ -847,7 +848,7 @@ class Ui_Pumps_Vacuum(PumpLayoutMixin):
         ###
         # Pumps_Vacuum.setWindowTitle(_translate("Pumps_Vacuum", "Form"))
         Pumps_Vacuum.setWindowTitle(_translate("Pumps_Vacuum", "PyCCAPT Pumps and Vacuum Control"))
-        Pumps_Vacuum.setWindowIcon(QtGui.QIcon('./files/logo.png'))
+        app_icon.apply_application_icon(window=Pumps_Vacuum)
         ###
         self.label_212.setText(_translate("Pumps_Vacuum", "Main Chamber (mBar)"))
         self.label_211.setText(_translate("Pumps_Vacuum", "Buffer Chamber (mBar)"))

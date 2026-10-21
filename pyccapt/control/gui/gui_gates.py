@@ -7,6 +7,7 @@ from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QPixmap
 
 # Local module and scripts
+from pyccapt.control.gui import app_icon
 from pyccapt.control.gui.responsive import make_window_responsive
 from pyccapt.control.core import runtime
 from pyccapt.control.gui import tooltips
@@ -328,7 +329,7 @@ class Ui_Gates(object):
         _translate = QtCore.QCoreApplication.translate
         ###
         Gates.setWindowTitle(_translate("Ui_Gates", "PyCCAPT Gates Control"))
-        Gates.setWindowIcon(QtGui.QIcon('./files/logo.png'))
+        app_icon.apply_application_icon(window=Gates)
         ###
         self.cryo_switch.setText(_translate("Gates", "Cryo"))
         self.main_chamber_switch.setText(_translate("Gates", "Main Chamber"))

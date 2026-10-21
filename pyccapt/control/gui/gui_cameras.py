@@ -10,6 +10,7 @@ from PyQt6.QtCore import pyqtSignal, QObject, QThread
 from PyQt6.QtGui import QPixmap
 
 # Local module and scripts
+from pyccapt.control.gui import app_icon
 from pyccapt.control.gui.responsive import make_window_responsive
 from pyccapt.control.core import runtime
 from pyccapt.control.devices import arduino_illumination, camera
@@ -724,7 +725,7 @@ class Ui_Cameras_Alignment(CameraLayoutMixin):
         ###
         # Cameras_alignment.setWindowTitle(_translate("Cameras_alignment", "Form"))
         Cameras_Alignment.setWindowTitle(_translate("Cameras_alignment", "PyCCAPT Cameras"))
-        Cameras_Alignment.setWindowIcon(QtGui.QIcon('./files/logo.png'))
+        app_icon.apply_application_icon(window=Cameras_Alignment)
         self.Cameras_Alignment = Cameras_Alignment
         ###
         self.label_208.setText(_translate("Cameras_Alignment", "Overview"))

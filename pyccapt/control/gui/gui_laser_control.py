@@ -1491,7 +1491,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
                 label = 'Emission requested / '+state.value
             self.laser_state_label.setText('Laser: '+(label if self.laser_device is not None else 'Disconnected'))
             if getattr(self.laser_device, 'protocol', None) == 'nktpbus':
-                self.laser_state_label.setText(self.laser_state_label.text()+' (native IR)')
+                self.laser_state_label.setText(self.laser_state_label.text()+' (native W)')
         known = code in (9, 33, 65, 129) and not pending and not emission_pending
         idle = code in (9, 33) and not pending and not emission_pending
         running = bool(self.variables.start_flag)
@@ -1520,6 +1520,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             self.laser_ir_power_apply.setEnabled(watt_enabled)
             self.laser_ir_power_apply.setText('Apply W' if native else 'Apply W (Listen)')
             tip = ('Apply the native IR watt setpoint on the existing connection. '
+                   'This adjusts the IR feeding the selected wavelength, not a Green/DUV watt setpoint. '
                    'Operating state and shutter are not changed. Manual AOM edits override this setpoint.'
                    if native else getattr(self, '_legacy_ir_power_tooltip', 'CLI watt requests return to Listen.'))
             self.laser_ir_power_apply.setToolTip(tip)

@@ -1,25 +1,30 @@
 """Persistent OXPS NKTPBus control, using the vendor's 0x95 register map.
 
-Main-board registers are documented in 800-621-01 pp163-166. This adapter
-currently supports an IR output selected and verified before handover.
-Harmonic selection remains a CLI operation until its register map is verified.
+Main-board registers are documented in 800-621-01 pp163-166. The IR setpoint
+controls the fundamental feeding any selected harmonic. The wavelength is
+read back via CLI before handover and locked for this session; it is not
+queried through an unverified harmonic register map.
 Opening/reading never enables emission or resets an interlock.
 """
 import math
 import struct
 import threading
 
-from pyccapt.control.nkt_photonics import nktpbus_switch
+from pyccapt.control.nkt_photonics import nktpbus_switch, readback
 from pyccapt.control.nkt_photonics.origamiClassCLI import origClass
 
 
 class NativeLaser:
     protocol = 'nktpbus'
     supports_wavelength_changes = False
-    wavelength_basis = 'IR selection verified before native handover; wavelength control locked'
 
-    def __init__(self, port, *, max_watts=5.2, max_aom_percent=100.):
+    def __init__(self, port, *, wavelength, max_watts=5.2, max_aom_percent=100.):
         self.comPort = port
+        self._wavelength_index = origClass._integer(wavelength, 0, 3)
+        name = readback.WAVELENGTHS[self._wavelength_index][0]
+        self.wavelength_basis = (
+            f'{name} selection read back via CLI before native handover; '
+            'selection locked; no live native harmonic-position readback')
         self.max_watts = float(max_watts)
         self.max_aom_percent = float(max_aom_percent)
         if not math.isfinite(self.max_watts) or not 0 < self.max_watts <= 65.535:
@@ -128,13 +133,14 @@ class NativeLaser:
                 raise ValueError('Invalid native frequency table')
             return '\n'.join(f'e_freq={i} --> {hz} Hz' for i, (hz,) in enumerate(struct.iter_unpack('<I', data)) if hz)
 
-    def wavelength_read(self): return 'Current position=IR'
+    def wavelength_read(self):
+        return f'CLI-verified position={readback.WAVELENGTHS[self._wavelength_index][0]}'
     def wavelength_change(self, value):
-        raise ValueError('Change wavelength using CLI; native control currently supports IR only.')
+        raise ValueError('Return to CLI to change wavelength, then reconnect native watt control.')
     def read_average_power(self): return f'{self._read(0x10) / 1000:g} W'
     def read_pulse_energy(self): return f'{self._read(0x11) * 10:g} nJ'
     def ir_power_setpoint_watts(self): return self._read(0x20) / 1000
-    def power_read_dv_green(self): return 'Unknown: harmonic monitor unavailable in native IR control'
+    def power_read_dv_green(self): return 'Unknown: native harmonic monitor scaling is unverified'
 
     def set_ir_power_watts(self, watts):
         """One power-register write. No state, shutter, protocol or mode writes."""

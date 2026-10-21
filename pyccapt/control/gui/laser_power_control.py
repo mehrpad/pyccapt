@@ -25,13 +25,13 @@ class LaserPowerControlMixin:
         self.laser_ir_power_apply = QtWidgets.QPushButton('Apply W (Listen)', parent)
         self.laser_ir_power_apply.setObjectName('laser_ir_power_apply')
         self.laser_ir_power_apply.setFixedHeight(25)
-        self.laser_native_control_button = QtWidgets.QPushButton('Native IR control', parent)
+        self.laser_native_control_button = QtWidgets.QPushButton('Native W control', parent)
         self.laser_native_control_button.setObjectName('laser_native_control_button')
         self.laser_native_control_button.setEnabled(False)
         self.laser_native_control_button.setToolTip(
-            'Select IR and Listen/Standby, then connect native control once before Laser On. '
-            'Watt and AOM adjustments then use the same connection while on. '
-            'Wavelength changes require returning to CLI.'
+            'Select the desired wavelength in CLI and use Listen/Standby, then connect once before Laser On. '
+            'IR-watt and AOM adjustments then use the same connection while on for IR, Green or DUV. '
+            'The CLI-verified wavelength is locked; changes require returning to CLI.'
         )
         self.laser_native_control_button.clicked.connect(self._use_native_ir_control)
         tooltip = ('Request IR watts using the NKT firmware calibration. Stop the experiment and use Listen or Standby. '
@@ -52,36 +52,44 @@ class LaserPowerControlMixin:
         if (self.laser_device is None or self.variables.start_flag or self._laser_alignment_busy()
                 or getattr(self, '_laser_mode_switch_in_progress', False)
                 or getattr(self, '_laser_stopping', False) or getattr(self, '_laser_status_in_progress', False)):
-            self.error_message('Native IR handover requires a connected, idle laser outside an experiment/alignment.')
+            self.error_message('Native watt handover requires a connected, idle laser outside an experiment/alignment.')
+            return
+        if any(getattr(self, flag, False) for flag in ('listen_mode', 'standby_mode', 'on_mode',
+                'enable_ouput_mode', 'close_output_mode', 'change_laser_power', 'change_laser_rate',
+                'change_laser_divition_factor', 'change_laser_wavelegnth')):
+            self.error_message('Wait for pending laser settings to be read back before entering native watt control.')
             return
         try:
             status, mode, index, divider, wavelength = self._ir_power_conditions()
-            if status not in (9, 33) or wavelength != 0:
-                raise ValueError('Select IR and Listen or ready Standby before entering native IR control.')
+            if status not in (9, 33):
+                raise ValueError('Select Listen or ready Standby before entering native watt control.')
+            if wavelength not in readback.WAVELENGTHS:
+                raise ValueError('Read back a valid selected wavelength through CLI before entering native watt control.')
             nktpbus_switch._load_nktp_dll_module()  # Preflight before releasing CLI.
         except Exception as exc:
-            self.error_message(f'Native IR handover rejected: {exc}')
+            self.error_message(f'Native watt handover rejected: {exc}')
             return
-        with self._laser_mode_transition('native IR control') as port:
+        with self._laser_mode_transition('native watt control') as port:
             if not port:
                 return
             nktpbus_switch.switch_to_nktpbus(port)
             self._wait_with_gui_pump(self.CLI_SWITCH_INITIAL_DELAY_S)
             if self._laser_stopping:
                 return
-            device = NativeLaser(port,
+            device = NativeLaser(port, wavelength=wavelength,
                 max_watts=self.laser_ir_power_control.maximum(),
                 max_aom_percent=self.conf.get('laser_aom_max_percent', 100.))
             self.laser_device = device  # Retain ownership if SDK cleanup fails.
             if device.open_port() != 0:
                 self._close_laser_device()
-                raise ConnectionError(f'Native IR connection failed: {device.last_error}; use Switch to CLI to recover.')
+                raise ConnectionError(f'Native watt connection failed: {device.last_error}; use Switch to CLI to recover.')
             self._sync_controls_from_device(initial=True)
             self._set_laser_disconnected_banner('')
             if (readback.scalar(device.FreqRead()), readback.scalar(device.DivRead())) != (index, divider):
-                self.error_message('Native IR connected; timing changed during reset. Review base rate/divider before Laser On.')
+                self.error_message('Native watt control connected; timing changed during reset. Review base rate/divider before Laser On.')
             else:
-                self.error_message('Native IR control connected. Watt adjustments can stay on this connection while emitting.')
+                name = readback.WAVELENGTHS[wavelength][0]
+                self.error_message(f'Native watt control connected with {name} selected in CLI. IR watts can be adjusted while emitting.')
 
     def _apply_native_ir_watts(self):
         try:

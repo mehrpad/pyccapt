@@ -112,7 +112,8 @@ class LaserReadoutMixin:
             if getattr(device, 'protocol', None) == 'nktpbus':
                 snapshot['protocol'] = 'nktpbus'
                 snapshot['wavelength_basis'] = device.wavelength_basis
-                snapshot['source'] = 'NKTPBus register 0x10 (IR internal monitor, 0.001 W)'
+                snapshot['source'] = ('NKTPBus register 0x10 (IR internal monitor, 0.001 W)' if wl == 0
+                    else 'Selected harmonic monitor unavailable: native scaling unverified')
                 setpoint = getattr(device, 'ir_power_setpoint_watts', None)
                 if callable(setpoint):
                     snapshot['ir_power_setpoint_w'] = setpoint()
@@ -197,6 +198,8 @@ class LaserReadoutMixin:
         nm = data.get('wavelength_nm')
         if hasattr(self, 'laser_wavelegnth_nm_label'):
             self.laser_wavelegnth_nm_label.setText(f'({nm:g} nm nominal)' if nm else '(not read back)')
+            self.laser_wavelegnth_nm_label.setToolTip(data.get('wavelength_basis', 'No fresh wavelength readback'))
+        self.laser_wavelegnth.setToolTip(data.get('wavelength_basis', 'No fresh wavelength readback'))
 
     def _apply_laser_settings(self, code):
         """Apply only operator-requested settings; never reopen AOM after edits."""

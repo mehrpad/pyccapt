@@ -228,14 +228,18 @@ help output, absent CLI replies and exclusive port ownership.
 
 ### Persistent native IR control
 
-For watt adjustment while emitting, select IR and Listen/Standby, grant
-Override Access, then choose **Native IR control** before enabling emission.
+For watt adjustment while emitting, select IR, Green or DUV through CLI and
+use Listen/Standby, grant Override Access, then choose **Native W control**
+before enabling emission. Wait for any queued wavelength edit to be read back.
 This performs one CLI -> NKTPBus handover and retains the SDK connection.
-The state label identifies native IR control. **Apply W** then writes only
+The state label identifies native watt control. **Apply W** then writes only
 the native `0x20` power setpoint and verifies its readback; repeated watt
 changes do not write the FSM, shutter, modulation mode or protocol registers.
 Relative AOM remains editable using `0x05`. Telemetry refreshes the firmware
 watt setpoint as well as the relative AOM setting without issuing new writes.
+The requested watts always refer to the fundamental IR power feeding the
+converter, including while Green or DUV is selected. They are not a calibrated
+Green/DUV output-power target and do not use a fixed conversion efficiency.
 
 The persistent adapter maps the documented main-board FSM, interlock, fault,
 frequency, divider, IR monitor and power registers into the existing GUI
@@ -247,14 +251,22 @@ blocks nonzero native watt requests because its amplitude cannot be predicted
 before the firmware applies its calibration; a watt ceiling is enforced
 independently.
 
-Native control currently supports the IR selection verified before handover;
-wavelength editing is locked until returning to CLI. The installed harmonic
-register map does not establish FHG/DUV scaling, so no harmonic watt values
-are guessed. Existing CLI harmonic controls remain available. **Switch to CLI**
+The native adapter retains the wavelength index actually read back through CLI
+before handover; it never defaults a Green/DUV selection to IR. This is cached
+selection provenance, not a new native harmonic-position measurement. The raw
+reply is marked `CLI-verified`, telemetry records this basis, and the wavelength
+tooltips identify it. Wavelength editing is locked until returning to CLI.
+The installed harmonic register map does not establish FHG/DUV scaling, so no
+harmonic watt values are guessed: selected harmonic power and pulse energy
+remain unavailable in native mode while the measured IR monitor remains live.
+Existing CLI harmonic controls remain available. **Switch to CLI**
 and **Nktpbus mode** release the SDK session; these explicit ownership handovers
 request Listen, unlike watt-only changes. Native shutdown uses the existing
 safe-off sequence before closing the handle. No live emission was enabled to
-test this feature; repeated updates in emitting FSM states are simulated.
+test this feature; repeated updates in emitting FSM states with IR, Green and
+DUV selected are simulated. Physical wavelength retention across the initial
+protocol reset and harmonic conversion efficiency still need instrument
+verification; individual watt updates perform no protocol reset.
 
 ### Legacy CLI watt requests
 

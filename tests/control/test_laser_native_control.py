@@ -9,7 +9,8 @@ from pyccapt.control.nkt_photonics import nktpbus_switch, readback
 
 
 @pytest.fixture
-def native(monkeypatch):
+def native(monkeypatch, request):
+    wavelength = getattr(request, 'param', 0)
     registers = {0x01: 6, 0x67: 0, 0x32: 2, 0x37: 0, 0x20: 1000,
                  0x05: 800, 0x35: 4, 0x36: 1, 0x10: 1000, 0x11: 250}
     sdk = Mock()
@@ -27,20 +28,24 @@ def native(monkeypatch):
         getattr(sdk, 'registerRead'+kind).side_effect = read
         getattr(sdk, 'registerWrite'+kind).side_effect = write
     monkeypatch.setattr(nktpbus_switch, '_load_nktp_dll_module', lambda: sdk)
-    laser = NativeLaser('FAKE')
+    laser = NativeLaser('FAKE', wavelength=wavelength)
     assert laser.open_port() == 0
+    assert readback.wavelength(laser.wavelength_read()) == wavelength
     yield laser, sdk, registers
     laser.close_port()
 
 
 @pytest.mark.parametrize('state', [1, 3, 5, 6])
+@pytest.mark.parametrize('native', [0, 1, 3], indirect=True)
 def test_watts_preserve_state_shutter_and_sdk_session(native, state):
     laser, sdk, registers = native
+    selection = laser.wavelength_read()
     registers[0x01] = state
     assert laser.set_ir_power_watts(1.2) == 1.2
     assert laser.set_ir_power_watts(1.4) == 1.4
     assert registers[0x01] == state
     assert registers[0x05] == 700
+    assert laser.wavelength_read() == selection
     assert sdk.openPorts.call_count == 1
     sdk.closePorts.assert_not_called()
     sdk.registerWriteU8.assert_not_called()  # No FSM, shutter, mode or protocol write.
@@ -109,7 +114,7 @@ def test_port_is_closed_on_failed_native_discovery(monkeypatch):
     sdk.openPorts.return_value = sdk.closePorts.return_value = 0
     sdk.deviceGetAllTypes.return_value = (0, bytes(255))
     monkeypatch.setattr(nktpbus_switch, '_load_nktp_dll_module', lambda: sdk)
-    laser = NativeLaser('FAKE')
+    laser = NativeLaser('FAKE', wavelength=0)
     assert laser.open_port() == -1
     sdk.closePorts.assert_called_once_with('FAKE')
     assert not laser.connected

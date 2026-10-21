@@ -140,6 +140,14 @@ The real DUV reply is needed before deciding whether to extend the parser.
 An attempted read-only diagnostic on 2026-10-05 could not open COM9 because it
 was already owned by another process; no live DUV reply was captured.
 
+The user-supplied log on 2026-10-21 establishes a combined CLI response:
+`NKT SHG\tOutput power=0mW` and `NKT FHG\tOutput power=0mW`, sometimes followed
+by `Listen=ok`. The parser now selects the SHG line for Green, THG for UV and
+FHG for DUV before parsing its explicit unit. Both the full reply and selected
+line are recorded. A missing, invalid or duplicate selected line remains
+unavailable; another module's reading is never substituted. This establishes
+the CLI reply format, not native harmonic register scaling or accuracy.
+
 The optical LCD tooltips now show the reason and a bounded raw monitor reply.
 `laser_telemetry.error` preserves the diagnostic alongside the existing raw
 replies, and the GUI log records changed failures once and subsequent recovery.
@@ -165,8 +173,9 @@ of those external interlocks; this audit does not claim they are instrumented.
 
 ## Switching between PyCCAPT and NKT CONTROL
 
-In the Laser Control window, enable **Override Access** and click **Nktpbus
-mode** to hand the laser to NKT Photonics CONTROL. PyCCAPT suspends CLI polling,
+In the Laser Control window, click **Nktpbus mode** to hand the laser to
+NKT Photonics CONTROL. Laser communication controls do not require the stage's
+Override Access; experiments and alignment must be stopped. PyCCAPT suspends CLI polling,
 clears pending laser actions, closes its current session, then sends the same
 `ly_oxp2_nktpbus=1\n` command as `python -m
 pyccapt.control.nkt_photonics.nktpbus_activate`. The command is flushed and the
@@ -228,10 +237,14 @@ help output, absent CLI replies and exclusive port ownership.
 
 ### Persistent native IR control
 
-For watt adjustment while emitting, select IR, Green or DUV through CLI and
-use Listen/Standby, grant Override Access, then choose **Native W control**
-before enabling emission. Wait for any queued wavelength edit to be read back.
-This performs one CLI -> NKTPBus handover and retains the SDK connection.
+For watt adjustment while emitting, select IR, Green or DUV through CLI, then
+choose **Connect W control**, directly below the primary power field. Stage
+Override Access is not required. Wait for any queued wavelength edit to be
+read back. The action is available in stable Listen, Standby and On states;
+when already on, it explicitly says **Connect W (stops output)**. It performs
+one CLI -> NKTPBus handover, requests Listen and retains the SDK connection.
+It never resumes emission automatically. Select Standby and Laser On after
+connecting; further watt edits retain the connection and operating state.
 The state label identifies native watt control. **Laser power (W)** is the
 primary power field; press Enter or leave the field to commit an edited value.
 There is no separate Apply button or GUI watt conversion through CLI/Listen.

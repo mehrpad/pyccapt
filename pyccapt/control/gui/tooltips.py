@@ -236,10 +236,10 @@ LASER_TOOLTIPS = {
     "start_scanning": "Start / stop the scanning routine using the selected scan and focus modes.",
     "nktpbus_mode_switch": "Send the NKTPBus mode command and release the port for NKT CONTROL. "
     "PyCCAPT can stay open. Disconnect in CONTROL before using Switch to CLI. "
-    "Requires Override Access and a stopped experiment/alignment.",
+    "Requires a stopped experiment/alignment; stage Override Access is not required.",
     "switch_to_cli_button": "Disconnect the laser in NKT CONTROL first, then switch to CLI "
     "and reconnect in PyCCAPT. Requests Listen and refreshes device readbacks. "
-    "Requires Override Access and a stopped experiment/alignment.",
+    "Requires a stopped experiment/alignment; stage Override Access is not required.",
     # --- SmarAct laser focusing stage: position display ------------------
     "laser_x_mm": "Laser-stage X position, millimetres digit.  Read-only.  "
     "Combined with µm and nm columns: total X = mm.µm.nm.",
@@ -272,9 +272,8 @@ LASER_TOOLTIPS = {
     "power-on.  Disabled until Override Access "
     "is granted.",
     "laser_stage_stop": "Immediately stop all laser-stage axes.  Always clickable.",
-    "laser_stage_superuser": "Enable potentially disruptive controls: "
-    "the stage Reference button and the Nktpbus "
-    "mode switch.  Click to grant access (a "
+    "laser_stage_superuser": "Enable potentially disruptive stage controls, including "
+    "the stage Reference button. Click to grant access (a "
     "confirmation dialog appears); the button "
     "turns green while active.",
     "Error": "Status / error messages from both the laser and the laser "

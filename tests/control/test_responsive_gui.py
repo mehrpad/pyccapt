@@ -491,7 +491,8 @@ def test_laser_compact_layout_preserves_controls_and_readouts(instrument_window,
         field.setValue(field.maximum())
         assert field.width() >= field.fontMetrics().horizontalAdvance(field.text()) + 30
     assert not ui.laser_stage_reference.isEnabled()
-    assert not ui.switch_to_cli_button.isEnabled()
+    assert ui.switch_to_cli_button.isEnabled()  # Recover communication without stage Override Access.
+    assert not ui.laser_native_control_button.isEnabled()  # No verified CLI session yet.
     assert ui.laser_ir_power_control_label.text() == 'Laser power (W)'
     assert not hasattr(ui, 'laser_ir_power_apply')
     assert not ui.laser_power.isVisible()
@@ -584,6 +585,19 @@ def test_primary_watts_commit_once_and_polling_does_not_send_power(instrument_wi
     ui.variables.start_flag = False
     ui._commit_laser_watt_edit()
     assert setter.call_count == 1  # A refused edit cannot replay after the experiment.
+    # Reproduce the reported CLI / Laser On screenshot: the recovery action
+    # must be visible and clickable without stage Override Access.
+    ui.laser_device.protocol = 'cli'
+    ui.flag_super_user_stage = False
+    ui._apply_button_locks_for_status('ly_oxp2_dev_status 129')
+    app.processEvents()
+    button = ui.laser_native_control_button
+    assert button.isVisible() and button.isEnabled()
+    assert button.text() == 'Connect W (stops output)'
+    assert button.width() >= button.fontMetrics().horizontalAdvance(button.text()) + 16
+    viewport = window._responsive_window.scroll.viewport()
+    assert viewport.rect().contains(QtCore.QRect(button.mapTo(viewport, QtCore.QPoint()), button.size()))
+    assert not field.isEnabled()
 
 
 @pytest.mark.parametrize('instrument_window', ['visualization'], indirect=True)

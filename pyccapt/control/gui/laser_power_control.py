@@ -1,4 +1,5 @@
 """Primary watt control with an advanced relative AOM override."""
+import logging
 import math
 
 from PyQt6 import QtWidgets
@@ -21,13 +22,16 @@ class LaserPowerControlMixin:
         self.laser_ir_power_control.setSingleStep(.01)
         self.laser_ir_power_control.setKeyboardTracking(False)
         self.laser_ir_power_control.setFixedSize(159, 25)
-        self.laser_native_control_button = QtWidgets.QPushButton('Native W control', parent)
+        self.laser_native_control_button = QtWidgets.QPushButton('Connect W control', parent)
         self.laser_native_control_button.setObjectName('laser_native_control_button')
+        self.laser_native_control_button.setMinimumWidth(180)
+        self.laser_native_control_button.setFixedHeight(25)
         self.laser_native_control_button.setEnabled(False)
         self.laser_native_control_button.setToolTip(
-            'Select the desired wavelength in CLI and use Listen/Standby, then connect once before Laser On. '
-            'IR-watt and AOM adjustments then use the same connection while on for IR, Green or DUV. '
-            'The CLI-verified wavelength is locked; changes require returning to CLI.'
+            'Connect once to enable laser power in watts. This stops output and leaves the laser in Listen. '
+            'Then select Standby and Laser On; watt changes use the same connection while on. '
+            'The selected wavelength is retained from CLI and locked until returning to CLI. '
+            'Stage Override Access is not required.'
         )
         self.laser_native_control_button.clicked.connect(self._use_native_ir_control)
         self.laser_ir_power_control.setEnabled(False)
@@ -56,6 +60,7 @@ class LaserPowerControlMixin:
         self.gridLayout_3.addWidget(self.laser_ir_power_control_label, 1, 0)
         self.gridLayout_3.addWidget(self.laser_ir_power_control, 1, 1)
         self.gridLayout_3.addWidget(self.laser_aom_advanced_button, 4, 0, 1, 2)
+        self.gridLayout_3.addWidget(self.laser_native_control_button, 4, 2)
         self._laser_watt_edit_pending = False
         self.laser_ir_power_control.valueChanged.connect(self._mark_laser_watt_edit)
         self.laser_ir_power_control.editingFinished.connect(self._commit_laser_watt_edit)
@@ -85,8 +90,8 @@ class LaserPowerControlMixin:
             return
         try:
             status, mode, index, divider, wavelength = self._ir_power_conditions()
-            if status not in (9, 33):
-                raise ValueError('Select Listen or ready Standby before entering native watt control.')
+            if status not in (9, 33, 65, 129):
+                raise ValueError('Wait for a stable laser state before connecting watt control; connecting stops output.')
             if wavelength not in readback.WAVELENGTHS:
                 raise ValueError('Read back a valid selected wavelength through CLI before entering native watt control.')
             nktpbus_switch._load_nktp_dll_module()  # Preflight before releasing CLI.
@@ -107,13 +112,30 @@ class LaserPowerControlMixin:
             if device.open_port() != 0:
                 self._close_laser_device()
                 raise ConnectionError(f'Native watt connection failed: {device.last_error}; use Switch to CLI to recover.')
+            # The Connect W action explicitly stops output. Never resume an
+            # emission request automatically after changing port ownership.
+            device.Listen()
+            for _ in range(5):
+                if self._laser_stopping:
+                    return
+                stopped_status = readback.scalar(device.StatusRead())
+                if stopped_status == 9:
+                    break
+                self._wait_with_gui_pump(.2)
+            else:
+                raise ConnectionError(f'W control opened, but Listen was not confirmed (status {stopped_status}); '
+                                      'check the laser state and request Listen again.')
+            logging.getLogger('pyccapt.laser').info(
+                'W control connected on %s; Listen confirmed; CLI-selected wavelength=%s',
+                port, readback.WAVELENGTHS[wavelength][0])
             self._sync_controls_from_device(initial=True)
             self._set_laser_disconnected_banner('')
             if (readback.scalar(device.FreqRead()), readback.scalar(device.DivRead())) != (index, divider):
                 self.error_message('Native watt control connected; timing changed during reset. Review base rate/divider before Laser On.')
             else:
                 name = readback.WAVELENGTHS[wavelength][0]
-                self.error_message(f'Native watt control connected with {name} selected in CLI. IR watts can be adjusted while emitting.')
+                self.error_message(f'W control connected ({name} selected in CLI). Output stopped; select Standby, then Laser On. '
+                                   'Further watt changes keep the connection and operating state.')
 
     def _apply_native_ir_watts(self):
         try:
@@ -124,8 +146,12 @@ class LaserPowerControlMixin:
                 self.laser_ir_power_control.setValue(accepted)
             finally:
                 self.laser_ir_power_control.blockSignals(previous)
+            logging.getLogger('pyccapt.laser').info(
+                'IR watt setpoint accepted on %s: %g W', getattr(self, 'com_port_laser', '?'), accepted)
             self.error_message(f'IR request {accepted:g} W accepted; native connection and operating state retained.')
         except Exception as exc:
+            logging.getLogger('pyccapt.laser').warning(
+                'IR watt request failed on %s: %s', getattr(self, 'com_port_laser', '?'), exc)
             self.error_message(f'IR watt request failed: {exc}')
 
     def _ir_power_conditions(self):
@@ -147,6 +173,6 @@ class LaserPowerControlMixin:
             self.error_message('Wait for pending laser settings to be read back before applying IR watts.')
             return
         if getattr(self.laser_device, 'protocol', None) != 'nktpbus':
-            self.error_message('Connect Native W control in Listen/Standby before editing laser power in watts.')
+            self.error_message('Click Connect W control below the power field. Connecting stops output; then select Standby and Laser On.')
             return
         self._apply_native_ir_watts()

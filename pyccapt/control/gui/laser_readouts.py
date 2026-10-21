@@ -80,7 +80,9 @@ class LaserReadoutMixin:
                     raw['ls_output_power'] = device.power_read_dv_green()
                 except Exception as exc:
                     raw['ls_output_power'] = f'Read failed: {exc}'
-                measured = readback.quantity(raw['ls_output_power'])
+                selected_reply = readback.selected_harmonic_reply(raw['ls_output_power'], wl)
+                raw['ls_selected_output_power'] = selected_reply
+                measured = readback.quantity(selected_reply)
                 # Manual defines harmonic monitor in W. Accept explicit power
                 # units only; unsupported FHG replies remain unknown.
                 if measured is None or not measured[1].endswith('W'):
@@ -90,7 +92,7 @@ class LaserReadoutMixin:
                         f"ls_output_power? reply: {raw['ls_output_power'][:256]!r}"
                     )
                 else:
-                    mw, nj = readback.optical_values(raw['ls_output_power'], output_hz)
+                    mw, nj = readback.optical_values(selected_reply, output_hz)
                 source = 'ls_output_power (selected harmonic monitor)'
             raw['status'] = device.StatusRead()
             code = readback.scalar(raw['status'])

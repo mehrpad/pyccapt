@@ -288,6 +288,45 @@ def test_measured_ir_power_is_separate_from_selected_output_and_aom(laser_gui, r
     assert not ui.laser_device.calls
 
 
+@pytest.mark.parametrize('wavelength,reply,watts', [
+    ('Green', 'NKT SHG\tOutput power=120mW\nNKT FHG\tOutput power=7mW', .120),
+    ('DUV', 'NKT SHG\tOutput power=120mW\nNKT FHG\tOutput power=7mW', .007),
+    ('Green', 'NKT SHG\tOutput power=0mW\nNKT FHG\tOutput power=0mW', 0.),
+    ('DUV', 'NKT SHG\tOutput power=0mW\nNKT FHG\tOutput power=0mW\nListen=ok', 0.),
+    ('Green', 'NKT SHG\tOutput power=10mW\nNKT FHG\tUnknown command', .010),
+    ('UV', 'NKT SHG\tOutput power=120mW\nNKT THG\tOutput power=3mW', .003),
+    ('DUV', 'Output power=0.53W\nListen=ok', .53),
+])
+def test_selected_harmonic_is_read_from_combined_controller_reply(laser_gui, wavelength, reply, watts):
+    ui = laser_gui
+    ui.laser_device.wavelength_read = lambda: f'Current position={wavelength}'
+    ui.laser_device.harmonic = reply
+    ui._sync_controls_from_device(initial=True)
+    data = ui.variables.laser_telemetry
+    assert data['valid'] and 'error' not in data
+    assert ui.laser_power_disp.value() == pytest.approx(watts)
+    assert ui.laser_pulse_energy_disp.value() == pytest.approx(watts / 40000 * 1e6)
+    assert data['raw']['ls_output_power'] == reply
+    assert data['raw']['ls_selected_output_power']
+    assert not ui.laser_device.calls
+
+
+@pytest.mark.parametrize('reply', [
+    'NKT FHG\tOutput power=0.53W',  # Not a Green monitor, even if it is the only reading.
+    'NKT SHG\tOutput power=0mW\nNKT SHG\tOutput power=0mW\nNKT FHG\tOutput power=1W',
+    'NKT SHG\tOutput power=unknown\nNKT FHG\tOutput power=1W',
+    'NKT SHG\tOutput power=3nJ\nNKT FHG\tOutput power=1W',
+])
+def test_ambiguous_or_missing_selected_harmonic_never_uses_other_module(laser_gui, reply):
+    ui = laser_gui
+    ui.laser_device.wavelength_read = lambda: 'Current position=Green'
+    ui.laser_device.harmonic = reply
+    ui._sync_controls_from_device(initial=True)
+    data = ui.variables.laser_telemetry
+    assert not data['valid'] and math.isnan(data['output_power_mw'])
+    assert math.isnan(data['pulse_energy_nj'])
+
+
 @pytest.mark.parametrize('failure', ['unsupported', 'timeout'])
 def test_unavailable_harmonic_monitor_keeps_independent_ir_reading(laser_gui, failure):
     ui = laser_gui
@@ -1049,7 +1088,7 @@ def test_cli_watt_control_is_disabled_without_protocol_handover(watt_gui, code):
     assert not device.calls
     assert ui.laser_device is device and device.code == code
     assert ui._laser_status_timer.isActive()
-    assert 'Connect Native W control' in ui.errors[-1]
+    assert 'Connect W control' in ui.errors[-1]
 
 
 @pytest.mark.parametrize('busy', ['experiment', 'alignment', 'pending', 'switch', 'stopping', 'poll'])
@@ -1128,17 +1167,17 @@ def test_native_gui_watts_while_on_do_not_handover_or_send_state_commands(watt_g
         assert 'unavailable' in data['source']
 
 
-def test_native_handover_is_refused_while_emitting(watt_gui, monkeypatch):
+def test_native_handover_is_refused_while_warming(watt_gui, monkeypatch):
     from pyccapt.control.nkt_photonics import nktpbus_switch
     ui, device, conversion = watt_gui
-    device.code = 129
+    device.code = 17
     device.wavelength_read = lambda: 'Current position=IR'
     switch = Mock()
     monkeypatch.setattr(nktpbus_switch, 'switch_to_nktpbus', switch)
     ui._use_native_ir_control()
     switch.assert_not_called()
     device.close_port.assert_not_called()
-    assert 'Listen or ready Standby' in ui.errors[-1]
+    assert 'stable laser state' in ui.errors[-1]
 
 
 def test_native_handover_requires_verified_wavelength_selection(watt_gui, monkeypatch):
@@ -1154,11 +1193,14 @@ def test_native_handover_requires_verified_wavelength_selection(watt_gui, monkey
 
 
 @pytest.mark.parametrize('wavelength,index', [('IR',0), ('Green',1), ('DUV',3)])
-def test_native_handover_opens_one_owned_sdk_session_then_restores_polling(watt_gui, monkeypatch, wavelength, index):
+@pytest.mark.parametrize('code', [33,129])
+def test_native_handover_opens_one_owned_sdk_session_then_restores_polling(watt_gui, monkeypatch, wavelength, index, code):
     from pyccapt.control.gui import laser_power_control
     from pyccapt.control.nkt_photonics import nktpbus_switch
     ui, old, conversion = watt_gui
     old.wavelength_read = lambda: f'Current position={wavelength}'
+    old.code = code
+    ui.flag_super_user_stage = False
     native = Laser()
     native.code = 9
     native.protocol = 'nktpbus'
@@ -1182,8 +1224,48 @@ def test_native_handover_opens_one_owned_sdk_session_then_restores_polling(watt_
     assert ui.variables.flag_laser_connected
     assert ui._laser_status_timer.isActive()
     assert not ui.laser_wavelegnth.isEnabled()
-    assert not native.calls  # Opening and reading did not enable emission.
+    assert native.calls == [('Listen',)]  # Connecting explicitly stops; never resumes emission.
+    assert native.code == 9
     assert ui.laser_wavelegnth.currentText() == wavelength
+
+
+@pytest.mark.parametrize('code,label', [(9,'Connect W control'), (33,'Connect W control'),
+                                      (129,'Connect W (stops output)')])
+def test_watt_connection_does_not_require_stage_override(watt_gui, code, label):
+    ui, device, _ = watt_gui
+    ui.flag_super_user_stage = False
+    ui.laser_native_control_button = QtWidgets.QPushButton()
+    device.code = code
+    ui._apply_button_locks_for_status(f'ly_oxp2_dev_status {code}')
+    assert ui.laser_native_control_button.isEnabled()
+    assert ui.laser_native_control_button.text() == label
+    assert ui.switch_to_cli_button.isEnabled()
+    assert not ui.laser_ir_power_control.isEnabled()
+    ui.variables.start_flag = True
+    ui._update_laser_mode_buttons()
+    assert not ui.laser_native_control_button.isEnabled()
+    assert not ui.switch_to_cli_button.isEnabled()
+
+
+def test_watt_connection_does_not_claim_stopped_if_listen_is_not_confirmed(watt_gui, monkeypatch):
+    from pyccapt.control.gui import laser_power_control
+    from pyccapt.control.nkt_photonics import nktpbus_switch
+    ui, old, _ = watt_gui
+    native = Laser()
+    native.protocol = 'nktpbus'
+    native.code = 129
+    native.open_port = Mock(return_value=0)
+    native.Listen = Mock()  # Firmware acknowledges but does not change its FSM.
+    monkeypatch.setattr(nktpbus_switch, '_load_nktp_dll_module', Mock())
+    monkeypatch.setattr(nktpbus_switch, 'switch_to_nktpbus', Mock())
+    monkeypatch.setattr(laser_power_control, 'NativeLaser', Mock(return_value=native))
+    ui._use_native_ir_control()
+    assert ui.laser_device is native
+    native.Listen.assert_called_once()
+    native.close_port.assert_not_called()
+    assert 'Listen was not confirmed' in ui.errors[-1]
+    assert 'Output stopped' not in ui.errors[-1]
+    assert not native.calls
 
 
 def test_native_handover_waits_for_queued_wavelength_request(watt_gui, monkeypatch):

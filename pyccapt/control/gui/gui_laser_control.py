@@ -1493,6 +1493,8 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             self.laser_state_label.setText('Laser: '+(label if self.laser_device is not None else 'Disconnected'))
             if getattr(self.laser_device, 'protocol', None) == 'nktpbus':
                 self.laser_state_label.setText(self.laser_state_label.text()+' (native W)')
+            elif self.laser_device is not None:
+                self.laser_state_label.setText(self.laser_state_label.text()+' (connect W control to set power)')
         known = code in (9, 33, 65, 129) and not pending and not emission_pending
         idle = code in (9, 33) and not pending and not emission_pending
         running = bool(self.variables.start_flag)
@@ -1523,7 +1525,8 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             tip = ('Press Enter or leave the field to set laser power on the existing connection. '
                    'This adjusts the IR feeding the selected wavelength, not a Green/DUV watt setpoint. '
                    'Operating state and shutter are not changed. Manual AOM edits override this setpoint.'
-                   if native else 'Select the desired wavelength in CLI, then connect Native W control in Listen/Standby. '
+                   if native else 'Click Connect W control below. Connecting stops output and leaves Listen; '
+                   'then select Standby and Laser On. '
                    'Laser power (W) controls the IR feeding the selected output. AOM percent is under Advanced AOM (%).')
             self.laser_ir_power_control.setToolTip(tip)
         for widget, active in ((self.led_laser_listen, code == 9),
@@ -1534,6 +1537,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
                 widget.setPixmap(getattr(self, 'led_orange', self.led_red))
             else:
                 widget.setPixmap(self.led_green if active else self.led_red)
+        self._update_laser_mode_buttons()
 
     # ------------------------------------------------------------------
     # CLI session lifecycle
@@ -1580,15 +1584,24 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         publish(self.variables, "laser", "main", "connection", connection=Connection.DISCONNECTED)
 
     def _update_laser_mode_buttons(self):
-        enabled = (bool(getattr(self, 'flag_super_user_stage', False))
-                   and not getattr(self, '_laser_mode_switch_in_progress', False)
+        enabled = (not getattr(self, '_laser_mode_switch_in_progress', False)
                    and not getattr(self, '_laser_stopping', False)
                    and not self.variables.start_flag and not self._laser_alignment_busy())
-        for name in ('nktpbus_mode_switch', 'switch_to_cli_button', 'laser_native_control_button'):
+        # Laser communication controls are independent of stage Override Access.
+        for name in ('nktpbus_mode_switch', 'switch_to_cli_button'):
             button = getattr(self, name, None)
             if button is not None:
-                button.setEnabled(enabled and (name != 'laser_native_control_button'
-                    or getattr(self.laser_device, 'protocol', None) != 'nktpbus'))
+                button.setEnabled(enabled)
+        button = getattr(self, 'laser_native_control_button', None)
+        if button is not None:
+            native = (getattr(self.laser_device, 'protocol', None) == 'nktpbus'
+                      and getattr(self.laser_device, 'connected', True))
+            code = readback.scalar(getattr(self, '_last_laser_status', None))
+            stable = code in (9, 33, 65, 129) and not (
+                getattr(self, '_laser_standby_pending', False) or getattr(self, '_laser_emission_pending', False))
+            button.setText('W control connected' if native else
+                           'Connect W (stops output)' if code in (65, 129) else 'Connect W control')
+            button.setEnabled(enabled and self.laser_device is not None and not native and stable)
 
     @contextmanager
     def _laser_mode_transition(self, target):

@@ -1563,6 +1563,7 @@ def test_native_handover_confirms_listen_and_reports_interlock_without_starting(
 @pytest.mark.parametrize('reset_accepted', [True, False])
 def test_standby_handover_with_real_native_adapter_and_reset_waiting(watt_gui, monkeypatch, wavelength, reset_accepted):
     import struct
+    from functools import partial
     from pyccapt.control.devices import nkt_native
     from pyccapt.control.nkt_photonics import nktpbus_switch
     ui, cli, _ = watt_gui
@@ -1581,9 +1582,10 @@ def test_standby_handover_with_real_native_adapter_and_reset_waiting(watt_gui, m
             if boot_reads[0] < 0:
                 registers[register] = 1
         return 0, registers[register]
-    def write(port, address, register, value, index):
+    def write(kind, port, address, register, value, index):
         writes.append((register, value))
         if register == 0x32:
+            assert kind == 'U8'  # NKT Origami reset wire format, independent of H16 readback.
             assert registers[0x01] == 1 and value == 1
             registers[register] = 2 if reset_accepted else 1
         elif register == 0x30 and value == 3:
@@ -1596,7 +1598,7 @@ def test_standby_handover_with_real_native_adapter_and_reset_waiting(watt_gui, m
     sdk.registerRead.return_value = (0, struct.pack('<13I', *([0]*4 + [400000] + [0]*8)))
     for kind in ('U8', 'U16', 'U32'):
         getattr(sdk, 'registerRead'+kind).side_effect = read
-        getattr(sdk, 'registerWrite'+kind).side_effect = write
+        getattr(sdk, 'registerWrite'+kind).side_effect = partial(write, kind)
     monkeypatch.setattr(nktpbus_switch, '_load_nktp_dll_module', lambda: sdk)
     monkeypatch.setattr(nktpbus_switch, 'switch_to_nktpbus', Mock())
     monkeypatch.setattr(nkt_native.time, 'sleep', lambda _: None)

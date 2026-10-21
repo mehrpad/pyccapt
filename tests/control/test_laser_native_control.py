@@ -168,18 +168,22 @@ def test_explicit_standby_acknowledges_closed_interlock_then_requests_warmup(nat
     registers.update({0x01: 1, 0x32: 1})
     laser.StatusRead()
     assert laser.standby_reset_available
-    write = sdk.registerWriteU16.side_effect
+    write = sdk.registerWriteU8.side_effect
     def acknowledge(port, address, register, value, index):
         result = write(port, address, register, value, index)
         if register == 0x32:
             assert value == 1
             registers[register] = 2
         return result
-    sdk.registerWriteU16.side_effect = acknowledge
+    # The vendor's reset slot sends SetInt8(1). Simulate the observed failure:
+    # a two-byte command can be acknowledged yet leave the interlock unchanged.
+    sdk.registerWriteU16.side_effect = lambda *args: 0
+    sdk.registerWriteU8.side_effect = acknowledge
     laser.standby_with_interlock_reset()
     assert not laser.status_fault
-    sdk.registerWriteU16.assert_called_once_with('FAKE', 15, 0x32, 1, -1)
-    sdk.registerWriteU8.assert_called_once_with('FAKE', 15, 0x30, 3, -1)
+    assert [command.args for command in sdk.registerWriteU8.call_args_list] == [
+        ('FAKE', 15, 0x32, 1, -1), ('FAKE', 15, 0x30, 3, -1)]
+    sdk.registerWriteU16.assert_not_called()
     sdk.registerWriteU32.assert_not_called()
 
 

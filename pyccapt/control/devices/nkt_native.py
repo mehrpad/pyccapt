@@ -155,10 +155,13 @@ class NativeLaser:
     def _standby(self, *, reset_interlock):
         self.StatusRead()
         if reset_interlock and self.standby_reset_available:
-            # NKT CONTROL 1.3.7.1569 PubOrigamiLib: the reset slot writes
-            # value 1 to its register 0x32. A closed loop awaiting reset is
+            # NKT CONTROL 1.3.7.1569 PubOrigamiLib (1.0.15.1569): reset uses
+            # IBHandler::SetInt8(value=1), despite the 16-bit status readback.
+            # Send exactly one byte, not a U16 value. A closed loop awaiting reset is
             # acknowledged only by this explicit operator Standby action.
-            self._write(0x32, 1, 'U16')
+            logging.getLogger('pyccapt.laser').info(
+                'Operator Standby on %s: interlock reset register 0x32, U8 payload 0x01', self.comPort)
+            self._write(0x32, 1, 'U8')
             for _ in range(10):
                 self.StatusRead()
                 if self.status_details['error'] or self.status_details['interlock'] not in (1, 2):
@@ -167,7 +170,9 @@ class NativeLaser:
                     break
                 time.sleep(.05)
             else:
-                raise ValueError('Interlock reset was not confirmed; Standby was not requested')
+                raise ValueError('Interlock reset was not confirmed; Standby was not requested '
+                                 f'(FSM={self.status_details["fsm"]}, error={self.status_details["error"]}, '
+                                 f'interlock=0x{self.status_details["interlock"]:04X}; reset payload U8=0x01)')
         if self.status_fault and self.status_details['fsm'] < 3:
             raise ValueError(self.status_fault)
         return self._write(0x30, 3)

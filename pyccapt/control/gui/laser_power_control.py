@@ -1,71 +1,12 @@
-"""Primary watt control with an advanced relative AOM override."""
+"""Native watt-control helpers retained independently of the primary AOM GUI."""
 import logging
-import math
 import time
-
-from PyQt6 import QtWidgets
 
 from pyccapt.control.devices.nkt_native import NativeLaser
 from pyccapt.control.nkt_photonics import nktpbus_switch, readback
 
 
 class LaserPowerControlMixin:
-    def _setup_ir_power_control(self, parent):
-        self.laser_ir_power_control_label = QtWidgets.QLabel('Laser power (W)', parent)
-        self.laser_ir_power_control_label.setFont(self.label.font())
-        self.laser_ir_power_control = QtWidgets.QDoubleSpinBox(parent)
-        self.laser_ir_power_control.setObjectName('laser_ir_power_control')
-        maximum = float(self.conf.get('laser_ir_max_power_w', 5.2))
-        if not math.isfinite(maximum) or not 0 < maximum <= 65.535:
-            raise ValueError('laser_ir_max_power_w must be finite and within 0..65.535 W.')
-        self.laser_ir_power_control.setRange(0., maximum)
-        self.laser_ir_power_control.setDecimals(3)
-        self.laser_ir_power_control.setSingleStep(.01)
-        self.laser_ir_power_control.setKeyboardTracking(False)
-        self.laser_ir_power_control.setFixedSize(159, 25)
-        self.laser_native_control_button = QtWidgets.QPushButton('Connect W control', parent)
-        self.laser_native_control_button.setObjectName('laser_native_control_button')
-        self.laser_native_control_button.setMinimumWidth(180)
-        self.laser_native_control_button.setFixedHeight(25)
-        self.laser_native_control_button.setEnabled(False)
-        self.laser_native_control_button.setToolTip(
-            'Connect native watt control explicitly: this stops output and leaves the laser in Listen. '
-            'Then select Standby and Laser On; watt changes use the same connection while on. '
-            'The selected wavelength is retained from CLI and locked until returning to CLI. '
-            'Stage Override Access is not required.'
-        )
-        self.laser_native_control_button.clicked.connect(self._use_native_ir_control)
-        self.laser_ir_power_control.setEnabled(False)
-        # Move the relative control out of the primary power row. Keep the
-        # original widget/signals for alignment and existing AOM commands.
-        self.gridLayout_3.removeWidget(self.label)
-        self.gridLayout_3.removeWidget(self.laser_power)
-        self.laser_aom_advanced_button = QtWidgets.QToolButton(parent)
-        self.laser_aom_advanced_button.setObjectName('laser_aom_advanced_button')
-        self.laser_aom_advanced_button.setText('Advanced AOM (%)')
-        self.laser_aom_advanced_button.setFixedHeight(25)
-        self.laser_aom_advanced_button.setPopupMode(QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.laser_aom_menu = QtWidgets.QMenu(self.laser_aom_advanced_button)
-        panel = QtWidgets.QWidget()
-        layout = QtWidgets.QGridLayout(panel)
-        layout.addWidget(self.label, 0, 0)
-        layout.addWidget(self.laser_power, 0, 1)
-        help_text = QtWidgets.QLabel('Relative AOM override. Changing this overrides the watt setpoint.', panel)
-        help_text.setWordWrap(True)
-        help_text.setMaximumWidth(330)
-        layout.addWidget(help_text, 1, 0, 1, 2)
-        action = QtWidgets.QWidgetAction(self.laser_aom_menu)
-        action.setDefaultWidget(panel)
-        self.laser_aom_menu.addAction(action)
-        self.laser_aom_advanced_button.setMenu(self.laser_aom_menu)
-        self.gridLayout_3.addWidget(self.laser_ir_power_control_label, 1, 0)
-        self.gridLayout_3.addWidget(self.laser_ir_power_control, 1, 1)
-        self.gridLayout_3.addWidget(self.laser_aom_advanced_button, 4, 0, 1, 2)
-        self.gridLayout_3.addWidget(self.laser_native_control_button, 4, 2)
-        self._laser_watt_edit_pending = False
-        self.laser_ir_power_control.valueChanged.connect(self._mark_laser_watt_edit)
-        self.laser_ir_power_control.editingFinished.connect(self._commit_laser_watt_edit)
-
     def _mark_laser_watt_edit(self, _value):
         self._laser_watt_edit_pending = True
 

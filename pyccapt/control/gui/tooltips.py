@@ -212,7 +212,7 @@ LASER_TOOLTIPS = {
     "For example, 400 kHz / 4 = 100 kHz. Firmware readback confirms the accepted value.",
     # --- Mode buttons + LEDs ---------------------------------------------
     "laser_listen": "Put the laser into Listen mode (lowest activity, safe).  No emission, ready to receive commands.",
-    "laser_standby": "Prepare watt control automatically, then warm up in Standby. "
+    "laser_standby": "Warm up in Standby using the current connection. "
     "The LED blinks red/orange until ready. Residual seed emission remains Class 4 (manual p116).",
     "laser_on": "From Standby: enables emission and opens output (manual pp116-117). "
     "While on: Laser Off returns to Standby and stops output.",
@@ -239,7 +239,7 @@ LASER_TOOLTIPS = {
     "PyCCAPT can stay open. Disconnect in CONTROL before using Switch to CLI. "
     "Requires a stopped experiment/alignment; stage Override Access is not required.",
     "switch_to_cli_button": "Disconnect the laser in NKT CONTROL first, then switch to CLI "
-    "and reconnect in PyCCAPT. Requests Listen and refreshes device readbacks. "
+    "and reconnect in PyCCAPT. Reads the current controller state and settings. "
     "Requires a stopped experiment/alignment; stage Override Access is not required.",
     # --- SmarAct laser focusing stage: position display ------------------
     "laser_x_mm": "Laser-stage X position, millimetres digit.  Read-only.  "

@@ -1,4 +1,4 @@
-"""Startup observes the controller's current protocol using simulated devices."""
+"""Startup selects Listen using the current protocol, with simulated devices."""
 import os
 import struct
 from types import SimpleNamespace
@@ -23,6 +23,8 @@ def startup_gui(monkeypatch):
     ui._last_laser_status = None
     ui._laser_alignment_busy = Mock(return_value=False)
     ui._publish_laser_state = Mock()
+    ui._request_laser_state = Mock()
+    ui._mark_laser_indicators_sent = Mock()
     ui._sync_controls_from_device = Mock(return_value=True)
     ui._set_laser_disconnected_banner = Mock()
     ui._update_laser_mode_buttons = Mock()
@@ -40,24 +42,26 @@ def startup_gui(monkeypatch):
 
 
 @pytest.mark.parametrize('status', [9, 17, 33, 65, 129])
-def test_startup_keeps_responding_cli_without_sdk_probe_or_setters(startup_gui, monkeypatch, status):
+def test_startup_selects_listen_on_cli_without_sdk_probe_or_upward_commands(startup_gui, monkeypatch, status):
     ui = startup_gui
     cli = Mock(last_error=None)
     cli.open_port.return_value = 0
     cli.StatusRead.return_value = f'ly_oxp2_dev_status {status}'
+    cli.Listen.side_effect = lambda: setattr(cli.StatusRead, 'return_value', 'ly_oxp2_dev_status 9')
     monkeypatch.setattr(origamiClassCLI, 'origClass', Mock(return_value=cli))
     native = Mock(side_effect=AssertionError('A responding CLI needs no SDK scan'))
     monkeypatch.setattr(gui_laser_control, 'NativeLaser', native)
     ui._recover_laser_startup()
     assert ui.laser_device is cli
     native.assert_not_called()
-    ui._sync_controls_from_device.assert_called_once_with(initial=True, status_text=f'ly_oxp2_dev_status {status}')
-    for method in ('Listen', 'Standby', 'Enable', 'AOM', 'InterbusEnable'):
+    ui._sync_controls_from_device.assert_called_once_with(initial=True, status_text='ly_oxp2_dev_status 9')
+    assert cli.Listen.call_count == (0 if status == 9 else 1)
+    for method in ('Standby', 'Enable', 'AOM', 'InterbusEnable'):
         getattr(cli, method).assert_not_called()
 
 
 @pytest.mark.parametrize('status', [9, 17, 33, 65, 129])
-def test_silent_cli_attaches_existing_native_state_without_writes(startup_gui, monkeypatch, status):
+def test_silent_cli_selects_listen_on_existing_bus_without_protocol_or_power_writes(startup_gui, monkeypatch, status):
     ui = startup_gui
     cli = Mock(last_error=None)
     cli.open_port.return_value = 0
@@ -66,6 +70,7 @@ def test_silent_cli_attaches_existing_native_state_without_writes(startup_gui, m
     device = Mock(last_error=None)
     device.open_port.return_value = 0
     device.StatusRead.return_value = f'ly_oxp2_dev_status {status}'
+    device.Listen.side_effect = lambda: setattr(device.StatusRead, 'return_value', 'ly_oxp2_dev_status 9')
     def create(*args, **kwargs):
         cli.close_port.assert_called_once()  # Never overlap CLI and SDK owners.
         return device
@@ -74,10 +79,11 @@ def test_silent_cli_attaches_existing_native_state_without_writes(startup_gui, m
     ui._recover_laser_startup()
     assert ui.laser_device is device
     factory.assert_called_once_with('FAKE', wavelength=None, max_watts=5.2, max_aom_percent=100.)
-    ui._publish_laser_state.assert_called_once_with(f'ly_oxp2_dev_status {status}')
-    ui._sync_controls_from_device.assert_called_once_with(initial=True, status_text=f'ly_oxp2_dev_status {status}')
+    ui._publish_laser_state.assert_called_once_with('ly_oxp2_dev_status 9')
+    ui._sync_controls_from_device.assert_called_once_with(initial=True, status_text='ly_oxp2_dev_status 9')
     ui._set_laser_disconnected_banner.assert_called_with('')
-    for method in ('Listen', 'Standby', 'Enable', 'AOM', 'AOMEnable', 'AOMDisable', 'set_ir_power_watts'):
+    assert device.Listen.call_count == (0 if status == 9 else 1)
+    for method in ('Standby', 'Enable', 'AOM', 'AOMEnable', 'AOMDisable', 'set_ir_power_watts'):
         getattr(device, method).assert_not_called()
     device.close_port.assert_not_called()
     assert not ui._laser_mode_switch_in_progress
@@ -114,7 +120,7 @@ def test_failed_native_detection_releases_handle_and_does_not_switch_protocol(st
     assert ui.laser_device is None
     if failure != 'missing_sdk':
         device.close_port.assert_called_once()
-    assert 'No interface/state change was requested' in ui._set_laser_disconnected_banner.call_args.args[0]
+    assert 'No protocol change or emission was requested' in ui._set_laser_disconnected_banner.call_args.args[0]
     assert not ui._laser_mode_switch_in_progress
 
 
@@ -134,7 +140,7 @@ def test_native_startup_detection_is_guarded(startup_gui, monkeypatch, blocked):
 
 
 @pytest.mark.parametrize('fsm,status', [(1, 9), (2, 17), (3, 33), (5, 65), (6, 129)])
-def test_actual_native_startup_adapter_only_reads_existing_bus(startup_gui, monkeypatch, fsm, status):
+def test_actual_native_startup_adapter_only_requests_listen_on_existing_bus(startup_gui, monkeypatch, fsm, status):
     ui = startup_gui
     sdk = Mock()
     sdk.openPorts.return_value = sdk.closePorts.return_value = 0
@@ -144,17 +150,23 @@ def test_actual_native_startup_adapter_only_reads_existing_bus(startup_gui, monk
     for kind in ('U8', 'U16', 'U32'):
         getattr(sdk, 'registerRead'+kind).side_effect = (
             lambda port, address, register, index: (0, registers[register]))
-        getattr(sdk, 'registerWrite'+kind).side_effect = AssertionError('Startup must not write a register')
+        getattr(sdk, 'registerWrite'+kind).side_effect = AssertionError('Startup must not change power or protocol')
+    def listen_write(port, address, register, value, index):
+        assert (register, value) == (0x30, 1)
+        registers[0x01] = 1
+        return 0
+    sdk.registerWriteU8.side_effect = listen_write
     sdk.registerRead.return_value = (0, struct.pack('<13I', *([0]*4 + [400000] + [0]*8)))
     monkeypatch.setattr(nktpbus_switch, '_load_nktp_dll_module', lambda: sdk)
     assert ui._open_existing_laser_native('FAKE')
     device = ui.laser_device
     assert device._wavelength_index is None
-    assert device.status_details['fsm'] == fsm
-    ui._publish_laser_state.assert_called_once_with(f'ly_oxp2_dev_status {status}')
+    assert device.status_details['fsm'] == 1
+    ui._publish_laser_state.assert_called_once_with('ly_oxp2_dev_status 9')
     sdk.openPorts.assert_called_once()
     sdk.closePorts.assert_not_called()
-    for kind in ('U8', 'U16', 'U32'):
+    assert sdk.registerWriteU8.call_count == (0 if fsm == 1 else 1)
+    for kind in ('U16', 'U32'):
         getattr(sdk, 'registerWrite'+kind).assert_not_called()
     device.close_port()
 

@@ -456,7 +456,7 @@ def test_laser_compact_layout_preserves_controls_and_readouts(instrument_window,
         app.processEvents()
     print(f'Laser GUI size: {window.size()}, preview: {tmp_path}')
     assert window.width() <= 1000
-    # Primary watts and an advanced AOM menu fit in the compact window.
+    # Primary AOM control and the optical readouts fit in the compact window.
     assert window.height() <= 780  # Three readable alignment lines need vertical space.
     viewport = window._responsive_window.scroll.viewport()
     assert window._responsive_window.scroll.horizontalScrollBar().maximum() == 0
@@ -466,9 +466,7 @@ def test_laser_compact_layout_preserves_controls_and_readouts(instrument_window,
     assert status.height() >= status.heightForWidth(status.width())
     assert status.height() >= 3 * status.fontMetrics().lineSpacing()
     assert ui.laser_alignment_panel.rect().contains(status.geometry())
-    controls = [ui.laser_wavelegnth, ui.laser_wavelegnth_nm_label, ui.laser_aom_advanced_button,
-                ui.laser_ir_power_control_label, ui.laser_ir_power_control,
-                ui.laser_native_control_button,
+    controls = [ui.laser_wavelegnth, ui.laser_wavelegnth_nm_label, ui.label, ui.laser_power,
                 ui.laser_rate, ui.laser_divition_factor, ui.laser_enable, ui.laser_on,
                 ui.laser_standby, ui.laser_listen, ui.laser_state_label, ui.laser_auto_alignment, ui.laser_tracking,
                 *ui.laser_alignment_fields.values(), *ui.laser_alignment_buttons,
@@ -497,17 +495,13 @@ def test_laser_compact_layout_preserves_controls_and_readouts(instrument_window,
         assert field.width() >= field.fontMetrics().horizontalAdvance(field.text()) + 30
     assert not ui.laser_stage_reference.isEnabled()
     assert ui.switch_to_cli_button.isEnabled()  # Recover communication without stage Override Access.
-    assert not ui.laser_native_control_button.isEnabled()  # No verified CLI session yet.
-    assert ui.laser_ir_power_control_label.text() == 'Laser power (W)'
+    assert not hasattr(ui, 'laser_native_control_button')
+    assert not hasattr(ui, 'laser_ir_power_control')
+    assert not hasattr(ui, 'laser_aom_advanced_button')
     assert not hasattr(ui, 'laser_ir_power_apply')
-    assert not ui.laser_power.isVisible()
-    assert ui.gridLayout_3.itemAtPosition(1, 1).widget() is ui.laser_ir_power_control
-    ui.laser_aom_menu.popup(ui.laser_aom_advanced_button.mapToGlobal(QtCore.QPoint(0, 25)))
-    app.processEvents()
     assert ui.laser_power.isVisible() and ui.label.isVisible()
-    assert ui.label.text() == 'AOM override (%)'
-    ui.laser_aom_menu.close()
-    app.processEvents()
+    assert ui.gridLayout_3.itemAtPosition(1, 1).widget() is ui.laser_power
+    assert ui.label.text() == 'AOM (%)'
     assert ui.laser_ir_power_label.text() == 'Measured IR power (W)'
     assert ui.label_9.text() == 'Selected output power (W)'
     assert ui.label_10.text() == 'Pulse energy (µJ)'
@@ -545,64 +539,38 @@ def test_laser_compact_layout_preserves_controls_and_readouts(instrument_window,
 
 
 @pytest.mark.parametrize('instrument_window', ['laser'], indirect=True)
-def test_primary_watts_commit_once_and_polling_does_not_send_power(instrument_window):
+@pytest.mark.parametrize('protocol', ['cli', 'nktpbus'])
+def test_primary_aom_controls_live_output_and_readback_never_replays_edits(instrument_window, protocol):
     from unittest.mock import Mock
-    from PyQt6.QtTest import QTest
     window, ui, app = instrument_window
-    target = SimpleNamespace(watts=1.)
-    def set_watts(value):
-        target.watts = value
-        return value
-    setter = Mock(side_effect=set_watts)
+    target = SimpleNamespace(aom=800)
+    setter = Mock(side_effect=lambda value: setattr(target, 'aom', value))
     ui.laser_device = SimpleNamespace(
-        protocol='nktpbus', supports_wavelength_changes=False,
-        wavelength_basis='Green read back through CLI before native handover; selection locked',
+        protocol=protocol, supports_wavelength_changes=False,
+        wavelength_basis='IR selection read back from device',
         freq_avaliable=lambda: 'e_freq=4 --> 400000 Hz',
         FreqRead=lambda: 'Frequency index parameter: 4', DivRead=lambda: 'Division factor: 1',
-        AOMRead=lambda: 'AOM relative setting: 800', wavelength_read=lambda: 'CLI-verified position=Green',
-        read_average_power=lambda: '1.0 W', power_read_dv_green=lambda: 'Unknown: native harmonic monitor',
+        AOMRead=lambda: f'AOM relative setting: {target.aom}', wavelength_read=lambda: 'Current position=IR',
+        read_average_power=lambda: '1.0 W', ModeRead=lambda: 'e_mode of AOM: 2', AOM=setter,
         StatusRead=lambda: 'ly_oxp2_dev_status 129',
-        ir_power_setpoint_watts=lambda: target.watts, set_ir_power_watts=setter,
     )
     ui._sync_controls_from_device(initial=True)
     window.show()
     app.processEvents()
-    field = ui.laser_ir_power_control
-    assert field.isEnabled() and field.value() == 1.
-    field.setFocus()
-    QTest.keyClick(field, QtCore.Qt.Key.Key_A, QtCore.Qt.KeyboardModifier.ControlModifier)
-    QTest.keyClicks(field, '1.25')
-    setter.assert_not_called()  # Typing is not a hardware request.
-    QTest.keyClick(field, QtCore.Qt.Key.Key_Return)
-    setter.assert_called_once_with(1.25)
-    ui.laser_divition_factor.setFocus()
-    app.processEvents()
-    assert setter.call_count == 1  # Focus-out following Enter is not a second write.
-    target.watts = 1.3
+    field = ui.laser_power
+    assert field.isVisible() and field.isEnabled() and field.value() == 20.
+    field.setValue(25.)
+    setter.assert_not_called()  # The GUI queues the request for the status loop.
+    ui.check_laser_status()
+    setter.assert_called_once_with(1000)
+    assert not ui.change_laser_power
+    target.aom = 1200
     ui._sync_controls_from_device()
-    assert field.value() == 1.3
-    ui._commit_laser_watt_edit()
-    assert setter.call_count == 1  # Firmware readbacks never queue another request.
-    field.setFocus()
-    field.setValue(1.4)
-    ui.variables.start_flag = True
-    ui._commit_laser_watt_edit()
-    ui.variables.start_flag = False
-    ui._commit_laser_watt_edit()
-    assert setter.call_count == 1  # A refused edit cannot replay after the experiment.
-    # Reproduce the reported CLI / Laser On screenshot: the recovery action
-    # must be visible and clickable without stage Override Access.
-    ui.laser_device.protocol = 'cli'
-    ui.flag_super_user_stage = False
-    ui._apply_button_locks_for_status('ly_oxp2_dev_status 129')
-    app.processEvents()
-    button = ui.laser_native_control_button
-    assert button.isVisible() and button.isEnabled()
-    assert button.text() == 'Connect W (stops output)'
-    assert button.width() >= button.fontMetrics().horizontalAdvance(button.text()) + 16
-    viewport = window._responsive_window.scroll.viewport()
-    assert viewport.rect().contains(QtCore.QRect(button.mapTo(viewport, QtCore.QPoint()), button.size()))
-    assert not field.isEnabled()
+    assert field.value() == 30.
+    ui.check_laser_status()
+    assert setter.call_count == 1
+    assert not ui.change_laser_power
+    assert not hasattr(ui, 'laser_aom_advanced_button')
 
 
 @pytest.mark.parametrize('instrument_window', ['visualization'], indirect=True)

@@ -1077,7 +1077,7 @@ def test_shutdown_during_settle_does_not_reopen_port(mode_gui, monkeypatch):
 
 
 @pytest.mark.parametrize('code', [9, 17, 33, 65, 129])
-def test_cli_connection_preserves_observed_state_without_setters(mode_gui, monkeypatch, code):
+def test_manual_cli_reconnect_preserves_observed_state_without_setters(mode_gui, monkeypatch, code):
     from pyccapt.control.nkt_photonics import origamiClassCLI
     ui = mode_gui
     ui._laser_last_stable_code = 9  # A previous connection must not color this one.
@@ -1086,7 +1086,7 @@ def test_cli_connection_preserves_observed_state_without_setters(mode_gui, monke
     device.open_port = Mock(return_value=0)
     device.Listen = Mock(side_effect=AssertionError('Connecting must not request Listen'))
     monkeypatch.setattr(origamiClassCLI, 'origClass', lambda port: device)
-    assert ui._open_laser_cli('FAKE', initial_open=True)
+    assert ui._open_laser_cli('FAKE')
     assert ui.laser_device is device and device.code == code
     assert not device.calls
     device.Listen.assert_not_called()

@@ -737,12 +737,14 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         self._laser_status_timer.setInterval(1000)
         self._laser_status_timer.timeout.connect(self._poll_laser_status)
         self._laser_status_timer.start()
-        # Retry after the rest of the window is constructed. If CLI stays
-        # silent, attach an already active bus session without changing mode.
+        # Prepare the default watt connection after constructing the window.
+        # Only a confirmed Listen state permits the CLI -> native handover.
         self._laser_startup_retry_timer = QtCore.QTimer(Laser_Control)
         self._laser_startup_retry_timer.setSingleShot(True)
-        self._laser_startup_retry_timer.timeout.connect(self._recover_laser_startup)
-        if startup_failed:
+        self._laser_startup_retry_timer.timeout.connect(self._complete_laser_startup)
+        self._laser_startup_watts_pending = True
+        self._laser_startup_watts_deadline = None
+        if startup_failed or self.laser_device is not None:
             self._laser_startup_retry_timer.start(1000)
 
         # ----- SmarAct laser focusing stage --------------------------------
@@ -1214,6 +1216,8 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         self._clamp_divider_to_min_output_rate()
 
     def _request_laser_state(self, target, *, indicator=None):
+        if target != LaserState.LISTEN.value:
+            self._cancel_laser_startup_watts()
         self._control_laser_request = request(self.variables, "laser", "main", target)
         self._clear_laser_indicator_requests()
         if target == LaserState.LISTEN.value:
@@ -1688,9 +1692,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
                 or getattr(self, '_laser_stopping', False)):
             yield None
             return
-        startup_timer = getattr(self, '_laser_startup_retry_timer', None)
-        if startup_timer is not None:
-            startup_timer.stop()
+        self._cancel_laser_startup_watts()
         if (self.variables.start_flag or self._laser_alignment_busy()
                 or getattr(self, '_laser_status_in_progress', False)):
             self.error_message('Stop the experiment/alignment and wait for the laser poll before switching modes.')
@@ -1883,6 +1885,62 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
     CLI_SWITCH_NUM_ATTEMPTS = 3
     CLI_SWITCH_INITIAL_DELAY_S = 1.5  # after the register write
     CLI_SWITCH_RETRY_DELAY_S = 1.0  # between subsequent attempts
+
+    def _cancel_laser_startup_watts(self):
+        self._laser_startup_watts_pending = False
+        timer = getattr(self, '_laser_startup_retry_timer', None)
+        if timer is not None:
+            timer.stop()
+
+    def _complete_laser_startup(self):
+        """Connect native watts once, in Listen, without resetting an interlock."""
+        if not getattr(self, '_laser_startup_watts_pending', False):
+            return
+        if (getattr(self, '_laser_stopping', False)
+                or getattr(self, '_laser_mode_switch_in_progress', False)
+                or self.variables.start_flag or self._laser_alignment_busy()
+                or self._laser_power_control_mode != 'watts'):
+            self._cancel_laser_startup_watts()
+            return
+        if getattr(self, '_laser_status_in_progress', False):
+            self._laser_startup_retry_timer.start(250)
+            return
+        if self.laser_device is None:
+            self._recover_laser_startup()
+        if (self.laser_device is None or getattr(self, '_laser_stopping', False)
+                or not self._laser_startup_watts_pending):
+            self._cancel_laser_startup_watts()
+            return
+        # Existing native sessions already requested Listen at connection.
+        # Calling the manual connect action here could request an interlock reset.
+        if getattr(self.laser_device, 'protocol', None) == 'nktpbus':
+            self._cancel_laser_startup_watts()
+            return
+        if any(getattr(self, flag, False) for flag in (
+                'standby_mode', 'on_mode', 'enable_ouput_mode', 'close_output_mode',
+                'change_laser_power', 'change_laser_rate', 'change_laser_divition_factor',
+                'change_laser_wavelegnth')):
+            self._cancel_laser_startup_watts()
+            return
+        try:
+            status = self.laser_device.StatusRead()
+            self._publish_laser_state(status)
+            self._apply_button_locks_for_status(status)
+            if readback.scalar(status) != 9 or getattr(self, 'listen_mode', False):
+                if self._laser_startup_watts_deadline is None:
+                    self._laser_startup_watts_deadline = time.monotonic() + 10.
+                if time.monotonic() >= self._laser_startup_watts_deadline:
+                    raise TimeoutError('Listen was not confirmed; watt connection was not attempted.')
+                self._laser_startup_retry_timer.start(500)
+                return
+            # Consume before handover: a failure must not cause repeated resets
+            # or interfere with a later manual protocol/state selection.
+            self._cancel_laser_startup_watts()
+            self._use_native_ir_control(listen_only=True)
+        except Exception as exc:
+            self._cancel_laser_startup_watts()
+            logging.getLogger('pyccapt.laser').warning('Startup watt connection unavailable: %s', exc)
+            self.error_message(f'Startup watt connection unavailable: {exc}')
 
     def _recover_laser_startup(self):
         """Connect the active protocol and request the startup Listen state."""

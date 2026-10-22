@@ -47,6 +47,7 @@ class LaserPowerControlMixin:
                 or self.variables.start_flag or self._laser_alignment_busy()):
             return
         target = 'aom' if getattr(self, '_laser_power_control_mode', 'watts') == 'watts' else 'watts'
+        self._cancel_laser_startup_watts()
         # A selection change never applies an old edit to the other controller.
         self.change_laser_power = False
         self._laser_watt_edit_pending = False
@@ -82,9 +83,9 @@ class LaserPowerControlMixin:
         self._laser_watt_edit_pending = False
         self._apply_ir_power_watts()
 
-    def _use_native_ir_control(self):
+    def _use_native_ir_control(self, *, listen_only=False):
         if getattr(self.laser_device, 'protocol', None) == 'nktpbus':
-            if getattr(self.laser_device, 'interlock_reset_available', False):
+            if not listen_only and getattr(self.laser_device, 'interlock_reset_available', False):
                 return self._reset_native_interlock()
             return getattr(self.laser_device, 'connected', True)
         if (self.laser_device is None or self.variables.start_flag or self._laser_alignment_busy()
@@ -99,6 +100,8 @@ class LaserPowerControlMixin:
             return
         try:
             status, mode, index, divider, wavelength = self._ir_power_conditions()
+            if listen_only and status != 9:
+                raise ValueError('Startup watt connection requires confirmed Listen; the current state was retained.')
             if status not in (9, 33, 65, 129):
                 raise ValueError('Wait for a stable laser state before connecting watt control; connecting stops output.')
             if wavelength not in readback.WAVELENGTHS:
@@ -243,6 +246,7 @@ class LaserPowerControlMixin:
             self.error_message('Wait for pending laser settings to be read back before applying IR watts.')
             return
         if getattr(self.laser_device, 'protocol', None) != 'nktpbus':
-            self.error_message('Click Connect W control below the power field. Connecting stops output; then select Standby and Laser On.')
+            self.error_message('Use the power selector to select AOM, then watts to reconnect watt control. '
+                               'Connecting from CLI stops output; then select Standby and Laser On.')
             return
         self._apply_native_ir_watts()

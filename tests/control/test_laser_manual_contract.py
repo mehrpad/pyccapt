@@ -1259,7 +1259,7 @@ def test_cli_watt_control_is_disabled_without_protocol_handover(watt_gui, code):
     assert not device.calls
     assert ui.laser_device is device and device.code == code
     assert ui._laser_status_timer.isActive()
-    assert 'Connect W control' in ui.errors[-1]
+    assert 'power selector' in ui.errors[-1]
 
 
 @pytest.mark.parametrize('busy', ['experiment', 'alignment', 'pending', 'switch', 'stopping', 'poll'])

@@ -20,9 +20,10 @@ class LaserPowerControlMixin:
         maximum = float(self.conf.get('laser_ir_max_power_w', 5.2))
         if not math.isfinite(maximum) or not 0 < maximum <= 65.535:
             raise ValueError('laser_ir_max_power_w must be finite and within 0..65.535 W.')
-        self.laser_ir_power_control.setRange(0., maximum)
-        self.laser_ir_power_control.setDecimals(3)
-        self.laser_ir_power_control.setSingleStep(.01)
+        self.laser_ir_power_control.setDecimals(2)
+        # Display precision must never round the configured ceiling upward.
+        self.laser_ir_power_control.setRange(0., math.floor(maximum * 100 + 1e-9) / 100)
+        self.laser_ir_power_control.setSingleStep(.1)
         self.laser_ir_power_control.setKeyboardTracking(False)
         self.laser_ir_power_control.setFixedSize(159, 25)
         self.laser_ir_power_control.setEnabled(False)
@@ -119,7 +120,7 @@ class LaserPowerControlMixin:
             if self._laser_stopping:
                 return
             device = NativeLaser(port, wavelength=wavelength,
-                max_watts=self.laser_ir_power_control.maximum(),
+                max_watts=self.conf.get('laser_ir_max_power_w', 5.2),
                 max_aom_percent=self.conf.get('laser_aom_max_percent', 100.))
             self.laser_device = device  # Retain ownership if SDK cleanup fails.
             if device.open_port() != 0:
@@ -128,6 +129,7 @@ class LaserPowerControlMixin:
             # The Connect W action explicitly stops output. Never resume an
             # emission request automatically after changing port ownership.
             self._queue_laser_indicator('listen', (9,))
+            self._laser_power_zero_pending = True
             device.Listen()
             self._mark_laser_indicators_sent()
             for _ in range(50):
@@ -207,6 +209,28 @@ class LaserPowerControlMixin:
             reason = getattr(device, 'status_fault', '') or 'interlock readback unavailable'
             logging.getLogger('pyccapt.laser').warning('Interlock reset was not confirmed: %s', reason)
             self.error_message(f'Interlock reset was not confirmed: {reason}. Standby and emission were not requested.')
+
+    def _zero_laser_power_after_listen(self, status):
+        if readback.scalar(status) != 9 or not getattr(self, '_laser_power_zero_pending', False):
+            return
+        self._laser_power_zero_pending = False  # One attempt per explicit Listen/startup.
+        self._laser_watt_edit_pending = self.change_laser_power = False
+        device = self.laser_device
+        native = getattr(device, 'protocol', None) == 'nktpbus'
+        if native:
+            device.zero_power_in_listen()
+        if self.laser_device is not device or getattr(self, '_laser_stopping', False):
+            return
+        widgets = [getattr(self, 'laser_ir_power_control', None)]
+        if native:
+            widgets.append(self.laser_power)
+        for widget in widgets:
+            if widget is not None:
+                previous = widget.blockSignals(True)
+                widget.setValue(0.)
+                widget.blockSignals(previous)
+        if native:
+            logging.getLogger('pyccapt.laser').info('Listen confirmed; laser watt/AOM settings cleared to zero')
 
     def _apply_native_ir_watts(self):
         # The SDK can pump Windows events during a register call. A nested

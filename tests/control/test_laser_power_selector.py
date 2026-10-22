@@ -10,6 +10,21 @@ from test_laser_manual_contract import laser_gui, mode_gui, watt_gui  # noqa: F4
 from test_responsive_gui import app, instrument_window  # noqa: F401
 
 
+@pytest.mark.parametrize('ceiling,maximum', [(5.255, 5.25), (5.2, 5.2), (.009, 0.)])
+def test_two_decimal_watt_editor_does_not_round_a_hardware_limit_upward(app, ceiling, maximum):
+    from pyccapt.control.gui.gui_laser_control import Ui_Laser_Control
+    ui = Ui_Laser_Control.__new__(Ui_Laser_Control)
+    ui.conf = {'laser_ir_max_power_w': ceiling}
+    parent = QtWidgets.QWidget()
+    ui.gridLayout_3 = QtWidgets.QGridLayout(parent)
+    ui.label = QtWidgets.QLabel(parent)
+    ui.laser_power = QtWidgets.QDoubleSpinBox(parent)
+    ui._setup_laser_power_controls(parent)
+    assert ui.laser_ir_power_control.maximum() == maximum
+    assert ui.laser_ir_power_control.decimals() == 2
+    assert ui.laser_ir_power_control.singleStep() == .1
+
+
 @pytest.mark.parametrize('wavelength', ['IR', 'Green', 'DUV'])
 def test_native_power_modes_are_exclusive_and_switch_without_hardware_writes(watt_gui, monkeypatch, wavelength):
     ui, device, _ = watt_gui
@@ -130,6 +145,8 @@ def test_real_selector_defaults_to_watts_and_routes_only_the_active_editor(instr
     assert ui._laser_power_control_mode == 'watts'
     assert ui.laser_ir_power_control.isEnabled() and not ui.laser_power.isEnabled()
     field = ui.laser_ir_power_control
+    assert field.decimals() == 2 and field.singleStep() == .1
+    assert ui.laser_power.decimals() == 2 and ui.laser_power.singleStep() == .1
     field.setFocus()
     QTest.keyClick(field, QtCore.Qt.Key.Key_A, QtCore.Qt.KeyboardModifier.ControlModifier)
     QTest.keyClicks(field, '1.25')

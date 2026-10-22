@@ -39,7 +39,7 @@ def lifecycle_native(watt_gui, monkeypatch, request):
         elif register == 0x32:
             assert (kind, value, registers[0x01], registers[0x32]) == ('U8', 1, 1, 1)
             # Accept the request, but leave relay confirmation asynchronous.
-        elif register == 0x20:
+        elif register in (0x20, 0x05):
             assert kind == 'U16'
             registers[register] = value
         elif register == 0x0E:
@@ -135,7 +135,8 @@ def test_return_to_listen_enables_native_wavelength_then_preserves_live_watts(li
         assert ui.laser_wavelegnth.currentText() == selection
         assert ui.laser_wavelegnth.isEnabled()
         assert registers[0x01] == 1 and registers[0x32] == 1
-    assert case.writes == [('U8', 0x30, 1), ('U8', 0x0E, 1), ('U8', 0x0E, 3), ('U8', 0x0E, 0)]
+    assert case.writes == [('U8', 0x30, 1), ('U16', 0x20, 0), ('U16', 0x05, 0),
+                           ('U8', 0x0E, 1), ('U8', 0x0E, 3), ('U8', 0x0E, 0)]
     ui.laser_standby_clicked()
     ui.check_laser_status()
     registers.update({0x01: 3, 0x32: 2})

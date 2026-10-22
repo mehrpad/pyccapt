@@ -162,9 +162,14 @@ class LaserReadoutMixin:
             if getattr(device, 'protocol', None) == 'nktpbus':
                 snapshot['protocol'] = 'nktpbus'
                 snapshot['wavelength_basis'] = device.wavelength_basis
-                snapshot['source'] = ('NKTPBus register 0x10 (IR internal monitor, 0.001 W)' if wl == 0
-                    else 'Selected wavelength unverified; independent IR monitor only' if wl is None
-                    else 'Selected harmonic monitor unavailable: native scaling unverified')
+                if wl == 0:
+                    snapshot['source'] = 'NKTPBus register 0x10 (IR internal monitor, 0.001 W)'
+                elif wl is None:
+                    snapshot['source'] = 'Selected wavelength unverified; independent IR monitor only'
+                else:
+                    snapshot['source'] = ((getattr(device, 'harmonic_power_basis', '')
+                        or 'NKTPBus selected-harmonic internal monitor') if math.isfinite(mw)
+                        else 'Selected harmonic monitor unavailable')
                 setpoint = getattr(device, 'ir_power_setpoint_watts', None)
                 if callable(setpoint):
                     snapshot['ir_power_setpoint_w'] = setpoint()

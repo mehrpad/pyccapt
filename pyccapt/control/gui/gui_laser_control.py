@@ -1210,6 +1210,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         self.laser_power.setMinimum(0.0)
         # Display actual readback even when it exceeds a local command limit.
         self.laser_power.setMaximum(100.)
+        self.laser_power.setDecimals(2)
         self.laser_power.setSingleStep(0.1)
         self.laser_divition_factor.setMinimum(1)
         # Manual p123: integer divider 1..10,000,000.
@@ -1299,6 +1300,8 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             None
         """
         self._laser_interlock_reset_deadline = None
+        self._laser_power_zero_pending = True
+        self._laser_watt_edit_pending = self.change_laser_power = False
         self.listen_mode = True
         self.standby_mode = self.on_mode = self.enable_ouput_mode = False
         self.close_output_mode = False
@@ -1505,6 +1508,10 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         """Publish only real serial reads; cached UI refreshes are not new evidence."""
         self._check_native_interlock_reset()
         code = readback.scalar(status_text)
+        device = self.laser_device
+        self._zero_laser_power_after_listen(status_text)
+        if getattr(self, '_laser_stopping', False) or self.laser_device is not device:
+            return
         self._observe_laser_indicators(code)
         state = LaserState.from_code(code)
         actions = allowed_actions(state, connected=self.laser_device is not None)
@@ -1870,6 +1877,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
 
     def _initialize_laser_listen(self, device, status):
         """Start in Listen without changing protocol or assuming an ACK is state."""
+        self._laser_power_zero_pending = True
         if readback.scalar(status) == 9:
             return status
         self._laser_standby_pending = self._laser_emission_pending = False

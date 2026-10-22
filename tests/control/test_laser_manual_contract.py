@@ -199,6 +199,7 @@ class Laser:
         self.code = 33
         self.aom = 800
         self.harmonic = 'NKT FHG Output power=0.53W'
+        self.zero_power_in_listen = Mock(side_effect=lambda: setattr(self, 'aom', 0))
     def freq_avaliable(self): return 'e_freq=4 --> 400000 Hz\ne_freq=6 --> 579710 Hz'
     def FreqRead(self): return 'Frequency index parameter: 4'
     def DivRead(self): return 'Notice: Division factor for PCAOM is 10'

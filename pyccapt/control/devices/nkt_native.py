@@ -14,11 +14,11 @@ import time
 
 from pyccapt.control.nkt_photonics import nktpbus_switch, readback
 from pyccapt.control.nkt_photonics.origamiClassCLI import origClass
+from pyccapt.control.devices.nkt_harmonic import NativeHarmonicReadoutMixin
 
 
-class NativeLaser:
+class NativeLaser(NativeHarmonicReadoutMixin):
     protocol = 'nktpbus'
-    supports_harmonic_power_readback = False
 
     def __init__(self, port, *, wavelength=None, max_watts=5.2, max_aom_percent=100.):
         self.comPort = port
@@ -83,12 +83,13 @@ class NativeLaser:
                 self._opened = False
                 self.address = None
 
-    def _read(self, register, kind='U16', index=-1, *, allow_unsupported=False):
+    def _read(self, register, kind='U16', index=-1, *, allow_unsupported=False, address=None):
         with self._lock:
             if not self._opened or self.address is None:
                 raise ConnectionError('Native laser is not connected')
+            target = self.address if address is None else address
             for attempt in range(4):
-                result, value = getattr(self.nkt, 'registerRead'+kind)(self.comPort, self.address, register, index)
+                result, value = getattr(self.nkt, 'registerRead'+kind)(self.comPort, target, register, index)
                 if result != 15 or attempt == 3:
                     break
                 # Retry reads only; never replay a state/power write or reuse
@@ -162,6 +163,18 @@ class NativeLaser:
             if self.open_port() != 0:
                 raise ConnectionError(f'Cannot reconnect for Listen: {self.last_error}')
         return self._write(0x30, 1)
+
+    def zero_power_in_listen(self):
+        """Clear stored watts and relative power only after Listen is read back."""
+        with self._lock:
+            if readback.scalar(self.StatusRead()) != 9:
+                raise ValueError('Power can only be cleared after Listen is confirmed')
+            # Zero is a reduction, allowed even while the interlock awaits reset.
+            # Never use the normal positive-power path to bypass that interlock.
+            self._write(0x20, 0, 'U16')
+            self._write(0x05, 0, 'U16')
+            if self._read(0x20) != 0 or self._read(0x05) != 0:
+                raise ValueError('Zero watt/AOM settings were not confirmed by laser readback')
 
     def Standby(self):
         self.StatusRead()
@@ -284,7 +297,6 @@ class NativeLaser:
     def read_average_power(self): return f'{self._read(0x10) / 1000:g} W'
     def read_pulse_energy(self): return f'{self._read(0x11) * 10:g} nJ'
     def ir_power_setpoint_watts(self): return self._read(0x20) / 1000
-    def power_read_dv_green(self): return 'Unknown: native harmonic monitor scaling is unverified'
 
     def set_ir_power_watts(self, watts):
         """One power-register write. No state, shutter, protocol or mode writes."""

@@ -1,16 +1,16 @@
 """Persistent OXPS NKTPBus control, using the vendor's 0x95 register map.
 
 Main-board registers are documented in 800-621-01 pp163-166. The IR setpoint
-controls the fundamental feeding any selected harmonic. A CLI-verified
-wavelength is retained across explicit handover. An existing bus can report
-its selected wavelength through native register 0x0E; unsupported readings
-remain unknown.
+controls the fundamental feeding any selected harmonic. Native register 0x0E
+reports and selects the wavelength on supported firmware. Selection changes
+require confirmed Listen; older firmware retains the CLI-verified selection.
 Opening/reading never enables emission or resets an interlock.
 """
 import logging
 import math
 import struct
 import threading
+import time
 
 from pyccapt.control.nkt_photonics import nktpbus_switch, readback
 from pyccapt.control.nkt_photonics.origamiClassCLI import origClass
@@ -18,19 +18,19 @@ from pyccapt.control.nkt_photonics.origamiClassCLI import origClass
 
 class NativeLaser:
     protocol = 'nktpbus'
-    supports_wavelength_changes = False
     supports_harmonic_power_readback = False
 
     def __init__(self, port, *, wavelength=None, max_watts=5.2, max_aom_percent=100.):
         self.comPort = port
         self._wavelength_index = None if wavelength is None else origClass._integer(wavelength, 0, 3)
+        self._native_wavelength_supported = False
         if self._wavelength_index is None:
             self.wavelength_basis = 'Current native wavelength has not been verified; return to CLI to read/change it.'
         else:
             name = readback.WAVELENGTHS[self._wavelength_index][0]
             self.wavelength_basis = (
                 f'{name} selection read back via CLI before native handover; '
-                'selection locked; no live native harmonic-position readback')
+                'native wavelength support has not yet been checked')
         self.max_watts = float(max_watts)
         self.max_aom_percent = float(max_aom_percent)
         if not math.isfinite(self.max_watts) or not 0 < self.max_watts <= 65.535:
@@ -87,7 +87,13 @@ class NativeLaser:
         with self._lock:
             if not self._opened or self.address is None:
                 raise ConnectionError('Native laser is not connected')
-            result, value = getattr(self.nkt, 'registerRead'+kind)(self.comPort, self.address, register, index)
+            for attempt in range(4):
+                result, value = getattr(self.nkt, 'registerRead'+kind)(self.comPort, self.address, register, index)
+                if result != 15 or attempt == 3:
+                    break
+                # Retry reads only; never replay a state/power write or reuse
+                # cached status as though it were a fresh hardware reply.
+                time.sleep(.02)
             if allow_unsupported and result in (4, 8, 11):  # NACK, type unsupported, register absent.
                 return None
             if result != 0:
@@ -229,19 +235,52 @@ class NativeLaser:
                 raise ValueError('Invalid native frequency table')
             return '\n'.join(f'e_freq={i} --> {hz} Hz' for i, (hz,) in enumerate(struct.iter_unpack('<I', data)) if hz)
 
+    @property
+    def supports_wavelength_changes(self):
+        return self._native_wavelength_supported
+
+    @property
+    def wavelength_change_available(self):
+        return (self.connected and self.supports_wavelength_changes
+                and self.status_details.get('fsm') == 1
+                and self.status_details.get('error') == 0
+                and self.status_details.get('interlock') in (1, 2))
+
     def wavelength_read(self):
-        if self._wavelength_index is None:
+        with self._lock:
             # NKT CONTROL's onRegDynamicWavelengthRead uses main-board 0x0E
             # (U8): 0=IR, 1=SHG, 2=THG, 3=FHG. Older firmware may NACK it.
             selected = self._read(0x0E, 'U8', allow_unsupported=True)
+            self._native_wavelength_supported = selected in readback.WAVELENGTHS
             if selected in readback.WAVELENGTHS:
+                self._wavelength_index = selected
                 name = readback.WAVELENGTHS[selected][0]
                 self.wavelength_basis = f'{name} selected wavelength read from native register 0x0E'
                 return f'Native wavelength position={name}'
-            return 'Unknown: current native wavelength has not been verified'
-        return f'CLI-verified position={readback.WAVELENGTHS[self._wavelength_index][0]}'
+            if selected is not None:
+                self._wavelength_index = None
+                raise ValueError(f'Unknown native wavelength position {selected}')
+            if self._wavelength_index is None:
+                return 'Unknown: current native wavelength has not been verified'
+            self.wavelength_basis = ('Last verified wavelength retained; native wavelength register is unsupported '
+                                     'and wavelength edits are unavailable')
+            return f'Last verified position={readback.WAVELENGTHS[self._wavelength_index][0]}'
+
     def wavelength_change(self, value):
-        raise ValueError('Return to CLI to change wavelength, then reconnect native watt control.')
+        with self._lock:
+            value = origClass._integer(value, 0, 3)
+            self.StatusRead()
+            self.wavelength_read()  # Confirm this firmware supports register 0x0E.
+            if not self.wavelength_change_available:
+                raise ValueError('Native wavelength changes require confirmed Listen, a closed interlock loop '
+                                 'and supported wavelength readback.')
+            # Installed NKT CONTROL PubOrigamiLib: dynamicWavelengthChanged
+            # encodes SetInt8 and writes the register created at main-board 0x0E.
+            # No protocol, FSM, interlock-reset or power command is needed.
+            self._write(0x0E, value, 'U8')
+            self._wavelength_index = None
+            self.wavelength_basis = 'Wavelength change requested; waiting for native register 0x0E readback'
+            return ''
     def read_average_power(self): return f'{self._read(0x10) / 1000:g} W'
     def read_pulse_energy(self): return f'{self._read(0x11) * 10:g} nJ'
     def ir_power_setpoint_watts(self): return self._read(0x20) / 1000

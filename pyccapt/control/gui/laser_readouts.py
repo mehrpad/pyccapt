@@ -287,7 +287,9 @@ class LaserReadoutMixin:
             changed = True
             try:
                 fault = getattr(self.laser_device, 'status_fault', '')
-                if fault:
+                stopped_wavelength_change = (flag == 'change_laser_wavelegnth' and code == 9
+                    and getattr(self.laser_device, 'wavelength_change_available', False))
+                if fault and not stopped_wavelength_change:
                     raise ValueError(fault)
                 if (code not in (9, 33, 65, 129) or getattr(self, '_laser_standby_pending', False)
                         or getattr(self, '_laser_emission_pending', False)):

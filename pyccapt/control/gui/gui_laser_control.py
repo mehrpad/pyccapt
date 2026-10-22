@@ -1586,8 +1586,13 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             'Request Standby / warm-up on the current connection. Laser On remains a separate action.')
         self.laser_on.setToolTip('Return the laser to Standby and stop output.' if code in (65, 129) else
                                  'Enable emission only after confirmed ready Standby.')
-        self.laser_wavelegnth.setEnabled(idle and not running
-            and getattr(self.laser_device, 'supports_wavelength_changes', True))
+        native_wavelength_idle = (code == 9 and not pending and not emission_pending and not listen_pending
+            and not getattr(self, '_laser_mode_switch_in_progress', False)
+            and getattr(self.laser_device, 'wavelength_change_available', False))
+        self.laser_wavelegnth.setEnabled((idle or native_wavelength_idle) and not running
+            and not self._laser_alignment_busy()
+            and getattr(self.laser_device, 'supports_wavelength_changes', True)
+            and (getattr(self.laser_device, 'protocol', None) != 'nktpbus' or code == 9))
         self.laser_rate.setEnabled(idle and not running and bool(getattr(self, '_frequency_table', {})))
         self.laser_divition_factor.setEnabled(known and not running)
         self.laser_power.setEnabled(known and not self._laser_alignment_busy()

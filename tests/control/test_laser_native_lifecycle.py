@@ -18,7 +18,7 @@ def lifecycle_native(watt_gui, monkeypatch, request):
     ui, cli, conversion = watt_gui
     wavelength = getattr(request, 'param', 0)
     registers = {0x01: 1, 0x67: 0, 0x32: 1, 0x37: 0, 0x20: 1000,
-                 0x05: 800, 0x35: 4, 0x36: 10, 0x10: 250, 0x11: 50}
+                 0x05: 800, 0x35: 4, 0x36: 10, 0x10: 250, 0x11: 50, 0x0E: wavelength}
     writes = []
     sdk = Mock()
     sdk.openPorts.return_value = sdk.closePorts.return_value = 0
@@ -28,7 +28,9 @@ def lifecycle_native(watt_gui, monkeypatch, request):
         return 0, registers[register]
     def write(kind, port, address, register, value, index):
         writes.append((kind, register, value))
-        if register == 0x30 and value == 3:
+        if register == 0x30 and value == 1:
+            registers.update({0x01: 1, 0x32: 1})
+        elif register == 0x30 and value == 3:
             assert registers[0x01] == 1 and registers[0x32] in (1, 2)
             registers[0x01] = 2  # Firmware accepts Standby, then warms up.
         elif register == 0x30 and value == 6:
@@ -39,6 +41,9 @@ def lifecycle_native(watt_gui, monkeypatch, request):
             # Accept the request, but leave relay confirmation asynchronous.
         elif register == 0x20:
             assert kind == 'U16'
+            registers[register] = value
+        elif register == 0x0E:
+            assert kind == 'U8' and registers[0x01] == 1
             registers[register] = value
         else:
             pytest.fail(f'Unexpected lifecycle write: {kind}, 0x{register:02X}={value}')
@@ -110,6 +115,67 @@ def test_native_listen_standby_warmup_emission_and_live_watts(lifecycle_native):
     case.conversion.assert_not_called()
     ui._open_laser_cli.assert_not_called()
     assert ui.laser_device is native
+
+
+def test_return_to_listen_enables_native_wavelength_then_preserves_live_watts(lifecycle_native):
+    case = lifecycle_native
+    ui, registers = case.ui, case.registers
+    ui._laser_power_control_mode = 'watts'
+    registers.update({0x01: 6, 0x32: 2})
+    ui._publish_laser_state(case.native.StatusRead())
+    ui._apply_button_locks_for_status(case.native.StatusRead())
+    assert not ui.laser_wavelegnth.isEnabled()
+    ui.laser_listen_clicked()
+    ui.check_laser_status()
+    assert ui.laser_wavelegnth.isEnabled() and ui.laser_standby.isEnabled()
+    for selection in ('Green', 'DUV', 'IR'):
+        ui.laser_wavelegnth.setCurrentText(selection)
+        ui.laser_wavelegnth_changed()
+        ui.check_laser_status()
+        assert ui.laser_wavelegnth.currentText() == selection
+        assert ui.laser_wavelegnth.isEnabled()
+        assert registers[0x01] == 1 and registers[0x32] == 1
+    assert case.writes == [('U8', 0x30, 1), ('U8', 0x0E, 1), ('U8', 0x0E, 3), ('U8', 0x0E, 0)]
+    ui.laser_standby_clicked()
+    ui.check_laser_status()
+    registers.update({0x01: 3, 0x32: 2})
+    ui.check_laser_status()
+    ui.laser_on_clicked()
+    ui.check_laser_status()
+    ui.laser_ir_power_control.setValue(1.5)
+    ui._mark_laser_watt_edit(1.5)
+    ui._commit_laser_watt_edit()
+    assert registers[0x01] == 6 and registers[0x20] == 1500
+    case.sdk.openPorts.assert_called_once()
+    case.sdk.closePorts.assert_not_called()
+
+
+@pytest.mark.parametrize('fails', [False, True])
+def test_watt_transaction_blocks_nested_timer_poll_and_releases_guard(watt_gui, fails):
+    ui, device, _ = watt_gui
+    device.protocol = 'nktpbus'
+    device.code = 129
+    device.wavelength_basis = 'IR verified'
+    ui._laser_power_control_mode = 'watts'
+    ui._apply_button_locks_for_status(device.StatusRead())
+    assert ui.laser_on.isEnabled() and ui.laser_enable.isEnabled()
+    ui.check_laser_status = Mock(side_effect=AssertionError('No nested SDK poll during watt write'))
+    def write(watts):
+        assert ui._laser_status_in_progress
+        ui._poll_laser_status()  # SDK/Windows can process this timer while writing.
+        assert ui.laser_on.isEnabled() and ui.laser_enable.isEnabled()
+        if fails:
+            raise ConnectionError('Write failed')
+        return watts
+    device.set_ir_power_watts = Mock(side_effect=write)
+    ui.laser_ir_power_control.setValue(1.25)
+    ui._apply_ir_power_watts()
+    ui.check_laser_status.assert_not_called()
+    assert not ui._laser_status_in_progress
+    assert ui.laser_on.isEnabled() and ui.laser_enable.isEnabled()
+    assert not device.calls and device.code == 129
+    if fails:
+        assert 'Write failed' in ui.errors[-1]
 
 
 @pytest.mark.parametrize('confirmed', [True, False], ids=['delayed-confirmation', 'timeout'])

@@ -209,6 +209,10 @@ class LaserPowerControlMixin:
             self.error_message(f'Interlock reset was not confirmed: {reason}. Standby and emission were not requested.')
 
     def _apply_native_ir_watts(self):
+        # The SDK can pump Windows events during a register call. A nested
+        # status timer then receives RegResultApplicationBusy and clears the UI.
+        # Own the whole write/readback transaction just like a status poll.
+        self._laser_status_in_progress = True
         try:
             accepted = self.laser_device.set_ir_power_watts(self.laser_ir_power_control.value())
             self._sync_controls_from_device()
@@ -224,6 +228,8 @@ class LaserPowerControlMixin:
             logging.getLogger('pyccapt.laser').warning(
                 'IR watt request failed on %s: %s', getattr(self, 'com_port_laser', '?'), exc)
             self.error_message(f'IR watt request failed: {exc}')
+        finally:
+            self._laser_status_in_progress = False
 
     def _ir_power_conditions(self):
         device = self.laser_device

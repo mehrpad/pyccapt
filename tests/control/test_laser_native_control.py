@@ -13,6 +13,8 @@ def native(monkeypatch, request):
     wavelength = getattr(request, 'param', 0)
     registers = {0x01: 6, 0x67: 0, 0x32: 2, 0x37: 0, 0x20: 1000,
                  0x05: 800, 0x35: 4, 0x36: 1, 0x10: 1000, 0x11: 250}
+    if wavelength is not None:
+        registers[0x0E] = wavelength
     sdk = Mock()
     sdk.openPorts.return_value = sdk.closePorts.return_value = 0
     sdk.deviceGetAllTypes.return_value = (0, bytes(15) + b'\x95' + bytes(239))
@@ -77,6 +79,91 @@ def test_existing_native_wavelength_is_read_without_a_protocol_change(native, wa
     assert 'register 0x0E' in laser.wavelength_basis
     sdk.registerWriteU8.assert_not_called()
     sdk.registerWriteU16.assert_not_called()
+
+
+@pytest.mark.parametrize('selection', [0, 1, 3])
+@pytest.mark.parametrize('interlock', [1, 2])
+def test_native_wavelength_changes_in_listen_use_only_the_vendor_wavelength_register(native, selection, interlock):
+    laser, sdk, registers = native
+    registers.update({0x01: 1, 0x32: interlock})
+    laser.wavelength_change(selection)
+    assert readback.wavelength(laser.wavelength_read()) == selection
+    assert 'register 0x0E' in laser.wavelength_basis
+    sdk.registerWriteU8.assert_called_once_with('FAKE', 15, 0x0E, selection, -1)
+    sdk.registerWriteU16.assert_not_called()
+    sdk.registerWriteU32.assert_not_called()
+    assert registers[0x01] == 1 and registers[0x32] == interlock
+    sdk.closePorts.assert_not_called()
+
+
+@pytest.mark.parametrize('state,interlock,error', [(2, 2, 0), (3, 2, 0), (5, 2, 0), (6, 2, 0),
+                                                (1, 0, 0), (1, 0x3000, 0), (1, 1, 7)])
+def test_wavelength_cannot_change_during_emission_warmup_or_fault(native, state, interlock, error):
+    laser, sdk, registers = native
+    registers.update({0x01: state, 0x32: interlock, 0x67: error})
+    with pytest.raises(ValueError, match='confirmed Listen'):
+        laser.wavelength_change(1)
+    sdk.registerWriteU8.assert_not_called()
+
+
+def test_unsupported_wavelength_register_retains_verified_selection_without_enabling_edits(native):
+    laser, sdk, registers = native
+    del registers[0x0E]
+    registers.update({0x01: 1, 0x32: 1})
+    assert readback.wavelength(laser.wavelength_read()) == 0
+    assert not laser.supports_wavelength_changes
+    with pytest.raises(ValueError, match='supported wavelength readback'):
+        laser.wavelength_change(1)
+    sdk.registerWriteU8.assert_not_called()
+
+
+def test_native_wavelength_readback_tracks_external_selection_instead_of_cli_cache(native):
+    laser, _, registers = native
+    registers[0x0E] = 3
+    assert readback.wavelength(laser.wavelength_read()) == 3
+
+
+def test_acknowledged_wavelength_write_does_not_invent_position(native):
+    laser, sdk, registers = native
+    registers[0x01] = 1
+    sdk.registerWriteU8.side_effect = None
+    sdk.registerWriteU8.return_value = 0  # Accepted; actual position remains IR for now.
+    laser.wavelength_change(1)
+    assert laser._wavelength_index is None
+    assert readback.wavelength(laser.wavelength_read()) == 0
+    registers[0x0E] = 1
+    assert readback.wavelength(laser.wavelength_read()) == 1
+
+
+def test_brief_sdk_busy_status_is_retried_without_replaying_writes(native, monkeypatch):
+    from pyccapt.control.devices import nkt_native
+    laser, sdk, _ = native
+    read = sdk.registerReadU8.side_effect
+    busy = [True, True]
+    def read_busy(*args):
+        return (15, 0) if busy and busy.pop() else read(*args)
+    sdk.registerReadU8.side_effect = read_busy
+    sleep = Mock()
+    monkeypatch.setattr(nkt_native.time, 'sleep', sleep)
+    assert readback.scalar(laser.StatusRead()) == 129
+    assert not laser.status_fault
+    assert sleep.call_count == 2
+    sdk.registerWriteU8.assert_not_called()
+    sdk.registerWriteU16.assert_not_called()
+
+
+def test_persistent_sdk_busy_is_reported_and_does_not_reuse_old_status(native, monkeypatch):
+    from pyccapt.control.devices import nkt_native
+    laser, sdk, _ = native
+    sdk.registerReadU8.side_effect = None
+    sdk.registerReadU8.return_value = (15, 0)
+    sdk.registerReadU8.reset_mock()
+    monkeypatch.setattr(nkt_native.time, 'sleep', Mock())
+    with pytest.raises(ConnectionError, match='Native register 0x01'):
+        laser.StatusRead()
+    assert sdk.registerReadU8.call_count == 4
+    assert not laser.status_details and laser.status_fault
+    sdk.registerWriteU8.assert_not_called()
 
 
 def test_persistent_native_session_keeps_vendor_watchdog_monitoring_active(native):

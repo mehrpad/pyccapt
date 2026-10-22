@@ -220,6 +220,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         self.laser_power = QtWidgets.QDoubleSpinBox(parent=Laser_Control)
         self.laser_power.setObjectName("doubleSpinBox")
         self.gridLayout_3.addWidget(self.laser_power, 1, 1, 1, 1)
+        self._setup_laser_power_controls(Laser_Control)
         self.gridLayout_5.addLayout(self.gridLayout_3, 0, 0, 2, 3)
         self.label_12 = QtWidgets.QLabel(parent=Laser_Control)
         font = QtGui.QFont()
@@ -645,7 +646,8 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         self.retranslateUi(Laser_Control)
         QtCore.QMetaObject.connectSlotsByName(Laser_Control)
         tooltips.apply_tooltips(self, tooltips.LASER_TOOLTIPS)
-        Laser_Control.setTabOrder(self.laser_wavelegnth, self.laser_power)
+        Laser_Control.setTabOrder(self.laser_wavelegnth, self.laser_ir_power_control)
+        Laser_Control.setTabOrder(self.laser_ir_power_control, self.laser_power)
         Laser_Control.setTabOrder(self.laser_power, self.laser_rate)
         Laser_Control.setTabOrder(self.laser_rate, self.laser_enable)
         Laser_Control.setTabOrder(self.laser_enable, self.laser_on)
@@ -886,7 +888,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             warning.setText(
                 "Override Access enables two potentially disruptive controls:\n"
                 "  - Stage Reference (moves all axes on their own)\n"
-                "  - Nktpbus mode (hands the laser over to NKT control software)"
+                "  - CLI and NKTPBus protocol switches (release/reconnect the laser port)"
             )
             warning.setInformativeText(
                 "Make sure nothing is in the way of the laser stage and you really want to switch laser modes. Continue?"
@@ -1321,7 +1323,8 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         Return:
             None
         """
-        self.change_laser_power = True
+        if getattr(self, '_laser_power_control_mode', 'aom') == 'aom':
+            self.change_laser_power = True
 
     def laser_rate_changed(self):
         """
@@ -1469,6 +1472,9 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
 
     def switch_to_nktpbus_mode(self):
         """Send the same LF-terminated command as the standalone helper."""
+        if not getattr(self, 'flag_super_user_stage', False):
+            self.error_message('Enable Override Access before switching the laser protocol.')
+            return
         already_native = getattr(self.laser_device, 'protocol', None) == 'nktpbus'
         with self._laser_mode_transition('NKTPBus') as port:
             if not port:
@@ -1580,21 +1586,23 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             and getattr(self.laser_device, 'supports_wavelength_changes', True))
         self.laser_rate.setEnabled(idle and not running and bool(getattr(self, '_frequency_table', {})))
         self.laser_divition_factor.setEnabled(known and not running)
-        self.laser_power.setEnabled(known and not self._laser_alignment_busy())
+        self.laser_power.setEnabled(known and not self._laser_alignment_busy()
+                                    and getattr(self, '_laser_power_control_mode', 'aom') == 'aom')
         if hasattr(self, 'laser_ir_power_control'):
             native = getattr(self.laser_device, 'protocol', None) == 'nktpbus'
-            watt_enabled = native and known and not running and not self._laser_alignment_busy()
+            watt_enabled = (native and known and not running and not self._laser_alignment_busy()
+                            and getattr(self, '_laser_power_control_mode', 'watts') == 'watts')
             self.laser_ir_power_control.setEnabled(watt_enabled)
             if not watt_enabled:
                 self._laser_watt_edit_pending = False
             tip = ('Press Enter or leave the field to set laser power on the existing connection. '
                    'This adjusts the IR feeding the selected wavelength, not a Green/DUV watt setpoint. '
-                   'Operating state and shutter are not changed. Manual AOM edits override this setpoint.'
-                   if native else 'Watt control requires the separate Connect W control action, which stops output. '
-                   'Standby and Laser On use the existing CLI connection. '
-                   'Laser power (W) controls the IR feeding the selected output. AOM percent is under Advanced AOM (%).')
+                   'Operating state and shutter are not changed. Select Use AOM (%) for relative control.'
+                   if native else 'Watt control requires a native connection. Selecting Use watts (W) from AOM mode '
+                   'connects it explicitly and stops output once. This controls IR feeding the selected output.')
             self.laser_ir_power_control.setToolTip(tip)
         self._render_laser_indicators()
+        self._update_laser_power_mode_button()
         self._update_laser_mode_buttons()
 
     # ------------------------------------------------------------------
@@ -1647,11 +1655,11 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         enabled = (not getattr(self, '_laser_mode_switch_in_progress', False)
                    and not getattr(self, '_laser_stopping', False)
                    and not self.variables.start_flag and not self._laser_alignment_busy())
-        # Laser communication controls are independent of stage Override Access.
+        # Manual protocol switches require Override Access as well as idle I/O.
         for name in ('nktpbus_mode_switch', 'switch_to_cli_button'):
             button = getattr(self, name, None)
             if button is not None:
-                button.setEnabled(enabled)
+                button.setEnabled(enabled and getattr(self, 'flag_super_user_stage', False))
         button = getattr(self, 'laser_native_control_button', None)
         if button is not None:
             native = (getattr(self.laser_device, 'protocol', None) == 'nktpbus'
@@ -1966,6 +1974,9 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
 
     def switch_to_cli_clicked(self):
         """Release CLI/SDK handles, select CLI if necessary, then reconnect."""
+        if not getattr(self, 'flag_super_user_stage', False):
+            self.error_message('Enable Override Access before switching the laser protocol.')
+            return
         with self._laser_mode_transition('CLI') as port:
             if not port:
                 return

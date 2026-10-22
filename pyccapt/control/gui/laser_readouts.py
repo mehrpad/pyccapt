@@ -310,6 +310,8 @@ class LaserReadoutMixin:
                         raise ValueError('Stop the experiment before changing the laser divider.')
                     self.laser_device.Div(self.laser_divition_factor.value())
                 else:
+                    if getattr(self, '_laser_power_control_mode', 'aom') != 'aom':
+                        raise ValueError('Select AOM control before changing the AOM percentage.')
                     if self.laser_power.value() > float(self.conf.get('laser_aom_max_percent', 100.)):
                         raise ValueError('Requested AOM setting exceeds laser_aom_max_percent in config.toml.')
                     if readback.scalar(self.laser_device.ModeRead()) != 2:

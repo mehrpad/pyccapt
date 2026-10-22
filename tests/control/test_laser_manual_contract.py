@@ -885,6 +885,7 @@ def test_manual_mode_handover_cancels_pending_startup_recovery(mode_gui):
 def test_cli_switch_releases_existing_session_before_probe(laser_gui, monkeypatch):
     from pyccapt.control.nkt_photonics import nktpbus_switch
     ui = laser_gui
+    ui.flag_super_user_stage = True
     ui.com_port_laser = 'FAKE'
     ui.laser_device.close_port = Mock()
     old_device = ui.laser_device
@@ -1491,7 +1492,7 @@ def test_watt_connection_does_not_require_stage_override(watt_gui, code, label):
     ui._apply_button_locks_for_status(f'ly_oxp2_dev_status {code}')
     assert ui.laser_native_control_button.isEnabled()
     assert ui.laser_native_control_button.text() == label
-    assert ui.switch_to_cli_button.isEnabled()
+    assert not ui.switch_to_cli_button.isEnabled()
     assert not ui.laser_ir_power_control.isEnabled()
     ui.variables.start_flag = True
     ui._update_laser_mode_buttons()

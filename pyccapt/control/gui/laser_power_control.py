@@ -1,13 +1,78 @@
-"""Native watt-control helpers retained independently of the primary AOM GUI."""
+"""Exclusive watt/AOM control with a persistent native watt connection."""
 import logging
+import math
 import time
+
+from PyQt6 import QtWidgets
 
 from pyccapt.control.devices.nkt_native import NativeLaser
 from pyccapt.control.nkt_photonics import nktpbus_switch, readback
 
 
 class LaserPowerControlMixin:
+    def _setup_laser_power_controls(self, parent):
+        self._laser_power_control_mode = 'watts'
+        self._laser_watt_edit_pending = False
+        self.laser_ir_power_control_label = QtWidgets.QLabel('Laser power (W)', parent)
+        self.laser_ir_power_control_label.setFont(self.label.font())
+        self.laser_ir_power_control = QtWidgets.QDoubleSpinBox(parent)
+        self.laser_ir_power_control.setObjectName('laser_ir_power_control')
+        maximum = float(self.conf.get('laser_ir_max_power_w', 5.2))
+        if not math.isfinite(maximum) or not 0 < maximum <= 65.535:
+            raise ValueError('laser_ir_max_power_w must be finite and within 0..65.535 W.')
+        self.laser_ir_power_control.setRange(0., maximum)
+        self.laser_ir_power_control.setDecimals(3)
+        self.laser_ir_power_control.setSingleStep(.01)
+        self.laser_ir_power_control.setKeyboardTracking(False)
+        self.laser_ir_power_control.setFixedSize(159, 25)
+        self.laser_ir_power_control.setEnabled(False)
+        self.laser_power.setEnabled(False)
+        self.gridLayout_3.removeWidget(self.label)
+        self.gridLayout_3.removeWidget(self.laser_power)
+        self.gridLayout_3.addWidget(self.laser_ir_power_control_label, 1, 0)
+        self.gridLayout_3.addWidget(self.laser_ir_power_control, 1, 1)
+        self.gridLayout_3.addWidget(self.label, 4, 0)
+        self.gridLayout_3.addWidget(self.laser_power, 4, 1)
+        self.laser_power_mode_button = QtWidgets.QPushButton('Use AOM (%)', parent)
+        self.laser_power_mode_button.setObjectName('laser_power_mode_button')
+        self.laser_power_mode_button.setFixedHeight(25)
+        self.gridLayout_3.addWidget(self.laser_power_mode_button, 4, 2)
+        self.laser_power_mode_button.clicked.connect(self._toggle_laser_power_control)
+        self.laser_ir_power_control.valueChanged.connect(self._mark_laser_watt_edit)
+        self.laser_ir_power_control.editingFinished.connect(self._commit_laser_watt_edit)
+
+    def _toggle_laser_power_control(self):
+        if (getattr(self, '_laser_mode_switch_in_progress', False) or getattr(self, '_laser_stopping', False)
+                or getattr(self, '_laser_status_in_progress', False)
+                or self.variables.start_flag or self._laser_alignment_busy()):
+            return
+        target = 'aom' if getattr(self, '_laser_power_control_mode', 'watts') == 'watts' else 'watts'
+        # A selection change never applies an old edit to the other controller.
+        self.change_laser_power = False
+        self._laser_watt_edit_pending = False
+        self._laser_power_control_mode = target
+        if target == 'watts' and self.laser_device is not None and getattr(self.laser_device, 'protocol', None) != 'nktpbus':
+            self._use_native_ir_control()
+            if getattr(self.laser_device, 'protocol', None) != 'nktpbus':
+                self._laser_power_control_mode = 'aom'
+        self._apply_button_locks_for_status(getattr(self, '_last_laser_status', None))
+
+    def _update_laser_power_mode_button(self):
+        button = getattr(self, 'laser_power_mode_button', None)
+        if button is None:
+            return
+        watts = self._laser_power_control_mode == 'watts'
+        button.setText('Use AOM (%)' if watts else 'Use watts (W)')
+        button.setToolTip('Enable AOM percent and disable watt edits without changing the laser state.' if watts else
+                          'Enable watt edits and disable AOM percent. Connecting from CLI stops output once; '
+                          'a native connection keeps its operating state.')
+        button.setEnabled(not (getattr(self, '_laser_mode_switch_in_progress', False)
+                               or getattr(self, '_laser_stopping', False)
+                               or self.variables.start_flag or self._laser_alignment_busy()))
+
     def _mark_laser_watt_edit(self, _value):
+        if getattr(self, '_laser_power_control_mode', 'watts') != 'watts':
+            return
         self._laser_watt_edit_pending = True
 
     def _commit_laser_watt_edit(self):
@@ -164,6 +229,8 @@ class LaserPowerControlMixin:
                 readback.wavelength(device.wavelength_read()))
 
     def _apply_ir_power_watts(self):
+        if getattr(self, '_laser_power_control_mode', 'watts') != 'watts':
+            return
         if (getattr(self, '_laser_mode_switch_in_progress', False) or getattr(self, '_laser_stopping', False)
                 or getattr(self, '_laser_status_in_progress', False)):
             return

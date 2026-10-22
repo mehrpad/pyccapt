@@ -456,7 +456,7 @@ def test_laser_compact_layout_preserves_controls_and_readouts(instrument_window,
         app.processEvents()
     print(f'Laser GUI size: {window.size()}, preview: {tmp_path}')
     assert window.width() <= 1000
-    # Primary AOM control and the optical readouts fit in the compact window.
+    # Watt/AOM controls and the optical readouts fit in the compact window.
     assert window.height() <= 780  # Three readable alignment lines need vertical space.
     viewport = window._responsive_window.scroll.viewport()
     assert window._responsive_window.scroll.horizontalScrollBar().maximum() == 0
@@ -467,6 +467,7 @@ def test_laser_compact_layout_preserves_controls_and_readouts(instrument_window,
     assert status.height() >= 3 * status.fontMetrics().lineSpacing()
     assert ui.laser_alignment_panel.rect().contains(status.geometry())
     controls = [ui.laser_wavelegnth, ui.laser_wavelegnth_nm_label, ui.label, ui.laser_power,
+                ui.laser_ir_power_control_label, ui.laser_ir_power_control, ui.laser_power_mode_button,
                 ui.laser_rate, ui.laser_divition_factor, ui.laser_enable, ui.laser_on,
                 ui.laser_standby, ui.laser_listen, ui.laser_state_label, ui.laser_auto_alignment, ui.laser_tracking,
                 *ui.laser_alignment_fields.values(), *ui.laser_alignment_buttons,
@@ -494,13 +495,18 @@ def test_laser_compact_layout_preserves_controls_and_readouts(instrument_window,
         field.setValue(field.maximum())
         assert field.width() >= field.fontMetrics().horizontalAdvance(field.text()) + 30
     assert not ui.laser_stage_reference.isEnabled()
-    assert ui.switch_to_cli_button.isEnabled()  # Recover communication without stage Override Access.
+    assert not ui.switch_to_cli_button.isEnabled()
+    assert not ui.nktpbus_mode_switch.isEnabled()
     assert not hasattr(ui, 'laser_native_control_button')
-    assert not hasattr(ui, 'laser_ir_power_control')
+    assert ui._laser_power_control_mode == 'watts'
+    assert ui.laser_power_mode_button.text() == 'Use AOM (%)'
+    assert not ui.laser_power.isEnabled()
+    assert not ui.laser_ir_power_control.isEnabled()  # No device readback yet.
     assert not hasattr(ui, 'laser_aom_advanced_button')
     assert not hasattr(ui, 'laser_ir_power_apply')
     assert ui.laser_power.isVisible() and ui.label.isVisible()
-    assert ui.gridLayout_3.itemAtPosition(1, 1).widget() is ui.laser_power
+    assert ui.gridLayout_3.itemAtPosition(1, 1).widget() is ui.laser_ir_power_control
+    assert ui.gridLayout_3.itemAtPosition(4, 1).widget() is ui.laser_power
     assert ui.label.text() == 'AOM (%)'
     assert ui.laser_ir_power_label.text() == 'Measured IR power (W)'
     assert ui.label_9.text() == 'Selected output power (W)'
@@ -556,6 +562,9 @@ def test_primary_aom_controls_live_output_and_readback_never_replays_edits(instr
     )
     ui._sync_controls_from_device(initial=True)
     window.show()
+    app.processEvents()
+    assert ui._laser_power_control_mode == 'watts' and not ui.laser_power.isEnabled()
+    ui.laser_power_mode_button.click()
     app.processEvents()
     field = ui.laser_power
     assert field.isVisible() and field.isEnabled() and field.value() == 20.

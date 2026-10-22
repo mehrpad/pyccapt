@@ -57,14 +57,13 @@ class Ui_Cameras_Alignment(CameraLayoutMixin):
                 conf: Configuration data.
                 SignalEmitter: Signal emitter for communication.
         """
-        # Cameras default to firmware auto exposure on startup. The Auto
-        # Exposure Time button starts selected (green), like the worker.
+        # Cameras default to fixed manual exposure on startup, like the worker.
         # This flag mirrors the worker's `exposure_auto` state.
-        self.auto_exposure_time_flag = True
+        self.auto_exposure_time_flag = False
         # "Manual Exposure Time" toggle (only meaningful when auto is off):
         #   selected  -> the three µs fields are user-editable;
         #   unselected -> the worker drives them from light-dependent presets.
-        self.manual_exposure_flag = False
+        self.manual_exposure_flag = True
         # This window keeps a local Override Access state for illumination and
         # camera-exposure changes.  Startup illumination is intentionally not
         # gated: it always turns on at the configured default brightness.
@@ -696,11 +695,11 @@ class Ui_Cameras_Alignment(CameraLayoutMixin):
         self._sync_all_exposure_sliders()
 
         self.original_button_style = self.auto_exposure_time.styleSheet()
-        self.auto_exposure_time.setStyleSheet("QPushButton{background: rgb(0, 255, 26)}")
         self._original_superuser_style = self.superuser.styleSheet()
         # Captured so the "Manual Exposure Time" toggle can restore its own
         # look when deselected (it goes green while selected).
         self._original_manual_exposure_style = self.default_exposure_time.styleSheet()
+        self.default_exposure_time.setStyleSheet("QPushButton{background: rgb(0, 255, 26)}")
         # Camera illumination and exposure controls start locked until the
         # operator deliberately grants Override Access.
         self._refresh_exposure_widgets()
@@ -743,9 +742,11 @@ class Ui_Cameras_Alignment(CameraLayoutMixin):
         self.light.setText(_translate("Cameras_Alignment", "Light On / Off"))
         self.illumination_percent_label.setText(_translate("Cameras_Alignment", "Dimming"))
         self.led_light_2.setText(_translate("Cameras_Alignment", "Side exposure (µs)"))
-        self.exposure_time_cam_1.setText(_translate("Cameras_Alignment", "2000000"))
-        self.exposure_time_cam_2.setText(_translate("Cameras_Alignment", "1000000"))
-        self.exposure_time_cam_3.setText(_translate("Cameras_Alignment", "2000000"))
+        for field, value in zip(
+            (self.exposure_time_cam_1, self.exposure_time_cam_2, self.exposure_time_cam_3),
+            camera.CameraWorker.DEFAULT_MANUAL_EXPOSURE,
+        ):
+            field.setText(str(value))
         self.led_light_3.setText(_translate("Cameras_Alignment", "Top exposure (µs)"))
         self.default_exposure_time.setText(_translate("Cameras_Alignment", "Manual Exposure Time"))
         self.led_light_4.setText(_translate("Cameras_Alignment", "Angle exposure (µs)"))

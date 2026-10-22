@@ -88,14 +88,14 @@ class CameraWorker(QObject):
     # "Manual Exposure Time" mode; the worker picks the row by light state.
     PRESET_EXPOSURE_DARK = (2_000_000, 1_000_000, 2_000_000)  # light off
     PRESET_EXPOSURE_LIGHT = (100_000, 50_000, 100_000)  # light on
+    DEFAULT_MANUAL_EXPOSURE = (100_000, 300_000, 2_000_000)
 
     def __init__(self, variables, emitter, conf=None):
         super().__init__()
-        # Cameras start with firmware auto exposure enabled, matching the
-        # GUI's selected Auto Exposure Time button. The operator can still
-        # switch to preset or user-manual exposure from the GUI.
-        self.exposure_auto = True
-        self.exposure_mode = 'Continuous'
+        # Start with fixed manual values, matching the GUI. Auto exposure and
+        # light-dependent presets remain selectable by the operator.
+        self.exposure_auto = False
+        self.exposure_mode = 'Off'
         self.emitter = emitter
         self.variables = variables
 
@@ -139,14 +139,13 @@ class CameraWorker(QObject):
         self.index_save_image = 0
         # User-entered manual exposure values (microseconds), per view
         # [side, top, angle]. Used only in user-manual mode; preset mode
-        # uses PRESET_EXPOSURE_DARK / PRESET_EXPOSURE_LIGHT instead. Seeded
-        # with the dark presets so the GUI fields start with sane values.
-        self.exposure_time_cam_1 = self.PRESET_EXPOSURE_DARK[0]
-        self.exposure_time_cam_2 = self.PRESET_EXPOSURE_DARK[1]
-        self.exposure_time_cam_3 = self.PRESET_EXPOSURE_DARK[2]
+        # uses PRESET_EXPOSURE_DARK / PRESET_EXPOSURE_LIGHT instead.
+        self.exposure_time_cam_1 = self.DEFAULT_MANUAL_EXPOSURE[0]
+        self.exposure_time_cam_2 = self.DEFAULT_MANUAL_EXPOSURE[1]
+        self.exposure_time_cam_3 = self.DEFAULT_MANUAL_EXPOSURE[2]
         # Manual-exposure source (only relevant when exposure_auto is off):
-        #   False -> light-dependent presets (default), True -> user values.
-        self.manual_user_mode = False
+        #   False -> light-dependent presets, True -> user values (default).
+        self.manual_user_mode = True
 
         self.emitter.cam_1_exposure_time.connect(self.set_exposure_time_1)
         self.emitter.cam_2_exposure_time.connect(self.set_exposure_time_2)

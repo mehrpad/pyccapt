@@ -5,7 +5,7 @@ import serial
 
 # Author Ian Baker
 
-
+# for activating nktbus mode run """python -m pyccapt.control.nkt_photonics.nktpbus_activate""" in powershell
 if __name__ == '__main__':
     # Customise your comport to your Origami address
     comPort = "COM9"

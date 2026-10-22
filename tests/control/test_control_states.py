@@ -6,6 +6,8 @@ import logging
 import multiprocessing
 import pickle
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
 
@@ -357,21 +359,91 @@ def test_safe_off_flag_is_not_independent_physical_confirmation(shared):
 
 
 def test_busy_or_abandoned_state_lock_cannot_trap_existing_stop_commands(shared):
-    shared.lock_state.acquire()
+    lock = shared.lock_states["dc_supply"]
+    lock.acquire()
     calls = []
     started = time.monotonic()
     try:
         with commanded(shared, "dc_supply", "exp", "output_off"):
             calls.append("F0")
         shared.stop_flag = True
-        with pytest.raises(TimeoutError):
-            shared.control_states()
-        with pytest.raises(TimeoutError):
-            shared.control_state_laser
+        assert shared.control_states()["dc_supply"].revision == 0
+        assert shared.control_state_laser.revision == 0
+        assert shared.control_state("experiment").requested == "stopped"
+        shared.stage_position_snapshot = (1., 2., 3., time.monotonic())
+        assert shared.control_state("sample_stage").details["xyz_m"] == (1., 2., 3.)
+        with pytest.raises(TimeoutError, match="dc_supply"):
+            shared.update_control_state("dc_supply", "exp", "fault", fault="test", lock_timeout_s=0.01)
     finally:
-        shared.lock_state.release()
+        lock.release()
     assert calls == ["F0"] and shared.stop_flag is True
     assert time.monotonic()-started < 0.5
+
+
+@pytest.mark.parametrize("reader", ["control_states", "control_state", "attribute"])
+def test_slow_diagnostic_reader_cannot_block_stage_publication(shared, reader, caplog):
+    entered, resume = threading.Event(), threading.Event()
+
+    class SlowNamespace(SimpleNamespace):
+        def __getattribute__(self, name):
+            value = super().__getattribute__(name)
+            if name == "control_state_sample_stage" and threading.current_thread().name.startswith("diagnostic"):
+                entered.set()
+                assert resume.wait(3), "diagnostic read was not released"
+            return value
+
+    shared.ns = SlowNamespace(**vars(shared.ns))
+    def read():
+        if reader == "control_states":
+            return shared.control_states()["sample_stage"]
+        if reader == "control_state":
+            return shared.control_state("sample_stage")
+        return shared.control_state_sample_stage
+
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="diagnostic") as executor:
+        pending = executor.submit(read)
+        try:
+            assert entered.wait(3), "diagnostic read did not start"
+            # Publication must succeed while the diagnostic read is still paused.
+            shared.stage_position_snapshot = (1e-6, 2e-6, 3e-6, time.monotonic())
+            state = shared.control_state("sample_stage")
+            assert state.revision == 1 and state.valid
+            assert state.details["xyz_m"] == (1e-6, 2e-6, 3e-6)
+            assert not any(record.levelno >= logging.ERROR for record in caplog.records)
+        finally:
+            resume.set()
+        previous = pending.result(timeout=3)
+    assert previous.revision == 0 and not previous.valid  # Complete old record.
+
+
+def _hold_state_lock(shared, device, entered):
+    with shared.lock_states[device]:
+        entered.set()
+        threading.Event().wait(30)
+
+
+def test_terminated_publisher_does_not_block_other_devices_or_state_reads():
+    context = multiprocessing.get_context("spawn")
+    with context.Manager() as manager:
+        shared = make_variables(manager.Namespace())
+        entered = context.Event()
+        process = context.Process(target=_hold_state_lock, args=(shared, "camera_0", entered))
+        process.start()
+        try:
+            assert entered.wait(10), "publisher did not acquire its state lock"
+            process.terminate()
+            process.join(5)
+            assert not process.is_alive()
+            shared.stage_position_snapshot = (1e-6, 2e-6, 3e-6, time.monotonic())
+            assert shared.control_state("sample_stage").details["xyz_m"] == (1e-6, 2e-6, 3e-6)
+            states = shared.control_states()
+            assert states["camera_0"].revision == 0 and not states["camera_0"].valid
+            with pytest.raises(TimeoutError, match="camera_0"):
+                shared.update_control_state("camera_0", "cam", "fault", fault="test", lock_timeout_s=0.01)
+        finally:
+            if process.is_alive():
+                process.terminate()
+                process.join(5)
 
 
 def test_final_diagnostics_are_strict_json_and_do_not_create_another_dataset(shared, tmp_path):

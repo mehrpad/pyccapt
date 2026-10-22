@@ -9,6 +9,21 @@ from pyccapt.control.nkt_photonics import readback
 
 
 class LaserReadoutMixin:
+    def _laser_readback_failure_reason(self, error):
+        """Keep one offline diagnostic while SDK transport errors alternate."""
+        text = str(error)
+        transport = (isinstance(error, TimeoutError)
+            or (isinstance(error, Exception) and any(marker in text for marker in (
+                'RegResultTimeout', 'RegResultPortNotFound', 'Native laser is not connected',
+                'Incomplete or missing laser reply')))
+            or type(error).__module__.startswith('serial.'))
+        if transport:
+            port = getattr(self, 'com_port_laser', None) or getattr(getattr(self, 'laser_device', None), 'comPort', '?')
+            if not getattr(self, '_last_optical_readback_error', '').startswith('Laser unavailable on '):
+                self._laser_transport_error_detail = text
+            return f'Laser unavailable on {port}; it may be powered off or disconnected.'
+        return text
+
     def get_frequency(self, index):
         return getattr(self, '_frequency_table', {}).get(index, math.nan)
 
@@ -19,6 +34,7 @@ class LaserReadoutMixin:
     def _invalidate_laser_readouts(self, reason):
         if getattr(self, '_laser_stopping', False):
             return
+        reason = self._laser_readback_failure_reason(reason)
         self.variables.laser_telemetry = {'monotonic': time.monotonic(), 'valid': False, 'error': str(reason)}
         for name in ('laser_average_power', 'laser_pulse_energy', 'laser_freq', 'laser_intensity'):
             setattr(self.variables, name, math.nan)
@@ -44,8 +60,10 @@ class LaserReadoutMixin:
                     and not any(marker in reason for marker in
                                 ('Read failed:', 'unsupported or ambiguous', 'no usable unit-bearing')))
             )
+            detail = getattr(self, '_laser_transport_error_detail', '') if reason.startswith('Laser unavailable on ') else ''
             logging.getLogger('pyccapt.laser').log(
-                logging.INFO if expected else logging.WARNING, 'Laser optical readback unavailable: %s', reason)
+                logging.INFO if expected else logging.WARNING, 'Laser optical readback unavailable: %s%s',
+                reason, f' First failure: {detail}' if detail else '')
         elif previous and not reason:
             logging.getLogger('pyccapt.laser').info('Laser optical readback restored')
 
@@ -220,12 +238,16 @@ class LaserReadoutMixin:
             self._update_wavelength_nm_label()
             self._recompute_derived_readouts()
             self._apply_button_locks_for_status(raw['status'])
+            self._last_laser_sync_error = ''
             return True
         except Exception as exc:
             if not self._laser_readout_is_current(device):
                 return False
             self._invalidate_laser_readouts(exc)
-            self.error_message(f'Laser readback unavailable: {exc}')
+            reason = self._laser_readback_failure_reason(exc)
+            if reason != getattr(self, '_last_laser_sync_error', ''):
+                self.error_message(f'Laser readback unavailable: {reason}')
+            self._last_laser_sync_error = reason
             return False
 
     def _recompute_derived_readouts(self):

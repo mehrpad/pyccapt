@@ -409,6 +409,70 @@ def test_camera_compact_layout_preserves_views_and_all_controls(instrument_windo
 
 
 @pytest.mark.parametrize('instrument_window', ['cameras'], indirect=True)
+def test_camera_startup_exposure_reaches_hardware_and_modes_remain_selectable(
+    instrument_window, monkeypatch,
+):
+    _, ui, _ = instrument_window
+    camera = gui_cameras.camera
+    monkeypatch.setattr(camera, 'check_camera_backend', lambda: (False, 'Simulated cameras'))
+    worker = camera.CameraWorker(ui.variables, ui.emitter, ui.conf)
+    monkeypatch.setattr(worker, '_apply_quality_settings', lambda cam: None)
+    monkeypatch.setattr(worker, '_lock_gain_low', lambda cam: None)
+
+    class Node:
+        def __init__(self):
+            self.value = None
+
+        def SetValue(self, value):
+            self.value = value
+
+    cameras = [SimpleNamespace(
+        ExposureAuto=Node(), ExposureTime=Node(),
+        Open=lambda: None, StartGrabbing=lambda strategy: None,
+    ) for _ in range(2)]
+    monkeypatch.setattr(camera, 'pylon', SimpleNamespace(
+        InstantCamera=lambda device: cameras[device], GrabStrategy_LatestImageOnly=0,
+    ))
+    worker._tl_factory = SimpleNamespace(CreateDevice=lambda info: info.slot)
+    for slot in range(2):
+        info = SimpleNamespace(slot=slot, GetSerialNumber=lambda: 'simulated')
+        assert worker._attach_slot(slot, info)
+
+    fields = (ui.exposure_time_cam_1, ui.exposure_time_cam_2)
+    assert not ui.auto_exposure_time_flag and ui.manual_exposure_flag
+    assert ui.auto_exposure_time.styleSheet() == ui.original_button_style
+    assert ui.default_exposure_time.styleSheet() != ui._original_manual_exposure_style
+    assert [field.text() for field in fields] == ['100000', '300000']
+    assert [cam.ExposureAuto.value for cam in cameras] == ['Off', 'Off']
+    assert [cam.ExposureTime.value for cam in cameras] == [100_000, 300_000]
+    for light in (True, False):
+        ui.variables.light = light
+        worker.light_switch()
+        worker._apply_exposure_changes()
+        assert [cam.ExposureTime.value for cam in cameras] == [100_000, 300_000]
+
+    # Override Access still gates editing; auto and presets remain selectable.
+    assert all(not field.isEnabled() for field in fields)
+    ui.flag_super_user = True
+    ui._refresh_exposure_widgets()
+    assert all(field.isEnabled() for field in fields)
+    ui.auto_exposure_time.click()
+    worker._apply_exposure_changes()
+    assert [cam.ExposureAuto.value for cam in cameras] == ['Continuous', 'Continuous']
+    assert not worker.manual_user_mode
+    assert all(not field.isEnabled() for field in fields)
+    ui.auto_exposure_time.click()
+    worker._apply_exposure_changes()
+    assert [cam.ExposureTime.value for cam in cameras] == [2_000_000, 1_000_000]
+    ui.default_exposure_time.click()
+    fields[0].setText('150000')
+    fields[0].editingFinished.emit()
+    worker._apply_exposure_changes()
+    assert worker.manual_user_mode
+    assert [cam.ExposureTime.value for cam in cameras] == [150_000, 300_000]
+
+
+@pytest.mark.parametrize('instrument_window', ['cameras'], indirect=True)
 def test_camera_notification_expires_without_refresh_restoring_it(instrument_window):
     window, ui, app = instrument_window
     window.show()

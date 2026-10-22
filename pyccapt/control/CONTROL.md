@@ -237,7 +237,12 @@ connection rows show the serial and slot on one line, with the full model and
 state in a tooltip. Bottom notifications disappear after five seconds; routine
 refreshes do not restore an expired message.
 
-Laser Control defaults to 980 × 650. Settings and three optical readouts sit above
+On startup, Auto Exposure Time is off and Manual Exposure Time is selected:
+side exposure is 100,000 µs (100 ms) and top exposure is 300,000 µs (300 ms).
+Override Access unlocks exposure changes. Auto mode and the light-dependent
+presets remain available through the existing toggles.
+
+Laser Control defaults to 980 × 650. Settings and four optical readouts sit above
 the alignment controls beside the response plot; stage position readouts, speed
 presets, jog buttons, Home, Reference, STOP and Override Access occupy the row
 below. Both plot tabs, alignment settings and CLI/NKTPBus controls remain
@@ -246,6 +251,12 @@ connection and alignment messages still wrap. Alignment fields have six pixels
 between rows and wider column gaps so they cannot overlap. Connection warnings
 and temporary errors share a two-line message area; scroll or hover to read
 longer messages. The window grows to fit the controls when fonts require it.
+
+When the laser is powered off or disconnected, polling continues with invalid
+readback and disabled emission controls. One warning records the first failure
+for that unavailable episode; alternating SDK timeout and missing-port replies
+do not repeat it. A valid status reply logs communication recovery once. A new
+loss of communication or a different device fault is reported again.
 
 Visualization opens at 980 × 570. Hold DC, Set DC and the target voltage field
 share one row, and the LED with Running/Stopped text sits in the top-right
@@ -281,8 +292,9 @@ names = [
 
 `core/control_state.py` defines the shared connection, request, observation,
 evidence, freshness, fault and command lifecycle contract. Every active control
-owner publishes through `Variables.update_control_state()`; the dedicated shared
-lock protects transactions across threads and spawned processes. Low-rate legacy
+owner publishes through `Variables.update_control_state()`; a shared lock per
+resource protects transactions across threads and spawned processes. Diagnostic
+readers fetch complete records without holding publisher locks. Low-rate legacy
 adapters retain compatibility, and existing guards/actuation sequences remain
 authoritative. Live health includes the registry. Completed/failed datasets save
 `meta_data/control_states.json` after cleanup. Write-only devices expose commanded

@@ -54,7 +54,7 @@ class Variables:
     # ------------------------------------------------------------------
     _OWNERSHIP = {
         # Shared state records contain owner observations and client requests;
-        # update_control_state validates authority under a dedicated shared lock.
+        # update_control_state validates authority under a lock per resource.
         **{f"control_state_{name}": (f"{spec.owner}; requests: {','.join(spec.requesters)}",
                                     ("main", "exp", "cam", "pump", "viz", "tdc", "drs"))
            for name, spec in STATE_SPECS.items()},
@@ -592,7 +592,7 @@ class Variables:
     }
 
     _INTERNAL_ATTRS = {
-        "lock_state",
+        "lock_states",
         "ns",
         "lock",
         "lock_lists",
@@ -617,7 +617,9 @@ class Variables:
 
         object.__setattr__(self, "ns", namespace)
         object.__setattr__(self, "lock", multiprocessing.Lock())
-        object.__setattr__(self, "lock_state", multiprocessing.Lock())
+        object.__setattr__(self, "lock_states", {
+            name: multiprocessing.Lock() for name in STATE_SPECS
+        })
         object.__setattr__(self, "lock_lists", multiprocessing.Lock())
         object.__setattr__(self, "lock_data_plot", multiprocessing.Lock())
         object.__setattr__(self, "lock_exp", multiprocessing.Lock())
@@ -662,7 +664,7 @@ class Variables:
 
     def _lock_for_field(self, field: str):
         if field.startswith("control_state_"):
-            return self.lock_state
+            return self.lock_states[field.removeprefix("control_state_")]
         if field in self._LIST_FIELDS:
             return self.lock_lists
         if field in self._DATA_PLOT_FIELDS:
@@ -688,8 +690,10 @@ class Variables:
         # ``getattr`` under the lock and translate a missing field into the
         # same AttributeError -- one IPC instead of two, identical semantics.
         if field.startswith("control_state_"):
-            with self._state_transaction(0.05):
-                return deepcopy(getattr(namespace, field))
+            # Writers replace a complete record in one Manager assignment;
+            # readers receive either the old or the new immutable record.
+            # Diagnostic reads must not hold a writer lock across IPC calls.
+            return deepcopy(getattr(namespace, field))
         lock = self._lock_for_field(field)
         with lock:
             try:
@@ -721,34 +725,37 @@ class Variables:
                 logging.getLogger("pyccapt.state").exception("Could not adapt shared field %s", field)
 
     @contextmanager
-    def _state_transaction(self, timeout_s):
+    def _state_transaction(self, device, timeout_s):
         # A terminated publisher can leave a multiprocessing semaphore locked.
         # Additional diagnostic state must never trap the physical stop path.
-        if not self.lock_state.acquire(timeout=timeout_s):
-            raise TimeoutError("Control state registry is busy or its publisher exited while holding the lock")
+        lock = self.lock_states[device]
+        if not lock.acquire(timeout=timeout_s):
+            raise TimeoutError(f"Control state update lock for {device} was not available within {timeout_s:g} s")
         try:
             yield
         finally:
-            self.lock_state.release()
+            lock.release()
 
     def control_state(self, device: str):
         """Return an immutable owner/request snapshot (freshness is computed on read)."""
         if device not in STATE_SPECS:
             raise KeyError(f"Unknown control resource {device!r}")
-        with self._state_transaction(0.05):
-            return deepcopy(getattr(self.ns, f"control_state_{device}"))
+        return deepcopy(getattr(self.ns, f"control_state_{device}"))
 
     def control_states(self) -> dict:
-        """Consistent snapshot of all resources, without reading acquisition lists."""
-        with self._state_transaction(0.05):
-            return {name: deepcopy(getattr(self.ns, f"control_state_{name}")) for name in STATE_SPECS}
+        """Read complete records without blocking publishers or acquisition.
+
+        Each record is atomic; different resources may be read at different
+        instants. Freshness is evaluated after collection by the diagnostics.
+        """
+        return {name: self.control_state(name) for name in STATE_SPECS}
 
     def update_control_state(self, device: str, source: str, event: str, *, lock_timeout_s=0.5, **changes):
         """Atomic read/reduce/write across GUI threads and spawned processes."""
         if device not in STATE_SPECS:
             raise KeyError(f"Unknown control resource {device!r}")
         field = f"control_state_{device}"
-        with self._state_transaction(lock_timeout_s):
+        with self._state_transaction(device, lock_timeout_s):
             previous = getattr(self.ns, field)
             state = evolve(previous, source, event, **changes)
             if state is not previous:

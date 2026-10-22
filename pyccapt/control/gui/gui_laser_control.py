@@ -1370,6 +1370,15 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         self._laser_status_in_progress = True
         try:
             self.check_laser_status()
+            if (getattr(self, '_last_laser_poll_error', '') and self.laser_device is not None
+                    and readback.scalar(getattr(self, '_last_laser_status', None)) is not None):
+                self._last_laser_poll_error = ''
+                if getattr(self, '_last_optical_readback_error', '').startswith('Laser unavailable on '):
+                    # A fresh status reply ends the transport-loss episode;
+                    # optical values remain invalid until their own refresh.
+                    self._last_optical_readback_error = ''
+                logging.getLogger('pyccapt.laser').info(
+                    'Laser communication restored on %s', getattr(self, 'com_port_laser', '?'))
         except Exception as exc:
             if getattr(self, '_laser_stopping', False):
                 return
@@ -1382,11 +1391,17 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
                          'change_laser_wavelegnth', 'change_laser_power', 'change_laser_rate',
                          'change_laser_divition_factor'):
                 setattr(self, flag, False)
-            self._invalidate_laser_readouts(exc)
+            reason = self._laser_readback_failure_reason(exc)
+            self._invalidate_laser_readouts(reason)
             self._apply_button_locks_for_status(None)
-            publish(self.variables, "laser", "main", "fault", fault=str(exc), fail_command=True)
-            self.error_message(f'Laser command/readback failed: {exc}')
-            print(f"Laser status poll failed: {exc}")
+            fault = dict(fault=reason, fail_command=True)
+            if reason.startswith('Laser unavailable on '):
+                fault['connection'] = Connection.DISCONNECTED
+            publish(self.variables, "laser", "main", "fault", **fault)
+            if reason != getattr(self, '_last_laser_poll_error', ''):
+                self.error_message(f'Laser command/readback failed: {reason}')
+                logging.getLogger('pyccapt.laser').debug('First laser poll failure: %s', exc)
+            self._last_laser_poll_error = reason
         finally:
             self._laser_status_in_progress = False
 

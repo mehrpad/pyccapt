@@ -30,19 +30,30 @@ def test_voltage_fit_removes_known_multiplicative_drift(mode):
 
 @pytest.mark.parametrize("mode", ["tof", "mc"])
 def test_multi_peak_voltage_fit_removes_known_drift(mode):
-    voltage = np.tile(np.linspace(4000.0, 6000.0, 10000), 3)
-    labels = np.repeat([28.0, 58.0, 100.0], 10000)
-    measured = labels * (1.0 + 0.002 * (voltage - 5000.0) / 1000.0)
+    # Peaks need an intrinsic width: with drift-only (flat-topped) peaks the
+    # histogram maximum is arbitrary, and detection at the requested 0.01 bins
+    # (rather than the old hard-coded 0.1, which found only one peak here)
+    # resolves those plateaus.
+    rng = np.random.default_rng(0)
+    voltage = np.tile(np.linspace(4000.0, 6000.0, 20000), 3)
+    labels = np.repeat([28.0, 58.0, 100.0], 20000)
+    intrinsic = 0.0005
+    measured = labels * (1.0 + 0.002 * (voltage - 5000.0) / 1000.0) * (1.0 + rng.normal(0, intrinsic, labels.size))
     variables = Variables()
     variables.dld_t_calib = measured.copy()
     variables.mc_calib = measured.copy()
-    calibration.multi_peak_voltage_corr_main(
+    _, peaks = calibration.multi_peak_voltage_corr_main(
         voltage, variables, calibration_mode=mode, model="curve_fit",
         bin_size=0.01, n_peaks=3, prominence=10, distance=10,
     )
+    assert sorted(round(p["position"]) for p in peaks) == [28, 58, 100]
     corrected = variables.get_calibration_array(mode)
     # Histogram centres can change global scale; the fitted voltage dependence
-    # must nevertheless disappear in each known reference population.
+    # must nevertheless disappear in each known reference population, leaving
+    # only the intrinsic peak width.
     for target in np.unique(labels):
         selected = labels == target
-        assert np.std(corrected[selected]) < np.std(measured[selected]) * 0.01
+        slope_before = np.polyfit(voltage[selected], measured[selected], 1)[0]
+        slope_after = np.polyfit(voltage[selected], corrected[selected], 1)[0]
+        assert abs(slope_after) < abs(slope_before) * 0.05
+        assert np.std(corrected[selected]) < target * intrinsic * 1.1

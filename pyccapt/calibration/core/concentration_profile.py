@@ -3,6 +3,9 @@
 The profile is evaluated in fixed, non-overlapping acquisition-order windows.
 Every ranged species contributes its stoichiometric atom count and every
 unranged event contributes one unknown atom-equivalent to the denominator.
+Events without a finite mass-to-charge (excluded or cropped by the guided
+workflow) are neither ranged nor unranged: they are reported separately as
+``excluded_events`` and never enter the denominator.
 Only user-selected elements, ions, or the unranged fraction are plotted.
 """
 
@@ -103,9 +106,22 @@ def _resolve_selectors(selectors: Iterable[str], species: list[_RangeSpecies]):
     return resolved
 
 
+_UNRANGED = -1
+_EXCLUDED = -2
+
+
 def _assign_species(mc: np.ndarray, species: list[_RangeSpecies]) -> np.ndarray:
     """Return one species-list index per event, or -1 when it is unranged."""
     return assign_intervals(mc, [item.lower for item in species], [item.upper for item in species])
+
+
+def _assign_profile_events(mc: np.ndarray, species: list[_RangeSpecies]) -> np.ndarray:
+    """Like :func:`_assign_species` (whose half-open contract the display
+    path shares), but marks non-finite masses ``_EXCLUDED`` so they stay out
+    of concentration denominators."""
+    assigned = np.asarray(_assign_species(mc, species)).astype(np.int64, copy=True)
+    assigned[~np.isfinite(mc)] = _EXCLUDED
+    return assigned
 
 
 def calculate_concentration_profile(
@@ -144,7 +160,7 @@ def calculate_concentration_profile(
     mc = np.asarray(mc_values, dtype=float).reshape(-1)
     species = _range_species(range_data)
     selectors = _resolve_selectors(selected_species, species)
-    assigned = _assign_species(mc, species)
+    assigned = _assign_profile_events(mc, species)
     denominator_weights = np.asarray([item.atom_count for item in species], dtype=float)
     numerator_weights = {}
     for label, kind, value in selectors:
@@ -162,7 +178,8 @@ def calculate_concentration_profile(
 
     all_ranged = assigned >= 0
     all_counts = np.bincount(assigned[all_ranged], minlength=len(species))
-    overall_unranged = int((~all_ranged).sum())
+    overall_unranged = int(np.count_nonzero(assigned == _UNRANGED))
+    overall_excluded = int(np.count_nonzero(assigned == _EXCLUDED))
     overall_ranged_atoms = float(all_counts @ denominator_weights)
     overall_denominator = overall_ranged_atoms + overall_unranged
     overall_percentages = {
@@ -184,7 +201,8 @@ def calculate_concentration_profile(
         ranged = assigned_window >= 0
         counts = np.bincount(assigned_window[ranged], minlength=len(species))
         ranged_atoms = float(counts @ denominator_weights)
-        unranged_events = int((~ranged).sum())
+        unranged_events = int(np.count_nonzero(assigned_window == _UNRANGED))
+        excluded_events = int(np.count_nonzero(assigned_window == _EXCLUDED))
         denominator = ranged_atoms + unranged_events
         numerators = {
             label: (unranged_events if weights is None else float(counts @ weights))
@@ -198,6 +216,7 @@ def calculate_concentration_profile(
             "detected_events": stop - start,
             "ranged_atoms": ranged_atoms,
             "unranged_events": unranged_events,
+            "excluded_events": excluded_events,
             "total_atom_equivalents": denominator,
         }
         for label, _, _ in selectors:
@@ -208,6 +227,7 @@ def calculate_concentration_profile(
     profile.attrs["overall_percentages"] = overall_percentages
     profile.attrs["overall_ranged_atoms"] = overall_ranged_atoms
     profile.attrs["overall_unranged_events"] = overall_unranged
+    profile.attrs["overall_excluded_events"] = overall_excluded
     profile.attrs["overall_atom_equivalents"] = overall_denominator
     return profile
 
@@ -218,7 +238,7 @@ def plot_concentration_profile(profile: pd.DataFrame, *, figure_size=(9.0, 5.0))
 
     metadata = {
         "sequence", "sequence_start", "sequence_end", "detected_events",
-        "ranged_atoms", "unranged_events", "total_atom_equivalents",
+        "ranged_atoms", "unranged_events", "excluded_events", "total_atom_equivalents",
     }
     curves = [column for column in profile.columns if column not in metadata]
     if profile.empty or not curves:
@@ -322,7 +342,7 @@ def calculate_roi_concentration_profile(
     edges[-1] = end
     species = _range_species(range_data)
     selectors = _resolve_selectors(selected_species, species)
-    assigned = _assign_species(mc, species)
+    assigned = _assign_profile_events(mc, species)
     denominator_weights = np.asarray([item.atom_count for item in species], dtype=float)
     numerator_weights = {
         label: (
@@ -347,7 +367,8 @@ def calculate_roi_concentration_profile(
         ranged = assigned_bin >= 0
         counts = np.bincount(assigned_bin[ranged], minlength=len(species))
         ranged_atoms = float(counts @ denominator_weights)
-        unranged_events = int((~ranged).sum())
+        unranged_events = int(np.count_nonzero(assigned_bin == _UNRANGED))
+        excluded_events = int(np.count_nonzero(assigned_bin == _EXCLUDED))
         denominator = ranged_atoms + unranged_events
         record = {
             "position_nm": (edges[index] + edges[index + 1]) / 2.0,
@@ -356,6 +377,7 @@ def calculate_roi_concentration_profile(
             "detected_events": int(assigned_bin.size),
             "ranged_atoms": ranged_atoms,
             "unranged_events": unranged_events,
+            "excluded_events": excluded_events,
             "total_atom_equivalents": denominator,
         }
         for label, _, _ in selectors:
@@ -368,7 +390,7 @@ def calculate_roi_concentration_profile(
     assigned_roi = assigned[roi_indices]
     ranged_roi = assigned_roi >= 0
     roi_counts = np.bincount(assigned_roi[ranged_roi], minlength=len(species))
-    roi_unranged = int((~ranged_roi).sum())
+    roi_unranged = int(np.count_nonzero(assigned_roi == _UNRANGED))
     roi_denominator = float(roi_counts @ denominator_weights) + roi_unranged
     profile.attrs["overall_percentages"] = {
         label: (
@@ -380,6 +402,7 @@ def calculate_roi_concentration_profile(
     }
     profile.attrs["axis"] = axis
     profile.attrs["roi_event_count"] = int(roi_indices.size)
+    profile.attrs["roi_excluded_events"] = int(np.count_nonzero(assigned_roi == _EXCLUDED))
     profile.attrs["roi_center_nm"] = center
     profile.attrs["roi_size_nm"] = size
     profile.attrs["profile_range_nm"] = (start, end)
@@ -392,7 +415,7 @@ def plot_roi_concentration_profile(profile: pd.DataFrame, *, figure_size=(9.0, 5
 
     metadata = {
         "position_nm", "bin_start_nm", "bin_end_nm", "detected_events",
-        "ranged_atoms", "unranged_events", "total_atom_equivalents",
+        "ranged_atoms", "unranged_events", "excluded_events", "total_atom_equivalents",
     }
     curves = [column for column in profile.columns if column not in metadata]
     if profile.empty or not curves:

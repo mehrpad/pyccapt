@@ -1013,9 +1013,13 @@ def calculate_ppi_and_ipp(data, max_start_counter):
         return delta_p, multi
     progress_step = max(1, total_iterations // 5)
 
-    previous_counter = counter[0]
+    # Python ints: ``start_counter`` is stored as uint64, so numpy
+    # subtraction at a counter wrap would underflow to ~1.8e19 instead of
+    # going negative, and the wrap branch below would never fire.
+    previous_counter = int(counter[0])
     run_start = 0
     for i, current_counter in enumerate(counter):
+        current_counter = int(current_counter)
         if i == 0:
             delta_p[i] = 0
         else:

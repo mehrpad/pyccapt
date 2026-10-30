@@ -257,11 +257,14 @@ def multi_peak_voltage_corr_main(
     calib_arr = variables.get_calibration_array(calibration_mode)
     dld_hv = np.asarray(dld_highVoltage, dtype=float)
 
+    # Forward bin_size: ``distance`` is in bins, so the 0.1 Da default bins
+    # would demand ~50 Da peak spacing and leave a single, over-wide window.
     detected = _auto_detect_peaks(
         calib_arr,
         n_peaks=n_peaks,
         prominence=prominence,
         distance=distance,
+        hist_bin_size=bin_size,
     )
 
     all_v_means = []
@@ -375,6 +378,7 @@ def multi_peak_bowl_corr_main(
         n_peaks=n_peaks,
         prominence=prominence,
         distance=distance,
+        hist_bin_size=bin_size,
     )
 
     all_x_samples = []

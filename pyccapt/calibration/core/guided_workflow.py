@@ -390,7 +390,7 @@ class GuidedWorkflow:
             return {"accepted_ranges": len(accepted["rows"]) if accepted else 0,
                     "preview_ranges": len(candidate["rows"]),
                     "preview_ranged_events": int(np.count_nonzero(candidate["assignment"] >= 0)),
-                    "unranged_events": int(np.count_nonzero((candidate["assignment"] < 0) & self.active_mask)),
+                    **self._unassigned_counts(candidate["assignment"]),
                     "excluded_events": int((~self.active_mask).sum())}
         key = "mass" if stage == "calibration" else "xyz"
         values = candidate[key]
@@ -401,6 +401,15 @@ class GuidedWorkflow:
             overlap = valid & np.isfinite(accepted[key])
             result["rms_change"] = float(np.sqrt(np.mean((values[overlap]-accepted[key][overlap])**2))) if overlap.any() else None
         return result
+
+    def _unassigned_counts(self, assignment):
+        """Split selected, unassigned events into unranged (finite mass outside
+        every range) and those with no calibrated mass (e.g. invalid voltage)."""
+        unassigned = (assignment < 0) & self.active_mask
+        calibration = self.accepted["calibration"]
+        finite = np.isfinite(calibration["mass"]) if calibration is not None else np.ones_like(unassigned)
+        return {"unranged_events": int(np.count_nonzero(unassigned & finite)),
+                "no_mass_events": int(np.count_nonzero(unassigned & ~finite))}
 
     def analyze(self):
         self._check()
@@ -416,7 +425,7 @@ class GuidedWorkflow:
         total = sum(atoms.values())
         result = {"events_per_ion": ions,
                   "atoms_per_element": atoms, "atomic_fractions_of_assigned_atoms": {k: v/total for k, v in atoms.items()} if total else {},
-                  "unranged_events": int(np.count_nonzero((ranged["assignment"] < 0) & self.active_mask)),
+                  **self._unassigned_counts(ranged["assignment"]),
                   "selected_events": int(self.active_mask.sum()), "excluded_events": int((~self.active_mask).sum()),
                   "interpretation": "Hard interval assignments, not a background-corrected composition or uncertainty estimate"}
         self._snapshot("analyze")

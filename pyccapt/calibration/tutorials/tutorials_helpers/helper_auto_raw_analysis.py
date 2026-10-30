@@ -86,6 +86,11 @@ def plot_full_spectrum(*args, **kwargs):
 # Top-level analysis runner
 # ---------------------------------------------------------------------------
 
+def effective_peak_units(peak_source: str, peak_units: str) -> str:
+    """Range-table windows are always mc (Da); only manual windows may be TOF."""
+    return "mc" if peak_source == "range" else peak_units
+
+
 def run_analysis(
     variables,
     species: list[dict],
@@ -754,9 +759,8 @@ def call_auto_raw_data_analysis(variables) -> None:
             if has_range:
                 summary.value = (
                     f"Range table loaded with <b>{len(range_species)}</b> usable rows. "
-                    f"Windows are <b>mc</b> ranges from the table; the dropdown "
-                    f"selection (<i>{unit_label}</i>) controls only how the "
-                    f"per-peak ratio table is binned. Click <i>Run analysis</i>."
+                    f"Range-table windows are <b>mass/charge (Da)</b>, so peak units "
+                    f"are fixed to mc in this mode. Click <i>Run analysis</i>."
                 )
             else:
                 summary.value = (
@@ -774,7 +778,7 @@ def call_auto_raw_data_analysis(variables) -> None:
     )
     peak_units = widgets.Dropdown(
         options=[("TOF (ns)", "tof"), ("Mass/charge (Da)", "mc")],
-        value="tof",
+        value=effective_peak_units(peak_source.value, "tof"),
         description="Peak units:",
         layout=widgets.Layout(width="320px"),
     )
@@ -817,6 +821,7 @@ def call_auto_raw_data_analysis(variables) -> None:
             pair_sum_tol,
         ):
             control.disabled = busy
+        peak_units.disabled = busy or peak_source.value == "range"
         # Manual rows: while busy, force-disabled. Otherwise, restore the
         # source-driven disabled state (rows are disabled in "From range" mode).
         rows_disabled = busy or peak_source.value == "range"
@@ -826,6 +831,8 @@ def call_auto_raw_data_analysis(variables) -> None:
 
     def _on_source_change(_change):
         _set_rows_disabled(manual_rows, peak_source.value == "range")
+        peak_units.value = effective_peak_units(peak_source.value, peak_units.value)
+        peak_units.disabled = peak_source.value == "range"
         _refresh_summary()
 
     def _on_units_change(_change):
@@ -863,7 +870,7 @@ def call_auto_raw_data_analysis(variables) -> None:
                     variables,
                     species,
                     save_plots=bool(save_plots.value),
-                    peak_units=str(peak_units.value),
+                    peak_units=effective_peak_units(peak_source.value, str(peak_units.value)),
                     recovery_mode=str(recovery_mode.value),
                     pair_sum_tolerance_bins=float(pair_sum_tol.value),
                 )
@@ -876,6 +883,7 @@ def call_auto_raw_data_analysis(variables) -> None:
 
     # Initialize disabled state to match the dropdown's starting value.
     _set_rows_disabled(manual_rows, peak_source.value == "range")
+    peak_units.disabled = peak_source.value == "range"
     _refresh_summary()
 
     panel = widgets.VBox(

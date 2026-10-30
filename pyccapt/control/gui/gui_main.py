@@ -2083,6 +2083,12 @@ class Ui_PyCCAPT(AlignmentGuiMixin, ExperimentPlanGuiMixin, MainLayoutMixin):
         if self.variables.electrode_out:
             self.error_message("Electrode is out; experiment start is blocked.")
             return False
+        # Every start path (Start button, next TOML-plan row, next alignment
+        # sample, Flat Test) passes through here, so the gate is re-checked
+        # before HV is applied even when it was opened between chained runs.
+        if self.variables.flag_main_gate and not self.flag_super_user:
+            self.error_message("Please close the main gate or activate the Access Override")
+            return False
         if getattr(self.variables, 'laser_alignment_enabled', False):
             from pyccapt.control.apt.laser_alignment_runtime import validate_laser_alignment
             try:

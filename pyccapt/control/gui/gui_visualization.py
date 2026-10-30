@@ -893,9 +893,13 @@ class Ui_Visualization(VisualizationLayoutMixin):
                 self._set_dc_voltage_controls_enabled(False)
 
     def _dc_voltage_limits(self):
-        """(min, max) DC voltage the Set field allows, from config.toml."""
+        """(min, max) DC voltage the Set field allows: config.toml limits,
+        with the max further capped by the running experiment's vdc_max."""
         lo = int(self.conf.get('default_vdc_min', 500))
         hi = int(self.conf.get('default_vdc_max', 9000))
+        run_max = getattr(self.variables, 'vdc_max', None)
+        if run_max:
+            hi = min(hi, int(run_max))
         return (lo, hi) if lo <= hi else (hi, lo)
 
     def _set_dc_voltage_controls_enabled(self, enabled):

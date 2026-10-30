@@ -446,8 +446,11 @@ class APT_Exp_Control:
 
         # update v_dc
         if not self.variables.stop_flag and not self.variables.vdc_hold and voltage_step != 0:
-            specimen_voltage_temp = max(self.vdc_min, min(self.specimen_voltage + voltage_step, self.vdc_max))
-            if specimen_voltage_temp >= self.vdc_min:
+            # A held-DC setpoint (vdc_min) above vdc_max must never lift the
+            # floor past the ceiling, or one step would jump HV beyond vdc_max.
+            vdc_floor = min(self.vdc_min, self.vdc_max)
+            specimen_voltage_temp = max(vdc_floor, min(self.specimen_voltage + voltage_step, self.vdc_max))
+            if specimen_voltage_temp >= vdc_floor:
                 if specimen_voltage_temp != self.specimen_voltage:
                     if self._vdc_active():
                         apt_exp_control_func.command_v_dc(self.com_port_v_dc, ">S0 %s" % specimen_voltage_temp)
@@ -1095,7 +1098,7 @@ class APT_Exp_Control:
         set_experiment_state(self.variables, ExperimentState.STOPPING)
         self._request_detector_stop()
         # Hardware safety must not wait for detector joins or HDF5/email work.
-        self.safe_outputs_off()
+        self._safe_off_before_finalization()
 
         self.log_apt.info('Experiment is finished')
         print(
@@ -1166,7 +1169,7 @@ class APT_Exp_Control:
         # This flag set to True to save the last screenshot of the experiment in the GUI visualization
         self.variables.last_screen_shot = True
         validate_detector_data_lengths(self.variables, self.conf, self.log_apt)
-        set_experiment_state(self.variables, ExperimentState.FINALIZING)
+        self._enter_finalization_state()
 
         # Sanity check: stage/laser positions are published by the Stage Control
         # and Laser Control GUIs' poll timers. If a SmarAct stage was not
@@ -1231,6 +1234,31 @@ class APT_Exp_Control:
                 evidence=Evidence.READBACK if physical else Evidence.SOFTWARE,
                 connection=Connection.CONNECTED if physical else Connection.DISABLED,
                 fault="" if permitted else "Physical interlock opened")
+
+    def _safe_off_before_finalization(self):
+        """Turn outputs off at loop exit without abandoning data finalization.
+
+        A failed safe-off must not skip the detector flush and HDF5 write that
+        follow: retry once immediately, record the failure, and return.
+        clear_up() retries again and re-raises if the outputs are still unsafe.
+        """
+        try:
+            self.safe_outputs_off()
+        except Exception:
+            try:
+                self.safe_outputs_off()
+            except Exception as exc:
+                self._run_failure = str(exc)
+                self.variables.experiment_error = self._run_failure
+                if self.log_apt is not None:
+                    self.log_apt.exception('Hardware safe-off failed; continuing data finalization')
+
+    def _enter_finalization_state(self):
+        """FINALIZING requires SAFE_OFF; an unsafe run is FAILED but still saved."""
+        if self.variables.hardware_safe:
+            set_experiment_state(self.variables, ExperimentState.FINALIZING)
+        else:
+            set_experiment_state(self.variables, ExperimentState.FAILED, self._run_failure)
 
     def safe_outputs_off(self):
         """Best-effort, idempotent transition of every energized output to off."""

@@ -303,6 +303,18 @@ def initialize_pfeiffer_gauges(variables):
     variables.vacuum_buffer = float(value)
 
 
+def read_tpg_pressure(tpg, channel, issue_key, report_once, clear_issue):
+    """Read one TPG362 channel in mBar, or -1.0 when the read or parse fails."""
+    try:
+        value, _ = tpg.pressure_gauge(channel)
+        pressure = float(value)
+    except Exception as e:
+        report_once(issue_key, f"Error reading {issue_key} (TPG channel {channel}): {e}")
+        return -1.0
+    clear_issue(issue_key)
+    return pressure
+
+
 def state_update(conf, variables, emitter, stop_event=None):
     """
     Read gauge parameters and update variables.
@@ -548,25 +560,14 @@ def state_update(conf, variables, emitter, stop_event=None):
                     set_temperature_tmp_ll = None
                     variables.set_temperature_flag_ll = None
             if conf['COM_PORT_gauge_mc'] != "off" and tpg is not None:
-                value, _ = tpg.pressure_gauge(2)
-                try:
-                    vacuum_main = float(value)
-                    clear_issue("vacuum_main")
-                except Exception as e:
-                    report_once("vacuum_main", f"Error reading Temperature:{e}")
-                    # Handle the case where response is not a valid float
-                    vacuum_main = -1.0
+                # A NAK, garbled reply or serial error must not kill this
+                # thread: the last good pressures would then stay published
+                # forever and the gate interlock would trust them. Publish -1
+                # (unknown) instead, which the interlock treats as unsafe.
+                vacuum_main = read_tpg_pressure(tpg, 2, "vacuum_main", report_once, clear_issue)
                 variables.vacuum_main = vacuum_main
                 emitter.vacuum_main.emit(float(vacuum_main))
-                value, _ = tpg.pressure_gauge(1)
-                try:
-                    vacuum_buffer = float(value)
-                    clear_issue("vacuum_buffer")
-                except Exception as e:
-                    report_once("vacuum_buffer", f"Error reading BC:{e}")
-                    tpg = None
-                    # Handle the case where response is not a valid float
-                    vacuum_buffer = -1.0
+                vacuum_buffer = read_tpg_pressure(tpg, 1, "vacuum_buffer", report_once, clear_issue)
                 variables.vacuum_buffer = vacuum_buffer
                 emitter.vacuum_buffer.emit(float(vacuum_buffer))
             if conf['pump_ll'] != "off" and E_AGC_ll is not None:

@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import multiprocessing
 import logging
+import time
 from multiprocessing import shared_memory
 
 import numpy as np
@@ -288,16 +289,37 @@ class SharedEventBuffer(SharedRingBuffer):
         finally:
             self._lock.release()
 
+    # Consecutive 50 ms lock timeouts before the transport is declared down,
+    # and the interval between non-blocking recovery probes afterwards.
+    _MAX_CONSECUTIVE_TIMEOUTS = 10
+    _RECOVERY_PROBE_INTERVAL_S = 2.0
+
     def _acquire(self):
         # A terminated process can abandon a Windows semaphore. Plot-only
         # delivery must never strand acquisition/Stop. Fail closed locally:
         # don't copy possibly half-written events and don't mutate the ring.
+        # One slow peer (a transient timeout) is skipped, not latched; after
+        # repeated timeouts only a non-blocking probe runs every few seconds,
+        # and the transport recovers as soon as the lock is free again.
         if self.transport_error:
-            return False
-        if self._lock.acquire(timeout=.05):
+            now = time.monotonic()
+            if now < getattr(self, '_next_probe', 0.0):
+                return False
+            self._next_probe = now + self._RECOVERY_PROBE_INTERVAL_S
+            if not self._lock.acquire(False):
+                return False
+            logging.getLogger('apt').warning('Plot event transport recovered')
+            self.transport_error = ''
+            self._timeouts = 0
             return True
-        self.transport_error = 'Plot event transport unavailable; restart the visualization context'
-        logging.getLogger('apt').error(self.transport_error)
+        if self._lock.acquire(timeout=.05):
+            self._timeouts = 0
+            return True
+        self._timeouts = getattr(self, '_timeouts', 0) + 1
+        if self._timeouts >= self._MAX_CONSECUTIVE_TIMEOUTS:
+            self.transport_error = 'Plot event transport unavailable; restart the visualization context'
+            self._next_probe = time.monotonic() + self._RECOVERY_PROBE_INTERVAL_S
+            logging.getLogger('apt').error(self.transport_error)
         return False
 
 

@@ -54,10 +54,12 @@ def atomic_write_chunk_group(
 
     fields: dict[str, dict[str, Any]] = {}
     published: list[Path] = []
+    temporaries: list[Path] = []
     try:
         for stem, values in normalized.items():
             target = directory / f"{stem}_chunk_{int(chunk_id)}.npy"
             temporary = directory / f".{target.name}.{os.getpid()}.tmp"
+            temporaries.append(temporary)
             with temporary.open("wb") as stream:
                 np.save(stream, values)
                 stream.flush()
@@ -72,7 +74,10 @@ def atomic_write_chunk_group(
                 "sha256": _sha256(target),
             }
     except Exception:
-        for path in directory.glob(f".*_chunk_{int(chunk_id)}.npy.*.tmp"):
+        # Remove only this group's own temporaries. Other streams/processes
+        # (detector writer, experiment apt metadata) can use the same chunk
+        # id concurrently in this directory; their in-flight files are theirs.
+        for path in temporaries:
             path.unlink(missing_ok=True)
         raise
 

@@ -1,5 +1,6 @@
 import datetime
 import json
+import math
 import multiprocessing
 import queue
 import threading
@@ -43,6 +44,15 @@ from pyccapt.control.core.contracts import (
 )
 from pyccapt.control.devices import initialize_devices, signal_generator
 from pyccapt.instrument_metadata import acquisition_metadata, record_mode_observation
+
+
+def _sensor_reading(value):
+    """Return a stored sensor sample: negative/non-numeric error sentinels become NaN."""
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return math.nan
+    return numeric if numeric >= 0 else math.nan
 
 
 class APT_Exp_Control:
@@ -152,9 +162,14 @@ class APT_Exp_Control:
         self.laser_alignment_runtime = None
 
         # apt/* metadata chunk state: how many items have already been flushed
-        # to disk and which chunk file ID to use next.
+        # to disk and the last successfully committed chunk file ID.
         self._apt_meta_flush_offset = 0
         self._apt_meta_chunk_id = 0
+        self._apt_meta_flush_errors = []
+        # Monotonic start of acquisition (outputs enabled); owned by this
+        # process so the time stop criterion never depends on the GUI.
+        self._run_started_monotonic = None
+        self._acquisition_started = False
 
     def _publish_status(self, kind: StatusKind, message: str = "", **metrics) -> None:
         if self.status_queue is None:
@@ -250,55 +265,94 @@ class APT_Exp_Control:
     # but slightly more disk I/O.
     _APT_META_CHUNK_SIZE = 100
 
-    def _flush_apt_meta_chunks(self, time_counter: list, time_ex: list) -> None:
+    def _apt_meta_columns(self, time_counter: list, time_ex: list, start: int = 0, end: int | None = None) -> dict:
+        """apt/* columns keyed by chunk stem (the same keys the chunks and HDF5 use)."""
+        columns = {
+            "apt_id": time_counter,
+            "apt_timestamps": time_ex,
+            "apt_num_events": self.main_counter,
+            "apt_num_raw_signals": self.main_raw_counter,
+            "apt_temperature": self.main_temperature,
+            "apt_vacuum": self.main_chamber_vacuum,
+            "apt_laser_x": self.main_laser_x,
+            "apt_laser_y": self.main_laser_y,
+            "apt_laser_z": self.main_laser_z,
+            "apt_stage_x": self.main_stage_x,
+            "apt_stage_y": self.main_stage_y,
+            "apt_stage_z": self.main_stage_z,
+            **{'apt_laser_' + key: values for key, values in self.main_laser_telemetry.items()},
+        }
+        return {stem: list(values[start:end]) for stem, values in columns.items()}
+
+    def _flush_apt_meta_chunks(self, time_counter: list, time_ex: list) -> bool:
         """Write accumulated apt/* metadata items (since last flush) to a chunk file.
 
         Uses a half-open slice [_apt_meta_flush_offset : current_len] so
         successive calls each write only the NEW items.  The in-memory lists
-        are NOT cleared, which means append_main_loop_results() still works
-        normally if chunk recovery is not needed.
+        are NOT cleared; the final HDF5 save uses them directly, so the chunks
+        are crash checkpoints. The chunk ID and offset advance only after a
+        committed write, so a retried transient failure leaves no ID gap.
+        Failures are recorded for the HDF5 provenance.
         """
         start = self._apt_meta_flush_offset
         end = len(time_counter)
         if end <= start:
-            return
+            return True
+        cid = self._apt_meta_chunk_id + 1
         try:
             chunk_dir = Path(self.variables.path) / "temp_data" / "chunks"
             chunk_dir.mkdir(parents=True, exist_ok=True)
-            self._apt_meta_chunk_id += 1
-            cid = self._apt_meta_chunk_id
-
+            dtypes = {stem: dtype for stem, _, dtype in hdf5_creator._APT_CHUNK_STEMS}
             atomic_write_chunk_group(
                 chunk_dir,
                 stream_name="apt",
                 chunk_id=cid,
-                arrays={
-                    "apt_id": np.asarray(time_counter[start:end], dtype=np.uint64),
-                    "apt_timestamps": np.asarray(time_ex[start:end], dtype=np.float64),
-                    "apt_num_events": np.asarray(self.main_counter[start:end], dtype=np.uint32),
-                    "apt_num_raw_signals": np.asarray(self.main_raw_counter[start:end], dtype=np.uint32),
-                    "apt_temperature": np.asarray(self.main_temperature[start:end], dtype=np.float64),
-                    "apt_vacuum": np.asarray(self.main_chamber_vacuum[start:end], dtype=np.float64),
-                    "apt_laser_x": np.asarray(self.main_laser_x[start:end], dtype=np.float64),
-                    "apt_laser_y": np.asarray(self.main_laser_y[start:end], dtype=np.float64),
-                    "apt_laser_z": np.asarray(self.main_laser_z[start:end], dtype=np.float64),
-                    **{'apt_laser_' + key: np.asarray(values[start:end], dtype=np.float64)
-                       for key, values in self.main_laser_telemetry.items()},
-                    "apt_stage_x": np.asarray(self.main_stage_x[start:end], dtype=np.float64),
-                    "apt_stage_y": np.asarray(self.main_stage_y[start:end], dtype=np.float64),
-                    "apt_stage_z": np.asarray(self.main_stage_z[start:end], dtype=np.float64),
-                },
+                arrays={stem: np.asarray(values, dtype=dtypes[stem])
+                        for stem, values in self._apt_meta_columns(time_counter, time_ex, start, end).items()},
             )
-
-            self._apt_meta_flush_offset = end
         except Exception as exc:
+            message = f"apt metadata chunk {cid} (rows {start}-{end}) failed: {type(exc).__name__}: {exc}"
+            self._apt_meta_flush_errors.append(message)
             if self.log_apt is not None:
-                self.log_apt.warning("apt meta chunk flush failed (chunk %d): %s", self._apt_meta_chunk_id, exc)
+                self.log_apt.warning(message)
+            return False
+        self._apt_meta_chunk_id = cid
+        self._apt_meta_flush_offset = end
+        return True
 
     def _pulse_supply_target(self, specimen_voltage):
         """Convert the desired sample pulse into a pulser supply command."""
         sample_pulse = specimen_voltage * (self.pulse_fraction / 100)
         return sample_pulse / self.pulse_amp_per_supply_voltage
+
+    def _ramp_to_new_min_voltage(self):
+        """Lower V_dc to a newly set minimum in 10 steps (~3 s).
+
+        The watchdog is kicked and Stop/E-stop are checked before every step;
+        either aborts the ramp and leaves shutdown to the main loop/safe-off.
+        """
+        if self.vdc_min > self.vdc_max:
+            self.vdc_min = self.vdc_max
+        decrement_vol = (self.specimen_voltage - self.vdc_min) / 10
+        for _ in range(10):
+            self.safety_interlock.kick_watchdog()
+            self._drain_commands()
+            if self.variables.stop_flag or not self.safety_interlock.is_safe():
+                break
+            self.specimen_voltage -= decrement_vol
+            if self._vdc_active():
+                apt_exp_control_func.command_v_dc(self.com_port_v_dc, ">S0 %s" % self.specimen_voltage)
+            time.sleep(0.3)
+        if self._vdc_active() and self.pulse_mode in ['Voltage', 'VoltageLaser']:
+            new_vp = self._pulse_supply_target(self.specimen_voltage)
+            if self.pulse_voltage_max > new_vp > self.pulse_voltage_min and self._vp_active():
+                apt_exp_control_func.command_v_p(self.com_port_v_p, 'VOLT %s' % new_vp)
+                self.pulse_voltage = new_vp * self.pulse_amp_per_supply_voltage
+                self.variables.pulse_voltage = self.pulse_voltage
+
+        self.variables.specimen_voltage = self.specimen_voltage
+        self.variables.specimen_voltage_plot = self.specimen_voltage
+        self.variables.flag_new_min_voltage = False
 
     def main_ex_loop(
         self,
@@ -337,8 +391,9 @@ class APT_Exp_Control:
         # with self.variables.lock_experiment_variables:
         self.main_counter.extend([count_temp])
         self.main_raw_counter.extend([count_raw_signals_temp])
-        self.main_temperature.extend([self.variables.temperature])
-        self.main_chamber_vacuum.extend([self.variables.vacuum_main])
+        # Device-error sentinels (-1 K / -1 mbar) are not measurements; store NaN.
+        self.main_temperature.extend([_sensor_reading(self.variables.temperature)])
+        self.main_chamber_vacuum.extend([_sensor_reading(self.variables.vacuum_main)])
         # Stage positions (meters) for this iteration, published by the
         # laser/stage GUIs. Read once per loop, like temperature/vacuum.
         self.main_laser_x.extend([self.variables.laser_pos_x])
@@ -429,7 +484,17 @@ class APT_Exp_Control:
             # simple_pid expects the *measurement* (it computes error itself).
             # output_limits are symmetric volts/iteration so the controller
             # can also drive voltage *down* when the rate is too high.
+            # simple_pid returns its previous output unchanged when the
+            # measured dt is below sample_time (coarse Windows monotonic
+            # clock). The output is applied as an increment, so a skipped
+            # evaluation must contribute no step rather than repeat the last.
+            previous_output = getattr(self.pid, '_last_output', None)
+            evaluated_at = getattr(self.pid, '_last_time', None)
             voltage_step = self.pid(self.variables.detection_rate_current)
+            skipped = previous_output is not None and getattr(self.pid, '_last_time', None) == evaluated_at
+            # A non-finite step (NaN rate) must not become +cap via min/max.
+            if skipped or voltage_step is None or not math.isfinite(voltage_step):
+                voltage_step = 0
             cap = self._pid_max_step
             voltage_step = max(-cap, min(cap, voltage_step))
 
@@ -669,6 +734,9 @@ class APT_Exp_Control:
 
         if self._is_config_enabled('tdc') and not self.initialization_error and not self._is_override_disabled("tdc"):
             self.variables.flag_tdc_failure = False
+            # A finish acknowledgement left by an earlier (crashed) run must
+            # not satisfy this run's detector-finalization wait.
+            self.variables.flag_finished_tdc = False
             self.initialize_detector_process()
         else:
             self.variables.flag_finished_tdc = True
@@ -743,21 +811,23 @@ class APT_Exp_Control:
             and not self._is_override_disabled("v_p")
             and self.pulse_mode in ['Voltage', 'VoltageLaser']
         ):
-            # Initialize pulser
-            try:
-                self.com_port_v_p = serial.Serial(self.variables.COM_PORT_V_p, baudrate=115200, timeout=0.01)
-            except Exception as e:
-                print('Can not open the COM port for V_p')
-                print(e)
-                self.initialization_v_p = False
-                self.initialization_error = True
+            # Initialize pulser (not after an earlier device failed: the run
+            # will not start, so do not open a port nobody will use).
             if not self.initialization_error:
-                self.initialization_error = apt_exp_control_func.initialization_v_p(
-                    self.com_port_v_p, self.log_apt, self.variables
-                )
+                try:
+                    self.com_port_v_p = serial.Serial(self.variables.COM_PORT_V_p, baudrate=115200, timeout=0.01)
+                except Exception as e:
+                    print('Can not open the COM port for V_p')
+                    print(e)
+                    self.initialization_v_p = False
+                    self.initialization_error = True
+                if not self.initialization_error:
+                    self.initialization_error = apt_exp_control_func.initialization_v_p(
+                        self.com_port_v_p, self.log_apt, self.variables
+                    )
 
-            if not self.initialization_error:
-                self.initialization_v_p = True
+                if not self.initialization_error:
+                    self.initialization_v_p = True
         elif self._is_config_enabled('laser') and self.pulse_mode in ['Laser', 'VoltageLaser']:
             print(f"{initialize_devices.bcolors.WARNING}Warning: turn on the laser manually{initialize_devices.bcolors.ENDC}")
 
@@ -851,6 +921,9 @@ class APT_Exp_Control:
         if self.initialization_error:
             self._run_failure = 'Experiment device initialization failed.'
         else:
+            self._acquisition_started = True
+            self._run_started_monotonic = time.monotonic()
+            self.variables.elapsed_time = 0.0
             while True:
                 self._drain_commands()
                 self._publish_health_if_due()
@@ -973,24 +1046,7 @@ class APT_Exp_Control:
 
                     else:
                         if self.variables.flag_new_min_voltage:
-                            if self.vdc_min > self.vdc_max:
-                                self.vdc_min = self.vdc_max
-                            decrement_vol = (self.specimen_voltage - self.vdc_min) / 10
-                            for _ in range(10):
-                                self.specimen_voltage -= decrement_vol
-                                if self._vdc_active():
-                                    apt_exp_control_func.command_v_dc(self.com_port_v_dc, ">S0 %s" % self.specimen_voltage)
-                                time.sleep(0.3)
-                            if self._vdc_active() and self.pulse_mode in ['Voltage', 'VoltageLaser']:
-                                new_vp = self._pulse_supply_target(self.specimen_voltage)
-                                if self.pulse_voltage_max > new_vp > self.pulse_voltage_min and self._vp_active():
-                                    apt_exp_control_func.command_v_p(self.com_port_v_p, 'VOLT %s' % new_vp)
-                                    self.pulse_voltage = new_vp * self.pulse_amp_per_supply_voltage
-                                    self.variables.pulse_voltage = self.pulse_voltage
-
-                            self.variables.specimen_voltage = self.specimen_voltage
-                            self.variables.specimen_voltage_plot = self.specimen_voltage
-                            self.variables.flag_new_min_voltage = False
+                            self._ramp_to_new_min_voltage()
 
                 # main loop function
                 if self.alignment is not None:
@@ -1024,6 +1080,8 @@ class APT_Exp_Control:
                     current_time_with_microseconds, "%Y-%m-%d %H:%M:%S.%f"
                 ).timestamp()
                 time_ex.append(current_time_unix)
+                run_elapsed_s = time.monotonic() - self._run_started_monotonic
+                self.variables.elapsed_time = run_elapsed_s
 
                 if self.variables.stop_flag:
                     self.log_apt.info('Experiment is stopped')
@@ -1062,7 +1120,7 @@ class APT_Exp_Control:
                         flag_achieved_high_voltage = 0
 
                 if self.variables.criteria_time:
-                    if self.variables.elapsed_time >= self.variables.ex_time:
+                    if run_elapsed_s >= self.variables.ex_time:
                         self.log_apt.info('Experiment is stopped because experiment time Max. is achieved')
                         # Set the stop flag and exit the loop unconditionally —
                         # without this break the loop kept running for one more
@@ -1087,6 +1145,8 @@ class APT_Exp_Control:
                 # Periodic apt/* metadata checkpoint so the data survives a crash.
                 if steps % self._APT_META_CHUNK_SIZE == 0:
                     self._flush_apt_meta_chunks(time_counter, time_ex)
+            # Acquisition duration for statistics/e-mail, frozen at loop exit.
+            self.variables.elapsed_time = time.monotonic() - self._run_started_monotonic
 
         if self.laser_alignment_runtime is not None:
             self.laser_alignment_runtime.stop()
@@ -1200,10 +1260,22 @@ class APT_Exp_Control:
                     "not connected?). apt/laser_* will be all zero."
                 )
 
+        if not self._acquisition_started:
+            # Device initialization failed before acquisition: no dataset, no
+            # report e-mail and no experiment-counter increment. The output
+            # folder keeps apt.log and any detector evidence for diagnosis.
+            self.log_apt.warning('No acquisition took place; HDF5, e-mail and experiment counter are skipped')
+            return
+
         try:
             self.variables.end_time = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
-            # save data in hdf5 file
-            hdf5_creator.hdf_creator(self.variables, self.conf, time_counter, time_ex)
+            # save data in hdf5 file; the complete in-memory apt/* columns are
+            # authoritative, the periodic chunks are crash checkpoints.
+            hdf5_creator.hdf_creator(
+                self.variables, self.conf, time_counter, time_ex,
+                apt_meta=self._apt_meta_columns(time_counter, time_ex),
+                apt_meta_flush_errors=list(self._apt_meta_flush_errors),
+            )
             # Adding results of the experiment to the log file
             self.log_apt.info('Total number of Ions is: %s' % self.variables.total_ions)
             self.log_apt.info('HDF5 file is created')
@@ -1357,14 +1429,16 @@ class APT_Exp_Control:
             except Exception as exc:
                 detector_cleanup_error = exc
 
+        # Close every opened port, including one whose device initialization
+        # failed (it is not "active", but the handle is still held).
         try:
-            if self._vdc_active():
+            if self.com_port_v_dc is not None:
                 self.com_port_v_dc.close()
         except Exception as e:
             print(e)
 
         try:
-            if self._vp_active():
+            if self.com_port_v_p is not None:
                 self.com_port_v_p.close()
         except Exception as e:
             print(e)

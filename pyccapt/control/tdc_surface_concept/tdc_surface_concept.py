@@ -14,7 +14,7 @@ from pyccapt.control.devices import initialize_devices
 from pyccapt.control.nkt_photonics.readback import pulse_energy_pj, experiment_frequency_hz
 from pyccapt.control.tdc_surface_concept import scTDC
 from pyccapt.control.apt.detector_chunks import (
-    ChunkStream, ChunkWriter, preserve_unattributed_packet, read_event_metadata,
+    ChunkStream, ChunkWriter, preserve_unattributed_packet, finite_rate_frequency_hz, read_event_metadata,
 )
 from pyccapt.control.core.shared_ring_buffer import publish_plot_events
 
@@ -324,7 +324,7 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
     writer = None
     events_detected = raw_signal_detected = events_detected_tmp = 0
     start_time = time.monotonic()
-    pulse_frequency = experiment_frequency_hz(variables)
+    pulse_frequency = finite_rate_frequency_hz(experiment_frequency_hz(variables))
     streams = []
     failure = None
     try:
@@ -409,7 +409,7 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
             elapsed_s = current_time-start_time
             if elapsed_s >= .5:
                 try:
-                    pulse_frequency = max(experiment_frequency_hz(variables), 1.)
+                    pulse_frequency = finite_rate_frequency_hz(experiment_frequency_hz(variables), pulse_frequency)
                 except Exception:
                     pass
                 rate = events_detected_tmp*100/(pulse_frequency*elapsed_s)

@@ -94,8 +94,8 @@ Control-loop metadata recorded each iteration.
 - `id` `(n,)` (`N/A`, `uint64`): control-loop iteration index
 - `num_events` `(n,)` (`N/A`, `uint32`): number of detected ions in loop interval
 - `num_raw_signals` `(n,)` (`N/A`, `uint32`): number of raw detector signals
-- `temperature` `(n,)` (`K`, `float64`): sample temperature
-- `experiment_chamber_vacuum` `(n,)` (`mbar`, `float64`): main-chamber vacuum
+- `temperature` `(n,)` (`K`, `float64`): sample temperature; NaN when the sensor was unavailable
+- `experiment_chamber_vacuum` `(n,)` (`mbar`, `float64`): main-chamber vacuum; NaN when the gauge was unavailable
 - `timestamps` `(n,)` (`UNIX s`, `float64`): acquisition timestamp
 - `stage_x`, `stage_y`, `stage_z` `(n,)` (`m`, `float64`): specimen-stage position
   (SmarAct MCS2 `stage_smartact_main`), one sample per control-loop iteration

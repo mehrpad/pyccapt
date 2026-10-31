@@ -51,9 +51,10 @@ documented in [LASER_ALIGNMENT.md](LASER_ALIGNMENT.md).
 Live plot delivery uses one `SharedEventBuffer` for complete `(x, y, tof,
 voltage)` records. A shared commit lock protects publication and copying, so
 overflow drops whole events rather than independently shifting columns. The
-plot-only lock has a bounded wait: an abandoned publisher/consumer disables
-that local transport with an error instead of blocking acquisition or Stop.
-Recreate the application context after this transport error. Saved detector
+plot-only lock has a bounded wait: after ten consecutive lock timeouts an
+abandoned publisher/consumer disables that local transport with an error
+instead of blocking acquisition or Stop. A non-blocking lock attempt every
+2 s clears the error once the lock is free again. Saved detector
 chunks are independent of plot loss. Dropped counters include oversized batches
 and count each overwritten event only once.
 

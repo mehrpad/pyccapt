@@ -269,6 +269,33 @@ def test_surface_stop_preserves_queued_tail_without_inventing_voltage(monkeypatc
                 np.testing.assert_array_equal(evidence[key], values)
 
 
+def test_surface_stop_ignores_empty_end_of_measurement_flushes(monkeypatch, tmp_path):
+    # Back-to-back exposures flush an (often empty) buffer after Stop; with no
+    # events there is nothing to attribute, so a normal Stop must not fail.
+    dld = {name: np.array([], dtype=np.uint64) for name in ("dif1", "dif2", "time", "start_counter")}
+    raw = {"channel": np.array([], dtype=np.uint32), "time": np.array([], dtype=np.uint64),
+           "start_counter": np.array([], dtype=np.uint64)}
+    module, v, writer, device, callbacks, _ = _surface_replay(monkeypatch, tmp_path, [dld], [raw])
+    assert module.run_experiment_measure(v, *[Mock() for _ in range(4)], SimpleNamespace(is_set=lambda: True)) == 0
+    assert not v.flag_tdc_failure and v.flag_finished_tdc
+    assert not list((tmp_path/'temp_data'/'unattributed').glob('*.npz'))
+
+
+def test_surface_late_callback_ignores_empty_packet(tmp_path):
+    from threading import Event, Lock
+    from pyccapt.control.tdc_surface_concept import tdc_surface_concept as module
+    callback = module.BufDataCB4.__new__(module.BufDataCB4)
+    callback.queue = Mock()
+    callback._closing, callback._publication_lock = Event(), Lock()
+    callback.unattributed_directory, callback.stream_name = tmp_path, 'dld'
+    callback.shutdown_packets, callback.publication_error, callback.end_of_meas = 0, '', False
+    callback.stop_publication()
+    callback.on_data({"dif1": np.array([], dtype=np.uint64), "time": np.array([], dtype=np.uint64)})
+    assert callback.shutdown_packets == 0 and not callback.publication_error
+    callback.on_data({"dif1": np.array([7], dtype=np.uint64), "time": np.array([9], dtype=np.uint64)})
+    assert callback.shutdown_packets == 1
+
+
 def test_surface_replay_to_real_writer_and_hdf_preserves_committed_events_and_exposes_tail(monkeypatch, tmp_path):
     import h5py
     import json

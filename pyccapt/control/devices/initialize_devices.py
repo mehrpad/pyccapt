@@ -412,6 +412,7 @@ def state_update(conf, variables, emitter, stop_event=None):
 
     if conf['cryo'] == "off":
         print('The cryo temperature monitoring is off')
+        com_port_cryovac = None
     else:
         try:
             com_port_cryovac = _open_cryovac_serial(variables.COM_PORT_cryo)
@@ -426,242 +427,244 @@ def state_update(conf, variables, emitter, stop_event=None):
             com_port_cryovac = None
             print(_format_port_error('Cryovac', variables.COM_PORT_cryo, e))
 
-        cryovac_reconnect_interval = 30.0
-        last_cryovac_reconnect_attempt = time.time()
+    # Gauge, pump and logging polling below must run even with cryo off;
+    # every cryo access inside the loop is guarded by conf['cryo'] == "on".
+    cryovac_reconnect_interval = 30.0
+    last_cryovac_reconnect_attempt = time.time()
 
-        start_time = time.time()
-        log_time_time_interval = conf['log_time_time_interval']
-        vacuum_main = -1.0
-        vacuum_buffer = -1.0
-        vacuum_buffer_backing = -1.0
-        vacuum_load_lock = -1.0
-        vacuum_load_lock_backing = -1.0
-        vacuum_cryo_load_lock = -1.0
-        vacuum_cryo_load_lock_backing = -1.0
-        # Last setpoint actually written to the controller. ``None`` means
-        # "nothing sent yet", so the first request -- and the first request
-        # after a stop -- is always pushed even if it equals a previous
-        # target (e.g. baking twice in a row at the same temperature).
-        set_temperature_tmp_cryo = None
-        set_temperature_tmp_ll = None
-        # Loop until either an external stop_event is set OR the
-        # legacy emitter flag goes False. The flag remains supported
-        # for backward compatibility but is unreliable (it's a pyqtSignal,
-        # always truthy); new callers should pass ``stop_event``.
-        def _should_continue() -> bool:
-            if stop_event is not None and stop_event.is_set():
-                return False
-            flag = getattr(emitter, 'bool_flag_while_loop', True)
-            # If it's a bound signal, fall back to True; otherwise honor the value.
-            if hasattr(flag, 'emit') and not isinstance(flag, bool):
-                return True
-            return bool(flag)
+    start_time = time.time()
+    log_time_time_interval = conf['log_time_time_interval']
+    vacuum_main = -1.0
+    vacuum_buffer = -1.0
+    vacuum_buffer_backing = -1.0
+    vacuum_load_lock = -1.0
+    vacuum_load_lock_backing = -1.0
+    vacuum_cryo_load_lock = -1.0
+    vacuum_cryo_load_lock_backing = -1.0
+    # Last setpoint actually written to the controller. ``None`` means
+    # "nothing sent yet", so the first request -- and the first request
+    # after a stop -- is always pushed even if it equals a previous
+    # target (e.g. baking twice in a row at the same temperature).
+    set_temperature_tmp_cryo = None
+    set_temperature_tmp_ll = None
+    # Loop until either an external stop_event is set OR the
+    # legacy emitter flag goes False. The flag remains supported
+    # for backward compatibility but is unreliable (it's a pyqtSignal,
+    # always truthy); new callers should pass ``stop_event``.
+    def _should_continue() -> bool:
+        if stop_event is not None and stop_event.is_set():
+            return False
+        flag = getattr(emitter, 'bool_flag_while_loop', True)
+        # If it's a bound signal, fall back to True; otherwise honor the value.
+        if hasattr(flag, 'emit') and not isinstance(flag, bool):
+            return True
+        return bool(flag)
 
-        while _should_continue():
-            if conf['cryo'] == "on" and com_port_cryovac is None:
-                now = time.time()
-                if now - last_cryovac_reconnect_attempt >= cryovac_reconnect_interval:
-                    last_cryovac_reconnect_attempt = now
-                    if _serial_port_present(variables.COM_PORT_cryo):
-                        try:
-                            com_port_cryovac = _open_cryovac_serial(variables.COM_PORT_cryo)
-                            initialize_cryovac(com_port_cryovac, variables)
-                            clear_issue("cryovac_reconnect")
-                            print(f"Cryovac reconnected on {variables.COM_PORT_cryo}")
-                        except Exception as e:
-                            publish(variables, "cryo", "pump", "connection", connection=Connection.DISCONNECTED)
-                            publish(variables, "cryo", "pump", "fault", fault=str(e))
-                            publish(variables, "heater_cryo", "pump", "connection", connection=Connection.DISCONNECTED)
-                            publish(variables, "heater_cryo", "pump", "fault", fault=str(e))
-                            publish(variables, "heater_load_lock", "pump", "connection", connection=Connection.DISCONNECTED)
-                            publish(variables, "heater_load_lock", "pump", "fault", fault=str(e))
-                            com_port_cryovac = None
-                            report_once(
-                                "cryovac_reconnect",
-                                _format_port_error('Cryovac', variables.COM_PORT_cryo, e),
-                            )
-            if conf['cryo'] == "on" and com_port_cryovac is not None:
-                try:
-                    output = command_cryovac('getOutput', com_port_cryovac)
-                except Exception as e:
-                    print(e)
-                    print("cannot read the cryo temperature")
-                    output = '0'
-                try:
-                    # Output indices are driven by config.toml cryo_sensor_X_index keys.
-                    # Change those values to remap which device output feeds each sensor slot.
-                    words = output.split()
-                    idx1 = conf.get('cryo_sensor_1_index', 2)  # cryo_head_outside
-                    idx2 = conf.get('cryo_sensor_2_index', 1)  # cryo_head_inside
-                    idx3 = conf.get('cryo_sensor_3_index', 0)  # stage
-                    idx4 = conf.get('cryo_sensor_4_index', 3)  # load_lock
-                    temperature_cryo_head = float(words[idx1].replace(',', ''))
-                    temperature_cryo_head_inside = float(words[idx2].replace(',', ''))
-                    temperature_stage = float(words[idx3].replace(',', ''))
-                    temperature_ll = float(words[idx4].replace(',', ''))
-                except Exception as e:
-                    com_port_cryovac = None
-                    temperature_cryo_head = -1
-                    temperature_cryo_head_inside = -1
-                    temperature_stage = -1
-                    temperature_ll = -1
-                    print(e)
-                    # Handle the case where response is not a valid float
-                    temperature = -1
-                variables.temperature = temperature_stage
-                emitter.temp_stage.emit(temperature_stage)
-                emitter.temp_cryo_head_inside.emit(temperature_cryo_head_inside)
-                emitter.temp_cryo_head.emit(temperature_cryo_head)
-                emitter.temp_ll.emit(temperature_ll - 273.15)  # convert from kelvin to celsius
+    while _should_continue():
+        if conf['cryo'] == "on" and com_port_cryovac is None:
+            now = time.time()
+            if now - last_cryovac_reconnect_attempt >= cryovac_reconnect_interval:
+                last_cryovac_reconnect_attempt = now
+                if _serial_port_present(variables.COM_PORT_cryo):
+                    try:
+                        com_port_cryovac = _open_cryovac_serial(variables.COM_PORT_cryo)
+                        initialize_cryovac(com_port_cryovac, variables)
+                        clear_issue("cryovac_reconnect")
+                        print(f"Cryovac reconnected on {variables.COM_PORT_cryo}")
+                    except Exception as e:
+                        publish(variables, "cryo", "pump", "connection", connection=Connection.DISCONNECTED)
+                        publish(variables, "cryo", "pump", "fault", fault=str(e))
+                        publish(variables, "heater_cryo", "pump", "connection", connection=Connection.DISCONNECTED)
+                        publish(variables, "heater_cryo", "pump", "fault", fault=str(e))
+                        publish(variables, "heater_load_lock", "pump", "connection", connection=Connection.DISCONNECTED)
+                        publish(variables, "heater_load_lock", "pump", "fault", fault=str(e))
+                        com_port_cryovac = None
+                        report_once(
+                            "cryovac_reconnect",
+                            _format_port_error('Cryovac', variables.COM_PORT_cryo, e),
+                        )
+        if conf['cryo'] == "on" and com_port_cryovac is not None:
+            try:
+                output = command_cryovac('getOutput', com_port_cryovac)
+            except Exception as e:
+                print(e)
+                print("cannot read the cryo temperature")
+                output = '0'
+            try:
+                # Output indices are driven by config.toml cryo_sensor_X_index keys.
+                # Change those values to remap which device output feeds each sensor slot.
+                words = output.split()
+                idx1 = conf.get('cryo_sensor_1_index', 2)  # cryo_head_outside
+                idx2 = conf.get('cryo_sensor_2_index', 1)  # cryo_head_inside
+                idx3 = conf.get('cryo_sensor_3_index', 0)  # stage
+                idx4 = conf.get('cryo_sensor_4_index', 3)  # load_lock
+                temperature_cryo_head = float(words[idx1].replace(',', ''))
+                temperature_cryo_head_inside = float(words[idx2].replace(',', ''))
+                temperature_stage = float(words[idx3].replace(',', ''))
+                temperature_ll = float(words[idx4].replace(',', ''))
+            except Exception as e:
+                com_port_cryovac = None
+                temperature_cryo_head = -1
+                temperature_cryo_head_inside = -1
+                temperature_stage = -1
+                temperature_ll = -1
+                print(e)
+                # Handle the case where response is not a valid float
+                temperature = -1
+            variables.temperature = temperature_stage
+            emitter.temp_stage.emit(temperature_stage)
+            emitter.temp_cryo_head_inside.emit(temperature_cryo_head_inside)
+            emitter.temp_cryo_head.emit(temperature_cryo_head)
+            emitter.temp_ll.emit(temperature_ll - 273.15)  # convert from kelvin to celsius
 
-                if variables.set_temperature_flag_cryo:
-                    if variables.set_temperature_cryo != set_temperature_tmp_cryo:
-                        try:
-                            with commanded(variables, "heater_cryo", "pump", "regulating"):
-                                res = command_cryovac(f'Out1Cryo.PID.Setpoint {variables.set_temperature_cryo}', com_port_cryovac)
-                            print(res)
-                            set_temperature_tmp_cryo = variables.set_temperature_cryo
-                        except Exception as e:
-                            print(e)
-                            print("cannot set the cryo temperature")
-                elif variables.set_temperature_flag_cryo == False:
-                    variables.set_temperature_cryo = 0
-                    with commanded(variables, "heater_cryo", "pump", "off"):
-                        res = command_cryovac(f'Out1Cryo.PID.Setpoint {variables.set_temperature_cryo}', com_port_cryovac)
-                    # Forget the last-written value so the next request is
-                    # re-sent even at the same setpoint as before.
-                    set_temperature_tmp_cryo = None
-                    variables.set_temperature_flag_cryo = None
+            if variables.set_temperature_flag_cryo:
+                if variables.set_temperature_cryo != set_temperature_tmp_cryo:
+                    try:
+                        with commanded(variables, "heater_cryo", "pump", "regulating"):
+                            res = command_cryovac(f'Out1Cryo.PID.Setpoint {variables.set_temperature_cryo}', com_port_cryovac)
+                        print(res)
+                        set_temperature_tmp_cryo = variables.set_temperature_cryo
+                    except Exception as e:
+                        print(e)
+                        print("cannot set the cryo temperature")
+            elif variables.set_temperature_flag_cryo == False:
+                variables.set_temperature_cryo = 0
+                with commanded(variables, "heater_cryo", "pump", "off"):
+                    res = command_cryovac(f'Out1Cryo.PID.Setpoint {variables.set_temperature_cryo}', com_port_cryovac)
+                # Forget the last-written value so the next request is
+                # re-sent even at the same setpoint as before.
+                set_temperature_tmp_cryo = None
+                variables.set_temperature_flag_cryo = None
 
-                if variables.set_temperature_flag_ll:
-                    if variables.set_temperature_ll != set_temperature_tmp_ll:
-                        try:
-                            # convert from celcius to kelvin
-                            set_temperature_ll = variables.set_temperature_ll + 273.15
-                            with commanded(variables, "heater_load_lock", "pump", "regulating"):
-                                res = command_cryovac(f'Out2LL.PID.Setpoint {set_temperature_ll}', com_port_cryovac)
-                            print(res)
-                            set_temperature_tmp_ll = variables.set_temperature_ll
-                        except Exception as e:
-                            print(e)
-                            print("cannot set the load lock temperature")
-                elif variables.set_temperature_flag_ll == False:
-                    variables.set_temperature_ll = 0
-                    # Drive the heater off by commanding the controller's
-                    # MINIMUM valid setpoint (Kelvin). A raw 0 means 0 K, which
-                    # is below the TIC 500's allowed LL range -> the controller
-                    # rejects it and keeps the previous baking setpoint, so the
-                    # heater stays pinned at full output (the "still 2 W after
-                    # deselect" bug). min_temperature_ll is already in Kelvin.
-                    with commanded(variables, "heater_load_lock", "pump", "off"):
-                        res = command_cryovac(f"Out2LL.PID.Setpoint {conf['min_temperature_ll']}", com_port_cryovac)
-                    # Forget the last-written value so the next bake re-sends
-                    # the setpoint even at the same temperature as before.
-                    set_temperature_tmp_ll = None
-                    variables.set_temperature_flag_ll = None
-            if conf['COM_PORT_gauge_mc'] != "off" and tpg is not None:
-                # A NAK, garbled reply or serial error must not kill this
-                # thread: the last good pressures would then stay published
-                # forever and the gate interlock would trust them. Publish -1
-                # (unknown) instead, which the interlock treats as unsafe.
-                vacuum_main = read_tpg_pressure(tpg, 2, "vacuum_main", report_once, clear_issue)
-                variables.vacuum_main = vacuum_main
-                emitter.vacuum_main.emit(float(vacuum_main))
-                vacuum_buffer = read_tpg_pressure(tpg, 1, "vacuum_buffer", report_once, clear_issue)
-                variables.vacuum_buffer = vacuum_buffer
-                emitter.vacuum_buffer.emit(float(vacuum_buffer))
-            if conf['pump_ll'] != "off" and E_AGC_ll is not None:
-                response = command_edwards(conf, variables, 'pressure', E_AGC=E_AGC_ll, status='load_lock')
+            if variables.set_temperature_flag_ll:
+                if variables.set_temperature_ll != set_temperature_tmp_ll:
+                    try:
+                        # convert from celcius to kelvin
+                        set_temperature_ll = variables.set_temperature_ll + 273.15
+                        with commanded(variables, "heater_load_lock", "pump", "regulating"):
+                            res = command_cryovac(f'Out2LL.PID.Setpoint {set_temperature_ll}', com_port_cryovac)
+                        print(res)
+                        set_temperature_tmp_ll = variables.set_temperature_ll
+                    except Exception as e:
+                        print(e)
+                        print("cannot set the load lock temperature")
+            elif variables.set_temperature_flag_ll == False:
+                variables.set_temperature_ll = 0
+                # Drive the heater off by commanding the controller's
+                # MINIMUM valid setpoint (Kelvin). A raw 0 means 0 K, which
+                # is below the TIC 500's allowed LL range -> the controller
+                # rejects it and keeps the previous baking setpoint, so the
+                # heater stays pinned at full output (the "still 2 W after
+                # deselect" bug). min_temperature_ll is already in Kelvin.
+                with commanded(variables, "heater_load_lock", "pump", "off"):
+                    res = command_cryovac(f"Out2LL.PID.Setpoint {conf['min_temperature_ll']}", com_port_cryovac)
+                # Forget the last-written value so the next bake re-sends
+                # the setpoint even at the same temperature as before.
+                set_temperature_tmp_ll = None
+                variables.set_temperature_flag_ll = None
+        if conf['COM_PORT_gauge_mc'] != "off" and tpg is not None:
+            # A NAK, garbled reply or serial error must not kill this
+            # thread: the last good pressures would then stay published
+            # forever and the gate interlock would trust them. Publish -1
+            # (unknown) instead, which the interlock treats as unsafe.
+            vacuum_main = read_tpg_pressure(tpg, 2, "vacuum_main", report_once, clear_issue)
+            variables.vacuum_main = vacuum_main
+            emitter.vacuum_main.emit(float(vacuum_main))
+            vacuum_buffer = read_tpg_pressure(tpg, 1, "vacuum_buffer", report_once, clear_issue)
+            variables.vacuum_buffer = vacuum_buffer
+            emitter.vacuum_buffer.emit(float(vacuum_buffer))
+        if conf['pump_ll'] != "off" and E_AGC_ll is not None:
+            response = command_edwards(conf, variables, 'pressure', E_AGC=E_AGC_ll, status='load_lock')
 
-                try:
-                    if isinstance(response, str):
-                        vacuum_load_lock = float(response.replace(';', ' ').split()[2]) * 0.01
-                        clear_issue("vacuum_load_lock")
-                    else:
-                        raise ValueError("device returned no pressure payload")
-                except Exception as e:
-                    report_once("vacuum_load_lock", f"Error reading LL:{e}")
-                    E_AGC_ll = None
-                    # Handle the case where response is not a valid float
-                    vacuum_load_lock = -1
-                try:
-                    if isinstance(response, str):
-                        vacuum_load_lock_backing = float(response.replace(';', ' ').split()[4]) * 0.01
-                        clear_issue("vacuum_load_lock_backing")
-                    else:
-                        raise ValueError("device returned no backing-pressure payload")
-                except Exception as e:
-                    report_once("vacuum_load_lock_backing", f"Error reading LL backing:{e}")
-                    E_AGC_ll = None
-                    # Handle the case where response is not a valid float
-                    vacuum_load_lock_backing = -1
-                variables.vacuum_load_lock = vacuum_load_lock
-                variables.vacuum_load_lock_backing = vacuum_load_lock_backing
-                emitter.vacuum_load_lock.emit(vacuum_load_lock)
-                emitter.vacuum_load_lock_back.emit(vacuum_load_lock_backing)
+            try:
+                if isinstance(response, str):
+                    vacuum_load_lock = float(response.replace(';', ' ').split()[2]) * 0.01
+                    clear_issue("vacuum_load_lock")
+                else:
+                    raise ValueError("device returned no pressure payload")
+            except Exception as e:
+                report_once("vacuum_load_lock", f"Error reading LL:{e}")
+                E_AGC_ll = None
+                # Handle the case where response is not a valid float
+                vacuum_load_lock = -1
+            try:
+                if isinstance(response, str):
+                    vacuum_load_lock_backing = float(response.replace(';', ' ').split()[4]) * 0.01
+                    clear_issue("vacuum_load_lock_backing")
+                else:
+                    raise ValueError("device returned no backing-pressure payload")
+            except Exception as e:
+                report_once("vacuum_load_lock_backing", f"Error reading LL backing:{e}")
+                E_AGC_ll = None
+                # Handle the case where response is not a valid float
+                vacuum_load_lock_backing = -1
+            variables.vacuum_load_lock = vacuum_load_lock
+            variables.vacuum_load_lock_backing = vacuum_load_lock_backing
+            emitter.vacuum_load_lock.emit(vacuum_load_lock)
+            emitter.vacuum_load_lock_back.emit(vacuum_load_lock_backing)
 
-            if conf['pump_cll'] != "off" and E_AGC_cll is not None:
-                response = command_edwards(conf, variables, 'pressure', E_AGC=E_AGC_cll, status='cryo_load_lock')
+        if conf['pump_cll'] != "off" and E_AGC_cll is not None:
+            response = command_edwards(conf, variables, 'pressure', E_AGC=E_AGC_cll, status='cryo_load_lock')
 
-                try:
-                    if isinstance(response, str):
-                        vacuum_cryo_load_lock = float(response.replace(';', ' ').split()[2]) * 0.01
-                        clear_issue("vacuum_cryo_load_lock")
-                    else:
-                        raise ValueError("device returned no pressure payload")
-                except Exception as e:
-                    report_once("vacuum_cryo_load_lock", f"Error reading CLL:{e}")
-                    E_AGC_cll = None
-                    # Handle the case where response is not a valid float
-                    vacuum_cryo_load_lock = -1
-                try:
-                    if isinstance(response, str):
-                        vacuum_cryo_load_lock_backing = float(response.replace(';', ' ').split()[4]) * 0.01
-                        clear_issue("vacuum_cryo_load_lock_backing")
-                    else:
-                        raise ValueError("device returned no backing-pressure payload")
-                except Exception as e:
-                    report_once("vacuum_cryo_load_lock_backing", f"Error reading CLL backing:{e}")
-                    # Handle the case where response is not a valid float
-                    vacuum_cryo_load_lock_backing = -1
-                variables.vacuum_cryo_load_lock = vacuum_cryo_load_lock
-                variables.vacuum_cryo_load_lock_backing = vacuum_cryo_load_lock_backing
-                emitter.vacuum_cryo_load_lock.emit(vacuum_cryo_load_lock)
-                emitter.vacuum_cryo_load_lock_back.emit(vacuum_cryo_load_lock_backing)
+            try:
+                if isinstance(response, str):
+                    vacuum_cryo_load_lock = float(response.replace(';', ' ').split()[2]) * 0.01
+                    clear_issue("vacuum_cryo_load_lock")
+                else:
+                    raise ValueError("device returned no pressure payload")
+            except Exception as e:
+                report_once("vacuum_cryo_load_lock", f"Error reading CLL:{e}")
+                E_AGC_cll = None
+                # Handle the case where response is not a valid float
+                vacuum_cryo_load_lock = -1
+            try:
+                if isinstance(response, str):
+                    vacuum_cryo_load_lock_backing = float(response.replace(';', ' ').split()[4]) * 0.01
+                    clear_issue("vacuum_cryo_load_lock_backing")
+                else:
+                    raise ValueError("device returned no backing-pressure payload")
+            except Exception as e:
+                report_once("vacuum_cryo_load_lock_backing", f"Error reading CLL backing:{e}")
+                # Handle the case where response is not a valid float
+                vacuum_cryo_load_lock_backing = -1
+            variables.vacuum_cryo_load_lock = vacuum_cryo_load_lock
+            variables.vacuum_cryo_load_lock_backing = vacuum_cryo_load_lock_backing
+            emitter.vacuum_cryo_load_lock.emit(vacuum_cryo_load_lock)
+            emitter.vacuum_cryo_load_lock_back.emit(vacuum_cryo_load_lock_backing)
 
-            if conf['COM_PORT_gauge_bc'] != "off" and E_AGC_bc is not None:
-                response = command_edwards(conf, variables, 'pressure', E_AGC=E_AGC_bc)
-                try:
-                    if isinstance(response, str):
-                        vacuum_buffer_backing = float(response.replace(';', ' ').split()[2]) * 0.01
-                        clear_issue("vacuum_buffer_backing")
-                    else:
-                        raise ValueError("device returned no pressure payload")
-                except Exception as e:
-                    report_once("vacuum_buffer_backing", f"Error reading BC backing:{e}")
-                    # Handle the case where response is not a valid float
-                    vacuum_buffer_backing = -1
-                variables.vacuum_buffer_backing = vacuum_buffer_backing
-                emitter.vacuum_buffer_back.emit(vacuum_buffer_backing)
+        if conf['COM_PORT_gauge_bc'] != "off" and E_AGC_bc is not None:
+            response = command_edwards(conf, variables, 'pressure', E_AGC=E_AGC_bc)
+            try:
+                if isinstance(response, str):
+                    vacuum_buffer_backing = float(response.replace(';', ' ').split()[2]) * 0.01
+                    clear_issue("vacuum_buffer_backing")
+                else:
+                    raise ValueError("device returned no pressure payload")
+            except Exception as e:
+                report_once("vacuum_buffer_backing", f"Error reading BC backing:{e}")
+                # Handle the case where response is not a valid float
+                vacuum_buffer_backing = -1
+            variables.vacuum_buffer_backing = vacuum_buffer_backing
+            emitter.vacuum_buffer_back.emit(vacuum_buffer_backing)
 
-            elapsed_time = time.time() - start_time
-            # Every 30 minutes, log the vacuum levels
-            if elapsed_time > log_time_time_interval:
-                start_time = time.time()
-                try:
-                    log_vacuum_levels(
-                        vacuum_main,
-                        vacuum_buffer,
-                        vacuum_buffer_backing,
-                        vacuum_load_lock,
-                        vacuum_load_lock_backing,
-                        vacuum_cryo_load_lock,
-                        vacuum_cryo_load_lock_backing,
-                    )
-                except Exception as e:
-                    print(e)
-                    print("cannot log the vacuum levels")
-            time.sleep(1)
+        elapsed_time = time.time() - start_time
+        # Every 30 minutes, log the vacuum levels
+        if elapsed_time > log_time_time_interval:
+            start_time = time.time()
+            try:
+                log_vacuum_levels(
+                    vacuum_main,
+                    vacuum_buffer,
+                    vacuum_buffer_backing,
+                    vacuum_load_lock,
+                    vacuum_load_lock_backing,
+                    vacuum_cryo_load_lock,
+                    vacuum_cryo_load_lock_backing,
+                )
+            except Exception as e:
+                print(e)
+                print("cannot log the vacuum levels")
+        time.sleep(1)
 
 
 def log_vacuum_levels(

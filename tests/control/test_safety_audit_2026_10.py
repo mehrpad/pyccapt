@@ -183,3 +183,134 @@ def test_main_gate_cannot_open_between_chained_runs():
     ui.timer.stop()
     window.close()
     app.processEvents()
+
+
+# --- second batch ------------------------------------------------------------
+
+def test_unparseable_laser_status_does_not_abort_the_experiment_loop():
+    import math
+    from pyccapt.control.nkt_photonics.readback import TELEMETRY_UNITS, telemetry_value
+    snapshot = {'status_code': None, 'valid': False, 'divider': 4, 'output_power_mw': float('nan')}
+    values = {key: telemetry_value(snapshot, key) for key in TELEMETRY_UNITS}
+    assert math.isnan(values['status_code'])
+    assert values['valid'] == 0.0 and values['divider'] == 4.0
+    assert math.isnan(values['wavelength_nm'])  # missing key
+    assert telemetry_value({}, 'valid') == 0.0
+
+
+def _vent_panel():
+    from pyccapt.control.gui import gui_pumps_vacuum
+    panel = SimpleNamespace(flag_vent_cll_partial=False, _cll_vent_cycle=0,
+                            conf={'cll_backing_valve_line': 6, 'cll_turbo_valve_line': 7},
+                            variables=SimpleNamespace(), valves=[])
+    panel._set_cll_valve_6525 = lambda line, state: panel.valves.append((line, state))
+    panel._set_vent_valve = lambda state: panel.valves.append(('vent', state))
+    cls = gui_pumps_vacuum.Ui_Pumps_Vacuum
+    return panel, cls
+
+
+def test_stale_cll_deselect_timers_cannot_reopen_turbo_in_a_later_cycle():
+    pytest.importorskip('PyQt6')
+    panel, cls = _vent_panel()
+    # Deselect at t=0 schedules turbo-on for cycle 1; the operator then vents
+    # again (cycle 2) and deselects again (cycle 3) before t=90 s.
+    first_deselect, panel._cll_vent_cycle = 1, 3
+    cls._vent_cll_deselect_turbo_on(panel, first_deselect)
+    cls._vent_cll_deselect_backing_off(panel, first_deselect)
+    assert panel.valves == []
+    cls._vent_cll_deselect_turbo_on(panel, 3)
+    cls._vent_cll_deselect_backing_off(panel, 3)
+    assert panel.valves == [(7, True), (6, False)]
+
+
+def test_stale_cll_vent_press_timer_cannot_vent_a_later_cycle():
+    pytest.importorskip('PyQt6')
+    panel, cls = _vent_panel()
+    panel.flag_vent_cll_partial, panel._cll_vent_cycle = True, 3
+    cls._vent_cll_press_delayed(panel, 1)
+    assert panel.valves == []
+    cls._vent_cll_press_delayed(panel, 3)
+    assert panel.valves == [('vent', False)]
+
+
+class _FakeCtl:
+    class Property:
+        REFERENCING_OPTIONS, MOVE_VELOCITY, CHANNEL_STATE = 1, 2, 3
+
+    class ChannelState:
+        ACTIVELY_MOVING = 1
+
+    class Error(Exception):
+        pass
+
+    def __init__(self, moving):
+        self.moving, self.stopped = set(moving), []
+
+    def SetProperty_i32(self, *args):
+        pass
+
+    def SetProperty_i64(self, *args):
+        pass
+
+    def Reference(self, handle, channel, _):
+        pass
+
+    def GetProperty_i32(self, handle, channel, prop):
+        return 1 if channel in self.moving else 0
+
+    def Stop(self, handle, channel):
+        self.stopped.append(channel)
+        self.moving.discard(channel)
+
+
+def _stage(monkeypatch, moving):
+    from pyccapt.control.smaract_mcs2 import mcs2_stage
+    fake = _FakeCtl(moving)
+    monkeypatch.setattr(mcs2_stage, 'ctl', fake)
+    stage = mcs2_stage.SmarActStage.__new__(mcs2_stage.SmarActStage)
+    stage._handle = 1
+    return mcs2_stage, stage, fake
+
+
+def test_reference_timeout_stops_every_axis(monkeypatch):
+    mcs2_stage, stage, fake = _stage(monkeypatch, moving={0, 1, 2})
+    with pytest.raises(mcs2_stage.SmarActStageError, match='did not stop'):
+        stage.find_reference(timeout_s=0.05)
+    assert sorted(fake.stopped) == [0, 1, 2]
+
+
+def test_cancelled_reference_is_not_reported_as_complete(monkeypatch):
+    import threading
+    mcs2_stage, stage, fake = _stage(monkeypatch, moving={0, 1, 2})
+    cancel = threading.Event()
+    cancel.set()
+    with pytest.raises(mcs2_stage.SmarActReferenceCancelled):
+        stage.find_reference(timeout_s=1.0, cancel_event=cancel)
+    assert {0, 1, 2} <= set(fake.stopped)
+    assert issubclass(mcs2_stage.SmarActReferenceCancelled, mcs2_stage.SmarActStageError)
+
+
+def test_gauges_are_polled_when_cryo_monitoring_is_off(monkeypatch):
+    import threading
+    from pyccapt.control.devices import initialize_devices as module
+
+    class Tpg:
+        def __init__(self, port):
+            pass
+
+        def pressure_gauge(self, channel):
+            return ('3e-9' if channel == 2 else '4e-8'), 0
+
+    stop = threading.Event()
+    monkeypatch.setattr(module, 'TPG362', Tpg)
+    monkeypatch.setattr(module.time, 'sleep', lambda _s: stop.set())
+    conf = {'gauges': 'on', 'cryo': 'off', 'COM_PORT_gauge_mc': 'COM5', 'COM_PORT_gauge_bc': 'off',
+            'COM_PORT_gauge_ll': 'off', 'COM_PORT_gauge_cll': 'off', 'pump_ll': 'off', 'pump_cll': 'off',
+            'log_time_time_interval': 1e9, 'min_temperature_ll': 250}
+    variables = SimpleNamespace(COM_PORT_gauge_mc='COM5', vacuum_main=0.0, vacuum_buffer=0.0)
+    emitter = SimpleNamespace(**{name: Mock() for name in ('vacuum_main', 'vacuum_buffer')})
+
+    module.state_update(conf, variables, emitter, stop_event=stop)
+
+    assert variables.vacuum_main == pytest.approx(3e-9)
+    assert variables.vacuum_buffer == pytest.approx(4e-8)

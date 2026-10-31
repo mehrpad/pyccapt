@@ -55,6 +55,15 @@ CHUNK_DTYPES = {
 QUEUE_GET_TIMEOUT_S = 0.05
 
 
+def packet_event_count(data):
+    """Number of events in an SDK callback packet (DLD and raw TDC both carry 'time')."""
+    try:
+        return len(data["time"])
+    except (KeyError, TypeError):
+        # Unknown layout: treat as non-empty so its evidence is never dropped.
+        return 1
+
+
 class BufDataCB4(scTDC.buffered_data_callbacks_pipe):
     """
     The class inherits from python wrapper module scTDC and class: buffered_data_callbacks_pipe
@@ -125,10 +134,11 @@ class BufDataCB4(scTDC.buffered_data_callbacks_pipe):
                 dcopy[k] = d[k].copy()
             else:
                 dcopy[k] = d[k]
-        if not self._publish((QUEUE_DATA, dcopy)):
+        if not self._publish((QUEUE_DATA, dcopy)) and packet_event_count(dcopy):
             # Output safe-off runs immediately when Stop is requested. A late
             # SDK packet cannot safely inherit the now-changing voltage. Keep
             # its raw evidence explicitly unassigned instead of dropping it.
+            # Empty end-of-measurement flushes carry no events and are ignored.
             try:
                 if self.unattributed_directory is None:
                     raise RuntimeError('No directory configured for stopped callback evidence')
@@ -425,7 +435,7 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
                     kind, data = callback.queue.get(block=False)
                 except Empty:
                     break
-                if kind == QUEUE_DATA:
+                if kind == QUEUE_DATA and packet_event_count(data):
                     queued_tail += 1
                     try:
                         preserve_unattributed_packet(directory, ('dld' if index == 0 else 'tdc')+'_shutdown', data)

@@ -28,7 +28,9 @@ from pyccapt.control.apt.experiment_state import (
     validate_detector_data_lengths,
 )
 from pyccapt.control.core import experiment_statistics, hdf5_creator, loggi, runtime
-from pyccapt.control.nkt_photonics.readback import TELEMETRY_UNITS, fresh_snapshot, experiment_frequency_hz, json_safe
+from pyccapt.control.nkt_photonics.readback import (
+    TELEMETRY_UNITS, experiment_frequency_hz, fresh_snapshot, json_safe, telemetry_value,
+)
 from pyccapt.control.core.chunk_store import atomic_write_chunk_group
 from pyccapt.control.core.safety import audit_safety_override, build_safety_interlock
 from pyccapt.control.core.health import build_health_snapshot
@@ -350,7 +352,7 @@ class APT_Exp_Control:
                     stream.write(json.dumps(json_safe(laser_snapshot), allow_nan=False)+'\n')
             self._last_laser_snapshot_time = laser_snapshot['monotonic']
         for key, values in self.main_laser_telemetry.items():
-            values.append(float(laser_snapshot.get(key, 0. if key == 'valid' else float('nan'))))
+            values.append(telemetry_value(laser_snapshot, key))
         self.main_stage_x.extend([self.variables.stage_pos_x])
         self.main_stage_y.extend([self.variables.stage_pos_y])
         self.main_stage_z.extend([self.variables.stage_pos_z])

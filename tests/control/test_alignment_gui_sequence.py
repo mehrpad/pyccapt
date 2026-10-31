@@ -720,3 +720,19 @@ def test_flat_test_restores_fraction_if_launch_fails(gui, raises):
         ui.start_flat_test()
     assert ui.pulse_fraction.text() == '17' and v.pulse_fraction == 17
     assert not ui._flat_test_running and not v.flat_test_active
+
+
+@pytest.mark.parametrize('outcome', ['timeout', 'voltage_limit'])
+def test_unfound_sample_is_skipped_and_sequence_continues(gui, outcome):
+    ui, v, motor, tick = gui
+    ui._start_alignment_batch((1, 2))
+    for _ in range(30):
+        tick()
+        if ui.started:
+            break
+    v.start_flag = False
+    v.hardware_safe = True
+    v.alignment_outcome = outcome
+    ui._alignment_sample_finished('')
+    assert ui._alignment_batch_index == 1 and ui._alignment_waiting_cleanup
+    assert 'skipped' in ui.errors[-1]

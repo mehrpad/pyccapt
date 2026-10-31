@@ -52,6 +52,10 @@ class LaserAlignmentRuntime:
             self.last_command = command.get('id')
             if auto:
                 self.auto_pending = False
+            idle = self.engine is not None and not self.engine.finished and self.engine.phase == 'tracking_wait'
+            if requested and idle:
+                # An operator request replaces an idle post-alignment tracker.
+                self.engine.finish('Replaced by a new laser alignment request.')
             if self.engine is None or self.engine.finished:
                 try:
                     if requested and not 0 <= time.monotonic()-command.get('issued', 0) <= 3:

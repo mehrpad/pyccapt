@@ -564,11 +564,10 @@ class Ui_Pumps_Vacuum(PumpLayoutMixin):
         self._sync_pump_action_styles()
         # Full CLL venting is unlocked by the shared Gates override.
         self.pump_cryo_load_lock_switch.setEnabled(False)
-        # Initialise the CLL vent valve CLOSED and HOLD the line low. The
-        # USB-6501 output floats HIGH via its pull-up when undriven, which would
-        # leave the active-high vent relay energised (CLL venting) at startup.
-        # Driving it low here opens a held task so the CLL starts un-vented.
-        self._set_vent_valve(True)  # True = closed, False = open
+        # Initialise the CLL vent valve CLOSED and HOLD the line: the USB-6501
+        # output floats HIGH via its pull-up when undriven, so a held task is
+        # opened here. The closing level is set by cll_vent_valve_open_level.
+        self._set_vent_valve_open(False)
         # Set 8 digits for each LCD to show
         self.vacuum_main.setDigitCount(8)
         self.vacuum_buffer.setDigitCount(8)
@@ -1345,7 +1344,7 @@ class Ui_Pumps_Vacuum(PumpLayoutMixin):
                     self.vent_cryo_load_lock_partial_switch, False, self.vent_partial_default_style
                 )
                 # Close the vent valve and re-open the backing valve immediately.
-                self._set_vent_valve(True)  # True = closed, False = open
+                self._set_vent_valve_open(False)
                 self.variables.flag_vent_cryo_load_lock_partial = False
                 self._set_cll_valve_6525(self.conf['cll_backing_valve_line'], True)
                 # Backing valve closes again after a delay; Turbo valve opens
@@ -1374,7 +1373,7 @@ class Ui_Pumps_Vacuum(PumpLayoutMixin):
                 None
         """
         if self.flag_vent_cll_partial and cycle in (None, self._cll_vent_cycle):
-            self._set_vent_valve(False) # True = closed, False = open
+            self._set_vent_valve_open(True)
             self.variables.flag_vent_cryo_load_lock_partial = True
 
     def _vent_cll_deselect_backing_off(self, cycle=None):
@@ -1455,23 +1454,39 @@ class Ui_Pumps_Vacuum(PumpLayoutMixin):
             except Exception:
                 pass
 
+    def _set_vent_valve_open(self, open_valve):
+        """Open (vent) or close the CLL vent valve.
+
+        Which line level opens the valve is ``cll_vent_valve_open_level``
+        ("high" or "low"). The default "low" reproduces the levels this GUI has
+        always written (open -> LOW, closed -> HIGH). The config wiring note and
+        the 6501 pull-up behaviour describe HIGH = venting instead, so confirm
+        on the instrument (devices_test/vent_valve.py) and set the key.
+
+        Args:
+                open_valve: True to vent, False to close the vent valve.
+
+        Return:
+                None
+        """
+        open_level = str(self.conf.get('cll_vent_valve_open_level', 'low')).strip().lower()
+        if open_level not in ('high', 'low'):
+            raise ValueError('cll_vent_valve_open_level must be "high" or "low".')
+        self._set_vent_valve((open_level == 'high') == bool(open_valve))
+
     def _set_vent_valve(self, state):
-        """Drive the CLL vent-valve relay on/off and HOLD the line.
+        """Drive the CLL vent-valve relay line to a level and HOLD it.
 
         The vent valve is a level-controlled relay on the NI USB-6501
         (``COM_PORT_cll_vent_valve``). The 6501 DIO lines are open-collector
         with a weak on-board 4.7 kOhm pull-up, so a line that is NOT actively
-        driven floats HIGH (~5 V) and leaves an active-high relay stuck ON.
-        The DAQmx task is therefore kept OPEN for the life of the panel and
-        just writes the level:
-                True  -> relay ON  (vent open)   - line released/high
-                False -> relay OFF (vent closed)  - line actively driven LOW
-        The task is NOT closed on the off-path: closing it would release the
-        line back to the pull-up and re-energise the relay (this was the bug
-        where the vent could never be switched off).
+        driven floats HIGH (~5 V). The DAQmx task is therefore kept OPEN for
+        the life of the panel and just writes the level. It is NOT closed on
+        the off-path: closing it would release the line back to the pull-up.
+        Use :meth:`_set_vent_valve_open` for open/close semantics.
 
         Args:
-                state: True to open (vent), False to close the vent valve.
+                state: True drives the line HIGH, False drives it LOW.
 
         Return:
                 None

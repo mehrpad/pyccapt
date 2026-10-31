@@ -90,7 +90,8 @@ an unsuccessful detector search.
 | `alignment_voltage_increment` | 100 | Default stationary DC retry in volts; GUI value takes precedence |
 | `alignment_approach_enabled` / `alignment_z_max_advance_um` | true / 20 | Fine Z enable and total advance cap in µm from saved Z |
 | `alignment_z_response_calibrated` / `alignment_z_response_calibration_id` | false / empty | Independent measured Z-response/clearance relation; both required before an approach |
-| `alignment_coverage_max_probes` / `alignment_coverage_subdivisions` | 0 / 8 | Optional extra probe budget and grid subdivisions per axis; zero disables fallback |
+| `alignment_coverage_max_probes` / `alignment_coverage_subdivisions` | 24 / 8 | Extra space-filling probe budget and grid subdivisions per axis after the sparse probes miss; zero disables it |
+| `alignment_max_rate_multiple` | 2.0 | Fine phase: above this multiple of the requested rate, DC steps down by one increment |
 | `alignment_max_attempts` | 1 | Fine entries at one voltage before recovery raises DC; does not terminate the sequence |
 
 The former `alignment_entry_fraction` and `alignment_loss_fraction` are no longer
@@ -169,7 +170,11 @@ within the total 20 µm allowance from saved Z. Recheck centring after every ste
 If the next step would exceed that allowance, retract to saved Z, return to
 saved XY and retry at higher DC. Never extend the Z allowance to find a signal.
 If only a density centroid is available, Z remains fixed and stationary DC can
-increase instead. **The 90% area setting is an approach limit, not a mandatory
+increase instead. A stationary fine-phase DC increase requires the same independent
+evidence as a fine probe (3 s and 200 new events at that position and voltage), not
+the first below-target sample after a move or ramp. If the fine-phase rate exceeds
+`alignment_max_rate_multiple` times the requested rate with that evidence, DC steps
+down by one increment (not below the run's minimum voltage) and fine alignment continues. **The 90% area setting is an approach limit, not a mandatory
 completion condition.**
 
 In fine alignment, an invalid region or rate below 25% of the verified fine-entry
@@ -181,7 +186,8 @@ at the same voltage first. Exhausting this counter does not stop the experiment.
 The counter resets after a voltage increase. A failed complete broad pass always
 increases DC after returning to the origin. At the configured voltage limit,
 the final unsuccessful pass skips the sample. The overall alignment deadline is 1800 s (30 min),
-starting when the experiment's alignment engine is created after transfer.
+starting when the experiment's alignment engine is created after transfer. Reaching it
+also skips the sample (outcome `timeout`); the sequence continues with the next sample.
 Normal experiment time/ion/voltage stop criteria remain active throughout.
 
 The configured bounds are X [-2, 6], Y [-3, 7] and Z [-10, 7] mm. Increasing
@@ -393,8 +399,8 @@ and Reference are blocked throughout a sequence; Stage Stop cancels the sequence
    before positioning the next sample. Then run normal new-experiment startup,
    including visualization reset and new counters/output files.
 
-An exhausted voltage search skips that sample. Alignment timeout,
-physical clearance/movement faults, detector errors, incomplete
+An exhausted voltage search or the alignment timeout skips that sample. Physical
+clearance/movement faults, detector errors, incomplete
 shutdown and Operator Stop end the entire sequence. The existing ten-second
 no-event detector safeguard remains active. A coarse scan does not bypass it.
 

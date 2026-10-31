@@ -204,7 +204,7 @@ def _vent_panel():
                             conf={'cll_backing_valve_line': 6, 'cll_turbo_valve_line': 7},
                             variables=SimpleNamespace(), valves=[])
     panel._set_cll_valve_6525 = lambda line, state: panel.valves.append((line, state))
-    panel._set_vent_valve = lambda state: panel.valves.append(('vent', state))
+    panel._set_vent_valve_open = lambda open_valve: panel.valves.append(('vent_open', open_valve))
     cls = gui_pumps_vacuum.Ui_Pumps_Vacuum
     return panel, cls
 
@@ -230,7 +230,7 @@ def test_stale_cll_vent_press_timer_cannot_vent_a_later_cycle():
     cls._vent_cll_press_delayed(panel, 1)
     assert panel.valves == []
     cls._vent_cll_press_delayed(panel, 3)
-    assert panel.valves == [('vent', False)]
+    assert panel.valves == [('vent_open', True)]
 
 
 class _FakeCtl:
@@ -314,3 +314,25 @@ def test_gauges_are_polled_when_cryo_monitoring_is_off(monkeypatch):
 
     assert variables.vacuum_main == pytest.approx(3e-9)
     assert variables.vacuum_buffer == pytest.approx(4e-8)
+
+
+@pytest.mark.parametrize('open_level, open_valve, line_high', [
+    ('low', True, False), ('low', False, True),    # default: the levels written so far
+    ('high', True, True), ('high', False, False),
+])
+def test_vent_valve_open_level_maps_to_line_level(open_level, open_valve, line_high):
+    pytest.importorskip('PyQt6')
+    from pyccapt.control.gui import gui_pumps_vacuum
+    panel = SimpleNamespace(conf={'cll_vent_valve_open_level': open_level}, levels=[])
+    panel._set_vent_valve = panel.levels.append
+    gui_pumps_vacuum.Ui_Pumps_Vacuum._set_vent_valve_open(panel, open_valve)
+    assert panel.levels == [line_high]
+
+
+def test_vent_valve_open_level_must_be_high_or_low():
+    pytest.importorskip('PyQt6')
+    from pyccapt.control.gui import gui_pumps_vacuum
+    panel = SimpleNamespace(conf={'cll_vent_valve_open_level': 'on'}, _set_vent_valve=Mock())
+    with pytest.raises(ValueError, match='high'):
+        gui_pumps_vacuum.Ui_Pumps_Vacuum._set_vent_valve_open(panel, True)
+    panel._set_vent_valve.assert_not_called()

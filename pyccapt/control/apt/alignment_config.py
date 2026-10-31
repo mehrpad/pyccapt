@@ -20,6 +20,7 @@ class AlignmentConfig:
     max_voltage: float = 6000.0
     ramp_v_s: float = 100.0
     finish_fraction: float = 0.80
+    max_rate_multiple: float = 2.0
     stable_s: float = 3.0
     loss_s: float = 3.0
     dwell_s: float = 10.0
@@ -48,7 +49,7 @@ class AlignmentConfig:
     transfer_speed_um_s: float = 300.0
     position_tolerance_um: float = 0.02
     settle_s: float = 0.5
-    move_timeout_s: float = 120.0
+    move_timeout_s: float = 180.0
     bounds_mm: tuple = ()
     xy_jacobian_mm_per_um: tuple = ()
     motion_calibrated: bool = False
@@ -113,6 +114,8 @@ class AlignmentConfig:
             raise ValueError('Alignment voltages, durations, steps and speeds must be positive.')
         if not 0 < self.finish_fraction <= 1:
             raise ValueError('Alignment completion rate fraction must be between zero and one.')
+        if not self.max_rate_multiple > 1:
+            raise ValueError('Alignment rate ceiling must be above the requested detection rate.')
         if not 0 < self.area_target < 1 or not 0 < self.centre_tolerance < 1:
             raise ValueError('Alignment area and centring fractions must be between 0 and 1.')
         if self.start_voltage > self.max_voltage or self.dwell_s < self.stable_s:

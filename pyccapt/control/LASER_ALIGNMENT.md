@@ -25,8 +25,10 @@ bounded to 5,000 measurements and updates at most five times per second.
   acquisition continues. The laser-stage STOP also cancels alignment. Main Stop,
   interlocks, detector failure, and experiment completion stop alignment too.
 - Editable coarse/fine/focus **± range** and **step**, in stage µm.
-- **DC increase after no signal**, default **50 V**: after an entire unsuccessful
-  coarse scan, return to that scan's centre, ramp DC by this amount, and repeat.
+- **DC increase after no signal**, default **50 V**: after a coarse scan with no
+  qualifying signal, return to that scan's centre, ramp DC by this amount, and repeat.
+  If the scan had signal but its candidate did not re-verify (often rate drift), the
+  coarse scan is repeated at unchanged DC; only after three such scans is DC raised.
   The effective ceiling is the minimum of `laser_alignment_max_voltage`, the
   experiment maximum, and the system maximum. The final increment is clamped.
 
@@ -59,7 +61,12 @@ Laser pulse mode with a Surface Concept or RoentDek TDC, not Voltage + Laser/DRS
 6. After three failed fine/focus attempts, return to coarse search. The total
    recovery count and search duration are bounded. Failure requests the normal
    experiment shutdown, with an error visible in the main GUI and laser status.
-7. Following alignment, ordinary detection-rate voltage control resumes. Tracking
+7. Following alignment, ordinary detection-rate voltage control resumes and the laser
+   controls unlock. While idle, no laser-readback, heartbeat or stage glitch (or laser
+   output-off) can fail the experiment. A tracking scan only starts when its
+   preconditions hold, re-baselines the current laser settings and stage position,
+   and on any error or unverified result keeps the position and returns to waiting;
+   it never escalates to a new search or raises DC mid-run. Tracking
    uses short fixed-DC comparisons; it does not infer drift merely from a falling
    count rate. Tracking pauses above the alignment voltage ceiling, without imposing
    that ceiling on a successfully aligned experiment's subsequent normal voltage ramp.
@@ -76,7 +83,10 @@ Manual laser jogging, Home, Reference, laser setting changes and scan parameter
 edits are locked while alignment owns the stage. Laser output-off controls remain
 available. A change in readback settings, stale stage/laser telemetry, lost
 experiment/GUI heartbeat, or a motion fault ends the search. A configured excessive
-detection rate while scanning also stops the experiment.
+detection rate while scanning (`laser_alignment_max_rate_multiple` times the target)
+steps DC down by the DC increment, no lower than the run minimum, and restarts the
+current scan; it stops the experiment only when DC cannot go lower or after the
+recovery limit.
 
 ## Commissioning required
 

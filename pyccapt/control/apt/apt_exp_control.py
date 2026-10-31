@@ -1005,7 +1005,7 @@ class APT_Exp_Control:
                         self.log_apt.info('Automatic alignment complete; stage position locked.')
                     if self.alignment.phase == 'finished':
                         self.log_apt.info('Automatic alignment ended: %s', self.alignment.reason)
-                        if self.alignment.outcome not in ('voltage_limit', 'cancelled'):
+                        if self.alignment.outcome not in ('voltage_limit', 'timeout', 'cancelled'):
                             self._run_failure = self.alignment.reason
                         self._request_detector_stop()
                         break

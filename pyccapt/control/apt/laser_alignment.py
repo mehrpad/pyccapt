@@ -38,6 +38,13 @@ class LaserAlignment:
         self.reason = ''
         self.finished = False
         self.recoveries = 0
+        self.coarse_rechecks = 0
+        self.overshoots = 0
+        self.restart_kind = None
+        # Set once the full sequence has been verified. From then on the engine
+        # only idles/tracks, and no idle-time glitch may fail the experiment.
+        self.aligned = False
+        self.search_started = None
         self.fine_failures = 0
         self.fine_round = 0
         self.final_xy = False
@@ -105,7 +112,8 @@ class LaserAlignment:
     def _publish(self):
         self.v.laser_alignment_status = {
             'session': self.session, 'phase': self.phase, 'reason': self.reason,
-            'active': not self.finished, 'time': self.now, 'target_voltage': self.target_voltage,
+            # Idle tracking does not own the stage or DC: laser controls unlock.
+            'active': self.owns_voltage, 'time': self.now, 'target_voltage': self.target_voltage,
             'fine_failures': self.fine_failures, 'recoveries': self.recoveries,
             'owns_voltage': self.owns_voltage,
             'progress': self.progress, 'measurements': self.measurements,
@@ -329,7 +337,10 @@ class LaserAlignment:
         threshold = max(reference*self.cfg.improvement_fraction,
                         3*math.hypot(best['error_percent'], self.reference['error_percent']))
         if self._signal(baseline) and best['rate_percent']-reference <= threshold:
-            best = baseline
+            # Keep the centre. Verify against its latest measurement (the
+            # closing repeat), not the first point of a scan that may have
+            # drifted since, or a correct "stay here" fails verification.
+            best = self.records[-1] if self._signal(self.records[-1]) else baseline
         if (self.reuse_in_progress and
                 np.linalg.norm(np.subtract(best['position_m'], self.reuse_target))*1e6 > self.cfg.tolerance_um):
             self._event('reuse_rejected', reason='Cached position did not improve on the fresh centre')
@@ -339,15 +350,17 @@ class LaserAlignment:
         self._move(best['position_m'], 'verify')
 
     def _accepted(self, measurement):
+        # The scan found signal, so a failed verification is a "recheck", not
+        # the "no signal" outcome that justifies a coarse DC increase.
         if not self._signal(measurement) or not self._quality_ok(measurement, self.candidate):
-            self._move(self.centre, 'retry')
+            self._move(self.centre, 'recheck')
             return
         # Repeatability check with Poisson uncertainty and a bounded relative tolerance.
         discrepancy = self.candidate['rate_percent']-measurement['rate_percent']
         tolerance = max(self.candidate['rate_percent']*0.2,
                         3*math.hypot(measurement['error_percent'], self.candidate['error_percent']))
         if discrepancy > tolerance:
-            self._move(self.centre, 'retry')
+            self._move(self.centre, 'recheck')
             return
         displaced = any(abs(self.candidate['position_m'][i]-self.centre[i]) >
                         self.cfg.tolerance_um*1e-6 for i in range(3))
@@ -357,9 +370,10 @@ class LaserAlignment:
             if (measurement['rate_percent']-self.reference['rate_percent'] <= threshold
                     or not self._quality_ok(measurement, self.records[0])):
                 self._event('verification_rejected', reason='Verified improvement over the scan centre was insufficient')
-                self._move(self.centre, 'retry')
+                self._move(self.centre, 'recheck')
                 return
         self.best_position = measurement['position_m']
+        self.coarse_rechecks = 0
         reused = self.reuse_in_progress
         if reused:
             self._event('reuse_verified', position_m=self.best_position)
@@ -380,22 +394,42 @@ class LaserAlignment:
             self.fine_round = 0
             self._begin_scan('fine', self.best_position)
         else:
-            self.phase = 'tracking_wait'
-            self.wait_started = self.now
-            self.search_started = None
-            self.v.laser_alignment_epoch = ''
+            self._enter_tracking_wait()
+            self.aligned = True
             self._event('aligned', position_m=self.best_position)
             self.progress = 'Aligned from repeated detector evidence; user laser settings unchanged'
             self._save_solution()
 
-    def _retry(self):
-        self._event('scan_unsuccessful', kind=self.kind)
+    def _enter_tracking_wait(self, reason=''):
+        self.phase = 'tracking_wait'
+        self.pending = None
+        self.wait_started = self.now
+        self.search_started = None
+        self.reason = reason
+        self.v.laser_alignment_epoch = ''
+
+    def _retry(self, signal_seen=False):
+        self._event('scan_unsuccessful', kind=self.kind, signal_seen=signal_seen)
         if self.reuse_in_progress:
             self.reuse_in_progress = False
             self._event('reuse_rejected', reason='Fresh verification failed; bounded coarse search at unchanged DC')
             self._begin_scan('coarse', self.centre)
             return
+        if self.kind == 'tracking':
+            # Already back at the last verified position. Never escalate a
+            # tracking miss into a new search or a DC increase mid-run.
+            self._enter_tracking_wait('Tracking found no verified improvement; position kept.')
+            self._event('tracking_unsuccessful', position_m=self.best_position)
+            return
         if self.kind == 'coarse':
+            if signal_seen and self.coarse_rechecks < 2:
+                # Signal exists but the candidate did not repeat (often rate
+                # drift): rescan at unchanged DC before considering more DC.
+                self.coarse_rechecks += 1
+                self._event('coarse_recheck', attempt=self.coarse_rechecks)
+                self._begin_scan('coarse', self.centre)
+                return
+            self.coarse_rechecks = 0
             if self.target_voltage >= self.limit:
                 self.finish('No laser alignment before the DC voltage ceiling.', failed=True)
                 return
@@ -424,13 +458,37 @@ class LaserAlignment:
             return None
         if self.phase != 'ramp':
             return 0.0
-        return max(0., min(self.target_voltage-voltage, self.cfg.ramp_v_s*dt))
+        # Upward after an unsuccessful scan; downward after a rate overshoot.
+        limit = self.cfg.ramp_v_s*dt
+        return max(-limit, min(self.target_voltage-voltage, limit))
+
+    def _overshoot(self):
+        """Step DC down and restart the current scan instead of failing the run."""
+        voltage = float(self.v.specimen_voltage)
+        floor = float(getattr(self.v, 'vdc_min', 0.) or 0.)
+        target = max(floor, voltage-self.cfg.voltage_increment)
+        if target >= voltage-0.1 or self.overshoots >= self.cfg.max_recoveries:
+            raise ValueError('Detection rate exceeded the laser alignment overshoot limit.')
+        self.overshoots += 1
+        self.target_voltage = target
+        self.restart_kind = self.kind
+        self._event('overshoot_voltage_decrease', voltage=voltage, target_voltage=target,
+                    detection_rate=float(self.v.detection_rate_current))
+        if self.pending:
+            # Let the stage finish its acknowledged move, then ramp down.
+            identifier, issued, _after = self.pending
+            self.pending = (identifier, issued, 'ramp')
+        else:
+            self.phase = 'ramp'
 
     def tick(self, now=None):
         self.now = time.monotonic() if now is None else now
         if self.finished:
             return
         try:
+            if self.phase == 'tracking_wait':
+                self._tick_tracking_wait()
+                return
             reply = self.v.laser_alignment_move_status
             if self.pending and reply.get('id') == self.pending[0] and reply.get('fault'):
                 raise ValueError(reply.get('error', 'Laser stage service fault.'))
@@ -449,15 +507,20 @@ class LaserAlignment:
             self.cfg.check_position(self._position(), self.origin)
             if self.owns_voltage and float(self.v.specimen_voltage) > self.limit+0.1:
                 raise ValueError('Laser alignment voltage ceiling exceeded.')
-            if (self.owns_voltage and float(self.v.detection_rate) > 0 and
+            ramp_pending = bool(self.pending) and self.pending[2] == 'ramp'
+            # Already stepping down: don't stack another decrease every tick.
+            ramping_down = ramp_pending or (self.phase == 'ramp' and
+                                            self.target_voltage < float(self.v.specimen_voltage)-0.1)
+            if (self.owns_voltage and not ramping_down and float(self.v.detection_rate) > 0 and
                     float(self.v.detection_rate_current) > self.cfg.max_rate_multiple*float(self.v.detection_rate)):
-                raise ValueError('Detection rate exceeded the laser alignment overshoot limit.')
-            if self.phase not in ('ramp', 'tracking_wait') and abs(float(self.v.specimen_voltage)-self.target_voltage) > 0.1:
+                self._overshoot()
+                return
+            if (self.phase != 'ramp' and not ramp_pending
+                    and abs(float(self.v.specimen_voltage)-self.target_voltage) > 0.1):
                 raise ValueError('DC changed during a fixed-voltage laser scan.')
-            if self.phase != 'tracking_wait':
-                search_started = getattr(self, 'search_started', self.started)
-                if self.now-search_started > self.cfg.max_duration_s:
-                    raise ValueError('Laser alignment search timed out.')
+            search_started = self.search_started if self.search_started is not None else self.started
+            if self.now-search_started > self.cfg.max_duration_s:
+                raise ValueError('Laser alignment search timed out.')
             if self.pending:
                 identifier, issued, after = self.pending
                 reply = self.v.laser_alignment_move_status
@@ -473,18 +536,12 @@ class LaserAlignment:
                 if after == 'observe': self._observe()
                 elif after == 'verify': self._observe(validation=True)
                 elif after == 'retry': self._retry()
+                elif after == 'recheck': self._retry(signal_seen=True)
+                elif after == 'ramp': self.phase = 'ramp'
             elif self.phase == 'ramp':
                 if abs(float(self.v.specimen_voltage)-self.target_voltage) <= 0.1:
-                    self._begin_scan('coarse', self.centre)
-            elif self.phase == 'tracking_wait':
-                if self.v.laser_alignment_tracking and self.now-self.wait_started >= self.cfg.tracking_interval_s:
-                    if float(self.v.specimen_voltage) > self.limit:
-                        self.reason = 'Tracking paused above the laser alignment voltage ceiling.'
-                        return
-                    self.target_voltage = float(self.v.specimen_voltage)
-                    self.reason = ''
-                    self.search_started = self.now
-                    self._begin_scan('tracking', self.best_position)
+                    kind, self.restart_kind = self.restart_kind or 'coarse', None
+                    self._begin_scan(kind, self.centre)
             else:
                 measured = self._measurement()
                 deadline = self.cfg.max_dwell_s if self.cfg.adaptive_dwell else self.cfg.dwell_s
@@ -500,6 +557,52 @@ class LaserAlignment:
                         self.records.append(measured)
                         self._next_point()
         except Exception as exc:
-            self.finish(str(exc), failed=True)
+            if self.aligned:
+                # Tracking is optional once aligned: abandon this scan and keep
+                # the verified position; never fail a running experiment for it.
+                self._enter_tracking_wait(f'Tracking paused: {exc}')
+                try:
+                    self._event('tracking_aborted', reason=str(exc))
+                except OSError:
+                    pass
+            else:
+                self.finish(str(exc), failed=True)
         finally:
             self._publish()
+
+    def _tick_tracking_wait(self):
+        """Idle after alignment: no stage or DC ownership, so no interlock here
+        can fail the run. Only start a tracking scan when its preconditions hold."""
+        if self.v.stop_flag or not self.v.start_flag or self.v.laser_alignment_cancel:
+            self.finish('Laser alignment stopped by operator / experiment.')
+            return
+        if not self.v.laser_alignment_tracking or self.now-self.wait_started < self.cfg.tracking_interval_s:
+            return
+        self.wait_started = self.now
+        voltage = float(self.v.specimen_voltage)
+        if voltage > self.limit:
+            self.reason = 'Tracking paused above the laser alignment voltage ceiling.'
+            return
+        try:
+            if self.v.vdc_hold:
+                raise ValueError('DC Hold is selected.')
+            if self.v.electrode_out or self.v.flag_tdc_failure:
+                raise ValueError('Electrode / detector interlock is not satisfied.')
+            if self.v.pulse_mode != 'Laser':
+                raise ValueError('Laser pulse mode is not active.')
+            signature = self._signature()
+            if not -0.1 <= self.now-self.v.laser_alignment_heartbeat <= 3:
+                raise ValueError('Laser stage service is unresponsive.')
+            position = self._position()
+            self.cfg.check_position(position, self.origin)
+        except ValueError as exc:
+            self.reason = f'Tracking paused: {exc}'
+            return
+        # Laser settings or the stage may have been changed by the operator
+        # since alignment: track around the present state, not a stale one.
+        self.laser_signature = signature
+        self.best_position = position
+        self.target_voltage = voltage
+        self.reason = ''
+        self.search_started = self.now
+        self._begin_scan('tracking', self.best_position)

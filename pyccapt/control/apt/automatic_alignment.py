@@ -373,6 +373,12 @@ class AutomaticAlignment:
         else:
             self._next_coarse()
 
+    def _observation_evidence(self, sequence):
+        """The current fixed-position, fixed-DC observation is long enough to act on."""
+        return (self.now-self.observation_start >= self.cfg.stable_s
+                and self.observation_first_sequence is not None
+                and sequence-self.observation_first_sequence >= self.cfg.search_min_events)
+
     def _stable(self, condition, sequence):
         if not condition:
             self.stable_since = self.stable_sequence = None
@@ -436,7 +442,9 @@ class AutomaticAlignment:
             if not 0 <= self._read_time()-heartbeat <= 2:
                 raise ValueError('Stage controller heartbeat lost.')
             if self.now-self.started > self.cfg.timeout_s:
-                self.finish('timeout', 'Maximum automatic alignment duration reached.')
+                # Like an exhausted voltage search, this sample is skipped; the
+                # remaining samples in the sequence still run.
+                self.finish('timeout', 'Maximum automatic alignment duration reached; skipping sample.')
                 return
             if self.phase == 'moving':
                 identifier, started, after = self.pending
@@ -502,6 +510,17 @@ class AutomaticAlignment:
                         self._recover()
                     return
                 self.loss_since = None
+                if fraction > self.cfg.max_rate_multiple and self._observation_evidence(sequence):
+                    # Moving onto the specimen at fixed DC can multiply the rate;
+                    # step DC down rather than keep evaporating far above target.
+                    floor = float(getattr(self.v, 'vdc_min', 0.) or 0.)
+                    lower = max(floor, self.target_voltage-self.cfg.voltage_increment)
+                    if lower < self.target_voltage-0.5:
+                        self.target_voltage = lower
+                        self.phase, self.ramp_destination = 'ramp', 'fine'
+                        self._event('fine_rate_ceiling_voltage_step', voltage=self.target_voltage,
+                                    rate=rate, target_rate=self.target_rate)
+                        return
                 centred = np.linalg.norm(fit.centre_mm) <= self.cfg.centre_tolerance*self.cfg.detector_radius_mm
                 z_centred = self._centre_ready_for_z(centred and fit.model == 'circle', sequence)
                 if self._stable(centred and fraction >= self.cfg.finish_fraction, sequence):
@@ -546,6 +565,10 @@ class AutomaticAlignment:
                     position[2] += self.cfg.z_direction*self.cfg.z_step_um*1e-6
                     self._move(tuple(position), 'observe_fine', z=True)
                 elif self.target_voltage < self.limit:
+                    # A below-target median of one or two 0.5 s samples is not
+                    # evidence: require the same independent window as a fine probe.
+                    if not self._observation_evidence(sequence):
+                        return
                     if self.cfg.approach_enabled and not self.cfg.z_response_calibrated:
                         self.reason = 'Z approach withheld: no independently calibrated Z response relation.'
                         self._event('z_abstained', reason=self.reason)

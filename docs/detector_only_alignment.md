@@ -65,8 +65,8 @@ specimen, coordinate-reference or optical changes; the software cannot infer the
 
 ## Sample coverage and geometric evidence
 
-`alignment_coverage_max_probes` defaults to zero. A positive budget, up to 256,
-adds space-filling probes after the sparse search fails. With the default
+`alignment_coverage_max_probes` is 24 in the included config (zero disables it). A
+positive budget, up to 256, adds space-filling probes after the sparse search fails. With the default
 `alignment_coverage_subdivisions = 8`, the ±49.8 µm inset envelope has 12.45 µm
 candidate spacing. Largest remaining gaps are sampled first, with travel-cost
 tie breaking. A sufficiently large budget can find an island at a grid point

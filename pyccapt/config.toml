@@ -289,6 +289,10 @@ cll_turbo_valve_line = 7
 # floats HIGH (relay ON). The GUI holds a task on this line and drives it LOW at
 # startup and on deselect to keep the vent closed.
 COM_PORT_cll_vent_valve = "Dev3/port1/line7"
+# Line level that OPENS (vents) the valve: "high" or "low". "low" keeps the levels
+# the GUI has always written (open -> LOW, closed -> HIGH). The wiring note above
+# says HIGH = venting; confirm with devices_test/vent_valve.py and set accordingly.
+cll_vent_valve_open_level = "low"
 #
 # --- Sequencing delays (seconds) ---
 cll_vent_on_delay = 2       # on press: wait this long, then open the vent valve
@@ -488,6 +492,7 @@ alignment_fine_loss_ratio = 0.25    # loss relative to verified fine-entry signa
 alignment_max_voltage = 6000.0
 alignment_ramp_v_s = 100.0
 alignment_finish_fraction = 0.80
+alignment_max_rate_multiple = 2.0  # fine phase: step DC down above this multiple of the target rate
 alignment_stable_s = 3.0
 alignment_loss_s = 3.0
 alignment_dwell_s = 10.0
@@ -521,7 +526,7 @@ alignment_approach_enabled = true   # also requires independent z_response_calib
 alignment_z_max_advance_um = 20.0   # maximum total approach from each saved Z, in micrometres
 # Candidate commissioning settings; validate before enabling movement.
 alignment_xy_step_um = 10.0 # cap on inner semi-coarse probe spacing; broad probes derive from XY range
-alignment_coverage_max_probes = 0 # opt-in extra space-filling probes after sparse search (0 disables; max256)
+alignment_coverage_max_probes = 24 # extra space-filling probes after the 17 sparse ones miss (0 disables; max 256); ~+2 min per pass
 alignment_coverage_subdivisions = 8 # extra search grid per axis; narrower islands can still be missed
 alignment_z_response_calibrated = false # no automatic Z approach from footprint area alone
 alignment_z_response_calibration_id = "" # independent measured Z response/clearance calibration record

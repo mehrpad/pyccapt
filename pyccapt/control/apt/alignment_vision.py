@@ -99,7 +99,11 @@ def estimate_dense_region(points_mm, detector_radius_mm, minimum_events=200):
     # not manufacture a smoothed sample-shaped region.
     cap = min(cap, max(4., len(points)/max(1, detector.sum())*8))
     image = ndimage.gaussian_filter(np.minimum(counts, cap), 1.)
-    background = float(np.quantile(image[detector], .05))
+    # The 25th percentile is still background while the footprint covers less
+    # than ~75% of the detector. The 5th percentile sat far below the smoothed
+    # background mean, so with 10-20% uniform background and >=1000 events the
+    # background itself crossed the threshold and the region reached the edge.
+    background = float(np.quantile(image[detector], .25))
     noise = np.sqrt(max(background, .02)/(4*np.pi))
     mask = detector & (image > background+max(.25, 3*noise))
     labels, count = ndimage.label(mask)

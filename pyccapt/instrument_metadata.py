@@ -97,18 +97,54 @@ def record_calibration_settings(frame, *, flight_path_length_mm=None, t0_ns=None
     return deepcopy(metadata)
 
 
+TOF_REFERENCE = 'calibrated_tof'
+_NOT_SETTINGS = {'unknown', 'fitted_model'}
+
+
+def record_calibrated_tof_reference(frame, *, convention, reference_voltage_V=None,
+                                    reference_flight_length_mm=None, t0_ns=None, source):
+    """Describe the frame's ``t_c (ns)`` scale; None stays unknown.
+
+    Normalized ToF from a reference model is expressed at a reference voltage
+    and flight length with its offset already removed (``t0_ns`` here is the
+    offset remaining in ``t_c``). It must not be reconverted with the actual
+    instrument flight length or have a fitted ``t0`` subtracted again.
+    """
+    metadata = deepcopy(frame.attrs.get(ATTR, {'schema_version': SCHEMA}))
+    numeric = {}
+    for name, value in (('reference_voltage_V', reference_voltage_V),
+                        ('reference_flight_length_mm', reference_flight_length_mm), ('t0_ns', t0_ns)):
+        try:
+            value = None if value is None or isinstance(value, bool) else float(value)
+        except (TypeError, ValueError, OverflowError):
+            value = None
+        numeric[name] = value if value is not None and math.isfinite(value) else None
+    metadata[TOF_REFERENCE] = {'column': 't_c (ns)', 'units': 'ns', 'convention': str(convention),
+                               'source': str(source), **numeric}
+    frame.attrs[ATTR] = metadata
+    return deepcopy(metadata)
+
+
+def calibrated_tof_reference(frame):
+    """Return the recorded ``t_c (ns)`` reference description, or an empty dict."""
+    record = frame.attrs.get(ATTR, {}).get(TOF_REFERENCE, {})
+    return deepcopy(record) if isinstance(record, dict) else {}
+
+
 def extract_instrument_settings(frame, *, context='calibration'):
     """Return only known flight_path_length_mm/t0_ns/pulse_mode suggestions.
 
     A calibration context takes precedence as a whole; partial contexts never
     borrow a different mode's acquisition offset. Mixed modes require review.
+    Fitted model parameters (status ``fitted_model``) remain in the metadata
+    for provenance but are not instrument settings and are never offered.
     """
     metadata = frame.attrs.get(ATTR, {})
     values = metadata.get(context, metadata.get('acquisition', {}))
     result = {}
     for name in ('flight_path_length_mm', 't0_ns', 'pulse_mode'):
         record = values.get(name, {})
-        if not isinstance(record, dict) or record.get('status', 'unknown') == 'unknown':
+        if not isinstance(record, dict) or record.get('status', 'unknown') in _NOT_SETTINGS:
             continue
         if record.get('units') != UNITS[name]:
             continue
@@ -147,6 +183,15 @@ def write_instrument_metadata(parent, metadata, *, name='instrument_metadata'):
                 dataset = context.create_dataset(field, data=float('nan') if value is None else value)
             dataset.attrs.update(units=record.get('units', UNITS[field]),
                                  status=record.get('status', 'unknown'), source=record.get('source', 'unknown'))
+    reference = metadata.get(TOF_REFERENCE)
+    if isinstance(reference, dict):
+        context = group.create_group(TOF_REFERENCE)
+        context.attrs.update(NX_class='NXcollection', column=str(reference.get('column', 't_c (ns)')),
+                             convention=str(reference.get('convention', 'unknown')),
+                             source=str(reference.get('source', 'unknown')))
+        for field, units in (('reference_voltage_V', 'V'), ('reference_flight_length_mm', 'mm'), ('t0_ns', 'ns')):
+            value = reference.get(field)
+            context.create_dataset(field, data=float('nan') if value is None else float(value)).attrs['units'] = units
     return group
 
 

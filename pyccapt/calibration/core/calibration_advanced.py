@@ -21,6 +21,7 @@ from pyccapt.calibration.core.calibration_sampling import (
 from pyccapt.calibration.core.correction_models import (
     _predict_bowl_model,
     _predict_voltage_model,
+    _voltage_correction_factors,
     bowl_corr,
     hybrid_calibration_model,
     robust_fit,
@@ -273,7 +274,8 @@ def multi_peak_voltage_corr_main(
 
     for pk in detected:
         x1, x2, peak_pos = pk['x1'], pk['x2'], pk['position']
-        mask = (calib_arr > x1) & (calib_arr < x2)
+        # Rows without a finite voltage cannot constrain the fit.
+        mask = (calib_arr > x1) & (calib_arr < x2) & np.isfinite(dld_hv)
         peak_ions = calib_arr[mask]
         voltage_ions = dld_hv[mask]
 
@@ -320,11 +322,9 @@ def multi_peak_voltage_corr_main(
     if not np.all(np.isfinite(np.asarray(predicted_fit, dtype=float))):
         raise CalibrationInputError("Voltage fit returned invalid parameters")
 
-    f_v = np.clip(
-        _predict_voltage_model(model, fitresult, dld_hv),
-        np.finfo(float).eps,
-        None,
-    )
+    # Rows with non-finite voltage keep their value (factor 1), matching
+    # joint_voltage_bowl_corr_main, instead of becoming NaN.
+    f_v = _voltage_correction_factors(model, fitresult, dld_hv)
 
     correction_factor = f_v  # fitted in the active mass or time domain
 

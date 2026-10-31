@@ -66,6 +66,7 @@ from pyccapt.calibration.path_utils import save_figure
 from pyccapt.calibration.core.correction_models import (
     _predict_bowl_model,
     _predict_voltage_model,
+    _voltage_correction_factors,
     bowl_corr,
     hybrid_calibration_model,
     refine_correction_nelder_mead,
@@ -349,7 +350,15 @@ def voltage_corr_main(
     left_edge, right_edge = variables.get_calibration_peak_range(calibration_mode)
     print('The left and right side of the main peak is:', left_edge, right_edge)
     mask_temporal, dld_peak_b = _extract_peak_mask_and_values(variables, calibration_mode)
-    dld_highVoltage_peak_v = np.asarray(dld_highVoltage)[mask_temporal]
+    dld_highVoltage_peak_v = np.asarray(dld_highVoltage, dtype=float)[mask_temporal]
+    # Rows without a finite voltage cannot constrain the fit; they are
+    # passed through unchanged below (same policy as the joint correction).
+    finite_voltage = np.isfinite(dld_highVoltage_peak_v)
+    if not np.all(finite_voltage):
+        dld_highVoltage_peak_v = dld_highVoltage_peak_v[finite_voltage]
+        dld_peak_b = dld_peak_b[finite_voltage]
+        if not len(dld_highVoltage_peak_v):
+            raise CalibrationInputError("No calibration-peak ions have a finite voltage")
 
     print('The number of ions is:', len(dld_highVoltage_peak_v))
     sample_size = _resolve_sample_size(sample_size, len(dld_highVoltage_peak_v))
@@ -425,10 +434,10 @@ def voltage_corr_main(
                 f"Nelder-Mead voltage refine requested but model='{model}' has no polynomial coefficients; skipping."
             )
 
-    f_v = _predict_voltage_model(model, fitresult, np.asarray(dld_highVoltage))
     # Bound extrapolated factors away from zero before division, matching
-    # the established multi_peak_voltage_corr_main policy.
-    f_v = np.clip(f_v, np.finfo(float).eps, None)
+    # the established multi_peak_voltage_corr_main policy; rows with a
+    # non-finite voltage keep their value (factor 1).
+    f_v = _voltage_correction_factors(model, fitresult, dld_highVoltage)
 
     # The fit target is observed/reference in the active domain, including ToF.
     correction_factor = f_v

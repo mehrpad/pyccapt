@@ -197,7 +197,9 @@ def test_imported_mass_acceptance_preserves_historical_calibration_context(tmp_p
     from pyccapt.calibration.core.share_variables import Variables
     data = frame()
     record_calibration_settings(data, flight_path_length_mm=111., t0_ns=35., pulse_mode='voltage',
-                                source='historical fitted model', status='fitted_model')
+                                source='historical fitted model',
+                                status={'t0_ns': 'fitted_model', 'flight_path_length_mm': 'user_supplied',
+                                        'pulse_mode': 'user_supplied'})
     historical = data.attrs[ATTR]['calibration'].copy()
     variables = Variables()
     variables.sync_from_data(data)
@@ -208,7 +210,9 @@ def test_imported_mass_acceptance_preserves_historical_calibration_context(tmp_p
     exported = workflow.export_frame()
     assert exported.attrs[ATTR]['calibration'] == historical
     assert exported.attrs[ATTR]['import_inputs']['t0_ns']['status'] == 'unknown'
-    assert extract_instrument_settings(exported)['t0_ns'] == 35.
+    # The historical fitted offset is retained as provenance, not offered as a setting.
+    assert 't0_ns' not in extract_instrument_settings(exported)
+    assert extract_instrument_settings(exported)['flight_path_length_mm'] == 111.
     path = tmp_path/'preserved.nxs'
     export_nexus(path, exported)
     with h5py.File(path, 'r') as handle:

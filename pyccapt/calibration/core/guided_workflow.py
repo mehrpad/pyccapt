@@ -163,6 +163,7 @@ class GuidedWorkflow:
                 context="import_inputs" if receipt.get("method") == "imported mass" else "calibration",
                 source="accepted guided calibration receipt", status={"flight_path_length_mm": "user_supplied",
                     "t0_ns": "fitted_model" if fitted_t0 is not None else "user_supplied", "pulse_mode": "user_supplied"})
+        self._record_tof_reference(frame, calibration, tof)
         v.reconstruction_selection_mask = self.active_mask.copy()
         frame.attrs["pyccapt_selection"] = self.selection_metadata(preserves_full_source=True)
         from pyccapt.instrument_metadata import extract_instrument_settings
@@ -172,10 +173,35 @@ class GuidedWorkflow:
         replaced = ({"mc (Da)"} if calibration else set()) | ({"t_c (ns)"} if tof is not None else set())
         if spatial:
             replaced.update(("x (nm)", "y (nm)", "z (nm)"))
-        frame.attrs["pyccapt_unavailable_columns"] = [name for name in
-            frame.attrs.get("pyccapt_unavailable_columns", []) if name not in replaced]
+        unavailable = [name for name in frame.attrs.get("pyccapt_unavailable_columns", []) if name not in replaced]
+        if not calibration and "mc (Da)" not in unavailable:
+            # The column is a NaN placeholder until a calibration is accepted.
+            unavailable.append("mc (Da)")
+        frame.attrs["pyccapt_unavailable_columns"] = unavailable
         v.calibration_metadata.attach(frame)
         v.data = frame
+
+    @staticmethod
+    def _record_tof_reference(frame, calibration, tof):
+        """Label the exported ``t_c (ns)`` scale; imported t_c keeps its source description."""
+        from pyccapt.instrument_metadata import ATTR, TOF_REFERENCE, record_calibrated_tof_reference
+        metadata = frame.attrs.get(ATTR)
+        if tof is None:
+            if isinstance(metadata, dict) and TOF_REFERENCE in metadata:
+                frame.attrs[ATTR] = {key: value for key, value in metadata.items() if key != TOF_REFERENCE}
+            return
+        receipt = calibration["receipt"]
+        if receipt.get("method") == "imported mass":
+            return
+        output = receipt.get("output") or {}
+        if output.get("convention") == "normalized reference ToF":
+            record_calibrated_tof_reference(frame, convention=output["convention"],
+                reference_voltage_V=output.get("reference_voltage_V"),
+                reference_flight_length_mm=output.get("reference_flight_length_mm"), t0_ns=output.get("t0_ns"),
+                source="accepted guided calibration receipt output")
+        else:
+            record_calibrated_tof_reference(frame, convention=receipt.get("tof_convention", "unrecorded"),
+                source="accepted guided calibration receipt")
 
     @property
     def active_mask(self):
@@ -355,7 +381,14 @@ class GuidedWorkflow:
         self.log.append({"action": "accept", "stage": stage, "revision": self.revision})
         self._sync_outputs()
         from pyccapt.calibration.core.calibration_metadata import record_step
-        parameters = accepted.get('criteria', accepted.get('receipt', accepted.get('parameters', {})))
+        if stage == "ranges":
+            # The accepted table itself is the decision; record what was accepted.
+            parameters = {"overlap_policy": accepted.get("overlap_policy"),
+                          "ranged_events": int(np.count_nonzero(accepted["assignment"] >= 0)),
+                          "ranges": [{key: row.get(key) for key in ("ion", "mc_low", "mc_up", "element", "complex", "charge")}
+                                     for row in accepted["rows"]]}
+        else:
+            parameters = accepted.get('criteria', accepted.get('receipt', accepted.get('parameters', {})))
         record_step(self.variables, f'guided_accept_{stage}', parameters=parameters,
                     model=(accepted.get('model_state') or {}).get('learned_model'))
         return self.status()

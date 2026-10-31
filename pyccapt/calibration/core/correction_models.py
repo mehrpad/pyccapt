@@ -248,6 +248,22 @@ def _predict_voltage_model(model_name, fitresult, voltage_values):
     return fitresult.predict(voltage_values.reshape(-1, 1))
 
 
+def _voltage_correction_factors(model_name, fitresult, voltage_values):
+    """Positive per-row voltage factors; rows with non-finite voltage get 1.
+
+    Matches the joint voltage/bowl policy: an event without a usable voltage
+    keeps its current calibrated value instead of becoming NaN (or making a
+    robust sklearn model reject the whole array).
+    """
+    voltage_values = np.asarray(voltage_values, dtype=float)
+    factors = np.ones(voltage_values.shape, dtype=float)
+    finite = np.isfinite(voltage_values)
+    if np.any(finite):
+        predicted = np.asarray(_predict_voltage_model(model_name, fitresult, voltage_values[finite]), dtype=float)
+        factors[finite] = np.clip(predicted, np.finfo(float).eps, None)
+    return factors
+
+
 def _predict_bowl_model(fit_mode, parameters, dld_x, dld_y):
     """Predict bowl correction values for the selected fitting mode."""
     if isinstance(parameters, CalibrationModel):
@@ -460,5 +476,6 @@ __all__ = [
     "robust_fit",
     "refine_correction_nelder_mead",
     "_predict_voltage_model",
+    "_voltage_correction_factors",
     "_predict_bowl_model",
 ]

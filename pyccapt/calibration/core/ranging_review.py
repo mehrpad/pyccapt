@@ -305,6 +305,27 @@ class PeakReviewQueue:
         row["evidence"]["profile"] = evidence
         return evidence
 
+    def _reference_background(self, reference, bin_width):
+        """Constant background under an isolated reference, in counts per histogram bin.
+
+        Adjacent side-bands as wide as the reference window are trimmed at the
+        nearest other (not rejected) peak window and at the measured mass range.
+        Without this subtraction the reference background becomes a flat
+        pedestal on every family component and biases fitted areas toward equality.
+        """
+        lower, upper = float(reference["lower"]), float(reference["upper"])
+        width = upper-lower
+        others = [r for r in self.records if r["id"] != reference["id"] and r["status"] != "not_peak"]
+        left = max([lower-width, float(self.sorted_mass[0])] + [r["upper"] for r in others if r["upper"] <= lower])
+        right = min([upper+width, float(self.sorted_mass[-1])] + [r["lower"] for r in others if r["lower"] >= upper])
+        spans = [(float(a), float(b)) for a, b in ((left, lower), (upper, right)) if b > a]
+        total = sum(b-a for a, b in spans)
+        if total < 2*bin_width:
+            return {"method": "unavailable", "counts_per_bin": 0., "sidebands_Da": [], "sideband_events": 0}
+        events = sum(int(np.diff(np.searchsorted(self.sorted_mass, span, side="left"))[0]) for span in spans)
+        return {"method": "adjacent_sidebands", "counts_per_bin": float(events*bin_width/total),
+                "sidebands_Da": [list(span) for span in spans], "sideband_events": events}
+
     def mixture_evidence(self, peak_ids, reference_id, *, identities_reviewed=False, bin_width=.005):
         from pyccapt.calibration.core.isotope_family import build_empirical_template, fit_isotope_family
         rows = [self._get(key) for key in peak_ids]
@@ -315,13 +336,15 @@ class PeakReviewQueue:
                for r in self.records if r["id"] != reference_id and r["status"] != "not_peak"):
             raise CalibrationInputError("Reference window overlaps another peak; use an isolated template")
         reference_counts, reference_edges = self.histogram(bin_width, reference["lower"], reference["upper"])
+        background = self._reference_background(reference, bin_width)
         template = build_empirical_template((reference_edges[:-1]+reference_edges[1:])/2, reference_counts,
-                                             reference_mass=reference["chosen"]["mass"])
+                                             reference_mass=reference["chosen"]["mass"],
+                                             background=background["counts_per_bin"])
         counts, edges = self.histogram(bin_width, min(r["lower"] for r in rows), max(r["upper"] for r in rows))
         fit = fit_isotope_family((edges[:-1]+edges[1:])/2, counts,
                                  isotope_masses=[r["chosen"]["mass"] for r in rows], template=template)
         for row in rows:
-            row["evidence"]["mixture"] = fit.summary()
+            row["evidence"]["mixture"] = {**fit.summary(), "reference_background": dict(background)}
         rows[0]["evidence"]["mixture_curve"] = {"mass": (edges[:-1]+edges[1:])/2,
             "observed": counts, "prediction": fit.prediction, "residual": counts-fit.prediction,
             "validation_mask": fit.validation_mask}

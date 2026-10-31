@@ -7,6 +7,9 @@ Events without a finite mass-to-charge (excluded or cropped by the guided
 workflow) are neither ranged nor unranged: they are reported separately as
 ``excluded_events`` and never enter the denominator.
 Only user-selected elements, ions, or the unranged fraction are plotted.
+An ion selection is the share of atoms contributed by that range (events times
+its stoichiometric atom count) in the same at.% denominator; it is labelled
+``"<name> (ion atoms)"`` because it is not an ion (event) fraction.
 """
 
 from __future__ import annotations
@@ -88,7 +91,7 @@ def _resolve_selectors(selectors: Iterable[str], species: list[_RangeSpecies]):
                 item = next(item for item in species if item.index == index)
             except (ValueError, StopIteration) as exc:
                 raise ValueError(f"Unknown ion selector {token!r}") from exc
-            label, kind, value = f"{item.name} (ion)", "ion", index
+            label, kind, value = f"{item.name} (ion atoms)", "ion", index
         elif token in element_names:
             label, kind, value = f"{token} (element)", "element", token
         else:
@@ -97,7 +100,7 @@ def _resolve_selectors(selectors: Iterable[str], species: list[_RangeSpecies]):
                 raise ValueError(f"Selected material {token!r} is not present in the range table")
             if len(matches) > 1:
                 raise ValueError(f"Ion name {token!r} occurs more than once; select a specific range")
-            label, kind, value = f"{token} (ion)", "ion", matches[0].index
+            label, kind, value = f"{token} (ion atoms)", "ion", matches[0].index
         if label not in used_labels:
             resolved.append((label, kind, value))
             used_labels.add(label)

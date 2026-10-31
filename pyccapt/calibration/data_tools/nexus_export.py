@@ -18,7 +18,9 @@ from pyccapt.calibration.core.exceptions import CalibrationInputError
 from pyccapt.calibration.data_tools.analysis_session import (
     _atomic_hdf, canonical_json, dataset_options, software_identity,
 )
-from pyccapt.instrument_metadata import ATTR as INSTRUMENT_ATTR, extract_instrument_settings, write_instrument_metadata
+from pyccapt.instrument_metadata import (
+    ATTR as INSTRUMENT_ATTR, calibrated_tof_reference, extract_instrument_settings, write_instrument_metadata,
+)
 
 
 MAPPING_VERSION = 'pyccapt-nxapm-map-2'
@@ -123,6 +125,14 @@ def write_nexus_mapping(handle, frame, *, metadata=None, ranges=None, reconstruc
         _measurement(tof, 'raw_tof', dataset, ['t (ns)'], 'ns')
         if 't_c (ns)' in frame:
             _measurement(tof, 'calibrated_tof', dataset, ['t_c (ns)'], 'ns')
+            # t_c may be normalized to a reference geometry with t0 removed;
+            # label that scale so it is not reconverted as raw instrument ToF.
+            reference = calibrated_tof_reference(frame)
+            attrs = tof['calibrated_tof'].attrs
+            attrs['convention'] = reference.get('convention', 'unrecorded; do not treat as raw instrument ToF')
+            for field in ('reference_voltage_V', 'reference_flight_length_mm', 't0_ns'):
+                value = reference.get(field)
+                attrs[field] = float('nan') if value is None else float(value)
         _program(tof, identity)
     if 'mc (Da)' in frame:
         mass = _group(instrument, 'mass_to_charge_conversion', 'NXprocess')

@@ -245,7 +245,9 @@ dataframes when the file is loaded with `load_tdc_raw=True`. The column rides
 through every cropping step in the calibration workflow (TOF clip, ROI, FDM,
 sequence range, manual mask drops); at save time the linked tdc rows for
 deleted dld rows are dropped, while orphan tdc rows (pulses that never produced
-a reconstructible dld event) are always preserved. See
+a reconstructible dld event) are preserved only inside the kept acquisition span
+(between the first and last surviving dld event, in acquisition order), so a
+temporal crop also drops the orphans of the cropped-away pulses. See
 [Calibration_DATA_STRUCTURE.md](Calibration_DATA_STRUCTURE.md) for the on-disk
 schema of the optional `/tdc` group and the linking semantics.
 

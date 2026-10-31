@@ -113,8 +113,10 @@ def test_apt_fallbacks_tag_only_absent_source_fields_and_preserve_tipbox(monkeyp
     raw.attrs = {'tipbox': np.array([1., 2., 3.]), 'pyccapt_source_id': 'apt-source'}
     monkeypatch.setattr(ccapt_tools.leap_tools, 'read_apt', lambda _: raw)
     result = ccapt_tools.apt_to_ccapt('dummy.apt')
+    # tElapsed is seconds, not a pulse counter: start_counter is unavailable
+    # rather than fabricated from it (audit 2026-10).
     assert set(result.attrs['pyccapt_unavailable_columns']) == {
-        'y (nm)', 'mc_uc (Da)', 'pulse_v (V)', 't_c (ns)', 'y_det (cm)', 'delta_p', 'multi'}
+        'y (nm)', 'mc_uc (Da)', 'pulse_v (V)', 't_c (ns)', 'y_det (cm)', 'delta_p', 'multi', 'start_counter'}
     np.testing.assert_array_equal(result.attrs['tipbox'], raw.attrs['tipbox'])
     result.attrs['tipbox'][0] = 100.
     assert raw.attrs['tipbox'][0] == 1.
@@ -124,7 +126,7 @@ def test_apt_fallbacks_tag_only_absent_source_fields_and_preserve_tipbox(monkeyp
     assert dataset.validity_status('high_voltage (V)').tolist() == [0, 0]
     assert dataset.validity_status('t (ns)').tolist() == [0, 1]
     assert dataset.validity_status('pulse_v (V)').tolist() == [2, 2]
-    assert dataset.validity_status('start_counter').tolist() == [0, 0]
+    assert dataset.validity_status('start_counter').tolist() == [2, 2]
 
 
 def test_nexus_mapping_preserves_import_availability_not_zero_heuristics(monkeypatch):

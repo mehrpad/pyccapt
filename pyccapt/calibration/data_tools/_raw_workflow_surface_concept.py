@@ -505,6 +505,19 @@ def _recover_surface_concept_partial_hits(
     return recovered_hits
 
 
+def _complete_chunk_is_valid(record_valid_flag: bool, chunk_times: np.ndarray) -> bool:
+    """A flagged ``[0, 1, 2, 3]`` chunk is complete only if its delay-line
+    pair sums agree (re-checked here for records built outside
+    :func:`raw_data_surface_concept._normalize_sequence`)."""
+    return bool(record_valid_flag) and len(chunk_times) == 4 and raw_data_surface_concept.pair_sums_consistent(chunk_times)
+
+
+def _in_detector_radius(det_x: float, det_y: float, detector_limit_cm: float) -> bool:
+    """Complete-hit detector gate: radial, matching the partial-recovery
+    ``detector_radius_cm`` gate and the configured ``detector_limit_cm``."""
+    return bool(np.hypot(det_x, det_y) <= detector_limit_cm)
+
+
 def _surface_concept_pulse_column(tdc_frame: pd.DataFrame, pulse_mode: str) -> str:
     mode = str(pulse_mode).strip().lower()
     if mode == 'laser':
@@ -519,8 +532,16 @@ def _surface_concept_pulse_column(tdc_frame: pd.DataFrame, pulse_mode: str) -> s
     )
 
 
-def summarize_surface_concept_sequences(sequence_records: list[dict]) -> dict[str, dict[int, int]]:
-    """Count sequence lengths and recoverable 2-D/1-D groups."""
+def summarize_surface_concept_sequences(
+    sequence_records: list[dict],
+    *,
+    detector_limit_cm: float = 4.0,
+) -> dict[str, dict[int, int]]:
+    """Count sequence lengths and recoverable 2-D/1-D groups.
+
+    ``detector_limit_cm`` is the detector radius used to gate recovered
+    partial hits; pass the configured value (``load_detector_constants``).
+    """
     total_counts: Counter[int] = Counter()
     dld2_counts: Counter[int] = Counter()
     dld4_counts: Counter[int] = Counter()
@@ -540,11 +561,13 @@ def summarize_surface_concept_sequences(sequence_records: list[dict]) -> dict[st
                 continue
             chunk_channels = channel_array[start:stop]
             chunk_times = time_array[start:stop]
-            is_valid = chunk_index < len(valid_events) and bool(valid_events[chunk_index]) and len(chunk_channels) == 4
+            is_valid = chunk_index < len(valid_events) and _complete_chunk_is_valid(valid_events[chunk_index], chunk_times)
             if is_valid:
                 dld4_counts[length] += 1
             else:
-                partial_hits = _recover_surface_concept_partial_hits(chunk_channels, chunk_times)
+                partial_hits = _recover_surface_concept_partial_hits(
+                    chunk_channels, chunk_times, detector_radius_cm=detector_limit_cm
+                )
                 if partial_hits:
                     dld2_counts[length] += len(partial_hits)
                 else:
@@ -679,23 +702,33 @@ def extract_surface_concept_hits(
 
 
 def plot_surface_concept_recovery_summary(recovery_stats: dict[str, int]) -> plt.Figure:
-    """Plot a compact summary of recovered and rejected Surface Concept hits."""
+    """Plot a compact summary of recovered and rejected Surface Concept hits.
+
+    A ``None`` entry (a count the recovery mode does not define, e.g. the
+    combinatorial recovery's outside-detector / unrecoverable counts) is drawn
+    as an empty bar labelled ``n/a`` rather than as a real zero.
+    """
     labels = [
         '4 DLTS in detector',
         '2 DLTS in detector',
         'Outside detector',
         'Unrecoverable',
     ]
-    values = [
-        int(recovery_stats.get('two_d_in_detector', 0)),
-        int(recovery_stats.get('one_d_in_detector', 0)),
-        int(recovery_stats.get('outside_detector_hits', 0)),
-        int(recovery_stats.get('unrecoverable_chunks', 0)),
+    raw_values = [
+        recovery_stats.get('two_d_in_detector', 0),
+        recovery_stats.get('one_d_in_detector', 0),
+        recovery_stats.get('outside_detector_hits', 0),
+        recovery_stats.get('unrecoverable_chunks', 0),
     ]
+    unavailable = [value is None for value in raw_values]
+    values = [0 if missing else int(value) for value, missing in zip(raw_values, unavailable)]
     colors = [DLTS_COLORS[4], DLTS_COLORS[2], '#6b7280', '#dc2626']
 
     fig, ax = plt.subplots(figsize=(7.0, 3.2))
     ax.bar(labels, values, color=colors)
+    for index, missing in enumerate(unavailable):
+        if missing:
+            ax.text(index, 0.5, 'n/a', ha='center', va='bottom', color='gray', transform=ax.get_xaxis_transform())
     ax.set_ylabel('Count')
     if max(values or [0]) > 20:
         ax.set_yscale('log')
@@ -731,11 +764,11 @@ def _build_diagnostics_batch(args: tuple) -> list[dict]:
                 continue
             chunk_channels = channel_array[start:stop]
             chunk_times = time_array[start:stop]
-            is_valid = chunk_index < len(valid_events) and bool(valid_events[chunk_index]) and len(chunk_times) == 4
+            is_valid = chunk_index < len(valid_events) and _complete_chunk_is_valid(valid_events[chunk_index], chunk_times)
             if is_valid:
                 det_x, det_y, tof = _surface_concept_hit_from_time_data(chunk_times)
                 radius = float(np.hypot(det_x, det_y))
-                in_detector = abs(det_x) <= detector_limit_cm and abs(det_y) <= detector_limit_cm
+                in_detector = radius <= detector_limit_cm
                 rows.append(
                     {
                         'sequence_index': sequence_index,
@@ -796,7 +829,7 @@ def _build_diagnostics_batch(args: tuple) -> list[dict]:
                 elif axis == 'y':
                     in_detector = abs(det_y) <= detector_limit_cm
                 else:
-                    in_detector = abs(det_x) <= detector_limit_cm and abs(det_y) <= detector_limit_cm
+                    in_detector = _in_detector_radius(det_x, det_y, detector_limit_cm)
                 # A combined hit (detector_axis == 'xy') fired all four
                 # delay-line ends -> 4 DLTS; a single-axis partial -> 2.
                 # The diagnostics path runs with combine_axes=False so axis
@@ -912,7 +945,7 @@ def analyze_surface_concept_tdc_frame(
             df_tdc[pulse_column].to_numpy(),
             print_stats=False,
         )
-    sequence_stats = summarize_surface_concept_sequences(sequence_records)
+    sequence_stats = summarize_surface_concept_sequences(sequence_records, detector_limit_cm=detector_limit_cm)
     raw_summary = summarize_surface_concept_raw_sequences(sequence_records)
     recovery_diagnostics = build_surface_concept_recovery_diagnostics(
         sequence_records,

@@ -31,12 +31,6 @@ def build_roi_concentration_profile_panel(variables, *, label_layout=None):
     the profile spans the selected axis in fixed-width spatial bins.
     """
     label_layout = label_layout or widgets.Layout(width="200px")
-    try:
-        x_values, y_values, z_values = _coordinate_arrays(variables)
-        coordinates_available = True
-    except ValueError:
-        x_values = y_values = z_values = np.empty(0, dtype=float)
-        coordinates_available = False
     options = profile_species_options(variables.range_data)
     selected_default = tuple(value for _, value in options[:1])
 
@@ -69,7 +63,6 @@ def build_roi_concentration_profile_panel(variables, *, label_layout=None):
     current_figure = [None]
 
     coordinate_names = ("x", "y", "z")
-    coordinate_map = {"x": x_values, "y": y_values, "z": z_values}
 
     def _set_current_figure(figure):
         if current_figure[0] is not None:
@@ -90,7 +83,11 @@ def build_roi_concentration_profile_panel(variables, *, label_layout=None):
         center_second_label.value = f"ROI centre {transverse[1]} [nm]:"
         width_first_label.value = f"ROI width {transverse[0]} [nm]:"
         width_second_label.value = f"ROI width {transverse[1]} [nm]:"
-        if not coordinates_available:
+        # Read the coordinates now, not at panel build time, so the defaults
+        # follow the latest reconstruction stored on ``variables``.
+        try:
+            coordinate_map = dict(zip(coordinate_names, _coordinate_arrays(variables)))
+        except ValueError:
             return
         for widget, name in zip((center_first, center_second), transverse):
             values = coordinate_map[name]

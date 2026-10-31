@@ -190,12 +190,16 @@ def _format_pct(numerator: int, denominator: int) -> str:
 def _classify_pulse_chunks(df: pd.DataFrame, group_col: str, detector_kind: str) -> dict:
     """Walk every pulse group and classify each chunk-of-N as complete / midtier / partial.
 
-    Per pulse the channels are sorted, then split into ``ceil(L/N)``
-    consecutive non-overlapping chunks (``N = 2 * len(delay-line pairs)``).
-    Each chunk emits **one** classification, so a length-8 SC pulse that
-    contains two valid 4-DLTS sub-events contributes 2 to the "complete" bar
-    at x=8 — same semantics as the legacy
-    ``raw_data_surface_concept.find_consecutive_sequences``.
+    Per pulse the channels are ordered by occurrence rank (the first
+    occurrence of every channel in channel order, then the second occurrence,
+    ...) and split into ``ceil(L/N)`` consecutive non-overlapping chunks
+    (``N = 2 * len(delay-line pairs)``). Each chunk emits **one**
+    classification, so a length-8 SC pulse ``[0,1,2,3,0,1,2,3]`` that contains
+    two valid 4-DLTS sub-events contributes 2 to the "complete" bar at x=8 —
+    same ordering as the legacy
+    ``raw_data_surface_concept._normalize_sequence`` used by
+    ``find_consecutive_sequences``. (A plain channel sort would give
+    ``[0,0,1,1]`` + ``[2,2,3,3]`` and misreport both sub-events as partials.)
 
     Categories:
 
@@ -220,13 +224,13 @@ def _classify_pulse_chunks(df: pd.DataFrame, group_col: str, detector_kind: str)
     - ``partial``   : one entry per partial chunk.
 
     .. note::
-        This classifier sorts by channel before chunking. For *position
+        This classifier orders by occurrence rank before chunking. For *position
         reconstruction* (det_x / det_y) sort order is suboptimal because
         timestamps that are physically adjacent in the TDC sequence are more
         likely to come from the same physical event; a future smarter
         grouping would walk the sequence and try alternative partitions,
         dropping any candidate event that lands outside the detector. For
-        the histogram-only classification used here, sort-then-chunk is
+        the histogram-only classification used here, rank-then-chunk is
         adequate.
     """
     pairs = _delay_line_pairs(detector_kind)
@@ -247,7 +251,12 @@ def _classify_pulse_chunks(df: pd.DataFrame, group_col: str, detector_kind: str)
     partial_lengths: list[int] = []
 
     for _, sub in df.groupby(group_col, sort=False):
-        channels_sorted = np.sort(sub["channel"].to_numpy())
+        channels = sub["channel"].to_numpy()
+        # Occurrence rank of each channel within the pulse (0 for the first
+        # time a channel fires, 1 for the second, ...), then order by
+        # (rank, channel) so repeated sub-events stay in separate chunks.
+        rank = pd.Series(channels).groupby(channels).cumcount().to_numpy()
+        channels_sorted = channels[np.lexsort((channels, rank))]
         pulse_len = int(channels_sorted.size)
         if pulse_len == 0:
             continue
@@ -321,8 +330,16 @@ def plot_dlts_per_pulse(
     orphans = tdc_df[~tdc_df["has_dld_match"]]
 
     m = _classify_pulse_chunks(matched, "event_group_id", detector_kind)
-    # Orphan rows share event_group_id = -1; group them by start_counter instead.
-    o = _classify_pulse_chunks(orphans, "start_counter", detector_kind)
+    # Orphan rows share event_group_id = -1. start_counter wraps, so grouping
+    # by its value would merge unrelated orphan pulses from different wraps;
+    # group by consecutive start_counter runs of the full tdc table instead.
+    if "start_counter" in tdc_df.columns and len(orphans):
+        sc = tdc_df["start_counter"].to_numpy()
+        run_id = np.concatenate(([0], np.cumsum(sc[1:] != sc[:-1])))
+        orphans = orphans.assign(_pulse_run=run_id[~tdc_df["has_dld_match"].to_numpy(dtype=bool)])
+        o = _classify_pulse_chunks(orphans, "_pulse_run", detector_kind)
+    else:
+        o = _classify_pulse_chunks(orphans.iloc[0:0], "event_group_id", detector_kind)
 
     def _join(a: np.ndarray, b: np.ndarray) -> np.ndarray:
         if a.size and b.size:
@@ -725,10 +742,16 @@ def _surface_concept_raw_summary_markdown(raw_summary: dict[str, object], recove
             f"- Multi-hit irregular groups: {int(raw_summary.get('multi_hit_irregular', 0)):,}",
             f"- Recovered 4 DLTS hits in detector: {int(recovery_stats.get('two_d_in_detector', 0)):,}",
             f"- Recovered 2 DLTS hits in detector: {int(recovery_stats.get('one_d_in_detector', 0)):,}",
-            f"- Recovered hits outside detector: {int(recovery_stats.get('outside_detector_hits', 0)):,}",
-            f"- Unrecoverable chunks: {int(recovery_stats.get('unrecoverable_chunks', 0)):,}",
+            f"- Recovered hits outside detector: {_count_or_na(recovery_stats.get('outside_detector_hits', 0))}",
+            f"- Unrecoverable chunks: {_count_or_na(recovery_stats.get('unrecoverable_chunks', 0))}",
         ]
     )
+
+def _count_or_na(value) -> str:
+    """Format a count, or ``n/a`` when the recovery mode does not define it (``None``)."""
+    if value is None:
+        return "n/a (not defined for this recovery mode)"
+    return f"{int(value):,}"
 
 def _species_to_windows(species: list[dict]) -> list[dict]:
     windows = []

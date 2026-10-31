@@ -1,3 +1,4 @@
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -182,6 +183,12 @@ def load_data(
             Detector-geometry key forwarded to the partial-hit recovery.
             Use ``'roentdek'`` for RoentDek hardware. Ignored when
             ``merge_partial_tdc=False``.
+
+    The partial-hit merge outcome is stored on
+    ``variables.partial_merge_status`` (``'not requested'``, ``'skipped: ...'``,
+    ``'ok'`` or ``'failed: ...'``). A failed merge also emits a
+    ``RuntimeWarning`` and the progress bar ends with ``partial-hit merge
+    FAILED``; ``variables.data`` then holds only the native DLD events.
     """
     if tdc in {'pyccapt', 'nexus'}:
         if Path(dataset_path).suffix.lower() not in {'.h5', '.nxs', '.nx5'}:
@@ -367,14 +374,17 @@ def load_data(
     variables.sync_from_data(update_backups=True)
     progress.update(1)  # phase 2: shared variables synchronized
 
+    variables.partial_merge_status = 'not requested'
     if merge_partial_tdc:
         progress.set_postfix_str("recovering partial hits")
         if tdc != 'pyccapt':
+            variables.partial_merge_status = f'skipped: requires a pyccapt h5 dataset (tdc={tdc!r})'
             print(
                 'WARNING: merge_partial_tdc=True requires a pyccapt h5 dataset; '
                 f'ignoring (tdc={tdc!r}).'
             )
         elif not load_tdc_raw or tdc_df is None:
+            variables.partial_merge_status = 'skipped: no raw /tdc loaded'
             print(
                 'WARNING: merge_partial_tdc=True requires load_tdc_raw=True with '
                 'a successful raw /tdc load; ignoring.'
@@ -393,10 +403,19 @@ def load_data(
                     multihit_match_tol_cm=float(multihit_match_tol_cm),
                 )
             except Exception as exc:
-                print(f'WARNING: merge_partial_tdc failed: {exc}')
+                variables.partial_merge_status = f'failed: {type(exc).__name__}: {exc}'
+                message = (
+                    f'merge_partial_tdc failed ({type(exc).__name__}: {exc}); variables.data '
+                    'contains only the native DLD events, no recovered partial hits.'
+                )
+                print(f'ERROR: {message}')
+                warnings.warn(message, RuntimeWarning, stacklevel=2)
+            else:
+                variables.partial_merge_status = 'ok'
 
     progress.update(1)  # phase 3: partial-hit recovery (or skipped)
-    progress.set_postfix_str("done")
+    merge_failed = str(variables.partial_merge_status).startswith('failed')
+    progress.set_postfix_str("done (partial-hit merge FAILED)" if merge_failed else "done")
     progress.close()
 
 

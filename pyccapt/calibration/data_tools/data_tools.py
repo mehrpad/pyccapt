@@ -613,14 +613,28 @@ def load_data(dataset_path, data_type, mode="processed", *, load_tdc=False, tdc_
             from pyccapt.calibration.data_tools import data_loadcrop
 
             if load_tdc:
+                # The /tdc layout differs between detectors; if the requested
+                # layout cannot be read, try the other one but say so: the
+                # channel semantics (and so every DLTS classification) follow
+                # the layout that was actually loaded.
                 primary_mode = tdc_extract_mode
                 fallback_modes = [mode_name for mode_name in ("tdc_sc", "tdc_ro") if mode_name != primary_mode]
                 last_error = None
                 for mode_name in [primary_mode, *fallback_modes]:
                     try:
-                        return data_loadcrop.fetch_dataset_with_tdc(dataset_path, tdc_extract_mode=mode_name)
+                        result = data_loadcrop.fetch_dataset_with_tdc(dataset_path, tdc_extract_mode=mode_name)
                     except Exception as error:
                         last_error = error
+                        continue
+                    if mode_name != primary_mode:
+                        warnings.warn(
+                            f"Raw /tdc could not be read with tdc_extract_mode={primary_mode!r} "
+                            f"({type(last_error).__name__}: {last_error}); loaded it with "
+                            f"tdc_extract_mode={mode_name!r} instead. Check the detector type.",
+                            RuntimeWarning,
+                            stacklevel=2,
+                        )
+                    return result
                 raise last_error
             return data_loadcrop.fetch_dataset_from_dld_grp(dataset_path)
         if mode == "processed":

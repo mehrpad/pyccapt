@@ -323,6 +323,12 @@ def apt_to_ccapt(file_path):
     """
     Convert APT data to PyCCAPT format.
 
+    ``start_counter`` is taken from the APT ``pulse`` section (the pulse
+    number), so ions of one pulse share a value. ``tElapsed`` is elapsed time
+    in seconds and is not a pulse counter; when no ``pulse`` section exists
+    ``start_counter`` is reported unavailable (``pyccapt_unavailable_columns``)
+    instead of being fabricated from it.
+
     Args:
         file_path: APT data file path.
 
@@ -356,7 +362,7 @@ def apt_to_ccapt(file_path):
         'z (nm)': z_values,
         'mc (Da)': pick_first('mc (Da)', 'Mass'),
         'high_voltage (V)': pick_first('high_voltage (V)', 'Voltage', 'Vref'),
-        'pulse_v (V)': pick_first('pulse_v (V)', 'Vap', 'pulse'),
+        'pulse_v (V)': pick_first('pulse_v (V)', 'Vap'),
         'pulse_l (pJ)': pick_first('pulse_l (pJ)', 'laserpower'),
         't (ns)': pick_first('t (ns)', 'Epos ToF', 'tof'),
         't_c (ns)': pick_first('t_c (ns)', 'tofc'),
@@ -364,7 +370,7 @@ def apt_to_ccapt(file_path):
         'y_det (cm)': pick_first('y_det (cm)', 'YDet_mm'),
         'delta_p': pick_first('delta_p', 'Delta Pulse', 'pulseDelta', dtype=int),
         'multi': pick_first('multi', 'Multiplicity', dtype=int),
-        'start_counter': pick_first('start_counter', 'tElapsed', dtype=int),
+        'start_counter': pick_first('start_counter', 'pulse', dtype=np.int64),
     }
 
     df = pd.DataFrame(data_dict)
@@ -373,6 +379,6 @@ def apt_to_ccapt(file_path):
     df['y_det (cm)'] = df['y_det (cm)'] / 10
     df['delta_p'] = df['delta_p'].astype(int)
     df['multi'] = df['multi'].astype(int)
-    df['start_counter'] = df['start_counter'].astype(int)
+    df['start_counter'] = df['start_counter'].astype(np.int64)
 
     return _with_import_availability(df, data, source_columns)

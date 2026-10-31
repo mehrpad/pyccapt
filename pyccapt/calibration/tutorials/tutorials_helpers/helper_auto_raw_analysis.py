@@ -91,6 +91,27 @@ def effective_peak_units(peak_source: str, peak_units: str) -> str:
     return "mc" if peak_source == "range" else peak_units
 
 
+def resolve_raw_t0_ns(variables, frame) -> tuple[float, str]:
+    """Return ``(t0_ns, source)`` for the raw hit-table mc conversion.
+
+    Uses ``variables.t0`` when set, else the ``t0_ns`` recorded in the
+    dataset's instrument metadata, else 0 ns (reported as unavailable).
+    """
+    value = getattr(variables, "t0", None)
+    try:
+        if value is not None and np.isfinite(float(value)):
+            return float(value), "`variables.t0`"
+    except (TypeError, ValueError):
+        pass
+    if frame is not None:
+        from pyccapt.instrument_metadata import extract_instrument_settings
+
+        recorded = extract_instrument_settings(frame).get("t0_ns")
+        if recorded is not None and np.isfinite(float(recorded)):
+            return float(recorded), "dataset instrument metadata"
+    return 0.0, "not available — assumed 0 ns"
+
+
 def run_analysis(
     variables,
     species: list[dict],
@@ -209,6 +230,17 @@ def run_analysis(
         # full hit table. This is what keeps the "Full spectrum" view
         # honest — noise events between peaks are still in the hit table.
         max_tof_ns = float(getattr(variables, "max_tof_ns", 5000.0) or 5000.0)
+        t0_ns, t0_source = resolve_raw_t0_ns(variables, dld_df)
+        _md(
+            f"_Hit-table mc uses `tof2mc` with t0 = {t0_ns:g} ns ({t0_source}), "
+            f"flight path = {flight_path_length:g} mm, pulse mode `{pulse_mode}`. "
+            "No voltage or bowl calibration is applied to it._"
+        )
+        if peak_units == "mc" and windows_for_recovery:
+            _md(
+                "_**Note:** mc peak windows (e.g. from a range file, which holds calibrated mc) are matched "
+                "against this uncalibrated hit-table mc, so peaks can sit off their windows._"
+            )
         combinatorial_analysis = analyze_surface_concept_tdc_frame_combinatorial(
             tdc_df,
             peak_windows=windows_for_recovery,
@@ -217,7 +249,7 @@ def run_analysis(
             max_tof_ns=max_tof_ns,
             mode=recovery_mode_value,
             pair_sum_tolerance_bins=float(pair_sum_tolerance_bins),
-            t0=0.0,
+            t0=t0_ns,
             flight_path_length_mm=flight_path_length,
             pulse_mode=pulse_mode,
             show_progress=True,

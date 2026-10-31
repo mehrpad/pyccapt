@@ -220,14 +220,15 @@ def test_read_apt_skips_position_tipbox(tmp_path: Path):
     np.testing.assert_allclose(dataframe.attrs["tipbox"], expected_tipbox)
 
 
-def test_apt_to_ccapt_uses_position_fallbacks_and_elapsed_counter(monkeypatch):
+def test_apt_to_ccapt_uses_position_fallbacks_and_pulse_number_counter(monkeypatch):
     apt_dataframe = pd.DataFrame(
         {
             "Mass": [27.0, 54.0],
             "x": [1.0, 4.0],
             "y": [2.0, 5.0],
             "z": [-3.0, -6.0],
-            "tElapsed": [10, 20],
+            "pulse": [10.0, 20.0],
+            "tElapsed": [0.5, 0.9],
         }
     )
 
@@ -236,7 +237,12 @@ def test_apt_to_ccapt_uses_position_fallbacks_and_elapsed_counter(monkeypatch):
 
     np.testing.assert_allclose(ccapt["x (nm)"].to_numpy(), [1.0, 4.0])
     np.testing.assert_allclose(ccapt["z (nm)"].to_numpy(), [-3.0, -6.0])
+    # start_counter comes from the APT pulse number, never from tElapsed
+    # (seconds); audit 2026-10.
     assert ccapt["start_counter"].tolist() == [10, 20]
+    assert "start_counter" not in ccapt.attrs["pyccapt_unavailable_columns"]
+    # The pulse-number section is not a pulse voltage.
+    assert "pulse_v (V)" in ccapt.attrs["pyccapt_unavailable_columns"]
 
 
 def test_read_epos_uses_record_reader_for_large_files(tmp_path: Path):

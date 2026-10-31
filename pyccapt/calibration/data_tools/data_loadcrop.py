@@ -159,10 +159,22 @@ def fetch_dataset_with_tdc(
     return dld_df, tdc_df
 
 def filter_tdc_by_dld(dld_df: pd.DataFrame, tdc_df: pd.DataFrame) -> pd.DataFrame:
-    """Return tdc rows whose dld counterpart still exists, plus all orphan rows.
+    """Return tdc rows whose dld counterpart still exists, plus in-range orphan rows.
 
-    Rule: drop a tdc row only when its linked dld row was deleted. Orphan tdc
-    rows (pulses that never produced a dld event) are always preserved.
+    Rules:
+
+    - A matched tdc row is kept iff its linked dld group survives in ``dld_df``.
+    - An orphan tdc row (a pulse that never produced a dld event) is kept iff
+      it lies inside the kept acquisition span: in tdc row (= acquisition)
+      order, between the first and the last surviving matched tdc row. The
+      span is extended to the start (end) of the table when no matched group
+      was removed before (after) it, so an uncropped dld keeps every orphan.
+      Row order is used instead of ``start_counter`` values because the
+      counter wraps. A temporal crop therefore drops the orphans of the
+      cropped-away pulses; a spatial crop cannot localise orphans (they have
+      no position) and keeps those inside the span. If ``tdc_df`` has no
+      matched rows at all there is nothing to anchor the span and every
+      orphan is kept.
     """
     if EVENT_GROUP_ID_COLUMN not in tdc_df.columns or TDC_HAS_DLD_MATCH_COLUMN not in tdc_df.columns:
         raise ValueError("tdc_df is missing the event_group_id/has_dld_match columns; load it via fetch_dataset_with_tdc().")
@@ -170,7 +182,21 @@ def filter_tdc_by_dld(dld_df: pd.DataFrame, tdc_df: pd.DataFrame) -> pd.DataFram
         raise ValueError("dld_df is missing the event_group_id column; load it via fetch_dataset_with_tdc().")
 
     surviving_groups = pd.unique(dld_df[EVENT_GROUP_ID_COLUMN].to_numpy())
-    keep = (~tdc_df[TDC_HAS_DLD_MATCH_COLUMN].to_numpy()) | (tdc_df[EVENT_GROUP_ID_COLUMN].isin(surviving_groups).to_numpy())
+    has_match = tdc_df[TDC_HAS_DLD_MATCH_COLUMN].to_numpy(dtype=bool)
+    orphan = ~has_match
+    matched_keep = has_match & tdc_df[EVENT_GROUP_ID_COLUMN].isin(surviving_groups).to_numpy()
+    matched_pos = np.flatnonzero(has_match)
+    if matched_pos.size:
+        kept_pos = np.flatnonzero(matched_keep)
+        if kept_pos.size == 0:
+            orphan = np.zeros_like(orphan)
+        else:
+            lo = 0 if kept_pos[0] == matched_pos[0] else kept_pos[0]
+            hi = len(tdc_df) if kept_pos[-1] == matched_pos[-1] else kept_pos[-1] + 1
+            in_span = np.zeros(len(tdc_df), dtype=bool)
+            in_span[lo:hi] = True
+            orphan &= in_span
+    keep = orphan | matched_keep
     return tdc_df.loc[keep].reset_index(drop=True).copy()
 
 def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld', *, lazy: bool = False):
@@ -882,14 +908,23 @@ def crop_data_after_selection(data_crop, variables):
 
     # Partial-recovered rows (merge_partial_tdc=True) carry NaN on the
     # delay-line axis that could not be reconstructed. Their detector
-    # position is *unknown*, not "outside the ROI" -- silently dropping
-    # them would throw away ToF / mass / pulse info that is still valid.
-    # Build the in/out mask only from rows where both axes are finite,
-    # and force partials to pass through unconditionally so the spatial
-    # crop is non-destructive to them.
-    finite_mask = np.isfinite(x) & np.isfinite(y)
+    # position is only partly *unknown*, not "outside the ROI" -- silently
+    # dropping them would throw away ToF / mass / pulse info that is still
+    # valid. Build the in/out mask from rows where both axes are finite.
+    # A single-axis partial is kept only if its known coordinate is within
+    # the crop radius of the centre on that axis (a necessary condition for
+    # lying inside the circle); rows with no finite axis are kept.
+    finite_x = np.isfinite(x)
+    finite_y = np.isfinite(y)
+    finite_mask = finite_x & finite_y
     partial_mask = ~finite_mask
-    n_partials = int(partial_mask.sum())
+    partial_keep = partial_mask.copy()
+    x_only = finite_x & ~finite_y
+    y_only = finite_y & ~finite_x
+    partial_keep[x_only] = np.abs(x[x_only] - center_x) <= radius
+    partial_keep[y_only] = np.abs(y[y_only] - center_y) <= radius
+    n_partials = int(partial_keep.sum())
+    n_partials_dropped = int(partial_mask.sum()) - n_partials
 
     x_finite = x[finite_mask]
     y_finite = y[finite_mask]
@@ -905,14 +940,16 @@ def crop_data_after_selection(data_crop, variables):
 
     detector_dist = np.full(len(data_crop), np.inf, dtype=np.float64)
     detector_dist[finite_mask] = np.sqrt((x_finite - center_x) ** 2 + (y_finite - center_y) ** 2)
-    mask_fdm = (detector_dist <= radius) | partial_mask  # keep partials always
+    mask_fdm = (detector_dist <= radius) | partial_keep
     if not np.any(mask_fdm & finite_mask):
         raise ValueError('Spatial crop does not contain any position-capable detector hits')
 
-    if n_partials > 0:
+    if n_partials > 0 or n_partials_dropped > 0:
         print(
             f'[crop_data_after_selection] Keeping {n_partials} partial-recovered rows '
-            '(NaN x_det/y_det) unconditionally; spatial-only analyses must still filter them.'
+            f'(NaN x_det/y_det) whose known axis lies within the crop radius; dropped '
+            f'{n_partials_dropped} whose known axis lies outside. Spatial-only analyses '
+            'must still filter the kept partials.'
         )
 
     cropped = data_crop.loc[mask_fdm].copy()

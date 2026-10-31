@@ -187,7 +187,8 @@ def _build_backend(
     if model == ROENTDEK_MODEL and source == "TDC":
         return RoentDekBackend(
             name="RoentDek", counter_source="TDC",
-            target=tdc_roentdek.experiment_measure, **common,
+            # conf carries the alignment_* window settings (as for Surface Concept).
+            target=partial(tdc_roentdek.experiment_measure, conf=dict(conf)), **common,
         )
     if model == HSD_MODEL and source == "HSD":
         return HSDBackend(

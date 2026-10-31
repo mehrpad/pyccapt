@@ -103,16 +103,27 @@ _APT_CHUNK_STEMS.extend(('apt_laser_'+key, 'apt/laser_'+key, 'float64') for key 
 
 
 def _load_apt_from_chunks(chunk_dir: Path,
-                          manifest_files: dict[str, list[Path]] | None = None) -> dict[str, np.ndarray] | None:
+                          manifest_files: dict[str, list[Path]] | None = None,
+                          problems: list[dict] | None = None) -> dict[str, np.ndarray] | None:
     """Load apt/* metadata from chunk files.
 
     Returns a dict {hdf5_path: array} if at least one apt chunk stem is present,
     or None if no apt chunk files exist (so callers can fall back to in-memory data).
+    Chunk files that cannot be loaded are skipped and described in *problems*
+    (when given) so callers can report the loss instead of hiding it.
     """
+    if problems is None:
+        problems = []
     result: dict[str, np.ndarray] = {}
     any_found = False
     for stem, ds_path, dtype in _APT_CHUNK_STEMS:
-        files = _sorted_chunk_files(chunk_dir, stem, manifest_files)
+        try:
+            files = _sorted_chunk_files(chunk_dir, stem, manifest_files) if chunk_dir.is_dir() else []
+        except ValueError as exc:
+            # Legacy (manifest-less) chunks with an id gap.
+            problems.append({'stem': stem, 'file': '', 'error': str(exc)})
+            any_found = True
+            continue
         if not files:
             if isinstance(manifest_files, chunk_store.ValidatedChunkIndex) and manifest_files.declares(stem):
                 result[ds_path] = np.empty(0, dtype=dtype)
@@ -130,11 +141,59 @@ def _load_apt_from_chunks(chunk_dir: Path,
                     arr = arr.astype(target)
                 parts.append(arr.copy())
                 del arr
-            except Exception:
-                pass
+            except Exception as exc:
+                problems.append({'stem': stem, 'file': f.name, 'error': f'{type(exc).__name__}: {exc}'})
         if parts:
             result[ds_path] = np.concatenate(parts)
     return result if any_found else None
+
+
+def _resolve_apt_datasets(variables, time_counter, time_ex, apt_meta, apt_from_chunks,
+                          chunk_problems, flush_errors) -> tuple[dict[str, tuple[object, str]], dict]:
+    """Choose the apt/* source and describe it for provenance.
+
+    ``apt_meta`` holds the experiment process's complete in-memory columns
+    (keyed by chunk stem). When they are complete they are authoritative: the
+    periodic chunks are only crash checkpoints, so a failed final flush cannot
+    drop the tail. Otherwise committed chunks are used and any flush error,
+    unloadable chunk or misaligned column marks the acquisition incomplete.
+    """
+    memory: dict[str, object] = {"apt/id": time_counter, "apt/timestamps": time_ex}
+    if apt_meta is not None:
+        for stem, ds_path, _ in _APT_CHUNK_STEMS:
+            if stem in apt_meta:
+                memory[ds_path] = apt_meta[stem]
+    for ds_path, attr in (("apt/num_events", "main_counter"), ("apt/num_raw_signals", "main_raw_counter"),
+                          ("apt/temperature", "main_temperature"),
+                          ("apt/experiment_chamber_vacuum", "main_chamber_vacuum")):
+        if ds_path not in memory:
+            memory[ds_path] = getattr(variables, attr)
+    dtypes = {ds_path: dtype for _, ds_path, dtype in _APT_CHUNK_STEMS}
+    rows = len(time_counter)
+    memory_complete = apt_meta is not None and all(
+        ds_path in memory and len(memory[ds_path]) == rows for ds_path in dtypes)
+    chunk_rows = {ds_path: int(len(values)) for ds_path, values in (apt_from_chunks or {}).items()}
+    report = {'flush_errors': [str(error) for error in flush_errors],
+              'unloadable_chunks': list(chunk_problems), 'chunk_rows': chunk_rows}
+    if memory_complete:
+        source = 'memory'
+        selected = {ds_path: memory[ds_path] for ds_path in dtypes}
+    elif apt_from_chunks is not None:
+        source = 'chunks'
+        selected = dict(apt_from_chunks)
+        # Fill stems without chunk files from memory so the group stays complete.
+        for ds_path, values in memory.items():
+            selected.setdefault(ds_path, values)
+    else:
+        source = 'memory'
+        selected = memory
+    lengths = {ds_path: int(len(values)) for ds_path, values in selected.items()}
+    report.update(source=source, rows=max(lengths.values(), default=0))
+    if len(set(lengths.values())) > 1:
+        report['length_mismatch'] = lengths
+    report['degraded'] = source == 'chunks' and bool(
+        report['flush_errors'] or report['unloadable_chunks'] or 'length_mismatch' in report)
+    return {ds_path: (values, dtypes[ds_path]) for ds_path, values in selected.items()}, report
 
 
 def _coerce_chunk_to_target(values: np.ndarray, target_dtype: np.dtype,
@@ -295,7 +354,7 @@ def _write_surface_concept_detector_data(hdf_file, variables, manifest_files=Non
 			_create_dataset(hdf_file, dataset_name, getattr(variables, var_attr), dtype)
 
 
-def hdf_creator(variables, conf, time_counter, time_ex):
+def hdf_creator(variables, conf, time_counter, time_ex, *, apt_meta=None, apt_meta_flush_errors=()):
     """
     Save experiment data to an HDF5 file.
 
@@ -304,6 +363,11 @@ def hdf_creator(variables, conf, time_counter, time_ex):
             conf (dict): A dictionary containing configuration settings.
             time_counter (list): A list of time counter data.
             time_ex (list): A list of timestamp of iteration.
+            apt_meta (dict | None): Complete in-memory apt/* columns keyed by
+                chunk stem (``apt_num_events``, ``apt_laser_x``, ...). When
+                complete they take precedence over the checkpoint chunks.
+            apt_meta_flush_errors (Iterable[str]): apt metadata checkpoint
+                write failures, recorded in provenance.
 
     Returns:
             None
@@ -335,6 +399,14 @@ def hdf_creator(variables, conf, time_counter, time_ex):
             integrity['status'] = 'incomplete'
         integrity.update(detector_error=detector_error, unattributed_packets=unattributed,
                          detector_warning=str(getattr(variables, 'detector_warning', '') or ''))
+        apt_chunk_problems: list[dict] = []
+        apt_from_chunks = _load_apt_from_chunks(chunk_dir, manifest_files, apt_chunk_problems)
+        apt_datasets, apt_report = _resolve_apt_datasets(
+            variables, time_counter, time_ex, apt_meta, apt_from_chunks,
+            apt_chunk_problems, apt_meta_flush_errors)
+        integrity['apt_metadata'] = apt_report
+        if apt_report['degraded']:
+            integrity['status'] = 'incomplete'
         logger.info('Acquisition chunk validation completed in %.3f s; writing HDF5',
                     time.monotonic()-save_started)
         with h5py.File(tmp_path, "w") as hdf_file:
@@ -405,36 +477,12 @@ def hdf_creator(variables, conf, time_counter, time_ex):
             for manifest in manifests:
                 manifest_hash.update(manifest.read_bytes())
             provenance.attrs["chunk_manifest_sha256"] = manifest_hash.hexdigest() if manifests else ""
-            # apt/* group: prefer chunk files written during the run (crash-safe),
-            # fall back to the in-memory lists for backwards-compatibility with
-            # experiments that ran before chunk flushing was introduced.
-            apt_from_chunks = _load_apt_from_chunks(chunk_dir, manifest_files)
-            if apt_from_chunks is not None:
-                for ds_path, arr in apt_from_chunks.items():
-                    _create_dataset(hdf_file, ds_path, arr, arr.dtype)
-                # Fill any stems that had no chunk files with in-memory data so
-                # the apt group is always structurally complete.
-                written = set(apt_from_chunks.keys())
-                if "apt/id"                         not in written:
-                    _create_dataset(hdf_file, "apt/id", time_counter, np.uint64)
-                if "apt/num_events"                 not in written:
-                    _create_dataset(hdf_file, "apt/num_events", variables.main_counter, np.uint32)
-                if "apt/num_raw_signals"            not in written:
-                    _create_dataset(hdf_file, "apt/num_raw_signals", variables.main_raw_counter, np.uint32)
-                if "apt/temperature"                not in written:
-                    _create_dataset(hdf_file, "apt/temperature", variables.main_temperature, np.float64)
-                if "apt/experiment_chamber_vacuum"  not in written:
-                    _create_dataset(hdf_file, "apt/experiment_chamber_vacuum", variables.main_chamber_vacuum, np.float64)
-                if "apt/timestamps"                 not in written:
-                    _create_dataset(hdf_file, "apt/timestamps", time_ex, np.float64)
-            else:
-                # No apt chunks: use the in-memory lists (pre-chunk-flush experiments).
-                _create_dataset(hdf_file, "apt/id", time_counter, np.uint64)
-                _create_dataset(hdf_file, "apt/num_events", variables.main_counter, np.uint32)
-                _create_dataset(hdf_file, "apt/num_raw_signals", variables.main_raw_counter, np.uint32)
-                _create_dataset(hdf_file, "apt/temperature", variables.main_temperature, np.float64)
-                _create_dataset(hdf_file, "apt/experiment_chamber_vacuum", variables.main_chamber_vacuum, np.float64)
-                _create_dataset(hdf_file, "apt/timestamps", time_ex, np.float64)
+            # apt/* group: the complete in-memory columns when the experiment
+            # supplies them, otherwise the committed checkpoint chunks filled
+            # from memory (see _resolve_apt_datasets). Both paths write the
+            # same datasets, including stage/laser positions and telemetry.
+            for ds_path, (values, dtype) in apt_datasets.items():
+                _create_dataset(hdf_file, ds_path, values, dtype)
 
             if conf["tdc"] == "on" and tdc_model == "Surface_Concept" and variables.counter_source == "TDC":
                 _write_surface_concept_detector_data(hdf_file, variables, manifest_files)

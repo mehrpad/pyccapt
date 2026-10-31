@@ -4,7 +4,9 @@ from pathlib import Path
 
 import numpy as np
 from numpy.ctypeslib import ndpointer
-from pyccapt.control.apt.detector_chunks import ChunkStream, ChunkWriter, preserve_unattributed_packet, read_event_metadata
+from pyccapt.control.apt.detector_chunks import (
+    ChunkStream, ChunkWriter, preserve_unattributed_packet, finite_rate_frequency_hz, read_event_metadata,
+)
 from pyccapt.control.core.shared_ring_buffer import publish_plot_events
 from pyccapt.control.nkt_photonics.readback import pulse_energy_pj, experiment_frequency_hz
 
@@ -74,7 +76,7 @@ class TDC:
         return data
 
 
-def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_event):
+def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_event, conf=None):
     """
     Measurement function: This function is called in a process to read data from the queue.
 
@@ -114,14 +116,14 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
 
     events_detected = raw_signal_detected = events_detected_tmp = 0
     start_time = time.monotonic()
-    pulse_frequency = max(experiment_frequency_hz(variables), 1.)
+    pulse_frequency = finite_rate_frequency_hz(experiment_frequency_hz(variables))
     last_buf_error = None
     writer = stream = None
     failure = None
     from pyccapt.control.apt.laser_alignment_data import LaserAlignmentPublisher
     from pyccapt.control.apt.alignment_vision import AlignmentEventPublisher
     laser_alignment_publisher = LaserAlignmentPublisher(variables)
-    alignment_publisher = AlignmentEventPublisher(variables)
+    alignment_publisher = AlignmentEventPublisher(variables, conf)
     try:
         writer = ChunkWriter(Path(variables.path)/"temp_data"/"chunks", stop_event=stop_event)
         dtypes = {name: np.float64 for name in
@@ -173,7 +175,7 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
             elapsed_s = current_time-start_time
             if elapsed_s >= .5:
                 try:
-                    pulse_frequency = max(experiment_frequency_hz(variables), 1.)
+                    pulse_frequency = finite_rate_frequency_hz(experiment_frequency_hz(variables), pulse_frequency)
                 except Exception:
                     pass
                 rate = events_detected_tmp*100/(pulse_frequency*elapsed_s)

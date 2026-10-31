@@ -105,13 +105,16 @@ def test_scalar_legacy_ring_counts_only_new_losses():
 
 def test_abandoned_plot_lock_does_not_block_acquisition_or_expose_partial_events(events):
     class UnavailableLock:
-        def acquire(self, *, timeout):
-            assert 0 < timeout <= .05
+        def acquire(self, block=True, timeout=None):
+            assert not block or 0 < timeout <= .05
             return False
     events._lock = UnavailableLock()
     assert events.write_events([1], [2], [3], [4]) is False
     assert all(len(column) == 0 for column in events.read_events())
     events.reset()
+    # Repeated timeouts (not a single slow peer) declare the transport down.
+    for _ in range(events._MAX_CONSECUTIVE_TIMEOUTS):
+        events.write_events([1], [2], [3], [4])
     assert events.transport_error
     assert int(events._idx[0]) == 0
 

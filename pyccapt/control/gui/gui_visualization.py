@@ -1035,7 +1035,9 @@ class Ui_Visualization(VisualizationLayoutMixin):
             self.start_time_metadata = time.time()
             self.index_plot_start += 1
             self.hitmap_count.setText(str(0))
-        self.variables.elapsed_time = time.time() - self.start_time
+        # variables.elapsed_time is owned by the experiment process (monotonic
+        # since acquisition start); the time stop criterion must not depend on
+        # this plot timer.
         # with self.variables.lock_statistics:
         if final_drain:
             # Final export must not inherit the live view's short startup

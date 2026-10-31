@@ -7,6 +7,7 @@ and atomic publication contract used by acquisition recovery.
 from __future__ import annotations
 
 from collections import deque
+import math
 import multiprocessing
 from pathlib import Path
 from queue import Empty, Full
@@ -176,6 +177,21 @@ class ChunkStream:
     def finish(self):
         if self.rows:
             self._flush(self.rows)
+
+
+def finite_rate_frequency_hz(frequency, previous=1.):
+    """Pulse frequency for the detection-rate denominator: finite and >= 1 Hz.
+
+    A missing laser readback yields NaN and ``max(NaN, 1.)`` is NaN, which
+    would publish a NaN detection rate. Keep the last valid value instead.
+    """
+    try:
+        frequency = float(frequency)
+    except (TypeError, ValueError):
+        return previous
+    if not math.isfinite(frequency):
+        return previous
+    return max(frequency, 1.)
 
 
 def read_event_metadata(variables, energy_reader, *, attempts=3):

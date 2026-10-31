@@ -173,10 +173,23 @@ def recover_chunks(chunk_directory: str | Path, output_path: str | Path) -> dict
             report['unattributed_packets'] = unattributed
             if unattributed:
                 report['status'] = 'incomplete'
+            # apt/* control-loop metadata (counters, sensors, stage/laser
+            # positions and laser telemetry) uses the same loader and schema
+            # as normal finalization.
+            apt_problems: list[dict] = []
+            apt = hdf5_creator._load_apt_from_chunks(chunk_dir, manifest_files, apt_problems) or {}
+            apt_lengths = {path: int(len(values)) for path, values in apt.items()}
+            report['apt_metadata'] = {'source': 'chunks', 'unloadable_chunks': apt_problems,
+                                      'chunk_rows': apt_lengths}
+            if apt_problems or len(set(apt_lengths.values())) > 1:
+                report['status'] = 'incomplete'
             # Recovery can verify committed records, never prove a crashed
             # acquisition had no uncommitted tail. Preserve that distinction.
             provenance.attrs['acquisition_completeness'] = ('incomplete' if report['status'] == 'incomplete' else 'unverified')
             provenance.attrs['chunk_integrity_json'] = json.dumps(report, sort_keys=True)
+            apt_dtypes = {path: dtype for _, path, dtype in hdf5_creator._APT_CHUNK_STEMS}
+            for dataset_name, values in apt.items():
+                hdf5_creator._create_dataset(handle, dataset_name, values, apt_dtypes[dataset_name])
             backend_written = (detector_hdf.write_hsd_chunks(handle, chunk_dir, manifest_files)
                                or detector_hdf.write_roentdek_chunks(handle, chunk_dir, manifest_files))
             if not backend_written:
@@ -186,7 +199,7 @@ def recover_chunks(chunk_directory: str | Path, output_path: str | Path) -> dict
                         continue
                     handle.require_group(dataset_name.split("/", 1)[0])
                     hdf5_creator._write_chunked_dataset(handle, dataset_name, files, dtype)
-            for group_name in ('dld', 'tdc', 'hsd'):
+            for group_name in ('apt', 'dld', 'tdc', 'hsd'):
                 if group_name in handle:
                     written.update({f'{group_name}/{name}': int(dataset.shape[0])
                                     for name, dataset in handle[group_name].items() if isinstance(dataset, h5py.Dataset)})
@@ -197,8 +210,8 @@ def recover_chunks(chunk_directory: str | Path, output_path: str | Path) -> dict
         temporary.unlink(missing_ok=True)
         raise
     result = validate_hdf5(output)
-    # A crash-recovery file may lack apt metadata, so report it but distinguish
-    # successful detector recovery from full-schema validity.
+    # A crash-recovery file may lack apt metadata (runs without apt chunks),
+    # so report it but distinguish successful recovery from full-schema validity.
     result.update(
         {
             "recovered": True,

@@ -30,10 +30,13 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
             variables.total_ions = event_count
             variables.total_raw_signals = raw_count
             pulse_frequency = max(float(variables.pulse_frequency) * 1000.0, 1.0)
-            variables.detection_rate_current = batch_size * 100.0 / pulse_frequency
+            interval_s = max(0.0, float(getattr(variables, "simulator_interval_s", 0.02)))
+            # One batch per interval: rate [% of pulses] = events/s * 100 / pulses/s,
+            # as in the real backends (events*100 / (frequency*elapsed)).
+            variables.detection_rate_current = batch_size * 100.0 / (pulse_frequency * max(interval_s, 1e-3))
             variables.detection_rate_current_plot = variables.detection_rate_current
             batch_count += 1
-            time.sleep(max(0.0, float(getattr(variables, "simulator_interval_s", 0.02))))
+            time.sleep(interval_s)
     except Exception as exc:
         variables.flag_tdc_failure = True
         variables.detector_error = f"Simulator failed: {exc.__class__.__name__}: {exc}"

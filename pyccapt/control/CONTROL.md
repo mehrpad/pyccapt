@@ -75,7 +75,11 @@ DLD coordinates.
 Writer errors and bounded shutdown failures set detector failure state. Hardware
 safe-off precedes the cooperative drain wait. A packet whose voltage/laser
 metadata cannot be obtained is retained under `temp_data/unattributed` and the
-run is marked incomplete. Control-loop frequency, gain interpretation, motion
+run is marked incomplete. Surface Concept packets that arrive after Stop (the
+in-flight exposure) are treated the same way, but only as a `detector_warning`:
+the HDF5 provenance is `incomplete` and lists the files, while the run itself
+does not fail. Zero-event packets are ignored; a failure to save the evidence
+remains a detector failure. Control-loop frequency, gain interpretation, motion
 settling periods and alignment search objectives are unchanged by these data
 transport optimizations.
 

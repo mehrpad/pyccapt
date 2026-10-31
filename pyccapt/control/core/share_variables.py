@@ -130,6 +130,8 @@ class Variables:
         "flag_stop_tdc": ("exp", ("tdc",)),
         "flag_tdc_failure": ("tdc", ("exp", "main")),
         "detector_error": ("tdc", ("exp", "main")),
+        # Non-fatal detector condition (e.g. shutdown packets kept unattributed).
+        "detector_warning": ("tdc", ("exp", "main")),
         # --- Visualization controls / clear handshakes -------------------
         "vdc_hold": ("viz", ("exp",)),
         "reset_heatmap": ("viz", ("viz",)),  # internal to viz
@@ -512,6 +514,7 @@ class Variables:
         "flag_finished_tdc": False,
         "flag_tdc_failure": False,
         "detector_error": "",
+        "detector_warning": "",
         "plot_clear_flag": False,
         "clear_index_save_image": False,
         "experiment_plan_count": 0,

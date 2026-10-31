@@ -333,7 +333,8 @@ def hdf_creator(variables, conf, time_counter, time_ex):
         unattributed = sorted(path.name for path in (chunk_dir.parent / 'unattributed').glob('*.npz'))
         if bool(getattr(variables, 'flag_tdc_failure', False)) or detector_error or unattributed:
             integrity['status'] = 'incomplete'
-        integrity.update(detector_error=detector_error, unattributed_packets=unattributed)
+        integrity.update(detector_error=detector_error, unattributed_packets=unattributed,
+                         detector_warning=str(getattr(variables, 'detector_warning', '') or ''))
         logger.info('Acquisition chunk validation completed in %.3f s; writing HDF5',
                     time.monotonic()-save_started)
         with h5py.File(tmp_path, "w") as hdf_file:

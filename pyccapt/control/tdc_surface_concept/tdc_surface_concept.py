@@ -463,11 +463,17 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
         stopped_tail = queued_tail + sum(getattr(callback, 'shutdown_packets', 0)
                                         for callback in (bufdatacb, bufdatacb_raw))
         publication_errors = [getattr(callback, 'publication_error', '') for callback in (bufdatacb, bufdatacb_raw)]
-        if stopped_tail or any(publication_errors):
-            failure = failure or RuntimeError(
-                f'{stopped_tail} detector packet(s) at shutdown retained without voltage attribution; '
-                'inspect temp_data/unattributed' +
-                (f'; callback preservation failed: {publication_errors}' if any(publication_errors) else ''))
+        tail_message = (f'{stopped_tail} detector packet(s) at shutdown retained without voltage attribution; '
+                        'inspect temp_data/unattributed')
+        if any(publication_errors):
+            # Evidence could not be saved: events were lost.
+            failure = failure or RuntimeError(f'{tail_message}; callback preservation failed: {publication_errors}')
+        elif stopped_tail:
+            # Packets that arrive after Stop are expected with back-to-back
+            # exposures. They are saved under temp_data/unattributed and HDF5
+            # provenance is marked incomplete, but the run itself is not failed.
+            variables.detector_warning = tail_message
+            print(f"Surface Concept acquisition warning: {tail_message}")
         variables.total_ions = events_detected
         variables.total_raw_signals = raw_signal_detected
         if failure is not None:

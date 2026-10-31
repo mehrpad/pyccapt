@@ -1150,6 +1150,9 @@ class APT_Exp_Control:
                 f"properly{initialize_devices.bcolors.ENDC}"
             )
             print(exc)
+        detector_warning = getattr(self.variables, 'detector_warning', '')
+        if detector_warning and self.log_apt is not None:
+            self.log_apt.warning('Detector: %s', detector_warning)
 
         # Final apt/* metadata checkpoint (the tail that did not fill a full chunk).
         self._flush_apt_meta_chunks(time_counter, time_ex)

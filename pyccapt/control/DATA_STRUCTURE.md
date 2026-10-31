@@ -179,7 +179,7 @@ This does not prove the detector electronics delivered every physical event.
 
 The `chunk_integrity_json` attribute preserves per-stream written and excluded
 rows, expected manifest rows, missing chunk-ID ranges, rejected group IDs and
-reasons, detector errors, and unattributed-packet filenames. Quarantined files
+reasons, detector errors and warnings, and unattributed-packet filenames. Quarantined files
 remain in the archived chunk evidence. `excluded_row_count` includes rejected
 primary event rows; raw-signal and metadata exclusions are reported separately
 per stream to avoid counting the same physical event repeatedly.

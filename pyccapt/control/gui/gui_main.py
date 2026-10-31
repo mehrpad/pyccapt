@@ -2130,6 +2130,7 @@ class Ui_PyCCAPT(AlignmentGuiMixin, ExperimentPlanGuiMixin, MainLayoutMixin):
         self.variables.flag_stop_tdc = False
         self.variables.flag_tdc_failure = False
         self.variables.detector_error = ''
+        self.variables.detector_warning = ''
         self.variables.flag_new_min_voltage = False
         self.variables.start_flag = True
         self.variables.stop_flag = False

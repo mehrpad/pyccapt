@@ -256,9 +256,11 @@ def test_surface_stop_preserves_queued_tail_without_inventing_voltage(monkeypatc
            "start_counter": np.arange(7, dtype=np.uint64)}
     module, v, writer, device, callbacks, _ = _surface_replay(monkeypatch, tmp_path, [dld], [raw])
     v.specimen_voltage = 0.  # The experiment owner has already initiated safe-off.
-    assert module.run_experiment_measure(v, *[Mock() for _ in range(4)], SimpleNamespace(is_set=lambda: True)) == -1
-    assert v.flag_tdc_failure and v.flag_finished_tdc
-    assert '2 detector packet(s)' in v.detector_error
+    v.flag_tdc_failure, v.detector_error = False, ''
+    # Packets after Stop are expected (in-flight exposure): kept, warned, not a failure.
+    assert module.run_experiment_measure(v, *[Mock() for _ in range(4)], SimpleNamespace(is_set=lambda: True)) == 0
+    assert not v.flag_tdc_failure and v.flag_finished_tdc and not v.detector_error
+    assert '2 detector packet(s)' in v.detector_warning
     assert v.total_ions == v.total_raw_signals == 0 and not writer.records
     paths = list((tmp_path/'temp_data'/'unattributed').glob('*.npz'))
     assert len(paths) == 2
@@ -296,6 +298,16 @@ def test_surface_late_callback_ignores_empty_packet(tmp_path):
     assert callback.shutdown_packets == 1
 
 
+def test_surface_stop_fails_when_tail_evidence_cannot_be_saved(monkeypatch, tmp_path):
+    dld = {name: np.arange(5, dtype=np.uint64) for name in ("dif1", "dif2", "time", "start_counter")}
+    module, v, writer, device, callbacks, _ = _surface_replay(monkeypatch, tmp_path, [dld], [])
+    def unwritable(*_args, **_kwargs):
+        raise OSError("disk full")
+    monkeypatch.setattr(module, "preserve_unattributed_packet", unwritable)
+    assert module.run_experiment_measure(v, *[Mock() for _ in range(4)], SimpleNamespace(is_set=lambda: True)) == -1
+    assert v.flag_tdc_failure and "disk full" in v.detector_error
+
+
 def test_surface_replay_to_real_writer_and_hdf_preserves_committed_events_and_exposes_tail(monkeypatch, tmp_path):
     import h5py
     import json
@@ -310,7 +322,7 @@ def test_surface_replay_to_real_writer_and_hdf_preserves_committed_events_and_ex
                                             [raw([1, 2, 3, 4, 5]), raw([6, 7, 8, 9])])
     monkeypatch.setattr(module, 'ChunkWriter', ChunkWriter)
     assert module.run_experiment_measure(v, *[Mock() for _ in range(4)],
-                                         SimpleNamespace(is_set=lambda: v.total_ions >= 3)) == -1
+                                         SimpleNamespace(is_set=lambda: v.total_ions >= 3)) == 0
     v.exp_name, v.counter_source = 'replay', 'TDC'
     v.main_counter, v.main_raw_counter = [3], [5]
     v.main_temperature, v.main_chamber_vacuum = [40.], [1e-8]
@@ -321,8 +333,9 @@ def test_surface_replay_to_real_writer_and_hdf_preserves_committed_events_and_ex
         np.testing.assert_array_equal(handle['dld/start_counter'], [1, 2, 3])
         np.testing.assert_array_equal(handle['tdc/start_counter'], [1, 2, 3, 4, 5])
         np.testing.assert_array_equal(handle['dld/high_voltage'], [1500., 1500., 1500.])
-        evidence = json.loads(handle['provenance'].attrs['chunk_integrity_json'])['unattributed_packets']
-        assert len(evidence) == 2
+        report = json.loads(handle['provenance'].attrs['chunk_integrity_json'])
+        assert len(report['unattributed_packets']) == 2
+        assert '2 detector packet(s)' in report['detector_warning'] and not report['detector_error']
     directory = tmp_path/'temp_data'/'unattributed'
     with np.load(next(directory.glob('dld_shutdown*.npz'))) as tail:
         np.testing.assert_array_equal(tail['start_counter'], [4, 5])

@@ -6,7 +6,9 @@
 
 
 #include <chrono>
+#include <cmath>
 #include <iostream>
+#include <limits>
 using namespace std;
 using namespace std::chrono;
 
@@ -21,6 +23,32 @@ using namespace std::chrono;
 
 #define READ_BUFFER_SIZE (50000)
 // this size can be set to other values
+
+// TDC channel layout (0-based): 0..5 = u1,u2,v1,v2,w1,w2, 6 = start (laser), 7 = MCP.
+// The MCP is the group trigger, so every time in a group is relative to the MCP (t_mcp = 0).
+#define START_CHANNEL (6)
+#define MCP_CHANNEL (7)
+#define VALUES_PER_EVENT (12)
+
+
+// Hexanode constants, same values and meaning as DAn-part2.ccf (Parameter 1102..1120).
+// pyccapt.calibration.data_tools.roentdek_hexanode implements the same reconstruction;
+// the Python acquisition loop recomputes x/y/t from the raw channels with it.
+struct HexParams
+{
+	double fu = 0.890;			// mm/ns, layer u
+	double fv = 0.917;			// mm/ns, layer v
+	double fw = 0.887;			// mm/ns, layer w
+	double w_offset = -1.175;	// ns
+	double x_offset = -1.5;		// mm
+	double y_offset = 1.85;		// mm
+	double sum_offset[3] = { -113.98, -113.03, -114.85 };	// ns, shifts each time sum to zero
+	double sum_halfwidth[3] = { 1.5, 1.2, 2.3 };				// ns, time-sum gate
+	double runtime[3] = { 88., 86., 88. };					// ns, max signal runtime across a layer
+	double rotation_deg = 0.;
+	double rotation_center[2] = { 0., 0. };					// mm
+	double tof_offset = 0.;									// ns
+};
 
 #ifdef WIN64
 	#pragma comment(lib,"hptdc_driver_3.5.2_x64.lib")
@@ -48,6 +76,9 @@ public:
 
 private:
 
+	void reconstruct_hit(double& x, double& y, double& tof);
+	void store_event(double* row);
+
 	// now configure the TDC:
 	TDCManager* manager = new TDCManager(0x1A13, 0x0001);
 	LMF_IO* LMF = new LMF_IO(NUM_CHANNELS, NUM_IONS);
@@ -71,14 +102,7 @@ private:
 	unsigned __int32	CNT[8];
 	__int32				TDC_data[8][10];
 
-	double fu;
-	double fv;
-	double fw;
-	double w_offset;
-
-	double u;
-	double v;
-	double w;
+	HexParams hex_params;
 
 	double X;
 	double Y;
@@ -96,23 +120,113 @@ Wrraper_tdc::Wrraper_tdc(int buf_size, int time_out)
 	time_out_micro = time_out * 1000; // convert it from milisecond to microsecond
 	trigger_channel = 8 - 1; // 1st TDC channel has index 0
 	ui64_HPTDC_AbsoluteTimeStamp = 0;
-
-	fu = 0.890000; // Time to mm calibration factor for u (mm/ns)
-	fv = 0.917000; //Time to mm calibration factor for v (mm/ns)
-	fw = 0.887000; //Time to mm calibration factor for w (mm/ns)
-	w_offset = -1.175000; //Offset for w layer (units: nanoseconds)
-
-	u = 0;
-	v = 0;
-	w = 0;
+	tdc_binsize = 0.025;	// overwritten in init_tdc() with the value reported by the driver
+	memset(CNT, 0, sizeof(CNT));
+	memset(TDC_data, 0, sizeof(TDC_data));
 
 	X = 0;
 	Y = 0;
 	TOF = 0;
 
-	array_tem = new double[(12 * buffer_size) + 1]; //+1 for putting the siye of array
+	array_tem = new double[(VALUES_PER_EVENT * buffer_size) + 1]; //+1 for putting the size of array
+	array_tem[0] = 0;
 
 };
+
+
+// Hexanode position and TOF of the first hit on each channel, in the DAn convention:
+//   u = 0.5*fu*(u1-u2), v = 0.5*fv*(v1-v2), w = 0.5*fw*(w1-w2+w_offset)
+//   Xuv = u, Yuv = (u-2v)/sqrt(3); Xuw = u, Yuw = (2w-u)/sqrt(3); Xvw = v+w, Yvw = (w-v)/sqrt(3)
+// A layer is used only if its time sum is inside the gate. One missing signal of a layer is
+// rebuilt from the time sum when exactly one other layer is complete. x, y and tof are NaN
+// when no position can be built or the start channel did not fire (DAn reports no particle).
+void Wrraper_tdc::reconstruct_hit(double& x, double& y, double& tof)
+{
+	const double nan = numeric_limits<double>::quiet_NaN();
+	x = nan;
+	y = nan;
+	tof = nan;
+	if (CNT[START_CHANNEL] == 0) return;
+
+	const double t_mcp = 0.;	// MCP is the group trigger
+	tof = t_mcp - TDC_data[START_CHANNEL][0] * tdc_binsize + hex_params.tof_offset;
+
+	const double factor[3] = { hex_params.fu, hex_params.fv, hex_params.fw };
+	const double layer_offset[3] = { 0., 0., hex_params.w_offset };
+	double pos[3];
+	bool full[3];
+	bool rebuilt[3];
+	int n_full = 0;
+	for (int k = 0; k < 3; ++k) {
+		const bool p1 = CNT[2 * k] > 0;
+		const bool p2 = CNT[2 * k + 1] > 0;
+		double t1 = TDC_data[2 * k][0] * tdc_binsize;
+		double t2 = TDC_data[2 * k + 1][0] * tdc_binsize;
+		const double target = 2. * t_mcp - hex_params.sum_offset[k];
+		full[k] = false;
+		rebuilt[k] = false;
+		if (p1 && p2) {
+			full[k] = fabs(t1 + t2 - 2. * t_mcp + hex_params.sum_offset[k]) <= hex_params.sum_halfwidth[k];
+		}
+		else if (p1) {
+			t2 = target - t1;
+			rebuilt[k] = true;
+		}
+		else if (p2) {
+			t1 = target - t2;
+			rebuilt[k] = true;
+		}
+		const double diff = t1 - t2;
+		const bool in_runtime = fabs(diff) <= hex_params.runtime[k] + hex_params.sum_halfwidth[k];
+		full[k] = full[k] && in_runtime;
+		rebuilt[k] = rebuilt[k] && in_runtime;
+		pos[k] = 0.5 * factor[k] * (diff + layer_offset[k]);
+		if (full[k]) ++n_full;
+	}
+
+	int mask = 0;	// u = 1, v = 2, w = 4
+	for (int k = 0; k < 3; ++k) {
+		if (full[k] || (rebuilt[k] && n_full == 1)) mask |= (1 << k);
+	}
+	const double u = pos[0];
+	const double v = pos[1];
+	const double w = pos[2];
+	const double sqrt3 = sqrt(3.);
+	double px;
+	double py;
+	switch (mask) {
+	case 7: px = (2. * u + v + w) / 3.; py = (w - v) / sqrt3; break;
+	case 3: px = u; py = (u - 2. * v) / sqrt3; break;
+	case 5: px = u; py = (2. * w - u) / sqrt3; break;
+	case 6: px = v + w; py = (w - v) / sqrt3; break;
+	default: return;
+	}
+	px += hex_params.x_offset;
+	py += hex_params.y_offset;
+	if (hex_params.rotation_deg != 0.) {
+		const double angle = hex_params.rotation_deg * 3.14159265358979323846 / 180.;
+		const double dx = px - hex_params.rotation_center[0];
+		const double dy = py - hex_params.rotation_center[1];
+		px = hex_params.rotation_center[0] + dx * cos(angle) - dy * sin(angle);
+		py = hex_params.rotation_center[1] + dx * sin(angle) + dy * cos(angle);
+	}
+	x = px;
+	y = py;
+}
+
+
+// One event row: ch0..ch7 first-hit bins (0 = no hit), X [mm], Y [mm], TOF [ns], timestamp [bins].
+void Wrraper_tdc::store_event(double* row)
+{
+	reconstruct_hit(X, Y, TOF);
+	for (int i = 0; i < 8; ++i) {
+		row[i] = CNT[i] > 0 ? static_cast<double>(TDC_data[i][0]) : 0.;
+	}
+	row[8] = X;
+	row[9] = Y;
+	row[10] = TOF;
+	row[11] = static_cast<double>(ui64_HPTDC_AbsoluteTimeStamp);
+}
 
 
 
@@ -206,9 +320,6 @@ double* Wrraper_tdc::get_data_tdc()
 {
 
 	memset(TDC_data, 0, sizeof(TDC_data));	// clear TDC_data[] array
-	memset(array_tem, 0, sizeof(array_tem));
-
-	//manager->Continue();
 
 	bool group_is_complete = false;
 	while (!group_is_complete) {
@@ -218,117 +329,46 @@ double* Wrraper_tdc::get_data_tdc()
 		}
 	}
 
-	//manager->Pause();
-
-	// Calculate the X, Y, Time of Flight, number of written events in lmf file , and Time_stamp
-	//static_cast<float>(
-	u = (1 / 2) * ((TDC_data[0][0] * tdc_binsize) - (TDC_data[1][0] * tdc_binsize)) * fu;
-	v = (1 / 2) * ((TDC_data[2][0] * tdc_binsize) - (TDC_data[3][0] * tdc_binsize)) * fv;
-	w = (1 / 2) * (((TDC_data[4][0] * tdc_binsize) - (TDC_data[5][0] * tdc_binsize)) + w_offset) * fw;
-
-	X = u;
-	Y = (u - (2 * v)) / sqrt(3);
-	TOF = (TDC_data[7][0] * tdc_binsize) - (TDC_data[6][0] * tdc_binsize);
-
-
 	LMF->WriteTDCData(ui64_HPTDC_AbsoluteTimeStamp, CNT, &TDC_data[0][0]);
 
 	array_tem[0] = 1;
-	for (int i = 0; i < 12; ++i) {
-		if (i < 8) {
-			array_tem[i + 1] = TDC_data[i][0];
-		}
-		else if (i == 8) {
-			array_tem[i + 1] = X;
-		}
-		else if (i == 9) {
-			array_tem[i + 1] = Y;
-		}
-		else if (i == 10) {
-			array_tem[i + 1] = TOF;
-		}
-		else {
-			array_tem[i + 1] = static_cast<double>(ui64_HPTDC_AbsoluteTimeStamp);
-		}
-		
-	}
-
+	store_event(array_tem + 1);
 	return array_tem;
 }
 
 
 // Version 2 of get_data_tdc with buffering the data to reduce returning number to python
 // It buffers events and then return the result to Python wrraper.
+// array_tem[0] = number of events in this packet (0 on timeout), then VALUES_PER_EVENT values per event.
+// The count restarts at 0 on every call; the timeout is also checked while waiting for a group,
+// so the call returns within ~time_out ms even when no ion arrives and Python can stop the TDC.
 double* Wrraper_tdc::get_data_tdc_buf()
 {
-	memset(array_tem, 0, sizeof(array_tem));
+	__int64 packet_events = 0;
+	array_tem[0] = 0;
 
 	auto start = high_resolution_clock::now();
 
-	while (true) {
-
-		++recorded_triggers;
+	while (packet_events < buffer_size) {
 
 		memset(TDC_data, 0, sizeof(TDC_data));	// clear TDC_data[] array
 
-		//manager->Continue();
-		bool group_is_complete = false;
-		while (!group_is_complete) {
-			group_is_complete = PCIGetTDC_25psGroupMode_TDC8HP(manager, CNT, TDC_data, 8, 10, ui64_HPTDC_AbsoluteTimeStamp);
-			if (!group_is_complete) {
-				Sleep(1);
-			}
-		}
-		//cout << TDC_data[4][0] << endl;
-		LMF->WriteTDCData(ui64_HPTDC_AbsoluteTimeStamp, CNT, &TDC_data[0][0]);
-
-
-		//manager->Pause();
-		// Calculate the X, Y, Time of Flight, and Time_stamp
-
-		u = (1 / 2) * ((TDC_data[0][0] * tdc_binsize) - (TDC_data[1][0] * tdc_binsize)) * fu;
-		v = (1 / 2) * ((TDC_data[2][0] * tdc_binsize) - (TDC_data[3][0] * tdc_binsize)) * fv;
-		w = (1 / 2) * (((TDC_data[4][0] * tdc_binsize) - (TDC_data[5][0] * tdc_binsize)) + w_offset) * fw;
-
-		X = u;
-		Y = (u - (2 * v)) / sqrt(3);
-		TOF = abs((TDC_data[7][0] * tdc_binsize) - (TDC_data[6][0] * tdc_binsize));
-
-		array_tem[0] = static_cast<double>(recorded_triggers);
-		for (int i = 0; i < 12; ++i) {
-			if (i < 8) {
-				array_tem[(12 * (recorded_triggers - 1)) + i + 1] = static_cast<double>(TDC_data[i][0]);
-			}
-			else if (i == 8) {
-				array_tem[(12 * (recorded_triggers - 1)) + i + 1] = X;
-			}
-			else if (i == 9) {
-				array_tem[(12 * (recorded_triggers - 1)) + i + 1] = Y;
-			}
-			else if (i == 10) {
-				array_tem[(12 * (recorded_triggers - 1)) + i + 1] = TOF;
-			}
-			else {
-				array_tem[(12 * (recorded_triggers - 1)) + i + 1] = static_cast<double>(ui64_HPTDC_AbsoluteTimeStamp);
-			}
-
+		bool group_is_complete = PCIGetTDC_25psGroupMode_TDC8HP(manager, CNT, TDC_data, 8, 10, ui64_HPTDC_AbsoluteTimeStamp);
+		if (group_is_complete) {
+			LMF->WriteTDCData(ui64_HPTDC_AbsoluteTimeStamp, CNT, &TDC_data[0][0]);
+			store_event(array_tem + 1 + VALUES_PER_EVENT * packet_events);
+			++packet_events;
+			++recorded_triggers;
+			array_tem[0] = static_cast<double>(packet_events);
 		}
 
-		if (recorded_triggers % buffer_size == 0) {
+		auto duration = duration_cast<microseconds>(high_resolution_clock::now() - start);
+		if (duration.count() >= time_out_micro) {
 			break;
 		}
-
-		auto stop = high_resolution_clock::now();
-
-		auto duration = duration_cast<microseconds>(stop - start);
-
-		if (duration.count() == time_out_micro) {
-			//cout << "Time taken by function: "
-			//	<< duration.count() << " microseconds" << endl;
-			break;
+		if (!group_is_complete) {
+			Sleep(1);
 		}
-
-
 	}
 	return array_tem;
 }

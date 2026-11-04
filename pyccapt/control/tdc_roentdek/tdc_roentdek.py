@@ -1,14 +1,66 @@
 import ctypes
+import json
 import time
 from pathlib import Path
 
 import numpy as np
 from numpy.ctypeslib import ndpointer
+from pyccapt.calibration.data_tools.roentdek_hexanode import (
+    HexanodeCorrection, HexanodeParameters, reconstruct_hexanode,
+)
 from pyccapt.control.apt.detector_chunks import (
     ChunkStream, ChunkWriter, preserve_unattributed_packet, finite_rate_frequency_hz, read_event_metadata,
 )
+from pyccapt.control.core import runtime
 from pyccapt.control.core.shared_ring_buffer import publish_plot_events
 from pyccapt.control.nkt_photonics.readback import pulse_energy_pj, experiment_frequency_hz
+
+
+def hexanode_setup(conf):
+    """Hexanode constants and optional correction map from ``config.toml``.
+
+    ``ro_hexanode_ccf`` points to a CoboldPC DAn ``.ccf`` with the detector
+    constants (defaults: the values in ``source/DAn-part2.ccf``);
+    ``ro_hexanode_correction`` to a JSON map written from
+    ``HexanodeCorrection.to_dict()``. Relative paths resolve from the
+    project root.
+    """
+    conf = conf or {}
+
+    def resolve(value):
+        path = Path(value)
+        return path if path.is_absolute() else runtime.project_path(str(path))
+
+    params = HexanodeParameters()
+    if conf.get("ro_hexanode_ccf"):
+        params = HexanodeParameters.from_ccf(resolve(conf["ro_hexanode_ccf"]))
+    correction = None
+    if conf.get("ro_hexanode_correction"):
+        with open(resolve(conf["ro_hexanode_correction"]), "r", encoding="utf-8") as handle:
+            correction = HexanodeCorrection.from_dict(json.load(handle))
+    return params, correction
+
+
+def events_from_packet(data, params, correction=None):
+    """Detector columns for one SDK packet of ``(n, 12)`` event rows.
+
+    Columns 0..7 are the first-hit TDC bins (0 = no hit); x/y/t are rebuilt
+    from them with the shared hexanode reconstruction instead of trusting
+    the DLL's columns 8..10, so the result does not depend on the DLL build.
+    Events without a position get x = y = t = 0 (CoboldPC convention). The
+    channel bins are signed (the start channel precedes the MCP trigger) and
+    are stored two's-complement in the uint64 schema; read them back with
+    ``.view(np.int64)``.
+    """
+    channels = np.rint(data[:, :8]).astype(np.int64)
+    hits = reconstruct_hexanode(channels, params, correction)
+    valid = hits["valid"]
+    arrays = {"x": np.where(valid, hits["x_mm"] / 10., 0.),
+              "y": np.where(valid, hits["y_mm"] / 10., 0.),
+              "t": np.where(valid, hits["tof_ns"], 0.),
+              "time_stamp": data[:, 11]}
+    arrays.update({f"ch{i}": channels[:, i].view(np.uint64) for i in range(8)})
+    return arrays, valid
 
 
 class TDC:
@@ -101,6 +153,14 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
         variables.flag_tdc_failure = False
         return 0
 
+    try:
+        hex_params, hex_correction = hexanode_setup(conf)
+    except Exception as exc:
+        print(f"RoentDek hexanode configuration is invalid: {exc}")
+        variables.detector_error = f"{type(exc).__name__}: {exc}"
+        variables.flag_tdc_failure = True
+        variables.flag_finished_tdc = True
+        return 1
     tdc = TDC(tdc_lib, buf_size=30000, time_out=100)
 
     ret_code = tdc.init_tdc()
@@ -153,19 +213,19 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
                     preserve_unattributed_packet(Path(variables.path)/"temp_data", "roentdek", {"events": data})
                     raise
                 voltage = np.full(buffer_length, dc)
-                arrays = {"x": data[:, 8], "y": data[:, 9], "t": data[:, 10],
-                          "time_stamp": data[:, 11], "voltage": voltage,
-                          "voltage_pulse": np.full(buffer_length, pulse),
-                          "laser_pulse": np.full(buffer_length, laser)}
-                arrays.update({f"ch{i}": data[:, i] for i in range(8)})
+                arrays, valid = events_from_packet(data, hex_params, hex_correction)
+                arrays.update({"voltage": voltage,
+                               "voltage_pulse": np.full(buffer_length, pulse),
+                               "laser_pulse": np.full(buffer_length, laser)})
                 stream.append(arrays)
                 events_detected += buffer_length
                 raw_signal_detected += buffer_length
                 events_detected_tmp += buffer_length
-                publish_plot_events(x_plot, y_plot, t_plot, main_v_dc_plot,
-                                    data[:, 8], data[:, 9], data[:, 10], voltage)
-                alignment_publisher.append(data[:, 8], data[:, 9])
-                laser_alignment_publisher.append(data[:, 10])
+                if valid.any():
+                    publish_plot_events(x_plot, y_plot, t_plot, main_v_dc_plot, arrays["x"][valid],
+                                        arrays["y"][valid], arrays["t"][valid], voltage[valid])
+                    alignment_publisher.append(arrays["x"][valid], arrays["y"][valid])
+                    laser_alignment_publisher.append(arrays["t"][valid])
             else:
                 time.sleep(.01)
 

@@ -151,9 +151,20 @@ Raw time-to-digital converter stream. Exact channel schema depends on the TDC ba
 
 ### RoentDek backend
 
-- `ch0..ch7` `(n,)` (`N/A`, `uint64`): per-channel raw counters
-- `voltage_pulse` `(n,)` (`V`, `float64`)
-- `laser_pulse` `(n,)` (`pJ`, `float64`)
+Same flat layout as Surface Concept, 8 rows per TDC group (`channel` = 0..7):
+
+- `channel` 0..5 = hexanode u1, u2, v1, v2, w1, w2; 6 = start (laser/pulse); 7 = MCP
+- `time_data`: first-hit TDC bin of that channel relative to the MCP group trigger,
+  0 = no hit. Bins are signed (the start channel precedes the MCP) and stored
+  two's-complement in `uint64`; read them with `time_data.view(np.int64)`.
+- `start_counter`: TDC8HP absolute group timestamp (TDC bins)
+- `high_voltage`, `voltage_pulse`, `laser_pulse`: per-group metadata repeated on each row
+
+Older files store `tdc/ch0..ch7` (`int32`) instead. `dld/x`, `dld/y`, `dld/t` are rebuilt
+from these channels with `pyccapt.calibration.data_tools.roentdek_hexanode`; groups without
+a position (no start signal, or fewer than two layers passing the time-sum gate) have
+`x = y = t = 0`, as in CoboldPC exports. Only the first hit per channel is kept, so
+multi-hit groups give at most one ion; CoboldPC's LMF keeps all hits.
 
 ## Group `hsd`
 

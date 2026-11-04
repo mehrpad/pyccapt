@@ -403,6 +403,14 @@ ro_detector_binning_factor = 2
 ro_detector_width_mm = 80
 # Detector usable half-width (cm).  Same convention as the SC entry.
 ro_detector_limit_cm = 4.0
+# Live x/y/t are rebuilt from the raw TDC channels with the hexanode
+# reconstruction in pyccapt/calibration/data_tools/roentdek_hexanode.py.
+# Optional CoboldPC DAn .ccf with the detector constants (empty = the values
+# of pyccapt/control/tdc_roentdek/source/DAn-part2.ccf), and an optional JSON
+# correction map fitted against a CoboldPC export (empty = analytic only).
+# Relative paths resolve from the project root.
+ro_hexanode_ccf = ""
+ro_hexanode_correction = ""
 
 # Speed preset range for the stage GUI. Mirrors the "Simple Mode" levels shown on
 # the SmarAct MCS2 hand-control display (1 = slowest, 11 = fastest).  Each

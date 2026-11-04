@@ -24,7 +24,9 @@ def test_detector_rate_uses_actual_elapsed_time(monkeypatch, tmp_path, backend, 
         sdk.init_tdc.return_value = 0
         def packet():
             clock[0] = elapsed_s
-            return np.concatenate(([count], np.ones((count, 12)).ravel()))
+            # A real hexanode hit (run 198, event 1); rows without a position are not plotted.
+            row = [1784, 2774, 2665, 1855, 1372, 3164, -201845, 0, 0, 0, 0, 1]
+            return np.concatenate(([count], np.tile(row, count).astype(float)))
         sdk.get_data_tdc_buf.side_effect = packet
         monkeypatch.setattr(module.ctypes, 'CDLL', lambda *_: object())
         monkeypatch.setattr(module, 'TDC', lambda *_args, **_kwargs: sdk)

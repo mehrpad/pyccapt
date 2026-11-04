@@ -177,12 +177,44 @@ def test_roentdek_empty_packets_publish_zero_and_preserve_columns(monkeypatch, t
     assert v.total_ions == 5 and v.flag_finished_tdc
     for i in range(8):
         np.testing.assert_array_equal(writer.column(f"ch{i}"), data[:, i])
-    for name, i in (("x", 8), ("y", 9), ("t", 10), ("time_stamp", 11)):
-        np.testing.assert_array_equal(writer.column(name), data[:, i])
+    # The DLL's x/y/t columns are ignored; these channel values form no hit.
+    for name in ("x", "y", "t"):
+        np.testing.assert_array_equal(writer.column(name), np.zeros(5))
+    np.testing.assert_array_equal(writer.column("time_stamp"), data[:, 11])
     np.testing.assert_array_equal(writer.column("voltage"), np.full(5, 1500.))
     np.testing.assert_array_equal(writer.column("laser_pulse"), np.full(5, 12.))
     v.extend_to.assert_not_called()
     sdk.stop_tdc.assert_called_once()
+
+
+def test_roentdek_packet_rebuilds_xyt_from_raw_channels():
+    from pyccapt.control.tdc_roentdek import tdc_roentdek as module
+    # First event of run 198: CoboldPC reports x=-12.3483 mm, y=-15.5235 mm, TOF=5069.8293 ns.
+    # The DLL's own x/y/t columns (all 0 here) are ignored.
+    row = [1784, 2774, 2665, 1855, 1372, 3164, -201845, 0, 0., 0., 0., 123.]
+    no_start = [1784, 2774, 2665, 1855, 1372, 3164, 0, 0, 0., 0., 0., 124.]
+    arrays, valid = module.events_from_packet(np.array([row, no_start], dtype=float),
+                                              module.HexanodeParameters())
+    np.testing.assert_array_equal(valid, [True, False])
+    assert arrays["x"][0] == pytest.approx(-1.23483, abs=0.06)
+    assert arrays["y"][0] == pytest.approx(-1.55235, abs=0.06)
+    assert arrays["t"][0] == pytest.approx(5069.8293, abs=0.05)
+    assert arrays["x"][1] == arrays["y"][1] == arrays["t"][1] == 0.
+    assert arrays["ch6"].dtype == np.uint64 and arrays["ch6"].view(np.int64)[0] == -201845
+    np.testing.assert_array_equal(arrays["time_stamp"], [123., 124.])
+
+
+def test_roentdek_hexanode_setup_reads_ccf_and_correction(tmp_path):
+    import json
+    from pyccapt.control.tdc_roentdek import tdc_roentdek as module
+    ccf = tmp_path / "det.ccf"
+    ccf.write_text("Parameter 1102,0.5\t; fu\nParameter 1106,2.0\n")
+    correction = tmp_path / "corr.json"
+    correction.write_text(json.dumps({"degree": 1, "coef_x": [0., 0., 1.], "coef_y": [0., 1., 0.]}))
+    params, loaded = module.hexanode_setup({"ro_hexanode_ccf": str(ccf), "ro_hexanode_correction": str(correction)})
+    assert params.fu == .5 and params.x_offset_mm == 2. and params.fv == module.HexanodeParameters().fv
+    assert loaded.degree == 1
+    assert module.hexanode_setup({}) == (module.HexanodeParameters(), None)
 
 
 def _surface_replay(monkeypatch, tmp_path, dld_packets, raw_packets):

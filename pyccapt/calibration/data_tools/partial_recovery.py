@@ -47,6 +47,7 @@ from pyccapt.calibration.data_tools._raw_workflow_common import (
 from pyccapt.calibration.data_tools._raw_workflow_surface_concept import (
     _recover_surface_concept_partial_hits,
     _surface_concept_position_from_pair,
+    estimate_pair_sum_offset,
 )
 from pyccapt.calibration.data_tools.data_loadcrop import (
     EVENT_GROUP_ID_COLUMN,
@@ -85,6 +86,7 @@ def _build_recovered_row(
     new_gid: int,
     dld_columns: list[str],
     flight_path_length_mm: float = 110.0,
+    detector_radius_cm: float = 4.0,
 ) -> dict:
     """Construct a recovered DLD row aligned with the processed schema.
 
@@ -94,15 +96,15 @@ def _build_recovered_row(
     ``dlts`` column.
 
     ``mc_uc (Da)`` is computed for every recovered row, including
-    1-DLTS partials, using the centred-axis approximation: the missing
-    detector coordinate is treated as 0 (centre of detector). Since
-    ``|det_x|, |det_y| <= 4 cm`` while the flight path is ~110 mm, the
-    spatial term in ``sqrt(x_det^2 + y_det^2 + L^2)`` contributes
-    ~0.1 % to the flight-path length, so this approximation gives a
-    usable mc estimate for the mass spectrum. Partials therefore show
-    up at roughly the right mass position (rather than clustering at
-    0), and downstream code that needs exact mc (calibration, ranging)
-    filters them via ``dlts == 4`` or the NaN detector mask.
+    single-axis partials. The detector offset is NOT negligible: a 4 cm
+    coordinate against a 110 mm flight path changes the flight path by
+    ~6 % and ``mc`` by up to ~13 %. The missing coordinate is therefore
+    replaced by its mean square for a hit uniformly spread along the chord
+    of the detector at the known coordinate, ``(R^2 - known^2) / 3``, which
+    removes the bias of assuming 0 and leaves an error of at most
+    ~(2/3)(R/L)^2 (~9 % at the centre, 0 at the edge). Partials therefore
+    show up near the right mass; code that needs exact mc (calibration,
+    ranging) filters them via ``dlts == 4`` or the NaN detector mask.
     """
     from pyccapt.calibration.mc import mc_tools
 
@@ -124,12 +126,12 @@ def _build_recovered_row(
     y_det_recovered = float(recovered_hit["y_det (cm)"])  # NaN for x-only
     tof_ns = float(recovered_hit["tof (ns)"])
 
-    # Centred-axis approximation for mc_uc: use the recovered axis at
-    # its real value, set the missing axis to 0. This produces a
-    # reasonable mc estimate so partials are visible in the mass
-    # spectrum near their true mass instead of piling up at zero.
-    x_for_mc = x_det_recovered if np.isfinite(x_det_recovered) else 0.0
-    y_for_mc = y_det_recovered if np.isfinite(y_det_recovered) else 0.0
+    # Missing axis: RMS coordinate along the detector chord at the known one.
+    def _missing_axis(known: float) -> float:
+        return float(np.sqrt(max(detector_radius_cm ** 2 - known ** 2, 0.0) / 3.0))
+
+    x_for_mc = x_det_recovered if np.isfinite(x_det_recovered) else _missing_axis(y_det_recovered)
+    y_for_mc = y_det_recovered if np.isfinite(y_det_recovered) else _missing_axis(x_det_recovered)
     try:
         mc_uc_value = float(
             mc_tools.tof2mc(
@@ -157,7 +159,7 @@ def _build_recovered_row(
     row[EVENT_GROUP_ID_COLUMN] = int(new_gid)
     row[DLTS_COLUMN] = np.int8(dlts_value)
     row[DLTS_QUALITY_COLUMN] = quality
-    # mc and mc_uc carry the centred-axis estimate. Downstream
+    # mc and mc_uc carry the chord-RMS estimate. Downstream
     # calibration steps will overwrite these for fully-paired ions;
     # partials retain the estimate so they remain visible in the mass
     # spectrum view, marked by dlts<4 / dlts_quality=='recovered_*'.
@@ -208,7 +210,7 @@ def _subtract_firmware_stops(
     used = [False] * n
     idx_by_channel = {c: [i for i in range(n) if int(channels[i]) == c] for c in (0, 1, 2, 3)}
 
-    def _candidate_pairs(a_list, b_list, target):
+    def _candidate_pairs(a_list, b_list, target, axis):
         # (pos_err, i, j, tof) for unused (a, b) pairs within match_tol_cm.
         out = []
         for i in a_list:
@@ -219,7 +221,7 @@ def _subtract_firmware_stops(
                 if used[j]:
                     continue
                 tj = float(times[j])
-                pos = _surface_concept_position_from_pair(ti, tj)
+                pos = _surface_concept_position_from_pair(ti, tj, axis)
                 err = abs(pos - target)
                 if err <= match_tol_cm:
                     out.append((err, i, j, (ti + tj) * TOF_FACTOR_NS_1D))
@@ -228,8 +230,8 @@ def _subtract_firmware_stops(
     for event in native_events:
         det_x, det_y = float(event[0]), float(event[1])
         native_tof = float(event[2]) if len(event) > 2 else float("nan")
-        cand_x = _candidate_pairs(idx_by_channel[0], idx_by_channel[1], det_x)
-        cand_y = _candidate_pairs(idx_by_channel[2], idx_by_channel[3], det_y)
+        cand_x = _candidate_pairs(idx_by_channel[0], idx_by_channel[1], det_x, 'x')
+        cand_y = _candidate_pairs(idx_by_channel[2], idx_by_channel[3], det_y, 'y')
         if not cand_x or not cand_y:
             return None
         best = None  # (score, xi, xj, yi, yj)
@@ -266,6 +268,7 @@ def _recover_for_pulse(
     detector_radius_cm: float,
     max_tof_ns: float | None,
     axis_consistency_ns: float | None,
+    pair_sum_offset_bins: float = 0.0,
 ) -> list[dict]:
     """Wrapper that drops the empty / single-tick degenerate cases.
 
@@ -284,6 +287,7 @@ def _recover_for_pulse(
         detector_radius_cm=detector_radius_cm,
         max_tof_ns=max_tof_ns,
         axis_consistency_ns=axis_consistency_ns,
+        pair_sum_offset_bins=pair_sum_offset_bins,
     )
 
 
@@ -297,6 +301,7 @@ def merge_partial_tdc_into_dld(
     include_one_d_partials: bool = False,
     recover_from_matched_multihit: bool = False,
     multihit_match_tol_cm: float = 0.1,
+    pair_sum_offset_bins: float | None = None,
     verbose: bool = True,
 ) -> int:
     """Recover partial-hit events from orphan TDC ticks and merge into DLD.
@@ -317,7 +322,7 @@ def merge_partial_tdc_into_dld(
     placed in the 3-D reconstruction; only full (x, y) hits -- native-style
     4-channel and 3-of-4 time-sum recoveries -- are added. Set it True to
     also append the 1-D partials (visible in the mass spectrum via their
-    centred-axis mc estimate, but dropped by the 3-D reconstruction).
+    chord-RMS mc estimate, but dropped by the 3-D reconstruction).
 
     ``recover_from_matched_multihit`` (default False) additionally recovers
     ions the firmware discarded from MATCHED multi-hit pulses. The Surface
@@ -362,6 +367,11 @@ def merge_partial_tdc_into_dld(
         Forwarded to the underlying recovery. Maximum allowed
         ``|tof_x - tof_y|`` when promoting an (x-pair, y-pair) match
         to a full 4-DLTS xy hit. ``None`` skips the agreement check.
+    pair_sum_offset_bins : float, optional
+        Detector-specific ``(t0 + t1) - (t2 + t3)`` of a real ion, used to
+        rebuild the missing stop of 3-of-4 hits and to centre single-axis
+        ToFs. ``None`` (default) measures it from the clean single-ion
+        pulses of ``variables.data_tdc``.
     verbose : bool, default True
         Print a summary of how many rows were merged.
 
@@ -399,12 +409,16 @@ def merge_partial_tdc_into_dld(
         if max_tof_ns is not None:
             max_tof_ns = float(max_tof_ns)
 
-    # Flight-path length used for the centred-axis mc_uc estimate on
+    # Flight-path length used for the chord-RMS mc_uc estimate on
     # recovered rows; falls back to the pyccapt default if not set.
     flight_path_length_mm = float(getattr(variables, "flight_path_length", 110.0) or 110.0)
 
     tdc_df = variables.data_tdc
     dld_df = variables.data
+    if pair_sum_offset_bins is None:
+        pair_sum_offset_bins = estimate_pair_sum_offset(
+            tdc_df["channel"].to_numpy(), tdc_df["time_data"].to_numpy(), tdc_df["start_counter"].to_numpy()
+        )
 
     # Annotate the native rows so the merged frame has a consistent
     # ``dlts`` / ``dlts_quality`` schema regardless of recovery results.
@@ -510,6 +524,7 @@ def merge_partial_tdc_into_dld(
             detector_radius_cm=detector_radius_cm,
             max_tof_ns=max_tof_ns,
             axis_consistency_ns=axis_consistency_ns,
+            pair_sum_offset_bins=pair_sum_offset_bins,
         )
         if not recovered:
             continue
@@ -548,6 +563,7 @@ def merge_partial_tdc_into_dld(
                     new_gid=new_gid,
                     dld_columns=dld_columns,
                     flight_path_length_mm=flight_path_length_mm,
+                    detector_radius_cm=detector_radius_cm,
                 )
             )
             new_row_insert_after.append(insert_after_row)
@@ -631,6 +647,7 @@ def merge_partial_tdc_into_dld(
                     detector_radius_cm=detector_radius_cm,
                     max_tof_ns=max_tof_ns,
                     axis_consistency_ns=axis_consistency_ns,
+                    pair_sum_offset_bins=pair_sum_offset_bins,
                 )
                 if not recovered:
                     continue
@@ -656,6 +673,7 @@ def merge_partial_tdc_into_dld(
                             new_gid=new_gid,
                             dld_columns=dld_columns,
                             flight_path_length_mm=flight_path_length_mm,
+                            detector_radius_cm=detector_radius_cm,
                         )
                     )
                     new_row_insert_after.append(insert_after_row)

@@ -30,14 +30,14 @@ from pyccapt.calibration.tutorials.tutorials_helpers.helper_roi_concentration_pr
     build_roi_concentration_profile_panel,
 )
 
-# position (cm) = -0.5 * (t_high - t_low) * XY_FACTOR * 0.1  ->  bins per cm
-_BINS_PER_CM = 1.0 / (0.5 * raw_data_workflow.XY_FACTOR * 0.1)
+def _pair_for_position(position_cm: float, centre: int = 10000, axis: str = "x") -> tuple[int, int]:
+    """Return (t_low, t_high) whose firmware coordinate (sc_position_cm) is ``position_cm``."""
+    from pyccapt.calibration.data_tools import _raw_workflow_common as common
 
-
-def _pair_for_position(position_cm: float, centre: int = 10000) -> tuple[int, int]:
-    """Return (t_low, t_high) whose reconstructed coordinate is ``position_cm``."""
-    half = int(round(position_cm * _BINS_PER_CM / 2.0))
-    return centre + half, centre - half
+    time_dif_min = common.SC_TIME_DIF_MIN_X if axis == "x" else common.SC_TIME_DIF_MIN_Y
+    position_bin = round(position_cm / (common.XY_FACTOR * 0.1)) + common.XY_BIN_SHIFT
+    difference = int(common.BINNING_FACTOR * position_bin + time_dif_min)
+    return centre + difference // 2, centre - difference // 2
 
 
 def _processed_frame(num_rows: int = 3) -> pd.DataFrame:
@@ -181,7 +181,7 @@ def test_diagnostics_do_not_accept_flagged_chunk_with_inconsistent_time_sum():
 
 def test_complete_hit_detector_gate_is_radial():
     t0, t1 = _pair_for_position(3.5)
-    t2, t3 = _pair_for_position(3.5)
+    t2, t3 = _pair_for_position(3.5, axis="y")
     record = {
         "channels": [0, 1, 2, 3],
         "time_data": [t0, t1, t2, t3],
@@ -198,7 +198,7 @@ def test_complete_hit_detector_gate_is_radial():
 def test_off_detector_complete_is_not_split_into_two_partials():
     # (3.5, 3.5) cm: each axis is inside ±4 cm but the radius (4.95 cm) is not.
     t0, t1 = _pair_for_position(3.5)
-    t2, t3 = _pair_for_position(3.5)
+    t2, t3 = _pair_for_position(3.5, axis="y")
     record = {"channels": [0, 1, 2, 3], "time_data": [t0, t1, t2, t3], "start_counter": [1],
               "high_voltage": 5000.0, "pulse": 0.0}
     for mode in ("greedy", "exhaustive"):

@@ -15,7 +15,8 @@ from tqdm.auto import tqdm
 
 from pyccapt.calibration.data_tools import raw_data_surface_concept
 from pyccapt.calibration.data_tools._raw_workflow_common import (
-    DLTS_COLORS, TOF_FACTOR_NS, TOF_FACTOR_NS_1D, XY_BIN_SHIFT, XY_FACTOR,
+    _SURFACE_CONCEPT_DEFAULT_CONSTANTS, DLTS_COLORS, TOF_FACTOR_NS, TOF_FACTOR_NS_1D, XY_BIN_SHIFT, XY_FACTOR,
+    sc_position_cm,
 )
 from pyccapt.calibration.data_tools._raw_workflow_surface_concept import (
     _recover_surface_concept_partial_hits, _surface_concept_pulse_column, filter_peak_hits,
@@ -126,7 +127,7 @@ def _generate_partial_candidates_for_axis(
         for i_high in high_indices:
             t_low = float(times[i_low])
             t_high = float(times[i_high])
-            position = _position_from_pair(t_low, t_high, xy_factor, xy_bin_shift)
+            position = _position_from_pair(t_low, t_high, xy_factor, xy_bin_shift, axis)
             tof = (t_low + t_high) * tof_factor_2d
             candidates.append(
                 {
@@ -143,12 +144,13 @@ def _generate_partial_candidates_for_axis(
     return candidates
 
 
-def _position_from_pair(first_time: float, second_time: float, xy_factor: float, xy_bin_shift: float) -> float:
-    """Same algebra as :func:`_surface_concept_position_from_pair` but with
-    explicit constants so the per-rig config can override them."""
-    difference = second_time - first_time
-    shifted = -0.5 * difference + xy_bin_shift
-    return ((shifted - xy_bin_shift) * xy_factor) * 0.1
+def _position_from_pair(
+    first_time: float, second_time: float, xy_factor: float, xy_bin_shift: float, axis: str
+) -> float:
+    """Firmware position (:func:`sc_position_cm`) with explicit ``xy_factor`` /
+    ``xy_bin_shift`` so the per-rig config can override them."""
+    constants = {**_SURFACE_CONCEPT_DEFAULT_CONSTANTS, 'xy_factor': xy_factor, 'xy_bin_shift': xy_bin_shift}
+    return sc_position_cm(first_time, second_time, axis, constants)
 
 
 def _generate_complete_candidates(
@@ -189,8 +191,8 @@ def _generate_complete_candidates(
                     sum_y = t2 + t3
                     if abs(sum_x - sum_y) > pair_sum_tolerance_bins:
                         continue
-                    det_x = _position_from_pair(t0, t1, xy_factor, xy_bin_shift)
-                    det_y = _position_from_pair(t2, t3, xy_factor, xy_bin_shift)
+                    det_x = _position_from_pair(t0, t1, xy_factor, xy_bin_shift, 'x')
+                    det_y = _position_from_pair(t2, t3, xy_factor, xy_bin_shift, 'y')
                     tof = (t0 + t1 + t2 + t3) * tof_factor_4d
                     candidates.append(
                         {
@@ -435,18 +437,22 @@ def _compute_mc_for_candidates(
     ``fpl=110 mm`` by default; overridable per call).
 
     Single-axis partials have an unknown (``NaN``) second coordinate. For the
-    mc estimate only, that coordinate is taken as 0 (the hit is assumed to lie
-    on the known axis, i.e. radius = |known coordinate|); this centred-axis
-    approximation underestimates the flight path for off-axis ions and is
-    never written back as a position.
+    mc estimate only, it is taken as the RMS coordinate along the detector
+    chord at the known one, ``sqrt((R^2 - known^2) / 3)``, as in
+    ``partial_recovery._build_recovered_row`` (assuming 0 biases mc by up to
+    ~13 % for a 4 cm detector and 110 mm flight path). It is never written
+    back as a position.
     """
     if not candidates:
         return
     tof = np.array([float(c['tof (ns)']) for c in candidates])
     x = np.array([float(c['x_det (cm)']) for c in candidates])
     y = np.array([float(c['y_det (cm)']) for c in candidates])
-    x = np.where(np.isfinite(x), x, 0.0)
-    y = np.where(np.isfinite(y), y, 0.0)
+    radius_sq = _SURFACE_CONCEPT_DEFAULT_CONSTANTS['detector_limit_cm'] ** 2
+    x_missing = np.sqrt(np.clip(radius_sq - np.nan_to_num(y) ** 2, 0.0, None) / 3.0)
+    y_missing = np.sqrt(np.clip(radius_sq - np.nan_to_num(x) ** 2, 0.0, None) / 3.0)
+    x = np.where(np.isfinite(x), x, x_missing)
+    y = np.where(np.isfinite(y), y, y_missing)
     n = len(candidates)
     voltage = np.full(n, float(high_voltage))
     pulse_arr = np.full(n, float(pulse_v)) if pulse_mode == 'voltage' else np.zeros(n)

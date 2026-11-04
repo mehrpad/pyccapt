@@ -64,7 +64,7 @@ def test_residual_recovered_from_matched_two_ion_pulse(monkeypatch):
     a_t = [100, 140, 130, 110]          # ch0,1,2,3  -> short ToF
     b_t = [2000, 2060, 2050, 2010]      # ch0,1,2,3  -> long ToF (different ion)
     x_a, y_a, tof_a = _hit4(a_t)
-    x_b, y_b = _pos(2000, 2060), _pos(2050, 2010)
+    x_b, y_b = _pos(2000, 2060, "x"), _pos(2050, 2010, "y")
 
     tdc = _tdc(
         channels=[0, 1, 2, 3, 0, 1, 2, 3],
@@ -98,7 +98,7 @@ def test_single_hit_matched_pulse_yields_no_residual(monkeypatch):
     monkeypatch.setattr(pr, "load_detector_constants", lambda *a, **k: {"detector_limit_cm": 100.0})
     # Exactly 4 stops = one ion; firmware used them all -> nothing residual.
     tdc = _tdc([0, 1, 2, 3], [100, 140, 130, 110], sc=100, gid=0, has_match=True)
-    dld = _dld_one_event(gid=0, sc=100, x_det=_pos(100, 140), y_det=_pos(130, 110))
+    dld = _dld_one_event(gid=0, sc=100, x_det=_pos(100, 140, "x"), y_det=_pos(130, 110, "y"))
     variables = _FakeVariables(dld, tdc)
     n = pr.merge_partial_tdc_into_dld(variables, recover_from_matched_multihit=True, verbose=False)
     assert n == 0

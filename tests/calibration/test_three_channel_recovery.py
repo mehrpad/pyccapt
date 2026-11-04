@@ -14,8 +14,8 @@ from pyccapt.calibration.data_tools import _raw_workflow_surface_concept as sc
 from pyccapt.calibration.data_tools import partial_recovery
 
 
-def _pos(a, b):
-    return sc._surface_concept_position_from_pair(a, b)
+def _pos(a, b, axis):
+    return sc._surface_concept_position_from_pair(a, b, axis)
 
 
 def test_single_three_channel_pulse_recovers_full_xy():
@@ -29,8 +29,8 @@ def test_single_three_channel_pulse_recovers_full_xy():
     assert hit["detector_axis"] == "xy"
     assert hit["recovery_method"] == "3of4"
     t3 = (100 + 140) - 130  # recovered missing end
-    assert abs(hit["x_det (cm)"] - _pos(100, 140)) < 1e-9
-    assert abs(hit["y_det (cm)"] - _pos(130, t3)) < 1e-9
+    assert abs(hit["x_det (cm)"] - _pos(100, 140, "x")) < 1e-9
+    assert abs(hit["y_det (cm)"] - _pos(130, t3, "y")) < 1e-9
 
 
 def test_multihit_full_plus_three_channel():
@@ -45,8 +45,8 @@ def test_multihit_full_plus_three_channel():
     methods = sorted(str(h.get("recovery_method")) for h in hits)
     assert methods == ["3of4", "None"]  # one normal xy + one 3-of-4
     recovered = next(h for h in hits if h.get("recovery_method") == "3of4")
-    # recovered ch0 = (230+170) - 200 = 200 -> x = pos(200, 200) = 0 (centre)
-    assert abs(recovered["x_det (cm)"] - _pos(200, 200)) < 1e-9
+    # recovered ch0 = (230+170) - 200 = 200 -> x = pos(200, 200)
+    assert abs(recovered["x_det (cm)"] - _pos(200, 200, "x")) < 1e-9
 
 
 def test_opt_out_keeps_one_dimensional_partial():

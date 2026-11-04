@@ -196,7 +196,7 @@ def test_surface_concept_recovery_validates_axis_specific_detector_bounds():
     sequence_records = [
         {
             'channels': [0, 1],
-            'time_data': [100, 110],  # |det_x| ≈ small → in_detector
+            'time_data': [148, 100],  # t0 - t1 = 48 -> firmware bin 1225 = detector centre → in_detector
             'start_counter': [10],
             'valid_event': [False],
             'high_voltage': 5000.0,

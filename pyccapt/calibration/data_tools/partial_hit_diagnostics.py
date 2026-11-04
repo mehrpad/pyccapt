@@ -270,6 +270,7 @@ def matched_dld_tdc_residuals(
         XY_BIN_SHIFT,
         XY_FACTOR,
         load_detector_constants,
+        sc_position_cm,
     )
 
     def _empty(reason: str) -> dict:
@@ -314,12 +315,11 @@ def matched_dld_tdc_residuals(
     if tof_tol_ns is None:
         tof_tol_ns = tof_per_bin  # one TDC bin in ns
 
-    def _sc_pos(first, second):
-        # Vectorised mirror of _surface_concept_position_from_pair so the
-        # re-derivation matches the firmware reconstruction bit-for-bit.
-        difference = second - first
-        shifted = -0.5 * difference + xy_bin_shift
-        return ((shifted - xy_bin_shift) * xy_factor) * 0.1
+    position_constants = {**constants, "xy_factor": xy_factor, "xy_bin_shift": xy_bin_shift}
+
+    def _sc_pos(first, second, axis):
+        # Same firmware formula as the dld group, so matched hits agree bit-for-bit.
+        return sc_position_cm(first, second, axis, position_constants)
 
     channel = np.asarray(tdc_df["channel"].to_numpy())
     start_counter = np.asarray(tdc_df["start_counter"].to_numpy())
@@ -374,8 +374,8 @@ def matched_dld_tdc_residuals(
     t_sel = t_sorted[sel]
     gid_sel = gid4[sel, 0]
 
-    det_x_tdc = _sc_pos(t_sel[:, 0], t_sel[:, 1])
-    det_y_tdc = _sc_pos(t_sel[:, 2], t_sel[:, 3])
+    det_x_tdc = _sc_pos(t_sel[:, 0], t_sel[:, 1], "x")
+    det_y_tdc = _sc_pos(t_sel[:, 2], t_sel[:, 3], "y")
     tof_tdc = t_sel.sum(axis=1) * tof_per_bin
 
     # DLD side: map each event_group_id to its single native row. A gid that

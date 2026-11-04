@@ -22,29 +22,75 @@ from pyccapt.calibration.data_tools._raw_workflow_common import (
     DLTS_COLORS,
     TOF_FACTOR_NS,
     TOF_FACTOR_NS_1D,
-    XY_BIN_SHIFT,
-    XY_FACTOR,
     _binned_status_fraction,
     _calculate_delta_p_and_multi,
     _normalize_signal_kind,
     normalize_signal_windows,
+    sc_position_cm,
     summarize_signal_windows,
 )
 from pyccapt.calibration.mc import mc_tools
 
 
-def _surface_concept_position_from_pair(first_time: float, second_time: float) -> float:
-    difference = second_time - first_time
-    shifted = -0.5 * difference + XY_BIN_SHIFT
-    return ((shifted - XY_BIN_SHIFT) * XY_FACTOR) * 0.1
+def _surface_concept_position_from_pair(first_time: float, second_time: float, axis: str) -> float:
+    """Detector coordinate (cm) of one axis, identical to the firmware's dld value."""
+    return sc_position_cm(first_time, second_time, axis)
 
 
 def _surface_concept_hit_from_time_data(time_data_chunk: Sequence[int] | np.ndarray) -> tuple[float, float, float]:
     time_data_tmp = np.asarray(time_data_chunk, dtype=np.int64)
-    det_x = _surface_concept_position_from_pair(time_data_tmp[0], time_data_tmp[1])
-    det_y = _surface_concept_position_from_pair(time_data_tmp[2], time_data_tmp[3])
+    det_x = _surface_concept_position_from_pair(time_data_tmp[0], time_data_tmp[1], 'x')
+    det_y = _surface_concept_position_from_pair(time_data_tmp[2], time_data_tmp[3], 'y')
     tof = float(np.sum(time_data_tmp)) * TOF_FACTOR_NS
     return det_x, det_y, tof
+
+
+def _axis_tof_ns(pair_sum: float, axis: str, pair_sum_offset_bins: float) -> float:
+    """Full-event ToF estimated from one axis' pair sum.
+
+    The two axis sums of one ion differ by a detector-specific offset,
+    ``(t0 + t1) - (t2 + t3) = pair_sum_offset_bins`` (see
+    :func:`estimate_pair_sum_offset`); shifting each axis by half of it makes
+    a single-axis ToF equal to the 4-stop ToF on average.
+    """
+    shift = -0.5 * pair_sum_offset_bins if axis == 'x' else 0.5 * pair_sum_offset_bins
+    return (pair_sum + shift) * TOF_FACTOR_NS_1D
+
+
+def estimate_pair_sum_offset(
+    channels: np.ndarray,
+    times: np.ndarray,
+    start_counter: np.ndarray,
+    *,
+    min_events: int = 100,
+) -> float:
+    """Median ``(t0 + t1) - (t2 + t3)`` (TDC bins) of clean single-ion pulses.
+
+    Uses pulses with exactly one stop on each of the four channels and a pair
+    sum inside the firmware window. Returns 0.0 when fewer than
+    ``min_events`` such pulses exist.
+    """
+    channels = np.asarray(channels, dtype=np.int64)
+    times = np.asarray(times, dtype=np.float64)
+    start_counter = np.asarray(start_counter)
+    if channels.size < 4:
+        return 0.0
+    starts = np.flatnonzero(np.r_[True, start_counter[1:] != start_counter[:-1]])
+    lengths = np.diff(np.r_[starts, channels.size])
+    four = starts[lengths == 4]
+    if four.size == 0:
+        return 0.0
+    rows = four[:, None] + np.arange(4)
+    pulse_channels = channels[rows]
+    clean = np.all(np.sort(pulse_channels, axis=1) == np.arange(4), axis=1)
+    rows, pulse_channels = rows[clean], pulse_channels[clean]
+    ordered = np.zeros(rows.shape)
+    ordered[np.arange(len(rows))[:, None], pulse_channels] = times[rows]
+    difference = (ordered[:, 0] + ordered[:, 1]) - (ordered[:, 2] + ordered[:, 3])
+    difference = difference[np.abs(difference) <= raw_data_surface_concept.PAIR_SUM_TOLERANCE_BINS]
+    if difference.size < min_events:
+        return 0.0
+    return float(np.median(difference))
 
 
 def _enumerate_axis_pairs(
@@ -54,6 +100,7 @@ def _enumerate_axis_pairs(
     second_channel: int,
     detector_radius_cm: float,
     max_tof_ns: float | None,
+    pair_sum_offset_bins: float = 0.0,
 ) -> list[dict]:
     """Enumerate every physically-valid (first, second) pair for one axis.
 
@@ -68,15 +115,16 @@ def _enumerate_axis_pairs(
     if first_indices.size == 0 or second_indices.size == 0:
         return []
 
+    axis = 'x' if first_channel in (0, 1) else 'y'
     candidates: list[dict] = []
     for i_local, i_global in enumerate(first_indices):
         t_first = float(chunk_times[int(i_global)])
         for j_local, j_global in enumerate(second_indices):
             t_second = float(chunk_times[int(j_global)])
-            position = _surface_concept_position_from_pair(t_first, t_second)
+            position = _surface_concept_position_from_pair(t_first, t_second, axis)
             if abs(position) > detector_radius_cm:
                 continue
-            tof = (t_first + t_second) * TOF_FACTOR_NS_1D
+            tof = _axis_tof_ns(t_first + t_second, axis, pair_sum_offset_bins)
             if max_tof_ns is not None and not (0.0 < tof <= max_tof_ns):
                 continue
             candidates.append(
@@ -87,6 +135,7 @@ def _enumerate_axis_pairs(
                     'second_global': int(j_global),
                     'position': float(position),
                     'tof': float(tof),
+                    'pair_sum': t_first + t_second,
                 }
             )
     return candidates
@@ -225,15 +274,17 @@ def _recover_three_channel_hits(
     y_leftover: list[dict],
     detector_radius_cm: float,
     max_tof_ns: float | None,
+    pair_sum_offset_bins: float = 0.0,
 ) -> tuple[list[dict], set, set]:
     """Recover full xy hits from 3-channel pulses via the delay-line time-sum.
 
     A pulse that fired one complete delay-line axis (both ends) plus a
     single end of the OTHER axis is reconstructable. The two crossed delay
-    lines share the same total propagation time, ``t0 + t1 = t2 + t3``
-    (both start from the same MCP signal), so the missing end is
+    lines share the same total propagation time up to a detector-specific
+    offset, ``(t0 + t1) - (t2 + t3) = pair_sum_offset_bins`` (both start from
+    the same MCP signal), so the missing end is
 
-        ``t_missing = sum_complete_axis - t_present``
+        ``t_missing = sum_complete_axis +/- pair_sum_offset_bins - t_present``
 
     and with it both det_x and det_y are computed -> a full 4-DLTS-equivalent
     xy hit. This is the offline analogue of the standard "3 of 4" delay-line
@@ -266,10 +317,10 @@ def _recover_three_channel_hits(
 
     # Complete Y axis + orphan X channel -> recover the missing X end.
     for yi, y_pair in enumerate(y_leftover):
-        tof_full = float(y_pair['tof'])  # == sum_y * TOF_FACTOR_NS_1D (full tof)
+        tof_full = float(y_pair['tof'])  # full-event tof estimated from the y sum
         if not _tof_ok(tof_full):
             continue
-        sum_y = tof_full / TOF_FACTOR_NS_1D
+        sum_x = float(y_pair['pair_sum']) + pair_sum_offset_bins
         best = None  # (abs_x, orphan_idx, x)
         for oi in orphan_x:
             if oi in used_orphan:
@@ -278,13 +329,13 @@ def _recover_three_channel_hits(
             t_present = float(chunk_times[oi])
             if channel == 0:
                 t0 = t_present
-                t1 = sum_y - t0
+                t1 = sum_x - t0
             else:  # channel == 1
                 t1 = t_present
-                t0 = sum_y - t1
+                t0 = sum_x - t1
             if t0 < 0 or t1 < 0:
                 continue
-            x = _surface_concept_position_from_pair(t0, t1)
+            x = _surface_concept_position_from_pair(t0, t1, 'x')
             if abs(x) > detector_radius_cm:
                 continue
             if best is None or abs(x) < best[0]:
@@ -308,7 +359,7 @@ def _recover_three_channel_hits(
         tof_full = float(x_pair['tof'])
         if not _tof_ok(tof_full):
             continue
-        sum_x = tof_full / TOF_FACTOR_NS_1D
+        sum_y = float(x_pair['pair_sum']) - pair_sum_offset_bins
         best = None
         for oi in orphan_y:
             if oi in used_orphan:
@@ -317,13 +368,13 @@ def _recover_three_channel_hits(
             t_present = float(chunk_times[oi])
             if channel == 2:
                 t2 = t_present
-                t3 = sum_x - t2
+                t3 = sum_y - t2
             else:  # channel == 3
                 t3 = t_present
-                t2 = sum_x - t3
+                t2 = sum_y - t3
             if t2 < 0 or t3 < 0:
                 continue
-            y = _surface_concept_position_from_pair(t2, t3)
+            y = _surface_concept_position_from_pair(t2, t3, 'y')
             if abs(y) > detector_radius_cm:
                 continue
             if best is None or abs(y) < best[0]:
@@ -354,6 +405,7 @@ def _recover_surface_concept_partial_hits(
     axis_consistency_ns: float | None = 5.0,
     combine_axes: bool = True,
     recover_three_channel: bool = True,
+    pair_sum_offset_bins: float = 0.0,
 ) -> list[dict]:
     """Recover every physically-valid hit from a multi-hit pulse.
 
@@ -406,6 +458,10 @@ def _recover_surface_concept_partial_hits(
         Maximum ``|tof_x - tof_y|`` permitted when promoting an
         (x-pair, y-pair) combination to a full xy hit. Set to ``None``
         to skip this check (any matched pair becomes full xy).
+    pair_sum_offset_bins : float, default 0.0
+        Detector-specific ``(t0 + t1) - (t2 + t3)`` of a real ion
+        (:func:`estimate_pair_sum_offset`). Centres the single-axis ToFs and
+        the missing stop rebuilt by the 3-of-4 recovery.
     """
     recovered_hits: list[dict] = []
     if chunk_channels is None or chunk_times is None or len(chunk_channels) < 2:
@@ -428,6 +484,7 @@ def _recover_surface_concept_partial_hits(
             second_channel=second_channel,
             detector_radius_cm=detector_radius_cm,
             max_tof_ns=max_tof_ns,
+            pair_sum_offset_bins=pair_sum_offset_bins,
         )
         if not candidates:
             continue
@@ -460,6 +517,7 @@ def _recover_surface_concept_partial_hits(
                 y_leftover,
                 detector_radius_cm=detector_radius_cm,
                 max_tof_ns=max_tof_ns,
+                pair_sum_offset_bins=pair_sum_offset_bins,
             )
             if consumed_x:
                 x_leftover = [p for i, p in enumerate(x_leftover) if i not in consumed_x]
@@ -663,12 +721,14 @@ def extract_surface_concept_hits(
     *,
     detector_limit_cm: float = 4.0,
     show_progress: bool = False,
+    pair_sum_offset_bins: float = 0.0,
 ) -> tuple[pd.DataFrame, dict[str, int]]:
     """Recover valid 4-DLTS hits and partial 2-DLTS hits from Surface Concept sequences."""
     diagnostics = build_surface_concept_recovery_diagnostics(
         sequence_records,
         detector_limit_cm=detector_limit_cm,
         show_progress=show_progress,
+        pair_sum_offset_bins=pair_sum_offset_bins,
     )
     recovered = diagnostics[diagnostics['dlts'] > 0].copy()
     hit_table = recovered.rename(columns={'accepted': 'in_detector'})
@@ -744,7 +804,8 @@ def _build_diagnostics_batch(args: tuple) -> list[dict]:
     workers can import and call it. ``args`` is a tuple to keep the worker
     signature single-arg, which lets us drive it with ``parallel_map``.
     """
-    records, start_index, detector_limit_cm = args
+    records, start_index, detector_limit_cm, *rest = args
+    pair_sum_offset_bins = float(rest[0]) if rest else 0.0
     rows: list[dict] = []
     for offset, record in enumerate(records):
         sequence_index = start_index + offset
@@ -798,6 +859,7 @@ def _build_diagnostics_batch(args: tuple) -> list[dict]:
                 chunk_times,
                 detector_radius_cm=float('inf'),
                 combine_axes=False,
+                pair_sum_offset_bins=pair_sum_offset_bins,
             )
             if not partial_hits:
                 rows.append(
@@ -862,6 +924,7 @@ def build_surface_concept_recovery_diagnostics(
     *,
     detector_limit_cm: float = 4.0,
     show_progress: bool = False,
+    pair_sum_offset_bins: float = 0.0,
 ) -> pd.DataFrame:
     """Build a per-candidate recovery table for advanced Surface Concept diagnostics.
 
@@ -885,12 +948,12 @@ def build_surface_concept_recovery_diagnostics(
     # users have a faster IPC path (e.g. fork on Linux).
     PROCESS_ENGAGE_THRESHOLD = 500_000
     if n_records < PROCESS_ENGAGE_THRESHOLD:
-        return pd.DataFrame(_build_diagnostics_batch((sequence_records, 0, detector_limit_cm)))
+        return pd.DataFrame(_build_diagnostics_batch((sequence_records, 0, detector_limit_cm, pair_sum_offset_bins)))
 
     batch_size = max(500, n_records // 16)
     batches: list[tuple] = []
     for start in range(0, n_records, batch_size):
-        batches.append((sequence_records[start : start + batch_size], start, detector_limit_cm))
+        batches.append((sequence_records[start : start + batch_size], start, detector_limit_cm, pair_sum_offset_bins))
 
     progress = None
     if show_progress:
@@ -947,15 +1010,20 @@ def analyze_surface_concept_tdc_frame(
         )
     sequence_stats = summarize_surface_concept_sequences(sequence_records, detector_limit_cm=detector_limit_cm)
     raw_summary = summarize_surface_concept_raw_sequences(sequence_records)
+    pair_sum_offset_bins = estimate_pair_sum_offset(
+        df_tdc['channel'].to_numpy(), df_tdc['time_data'].to_numpy(), df_tdc['start_counter'].to_numpy()
+    )
     recovery_diagnostics = build_surface_concept_recovery_diagnostics(
         sequence_records,
         detector_limit_cm=detector_limit_cm,
         show_progress=show_progress,
+        pair_sum_offset_bins=pair_sum_offset_bins,
     )
     hit_table, recovery_stats = extract_surface_concept_hits(
         sequence_records,
         detector_limit_cm=detector_limit_cm,
         show_progress=False,
+        pair_sum_offset_bins=pair_sum_offset_bins,
     )
 
     if not hit_table.empty:
@@ -982,6 +1050,7 @@ def analyze_surface_concept_tdc_frame(
         'pulse_mode': pulse_mode,
         'flight_path_length_mm': flight_path_length_mm,
         't0': t0,
+        'pair_sum_offset_bins': pair_sum_offset_bins,
     }
 
 

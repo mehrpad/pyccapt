@@ -15,10 +15,12 @@ to use another CCF or a correction map fitted against CoboldPC.
 DLL builds made before 2026-11 always return X = Y = 0 (`(1 / 2)` is integer division in
 C++), ignore missing hits and time sums, and their packet counter never resets, so after
 the first full 30000-event packet they repeat events and write past the end of the buffer.
-`source/wrapper_read_TDC8HP.cpp` is fixed. Rebuild the DLL with Visual Studio 2019+ (v142
-toolset with MFC): open `source/simple_read_TDC8HP.sln` and build the `Debug|x64`
-configuration, the only x64 configuration set to build a DLL. Copy the resulting
-`simple_read_TDC8HP_x64.dll` over `wrapper_read_TDC8HP_x64.dll`.
+`source/wrapper_read_TDC8HP.cpp` is fixed and `wrapper_read_TDC8HP_x64.dll` is rebuilt from
+it (2026-11-04). The rebuild is a Release build with the C runtime linked statically: it
+depends only on `hptdc_driver_3.5.2_x64.dll` (installed with the RoentDek TDC driver), not on
+the debug runtime the old Debug build needed. To rebuild, run `source/build_dll.bat`. It needs
+the Visual Studio 2019/2022 C++ build tools with the v142 (14.29) x64 toolset; MFC is not
+needed. On 100,000 events of run 198 its X/Y/TOF match `roentdek_hexanode.py` exactly.
 
 ## Re-processing existing files
 

@@ -13,7 +13,7 @@ using namespace std;
 using namespace std::chrono;
 
 #include "tdcmanager.h"
-#include "afx.h" // only needed for the CStrings in this example
+#include <windows.h> // Sleep, GetTickCount64 (MFC/afx.h is not needed)
 #include "conio.h"
 
 #include "LMF_IO.h"

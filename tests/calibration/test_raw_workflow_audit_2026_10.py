@@ -31,12 +31,13 @@ from pyccapt.calibration.tutorials.tutorials_helpers.helper_roi_concentration_pr
 )
 
 def _pair_for_position(position_cm: float, centre: int = 10000, axis: str = "x") -> tuple[int, int]:
-    """Return (t_low, t_high) whose firmware coordinate (sc_position_cm) is ``position_cm``."""
-    from pyccapt.calibration.data_tools import _raw_workflow_common as common
+    """Return (t_low, t_high) whose firmware coordinate (sc_position_cm) is within half a pixel of ``position_cm``."""
+    from pyccapt.calibration.data_tools import sc_geometry
 
-    time_dif_min = common.SC_TIME_DIF_MIN_X if axis == "x" else common.SC_TIME_DIF_MIN_Y
-    position_bin = round(position_cm / (common.XY_FACTOR * 0.1)) + common.XY_BIN_SHIFT
-    difference = int(common.BINNING_FACTOR * position_bin + time_dif_min)
+    geometry = sc_geometry.DEFAULT_GEOMETRY
+    pixel_cm = geometry[f"pixel_size_{axis}_mm"] * 0.1
+    position_bin = round(position_cm / pixel_cm + sc_geometry.centre_bin(axis) - 0.5)
+    difference = int(geometry["binning_factor"] * position_bin + geometry[f"time_dif_min_{axis}"])
     return centre + difference // 2, centre - difference // 2
 
 
@@ -131,7 +132,7 @@ def test_combinatorial_partial_hit_has_nan_for_missing_axis_and_finite_mc():
     assert len(emitted) == 1
     hit = emitted[0]
     assert hit["detector_axis"] == "x"
-    assert hit["x_det (cm)"] == pytest.approx(1.0, abs=1e-3)
+    assert hit["x_det (cm)"] == pytest.approx(1.0, abs=0.002)  # within half a pixel
     assert np.isnan(hit["y_det (cm)"])
     assert np.isfinite(hit["mc (Da)"])
 

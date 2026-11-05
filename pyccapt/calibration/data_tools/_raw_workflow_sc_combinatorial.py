@@ -13,7 +13,7 @@ import pandas as pd
 from matplotlib.patches import Rectangle
 from tqdm.auto import tqdm
 
-from pyccapt.calibration.data_tools import raw_data_surface_concept
+from pyccapt.calibration.data_tools import raw_data_surface_concept, sc_geometry
 from pyccapt.calibration.data_tools._raw_workflow_common import (
     _SURFACE_CONCEPT_DEFAULT_CONSTANTS, DLTS_COLORS, TOF_FACTOR_NS, TOF_FACTOR_NS_1D, XY_BIN_SHIFT, XY_FACTOR,
     sc_position_cm,
@@ -34,14 +34,15 @@ from pyccapt.calibration.mc import mc_tools
 # The combinatorial recovery below enumerates every reasonable
 # ``(ch_a, ch_b)`` partial-hit pair and every ``(ch=0, ch=1, ch=2, ch=3)``
 # complete-hit quadruple whose x-pair-sum and y-pair-sum coincide within a
-# user-set tolerance (default ±200 TDC bins, ≈1.4 ns at 6.86 ps/bin), then
-# selects the maximum set of valid hits whose timestamps don't overlap.
-# Two selection modes are offered:
+# user-set tolerance (default ±200 raw 27.432 ps TDC bins, the firmware
+# SumDif window), then selects the maximum set of valid hits whose
+# timestamps don't overlap. Two selection modes are offered:
 #
-#   - ``greedy`` (default, fast): O(N²) — rank candidates by validity then
-#     by signal distance to the nearest peak centre, pick the highest-ranked
-#     one whose timestamps are still free, repeat. Matches the legacy
-#     "first-occurrence" approach when no peak windows are supplied.
+#   - ``greedy`` (default, fast): O(N²) — rank candidates by time-sum
+#     residual, pick the highest-ranked one whose timestamps are still free,
+#     repeat. Peak windows never influence which pairing wins: the per-peak
+#     yields are measured on the selected hits, so ranking by peak distance
+#     would bias them (it inflated minor-peak counts by up to ~50 % on run 2559).
 #   - ``exhaustive`` (slow, opt-in): branch-and-bound search of the
 #     index-disjoint subsets of valid candidates; returns the largest one.
 #     Falls back to greedy when the candidate count exceeds
@@ -147,10 +148,13 @@ def _generate_partial_candidates_for_axis(
 def _position_from_pair(
     first_time: float, second_time: float, xy_factor: float, xy_bin_shift: float, axis: str
 ) -> float:
-    """Firmware position (:func:`sc_position_cm`) with explicit ``xy_factor`` /
-    ``xy_bin_shift`` so the per-rig config can override them."""
-    constants = {**_SURFACE_CONCEPT_DEFAULT_CONSTANTS, 'xy_factor': xy_factor, 'xy_bin_shift': xy_bin_shift}
-    return sc_position_cm(first_time, second_time, axis, constants)
+    """Firmware position (:func:`sc_position_cm`).
+
+    ``xy_factor`` / ``xy_bin_shift`` describe the pre-2026-11-05 convention
+    and are kept only for signature compatibility; positions follow
+    :mod:`sc_geometry` so they match the (converted) dld coordinates.
+    """
+    return sc_position_cm(first_time, second_time, axis)
 
 
 def _generate_complete_candidates(
@@ -272,17 +276,18 @@ def _pair_sum_residual(candidate: dict) -> float:
     return abs(float(sum_x) - float(sum_y))
 
 
-def _candidate_rank_key(candidate: dict) -> tuple[float, float]:
-    """Rank by peak-centre distance, then by time-sum residual. Without peak
-    windows every distance is ``inf``; the residual then picks the most
-    self-consistent pairing instead of falling back to enumeration order."""
-    return float(candidate.get('signal_distance', float('inf'))), _pair_sum_residual(candidate)
+def _candidate_rank_key(candidate: dict) -> float:
+    """Rank by time-sum residual only (most self-consistent pairing first).
+
+    Peak-window distance is deliberately not used: the per-peak yields are
+    computed from the selected hits, so preferring pairings that land in a
+    window would bias exactly the quantity being measured."""
+    return _pair_sum_residual(candidate)
 
 
 def _select_max_disjoint_greedy(candidates: list[dict]) -> list[dict]:
     """Greedy max-disjoint set on a homogeneous candidate list. Sorts by
-    ``signal_distance`` ascending (tighter peak match wins), then by
-    pair-sum residual, and picks the highest-ranked candidate whose
+    pair-sum residual and picks the highest-ranked candidate whose
     timestamps are still free."""
     ranked = sorted(candidates, key=_candidate_rank_key)
     used: set[int] = set()
@@ -470,6 +475,45 @@ def _compute_mc_for_candidates(
         candidate['mc (Da)'] = float(mc_value)
 
 
+def _firmware_pixel_candidates(position_cm: float, axis: str) -> set[int]:
+    """Firmware pixel(s) a dld coordinate can encode: the current geometry,
+    or the legacy one for processed files saved before 2026-11-05."""
+    geometry = sc_geometry.DEFAULT_GEOMETRY
+    current = position_cm / (geometry[f'pixel_size_{axis}_mm'] * 0.1) + sc_geometry.centre_bin(axis) - 0.5
+    legacy = float(sc_geometry.legacy_cm_to_bin(position_cm))
+    return {int(round(current)), int(round(legacy))}
+
+
+def _lock_firmware_events(
+    complete_candidates: list[dict],
+    channels: np.ndarray,
+    times: np.ndarray,
+    firmware_events: Sequence[tuple[float, float, float]] | None,
+) -> list[dict]:
+    """Complete candidates built from exactly the stops of each firmware ion."""
+    locked: list[dict] = []
+    if not firmware_events:
+        return locked
+    used: set[int] = set()
+    for x_cm, y_cm, tof_ns in firmware_events:
+        if not (np.isfinite(x_cm) and np.isfinite(y_cm) and np.isfinite(tof_ns)):
+            continue
+        x_bins = _firmware_pixel_candidates(float(x_cm), 'x')
+        y_bins = _firmware_pixel_candidates(float(y_cm), 'y')
+        for candidate in complete_candidates:
+            indices = candidate['used_indices']
+            if not indices.isdisjoint(used) or abs(candidate['tof (ns)'] - float(tof_ns)) > 1e-4:
+                continue
+            stop = {int(channels[i]): float(times[i]) for i in indices}
+            if (int(sc_geometry.stops_to_bin(stop[0], stop[1], 'x')) in x_bins
+                    and int(sc_geometry.stops_to_bin(stop[2], stop[3], 'y')) in y_bins):
+                candidate['firmware'] = True
+                locked.append(candidate)
+                used.update(indices)
+                break
+    return locked
+
+
 def extract_valid_hits_combinatorial(
     record: dict,
     *,
@@ -487,9 +531,18 @@ def extract_valid_hits_combinatorial(
     tof_factor_4d: float = TOF_FACTOR_NS,
     tof_factor_2d: float = TOF_FACTOR_NS_1D,
     exhaustive_max_candidates: int = _DEFAULT_EXHAUSTIVE_MAX_CANDIDATES,
+    firmware_events: Sequence[tuple[float, float, float]] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Per-pulse combinatorial hit recovery for one ``find_consecutive_sequences``
     record.
+
+    ``firmware_events`` are the pulse's dld ions as ``(x_det cm, y_det cm,
+    tof ns)``. Each is matched to the complete candidate built from exactly
+    its four stops; that candidate is emitted (flag ``firmware``) and its
+    stops are removed before the combinatorial search, which then only
+    recovers what the firmware left. Without this, the maximum-disjoint
+    search re-pairs firmware ions with leftover stops (on run 2559 it
+    replaced 5 % of the firmware ions by 1.5x as many re-paired hits).
 
     Returns ``(emitted_hits, all_candidates)``. Each emitted hit is annotated
     with ``parent_pulse_length``, ``high_voltage (V)``, ``pulse``,
@@ -561,9 +614,15 @@ def extract_valid_hits_combinatorial(
             max_tof_ns=max_tof_ns,
         )
 
-    valid_candidates = [c for c in all_candidates if c['valid']]
+    for candidate in all_candidates:
+        candidate['firmware'] = False
+    locked = _lock_firmware_events(complete_candidates, channels, times, firmware_events)
+    locked_indices = frozenset().union(*(c['used_indices'] for c in locked)) if locked else frozenset()
+
+    valid_candidates = [c for c in all_candidates if c['valid'] and c['used_indices'].isdisjoint(locked_indices)]
     rejected_completes = [
-        c for c in complete_candidates if c['in_tof_range'] and not c['in_detector']
+        c for c in complete_candidates
+        if c['in_tof_range'] and not c['in_detector'] and c['used_indices'].isdisjoint(locked_indices)
     ]
     # Two-stage selection: lock valid completes first (in their max-disjoint
     # set), THEN fill valid partials on the remaining indices. This enforces
@@ -571,7 +630,7 @@ def extract_valid_hits_combinatorial(
     # first check full hit possibility then partial hit if full hit is not
     # valid" — without it, the exhaustive mode prefers (count = 2 partials)
     # over (count = 1 complete) on a clean [0, 1, 2, 3] chunk.
-    emitted = _select_hits_two_stage(
+    emitted = [c for c in locked if c['valid']] + _select_hits_two_stage(
         valid_candidates,
         mode=mode.lower(),
         exhaustive_max_candidates=exhaustive_max_candidates,
@@ -644,6 +703,7 @@ def analyze_surface_concept_tdc_frame_combinatorial(
     xy_bin_shift: float = XY_BIN_SHIFT,
     tof_factor_4d: float = TOF_FACTOR_NS,
     tof_factor_2d: float = TOF_FACTOR_NS_1D,
+    firmware_dld: pd.DataFrame | None = None,
 ) -> dict:
     """Run the combinatorial per-pulse hit recovery on a Surface Concept tdc
     frame.
@@ -655,6 +715,13 @@ def analyze_surface_concept_tdc_frame_combinatorial(
     ``'greedy'`` (default, fast O(N²)) or ``'exhaustive'`` (slow,
     branch-and-bound, falls back to greedy when a pulse generates more than
     ``exhaustive_max_candidates`` candidates).
+
+    ``firmware_dld`` (the dld frame, with ``event_group_id``, ``x_det (cm)``,
+    ``y_det (cm)`` and ``t (ns)``; ``df_tdc`` must carry ``event_group_id``)
+    turns on firmware-first recovery: each pulse's firmware ions are locked
+    to their exact stops and only the remaining stops are searched (see
+    :func:`extract_valid_hits_combinatorial`). The hit table then carries
+    ``firmware`` = True for those ions.
     """
     required = {'start_counter', 'channel', 'time_data', 'high_voltage (V)'}
     missing = required.difference(df_tdc.columns)
@@ -666,6 +733,24 @@ def analyze_surface_concept_tdc_frame_combinatorial(
     # Use a generator so sequence records are produced one at a time and
     # immediately discarded after processing.  The old approach built a Python
     # list of ~16 M dicts which consumed ~20 GB of RAM and crashed the system.
+    firmware_by_gid: dict[int, list[tuple[float, float, float]]] = {}
+    tdc_gid = None
+    if (
+        firmware_dld is not None
+        and len(firmware_dld)
+        and 'event_group_id' in df_tdc.columns
+        and {'event_group_id', 'x_det (cm)', 'y_det (cm)', 't (ns)'} <= set(firmware_dld.columns)
+    ):
+        tdc_gid = df_tdc['event_group_id'].to_numpy()
+        for gid, x_cm, y_cm, tof_ns in zip(
+            firmware_dld['event_group_id'].to_numpy(),
+            firmware_dld['x_det (cm)'].to_numpy(),
+            firmware_dld['y_det (cm)'].to_numpy(),
+            firmware_dld['t (ns)'].to_numpy(),
+        ):
+            if gid >= 0:
+                firmware_by_gid.setdefault(int(gid), []).append((float(x_cm), float(y_cm), float(tof_ns)))
+
     record_gen = raw_data_surface_concept.iter_consecutive_sequences(
         df_tdc['start_counter'].to_numpy(),
         df_tdc['channel'].to_numpy(),
@@ -691,8 +776,9 @@ def analyze_surface_concept_tdc_frame_combinatorial(
     col_in_det: list = []
     col_in_peak: list = []
     col_plen: list = []
+    col_firmware: list = []
 
-    candidate_counts = {'total': 0, 'valid': 0, 'in_peak': 0, 'emitted': 0}
+    candidate_counts = {'total': 0, 'valid': 0, 'in_peak': 0, 'emitted': 0, 'firmware': 0, 'firmware_events': 0}
 
     # Sequence / raw-summary accumulators (replaces summarize_surface_concept_sequences
     # and summarize_surface_concept_raw_sequences, computed in one pass).
@@ -754,6 +840,10 @@ def analyze_surface_concept_tdc_frame_combinatorial(
             mh_irreg_ts += length
 
         # --- combinatorial hit recovery ---
+        firmware_events = None
+        if tdc_gid is not None:
+            firmware_events = firmware_by_gid.get(int(tdc_gid[record['indices'][0]]))
+            candidate_counts['firmware_events'] += len(firmware_events or ())
         emitted, all_candidates = extract_valid_hits_combinatorial(
             record,
             peak_windows=peak_windows,
@@ -770,8 +860,10 @@ def analyze_surface_concept_tdc_frame_combinatorial(
             tof_factor_4d=tof_factor_4d,
             tof_factor_2d=tof_factor_2d,
             exhaustive_max_candidates=exhaustive_max_candidates,
+            firmware_events=firmware_events,
         )
         candidate_counts['total'] += len(all_candidates)
+        candidate_counts['firmware'] += sum(1 for hit in emitted if hit.get('firmware'))
         candidate_counts['valid'] += sum(1 for c in all_candidates if c['valid'])
         candidate_counts['in_peak'] += sum(1 for c in all_candidates if c.get('in_peak'))
         candidate_counts['emitted'] += len(emitted)
@@ -789,6 +881,7 @@ def analyze_surface_concept_tdc_frame_combinatorial(
             col_in_det.append(bool(hit['in_detector']))
             col_in_peak.append(bool(hit['in_peak']))
             col_plen.append(int(hit['parent_pulse_length']))
+            col_firmware.append(bool(hit.get('firmware', False)))
 
     gc.collect()
 
@@ -807,17 +900,18 @@ def analyze_surface_concept_tdc_frame_combinatorial(
             'in_detector': col_in_det,
             'in_peak': col_in_peak,
             'parent_pulse_length': col_plen,
+            'firmware': col_firmware,
         })
     else:
         hit_table = pd.DataFrame(columns=[
             'start_counter', 'high_voltage (V)', 'pulse', 'tof (ns)', 'mc (Da)',
             'x_det (cm)', 'y_det (cm)', 'dlts', 'detector_axis', 'recovery',
-            'in_detector', 'in_peak', 'parent_pulse_length',
+            'in_detector', 'in_peak', 'parent_pulse_length', 'firmware',
         ])
 
     # Free the column lists now that the DataFrame is built.
     del col_sc, col_hv, col_pulse, col_tof, col_mc, col_x, col_y
-    del col_dlts, col_axis, col_recovery, col_in_det, col_in_peak, col_plen
+    del col_dlts, col_axis, col_recovery, col_in_det, col_in_peak, col_plen, col_firmware
     gc.collect()
 
     sequence_stats = {

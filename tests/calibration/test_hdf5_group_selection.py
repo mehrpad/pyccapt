@@ -44,10 +44,11 @@ def test_dld_only_read_preserves_alias_shape_units_and_integer_precision(tmp_pat
         "pulse_l (pJ)": source["laser_intensity"], "start_counter": counters,
         "t (ns)": source["t"], "x_det (cm)": source["x"], "y_det (cm)": source["y"]})
     if pulse_alias == "pulse_voltage":
-        # Independent legacy bin-to-ns / centered bin-to-cm contract.
+        # Independent legacy bin-to-ns / firmware-window bin-to-cm contract
+        # (centre pixel 1201 / 1190, pix_size_x / pix_size_y of tdc_gpx3.ini).
         expected["t (ns)"] *= 27.432 / 4000
-        for column in ("x_det (cm)", "y_det (cm)"):
-            expected[column] = (expected[column] - 1225.) * (160. / 4900.) * .1
+        expected["x_det (cm)"] = (expected["x_det (cm)"] + .5 - 1201.) * .033306 * .1
+        expected["y_det (cm)"] = (expected["y_det (cm)"] + .5 - 1190.) * .033613 * .1
     pd.testing.assert_frame_equal(actual, expected, check_exact=True)
     assert actual["start_counter"].dtype == np.uint64
     assert set(reads) == {f"/dld/{name}" for name in source}

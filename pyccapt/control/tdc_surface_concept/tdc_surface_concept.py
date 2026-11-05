@@ -8,6 +8,7 @@ from queue import Empty, Full, Queue
 import numpy as np
 
 # local imports
+from pyccapt.calibration.data_tools import sc_geometry
 from pyccapt.control.core import runtime as _runtime
 from pyccapt.control.core.chunk_store import atomic_write_chunk_group
 from pyccapt.control.devices import initialize_devices
@@ -273,11 +274,9 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
         _conf = {}
     exposure_time = int(_conf.get("sc_exposure_time", 100))
     TOFFACTOR = float(_conf.get("sc_tof_ns_per_bin", 27.432 / (1000 * 4)))
-    DETBINS = int(_conf.get("sc_detector_bins", 4900))
-    BINNINGFAC = int(_conf.get("sc_detector_binning_factor", 2))
-    DET_WIDTH_MM = float(_conf.get("sc_detector_width_mm", 80))
-    XYFACTOR = DET_WIDTH_MM / DETBINS * BINNINGFAC  # mm per bin
-    XYBINSHIFT = DETBINS / BINNINGFAC / 2  # to center the detector
+    # dif1/dif2 -> cm with the firmware quadrupel-finder window (centre and
+    # pixel size from tdc_gpx3.ini); see sc_geometry.
+    geometry = sc_geometry.geometry_from_config(_conf)
 
     device = scTDC.Device(autoinit=False)
     retcode, errmsg = device.initialize()
@@ -381,8 +380,8 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
                     count = len(x_bin)
                     if not count:
                         continue
-                    x = ((x_bin-XYBINSHIFT)*XYFACTOR)*.1
-                    y = ((y_bin-XYBINSHIFT)*XYFACTOR)*.1
+                    x = sc_geometry.bins_to_cm(x_bin, "x", geometry)
+                    y = sc_geometry.bins_to_cm(y_bin, "y", geometry)
                     tof = t_bin*TOFFACTOR
                     voltage = np.full(count, specimen_voltage, dtype=np.float64)
                     dld.append({"x": x, "y": y, "t": tof, "x_bin": x_bin,

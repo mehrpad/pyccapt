@@ -2,16 +2,16 @@
 
 The FPGA quadrupel finder reports ``x_bin = floor((t0 - t1 - TimeDif1Min) / 2)``
 (``TimeDif1Min = -2402``, ``TimeDif2Min = -2380`` in ``tdc_gpx3.ini``), so the
-detector centre is not at bin 1225. Positions rebuilt from raw stops (raw
-analysis, partial-hit recovery) must use the same formula to line up with
-native dld hits.
+detector centre is pixel 1201 / 1190, not 1225. Positions rebuilt from raw
+stops (raw analysis, partial-hit recovery) and dld x/y (live, or converted from
+legacy files on load) use the same geometry (sc_geometry).
 """
 import numpy as np
 import pytest
 
 from pyccapt.calibration.data_tools import _raw_workflow_common as common
 from pyccapt.calibration.data_tools import _raw_workflow_surface_concept as sc
-from pyccapt.calibration.data_tools import partial_recovery
+from pyccapt.calibration.data_tools import partial_recovery, sc_geometry
 from pyccapt.calibration.mc import mc_tools
 
 # (t0, t1, t2, t3, dld x [cm], dld y [cm], dld t [ns]) of single-ion pulses
@@ -29,26 +29,46 @@ RUN_2559_EVENTS = [
 
 @pytest.mark.parametrize("event", RUN_2559_EVENTS)
 def test_raw_stops_reproduce_firmware_dld_event(event):
+    # Run 2559 predates the geometry fix; its dld x/y are converted on load.
     *stops, x, y, tof = event
     det_x, det_y, det_t = sc._surface_concept_hit_from_time_data(stops)
-    assert det_x == pytest.approx(x, abs=1e-9)
-    assert det_y == pytest.approx(y, abs=1e-9)
+    assert det_x == pytest.approx(sc_geometry.legacy_cm_to_cm(x, "x"), abs=1e-9)
+    assert det_y == pytest.approx(sc_geometry.legacy_cm_to_cm(y, "y"), abs=1e-9)
     assert det_t == pytest.approx(tof, abs=1e-6)
 
 
 def test_vectorised_position_matches_scalar():
     stops = np.array([event[:4] for event in RUN_2559_EVENTS], dtype=np.int64)
     np.testing.assert_allclose(common.sc_position_cm(stops[:, 0], stops[:, 1], "x"),
-                               [event[4] for event in RUN_2559_EVENTS], atol=1e-9)
+                               sc_geometry.legacy_cm_to_cm([event[4] for event in RUN_2559_EVENTS], "x"), atol=1e-9)
     np.testing.assert_allclose(common.sc_position_cm(stops[:, 2], stops[:, 3], "y"),
-                               [event[5] for event in RUN_2559_EVENTS], atol=1e-9)
+                               sc_geometry.legacy_cm_to_cm([event[5] for event in RUN_2559_EVENTS], "y"), atol=1e-9)
+
+
+def test_geometry_centres_the_firmware_window():
+    # Pixels 0 and 2401 (x) / 2379 (y) are the window edges: +-4.0 cm.
+    assert sc_geometry.bins_to_cm(0, "x") == pytest.approx(-sc_geometry.bins_to_cm(2401, "x"))
+    assert sc_geometry.bins_to_cm(0, "y") == pytest.approx(-sc_geometry.bins_to_cm(2379, "y"))
+    assert sc_geometry.bins_to_cm(2401, "x") == pytest.approx(3.998, abs=1e-3)
+    # Equal stop times (ion at the delay-line centre) land on the centre pixel.
+    assert abs(common.sc_position_cm(5000, 5000, "x")) <= 0.5 * sc_geometry.PIXEL_SIZE_X_MM * 0.1
+
+
+def test_legacy_coordinates_convert_exactly():
+    pixels = np.array([0, 17, 1201, 1225, 2401])
+    legacy = (pixels - 1225) * 80.0 / 2450 * 0.1
+    assert sc_geometry.looks_like_legacy_cm(legacy, legacy)
+    np.testing.assert_allclose(sc_geometry.legacy_cm_to_cm(legacy, "x"), sc_geometry.bins_to_cm(pixels, "x"))
+    assert not sc_geometry.looks_like_legacy_cm([-1.23483, 0.0], [-1.55235, 0.0])  # CoboldPC values
+    assert not sc_geometry.looks_like_legacy_cm([0.0, 0.0], [0.0, 0.0])
 
 
 def test_quadrupel_window_is_configurable():
-    constants = common.load_detector_constants("surface_concept", {"sc_time_dif1_min": -2450, "sc_time_dif2_min": -2450})
+    conf = {"sc_time_dif1_min": -2450, "sc_time_dif2_min": -2450, "sc_pixel_size_x_mm": 0.05}
+    constants = common.load_detector_constants("surface_concept", conf)
     assert (constants["time_dif_min_x"], constants["time_dif_min_y"]) == (-2450, -2450)
-    # With a symmetric window the centre is back at XY_BIN_SHIFT.
-    assert common.sc_position_cm(5000, 5000, "x", constants) == pytest.approx(0.0)
+    assert constants["pixel_size_x_mm"] == 0.05
+    assert common.sc_position_cm(5100, 5000, "x", constants) == pytest.approx((1275 + 0.5 - 1225) * 0.05 * 0.1)
     defaults = common.load_detector_constants("surface_concept")
     assert (defaults["time_dif_min_x"], defaults["time_dif_min_y"]) == (-2402, -2380)
 
@@ -105,8 +125,34 @@ def test_single_axis_partial_mc_uses_chord_rms_for_missing_axis():
 def test_matched_multihit_subtraction_finds_firmware_stops():
     # Firmware ion from run 2559 plus a second ion's stops in the same pulse.
     *stops, x, y, tof = RUN_2559_EVENTS[1]
+    x, y = sc_geometry.legacy_cm_to_cm(x, "x"), sc_geometry.legacy_cm_to_cm(y, "y")
     channels = np.array([0, 1, 2, 3, 0, 1, 2, 3])
     times = np.array([*stops, 31000, 31400, 31190, 31200])
     residual = partial_recovery._subtract_firmware_stops(channels, times, [(x, y, tof)], match_tol_cm=0.1)
     assert residual is not None
     np.testing.assert_array_equal(residual[1], [31000, 31400, 31190, 31200])
+
+
+@pytest.mark.parametrize("legacy_coordinates", [False, True])
+def test_combinatorial_keeps_firmware_ion_and_searches_only_leftover_stops(legacy_coordinates):
+    from pyccapt.calibration.data_tools import _raw_workflow_sc_combinatorial as combinatorial
+
+    first = RUN_2559_EVENTS[2]          # firmware ion
+    second = (32210, 33190, 33080, 32340)  # another ion in the same pulse, not in dld
+    channels = [0, 1, 2, 3, 0, 1, 2, 3]
+    times = [*first[:4], *second]
+    x, y, tof = first[4], first[5], first[6]
+    if not legacy_coordinates:
+        x, y = sc_geometry.legacy_cm_to_cm(x, "x"), sc_geometry.legacy_cm_to_cm(y, "y")
+    record = {"channels": channels, "time_data": times, "start_counter": [1], "high_voltage": 5000.0, "pulse": 0.0}
+
+    emitted, _ = combinatorial.extract_valid_hits_combinatorial(
+        record, mode="exhaustive", max_tof_ns=6000.0, firmware_events=[(x, y, tof)]
+    )
+    firmware = [hit for hit in emitted if hit["firmware"]]
+    assert len(firmware) == 1
+    assert firmware[0]["used_indices"] == frozenset({0, 1, 2, 3})
+    assert firmware[0]["tof (ns)"] == pytest.approx(tof)
+    others = [hit for hit in emitted if not hit["firmware"]]
+    assert [hit["dlts"] for hit in others] == [4]
+    assert others[0]["used_indices"] == frozenset({4, 5, 6, 7})

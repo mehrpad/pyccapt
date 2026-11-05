@@ -7,6 +7,8 @@ from pathlib import Path
 import h5py
 import numpy as np
 
+from pyccapt.calibration.data_tools import sc_geometry
+
 
 @contextmanager
 def _transactional_hdf5_update(hdf5_file_path):
@@ -61,10 +63,6 @@ def correct_surface_concept_old_data(hdf5_file_path):
     """
     # surface concept tdc specific binning and factors
     TOFFACTOR = 27.432 / (1000.0 * 4.0)  # 27.432 ps/bin, tof in ns, data is TDC time sum
-    DETBINS = 4900.0
-    BINNINGFAC = 2.0
-    XYFACTOR = 80.0 / DETBINS * BINNINGFAC  # XXX mm/bin
-    XYBINSHIFT = DETBINS / BINNINGFAC / 2.0  # to center detector
 
     with _transactional_hdf5_update(hdf5_file_path) as file:
         data_x = file['dld/x']
@@ -78,12 +76,14 @@ def correct_surface_concept_old_data(hdf5_file_path):
         modified_t = data_t.astype(np.float64) * TOFFACTOR
         del file['dld/t']
         file.create_dataset('dld/t', data=modified_t, dtype=np.float64)
-        modified_x = ((data_x.astype(np.float64) - XYBINSHIFT) * XYFACTOR) / 10.0
+        # x/y are firmware pixels (dif1/dif2); see sc_geometry.
+        modified_x = sc_geometry.bins_to_cm(data_x.astype(np.float64), 'x')
         del file['dld/x']
         file.create_dataset('dld/x', data=modified_x, dtype=np.float64)
-        modified_y = ((data_y.astype(np.float64) - XYBINSHIFT) * XYFACTOR) / 10.0
+        modified_y = sc_geometry.bins_to_cm(data_y.astype(np.float64), 'y')
         del file['dld/y']
         file.create_dataset('dld/y', data=modified_y, dtype=np.float64)
+        file['dld'].attrs[sc_geometry.GEOMETRY_ATTR] = sc_geometry.GEOMETRY_NAME
 
 
 def copy_npy_to_hdf_surface_concept(path, hdf5_file_name):

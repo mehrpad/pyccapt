@@ -384,13 +384,16 @@ sc_detector_width_mm = 80
 # this radius are flagged as "outside detector" and excluded from the
 # raw-data analysis peak yields.  80 mm full width → ±40 mm = ±4 cm.
 sc_detector_limit_cm = 4.0
-# Lower edges of the FPGA quadrupel-finder windows (TimeDif1Min / TimeDif2Min
-# in control/tdc_surface_concept/tdc_gpx3.ini, unbinned TDC bins). The
-# firmware reports x_bin = floor((t0 - t1 - sc_time_dif1_min) / binning);
-# positions rebuilt from raw tdc stops use the same formula so they match
-# dld/x and dld/y exactly. Keep these equal to the values in the ini.
+# Detector geometry of dld/x, dld/y (pyccapt/calibration/data_tools/sc_geometry.py).
+# The FPGA quadrupel finder reports x_bin = floor((t0 - t1 - sc_time_dif1_min) / binning),
+# so the detector centre is pixel -sc_time_dif1_min / binning (1201 in x, 1190 in y),
+# and x_cm = (x_bin + 0.5 - centre) * sc_pixel_size_x_mm / 10. Keep these equal to
+# TimeDif1Min / TimeDif2Min and pix_size_x / pix_size_y in tdc_gpx3.ini.
+# (sc_detector_bins / sc_detector_width_mm above describe only the legacy convention.)
 sc_time_dif1_min = -2402
 sc_time_dif2_min = -2380
+sc_pixel_size_x_mm = 0.033306
+sc_pixel_size_y_mm = 0.033613
 # Exposure time (TDC tick units, integer).  Controls how long the TDC
 # integrates between callbacks.  Lower = faster GUI updates, higher
 # CPU.  Surface Concept default 100 worked well in practice.

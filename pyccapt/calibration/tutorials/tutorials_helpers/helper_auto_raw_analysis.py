@@ -140,17 +140,17 @@ def run_analysis(
       back to greedy when a single pulse generates more than ~80 candidates
       so the worst case stays bounded.
     - ``"greedy"`` — fast O(N²) variant that ranks valid candidates by
-      complete-vs-partial first then by signal distance to the nearest peak
-      centre, picking the highest-ranked candidate whose timestamps are
-      still free at each step. Use when the analysis must run on a tight
-      time budget.
+      complete-vs-partial first then by time-sum residual, picking the
+      highest-ranked candidate whose timestamps are still free at each step.
+      Use when the analysis must run on a tight time budget.
 
     Both modes enumerate every candidate ``(0, 1)`` x-pair, every ``(2, 3)``
     y-pair, and every complete-event quadruple whose x-pair-sum matches the
-    y-pair-sum within ``pair_sum_tolerance_bins`` (default ±200 TDC bins
-    ≈ 1.4 ns at 6.86 ps/bin). Validity = in-detector AND in any peak window.
-    Selection is two-stage: completes lock their timestamps first, then
-    partials run on the remaining indices.
+    y-pair-sum within ``pair_sum_tolerance_bins`` (default ±200 raw
+    27.432 ps TDC bins, the firmware SumDif window). Validity = in-detector
+    AND ToF in range; peak windows only label hits and never decide which
+    pairing wins. Selection is two-stage: completes lock their timestamps
+    first, then partials run on the remaining indices.
 
     ``pair_sum_tolerance_bins`` controls the coincidence window for forming
     complete-event candidates from individual delay-line pairs.
@@ -241,8 +241,19 @@ def run_analysis(
                 "_**Note:** mc peak windows (e.g. from a range file, which holds calibrated mc) are matched "
                 "against this uncalibrated hit-table mc, so peaks can sit off their windows._"
             )
+        # Firmware first: the dld ions are locked to their exact raw stops and
+        # only the leftover stops (and orphan pulses) are searched, so the
+        # combinatorial search cannot re-pair ions the firmware already built.
+        firmware_dld = dld_df if {"event_group_id"} <= set(dld_df.columns) and "event_group_id" in tdc_df.columns else None
+        _md(
+            "_Firmware-first recovery: the dld ions are kept as-is and only the stops they did not use are searched._"
+            if firmware_dld is not None
+            else "_No dld↔tdc `event_group_id` link: every stop is re-paired from scratch (the firmware's ions can be "
+                 "replaced by alternative pairings)._"
+        )
         combinatorial_analysis = analyze_surface_concept_tdc_frame_combinatorial(
             tdc_df,
+            firmware_dld=firmware_dld,
             peak_windows=windows_for_recovery,
             signal_kind=peak_units,
             detector_limit_cm=detector_limit_cm,
@@ -273,6 +284,12 @@ def run_analysis(
             f"- Passed geometry (in detector AND tof in [0, {int(max_tof_ns)}] ns): {counts['valid']:,}\n"
             f"- Of those, also in a user peak window (informational): {counts.get('in_peak', 0):,}\n"
             f"- Emitted (after index-disjoint two-stage selection): {counts['emitted']:,}\n"
+            + (
+                f"- Firmware ions kept from their own stops: {counts.get('firmware', 0):,} of "
+                f"{counts.get('firmware_events', 0):,} dld ions in these pulses "
+                "(the rest are outside the detector gate or not built from the stored stops)\n"
+                if counts.get('firmware_events') else ""
+            )
         )
 
         if not analysis["hit_table"].empty:

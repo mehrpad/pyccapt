@@ -10,7 +10,7 @@ from matplotlib.widgets import RectangleSelector, EllipseSelector
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
 from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
 
-from pyccapt.calibration.data_tools import data_tools, hdf5_schema, selectors_data
+from pyccapt.calibration.data_tools import data_tools, hdf5_schema, sc_geometry, selectors_data
 from pyccapt.calibration.path_utils import save_figure
 
 EXTRACT_MODE_ALIASES = {
@@ -199,7 +199,43 @@ def filter_tdc_by_dld(dld_df: pd.DataFrame, tdc_df: pd.DataFrame) -> pd.DataFram
     keep = orphan | matched_keep
     return tdc_df.loc[keep].reset_index(drop=True).copy()
 
-def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld', *, lazy: bool = False):
+def _uses_legacy_sc_geometry(filename: str, x_cm, y_cm) -> bool:
+    """True when ``/dld`` x/y use the pre-2026-11-05 Surface Concept convention.
+
+    Files written since then carry ``sc_geometry.GEOMETRY_ATTR``; older Surface
+    Concept files are recognised by their coordinates sitting exactly on the
+    legacy pixel grid (CoboldPC/RoentDek coordinates never do).
+    """
+    try:
+        import h5py
+
+        with h5py.File(filename, 'r') as handle:
+            if 'dld' in handle and sc_geometry.GEOMETRY_ATTR in handle['dld'].attrs:
+                return False
+    except (OSError, KeyError):
+        pass
+    return sc_geometry.looks_like_legacy_cm(x_cm, y_cm)
+
+
+class _LegacyScCoordinateSource:
+    """Lazy column source converting legacy Surface Concept cm on read."""
+
+    dtype = np.dtype(np.float64)
+
+    def __init__(self, column, axis: str):
+        self._column = column
+        self._axis = axis
+
+    def __len__(self) -> int:
+        return len(self._column)
+
+    def __getitem__(self, item):
+        return sc_geometry.legacy_cm_to_cm(self._column[item], self._axis)
+
+
+def fetch_dataset_from_dld_grp(
+    filename: str, extract_mode='dld', *, lazy: bool = False, convert_legacy_sc_geometry: bool = True
+):
     """
     Fetches dataset from HDF5 file.
 
@@ -217,6 +253,11 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld', *, lazy: bool 
             chunks via :meth:`LazyTable.iter_chunks`. The caller is
             responsible for closing the table (preferably via a ``with``
             block).
+        convert_legacy_sc_geometry: Surface Concept files written before
+            2026-11-05 centred dld x/y on pixel 1225 with 80 mm / 2450 pixels;
+            when ``True`` (default) their x/y are converted on load, exactly,
+            to the firmware geometry of :mod:`sc_geometry` (detector centred,
+            +-4 cm on both axes), which raw-stop recovery also uses.
 
     Returns:
         DataFrame | LazyTable: Contains relevant information from the
@@ -224,7 +265,7 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld', *, lazy: bool 
     """
     extract_mode = _normalize_extract_mode(extract_mode)
     if lazy:
-        return _fetch_dataset_from_dld_grp_lazy(filename, extract_mode)
+        return _fetch_dataset_from_dld_grp_lazy(filename, extract_mode, convert_legacy_sc_geometry)
     flag_old_pyccpat_data = False
     if extract_mode == 'dld':
         try:
@@ -267,6 +308,15 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld', *, lazy: bool 
             dld_group_storage = create_pandas_dataframe(
                 dld_group_array, mode='dld', flag_old_pyccpat_data=flag_old_pyccpat_data
             )
+            if (
+                convert_legacy_sc_geometry
+                and not flag_old_pyccpat_data
+                and _uses_legacy_sc_geometry(filename, dld_group_storage['x_det (cm)'], dld_group_storage['y_det (cm)'])
+            ):
+                for column, axis in (('x_det (cm)', 'x'), ('y_det (cm)', 'y')):
+                    dld_group_storage[column] = sc_geometry.legacy_cm_to_cm(dld_group_storage[column].to_numpy(), axis)
+                dld_group_storage.attrs['pyccapt_sc_geometry_converted_from_legacy'] = True
+                print('[*] Surface Concept dld x/y converted from the legacy centre/scale to the firmware geometry')
             missing = []
             for column, aliases in {
                 'pulse_v (V)': ('dld/pulse', 'dld/voltage_pulse', 'dld/pulse_voltage'),
@@ -325,7 +375,7 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld', *, lazy: bool 
             print("[*] HDF5 file not found")
     return None
 
-def _fetch_dataset_from_dld_grp_lazy(filename: str, extract_mode: str):
+def _fetch_dataset_from_dld_grp_lazy(filename: str, extract_mode: str, convert_legacy_sc_geometry: bool = True):
     """Return a memory-mapped :class:`LazyTable` view of one group.
 
     Opens ``filename`` once with h5py and exposes only the columns of the
@@ -372,7 +422,18 @@ def _fetch_dataset_from_dld_grp_lazy(filename: str, extract_mode: str):
         raw.close()
         raise ValueError(f"No /{group}/* columns found in {filename}. Is this a pyccapt-raw HDF5?")
 
-    from pyccapt.calibration.data_tools.lazy_io import LazyTable
+    from pyccapt.calibration.data_tools.lazy_io import LazyColumn, LazyTable
+
+    if (
+        convert_legacy_sc_geometry
+        and group == 'dld'
+        and {'x_det (cm)', 'y_det (cm)'} <= selected.keys()
+        and _uses_legacy_sc_geometry(filename, selected['x_det (cm)'][:200_000], selected['y_det (cm)'][:200_000])
+    ):
+        for column, axis in (('x_det (cm)', 'x'), ('y_det (cm)', 'y')):
+            selected[column] = LazyColumn(
+                _LegacyScCoordinateSource(selected[column], axis), name=column, native_dtype=np.float64
+            )
 
     return LazyTable(
         selected,
@@ -975,20 +1036,17 @@ def create_pandas_dataframe(data_crop, mode='dld', flag_old_pyccpat_data=False):
     if mode == 'dld':
         if flag_old_pyccpat_data:
             TOFFACTOR = 27.432 / (1000 * 4)  # 27.432 ps/bin, tof in ns, data is TDC time sum
-            DETBINS = 4900
-            BINNINGFAC = 2
-            XYFACTOR = 80 / DETBINS * BINNINGFAC  # XXX mm/bin
-            XYBINSHIFT = DETBINS / BINNINGFAC / 2  # to center detector
 
+            # x/y are firmware pixels (dif1/dif2); see sc_geometry.
             if isinstance(data_crop, dict):
                 data_crop = dict(data_crop)
                 data_crop['t (ns)'] = data_crop['t (ns)'] * TOFFACTOR
-                for name in ('x_det (cm)', 'y_det (cm)'):
-                    data_crop[name] = ((data_crop[name] - XYBINSHIFT) * XYFACTOR) * .1
+                for name, axis in (('x_det (cm)', 'x'), ('y_det (cm)', 'y')):
+                    data_crop[name] = sc_geometry.bins_to_cm(data_crop[name], axis)
             else:
                 data_crop[:, 4] = data_crop[:, 4] * TOFFACTOR  # in ns
-                data_crop[:, 5] = ((data_crop[:, 5] - XYBINSHIFT) * XYFACTOR) * 0.1
-                data_crop[:, 6] = ((data_crop[:, 6] - XYBINSHIFT) * XYFACTOR) * 0.1
+                data_crop[:, 5] = sc_geometry.bins_to_cm(data_crop[:, 5], 'x')
+                data_crop[:, 6] = sc_geometry.bins_to_cm(data_crop[:, 6], 'y')
 
         hdf_dataframe = pd.DataFrame(
             data=data_crop,

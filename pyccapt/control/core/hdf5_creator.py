@@ -15,6 +15,7 @@ import h5py
 import numpy as np
 import pyccapt
 
+from pyccapt.calibration.data_tools import sc_geometry
 from pyccapt.control.apt.detector_models import normalize_tdc_model
 from pyccapt.control.core import chunk_store, detector_hdf
 from pyccapt.control.nkt_photonics.readback import TELEMETRY_UNITS, json_safe
@@ -312,7 +313,7 @@ def _create_dataset(hdf_file, dataset_name: str, data, dtype) -> None:
     _annotate_dataset(dataset, dataset_name)
 
 
-def _write_surface_concept_detector_data(hdf_file, variables, manifest_files=None) -> None:
+def _write_surface_concept_detector_data(hdf_file, variables, manifest_files=None, conf=None) -> None:
 	chunk_dir = Path(variables.path) / "temp_data" / "chunks"
 	chunk_dir_exists = chunk_dir.is_dir()
 
@@ -352,6 +353,13 @@ def _write_surface_concept_detector_data(hdf_file, variables, manifest_files=Non
 			# this stream was NOT chunked, so a fully-chunked run never pulls
 			# the bulk acquisition arrays back through the Manager.
 			_create_dataset(hdf_file, dataset_name, getattr(variables, var_attr), dtype)
+	# dld/x, dld/y use the firmware quadrupel-finder geometry; the loader
+	# converts files without this attribute from the legacy convention.
+	if "dld" in hdf_file:
+		geometry = sc_geometry.geometry_from_config(conf)
+		hdf_file["dld"].attrs[sc_geometry.GEOMETRY_ATTR] = sc_geometry.GEOMETRY_NAME
+		for key, value in geometry.items():
+			hdf_file["dld"].attrs[f"{sc_geometry.GEOMETRY_ATTR}_{key}"] = value
 
 
 def hdf_creator(variables, conf, time_counter, time_ex, *, apt_meta=None, apt_meta_flush_errors=()):
@@ -485,7 +493,7 @@ def hdf_creator(variables, conf, time_counter, time_ex, *, apt_meta=None, apt_me
                 _create_dataset(hdf_file, ds_path, values, dtype)
 
             if conf["tdc"] == "on" and tdc_model == "Surface_Concept" and variables.counter_source == "TDC":
-                _write_surface_concept_detector_data(hdf_file, variables, manifest_files)
+                _write_surface_concept_detector_data(hdf_file, variables, manifest_files, conf)
 
             elif conf["tdc"] == "on" and tdc_model == "RoentDek" and variables.counter_source == "TDC":
                 if not detector_hdf.write_roentdek_chunks(hdf_file, chunk_dir, manifest_files):

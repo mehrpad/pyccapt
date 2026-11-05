@@ -130,6 +130,13 @@ Delay-line detector hit coordinates and synchronized high-voltage/pulse metadata
 
 - `x` `(n,)` (`cm`, `float64`): detector X hit position
 - `y` `(n,)` (`cm`, `float64`): detector Y hit position
+
+Surface Concept x/y follow the firmware quadrupel-finder window of `tdc_gpx3.ini`
+(`pyccapt/calibration/data_tools/sc_geometry.py`): `x = (dif1 + 0.5 - 1201) * 0.033306 mm`,
+`y = (dif2 + 0.5 - 1190) * 0.033613 mm`, i.e. centred and ±4.0 cm on both axes. Such files
+carry the `/dld` attribute `sc_detector_geometry = "firmware_window_v1"`. Files written before
+2026-11-05 used `(bin - 1225) * 80/2450 mm` on both axes (0.8 / 1.15 mm off-centre, 2–3 %
+small); the calibration loader converts them exactly on load.
 - `t` `(n,)` (`ns`, `float64`): time-of-flight
 - `high_voltage` `(n,)` (`V`, `float64`): specimen DC voltage
 - `voltage_pulse` `(n,)` (`V`, `float64`): pulse voltage

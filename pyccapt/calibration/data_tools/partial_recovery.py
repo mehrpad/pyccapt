@@ -269,6 +269,7 @@ def _recover_for_pulse(
     max_tof_ns: float | None,
     axis_consistency_ns: float | None,
     pair_sum_offset_bins: float = 0.0,
+    recover_three_channel: bool = True,
 ) -> list[dict]:
     """Wrapper that drops the empty / single-tick degenerate cases.
 
@@ -288,6 +289,7 @@ def _recover_for_pulse(
         max_tof_ns=max_tof_ns,
         axis_consistency_ns=axis_consistency_ns,
         pair_sum_offset_bins=pair_sum_offset_bins,
+        recover_three_channel=recover_three_channel,
     )
 
 
@@ -302,6 +304,7 @@ def merge_partial_tdc_into_dld(
     recover_from_matched_multihit: bool = False,
     multihit_match_tol_cm: float = 0.1,
     pair_sum_offset_bins: float | None = None,
+    residual_three_of_four: bool = False,
     verbose: bool = True,
 ) -> int:
     """Recover partial-hit events from orphan TDC ticks and merge into DLD.
@@ -372,6 +375,12 @@ def merge_partial_tdc_into_dld(
         rebuild the missing stop of 3-of-4 hits and to centre single-axis
         ToFs. ``None`` (default) measures it from the clean single-ion
         pulses of ``variables.data_tdc``.
+    residual_three_of_four : bool, default False
+        Also rebuild 3-of-4 hits from the stops a matched multi-hit pulse
+        has left after removing the firmware's ions. Off by default: those
+        leftovers are mostly reflections, and on run 2559 only ~1/3 of such
+        hits landed on mass peaks (real ions ~70 %, random ~3 %). 3-of-4
+        hits from orphan pulses (~2/3 real) are always recovered.
     verbose : bool, default True
         Print a summary of how many rows were merged.
 
@@ -648,6 +657,7 @@ def merge_partial_tdc_into_dld(
                     max_tof_ns=max_tof_ns,
                     axis_consistency_ns=axis_consistency_ns,
                     pair_sum_offset_bins=pair_sum_offset_bins,
+                    recover_three_channel=residual_three_of_four,
                 )
                 if not recovered:
                     continue

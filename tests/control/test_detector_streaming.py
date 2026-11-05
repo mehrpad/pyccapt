@@ -260,7 +260,9 @@ def test_surface_drains_large_independent_packets_to_bounded_chunks(monkeypatch,
     np.testing.assert_array_equal(writer.column("start_counter"), dld["start_counter"])
     np.testing.assert_array_equal(writer.column("time"), raw["time"])
     np.testing.assert_array_equal(writer.column("t"), dld["time"]*(27.432/(1000*4)))
-    np.testing.assert_array_equal(writer.column("x"), ((dld["dif1"]-1225.)*(80/4900*2))*.1)
+    # Firmware quadrupel-finder geometry: centre pixel 1201, pix_size_x 0.033306 mm.
+    np.testing.assert_allclose(writer.column("x"), (dld["dif1"]+.5-1201.)*.033306*.1)
+    np.testing.assert_allclose(writer.column("y"), (dld["dif2"]+.5-1190.)*.033613*.1)
     assert writer.column("time").dtype == np.uint64
     assert callbacks[0].queue.get.call_args.kwargs == {"block": False}
     assert callbacks[1].queue.get.call_args.kwargs == {"block": False}

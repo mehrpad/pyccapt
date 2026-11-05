@@ -16,7 +16,7 @@ from scipy.signal import find_peaks
 from scipy.spatial import cKDTree
 from tqdm.auto import tqdm
 
-from pyccapt.calibration.data_tools import data_tools, lazy_io
+from pyccapt.calibration.data_tools import data_tools, lazy_io, sc_geometry
 
 
 # ---------------------------------------------------------------------------
@@ -96,13 +96,11 @@ DETBINS = 4900
 BINNING_FACTOR = 2
 XY_FACTOR = 80.0 / DETBINS * BINNING_FACTOR
 XY_BIN_SHIFT = DETBINS / BINNING_FACTOR / 2.0
-# Lower edges of the FPGA quadrupel-finder windows (TimeDif1Min / TimeDif2Min
-# in control/tdc_surface_concept/tdc_gpx3.ini), in unbinned TDC bins. The
-# firmware reports x_bin = floor((t0 - t1 - TIME_DIF_MIN_X) / binning), so the
-# detector centre is NOT at XY_BIN_SHIFT; positions rebuilt from raw stops
-# must use the same formula to land on the dld coordinates.
-SC_TIME_DIF_MIN_X = -2402
-SC_TIME_DIF_MIN_Y = -2380
+# Surface Concept detector positions follow the firmware quadrupel-finder
+# window (sc_geometry): XY_FACTOR / XY_BIN_SHIFT above are the pre-2026-11-05
+# convention and only describe legacy files.
+SC_TIME_DIF_MIN_X = sc_geometry.TIME_DIF_MIN_X
+SC_TIME_DIF_MIN_Y = sc_geometry.TIME_DIF_MIN_Y
 
 
 def sc_position_cm(first_time, second_time, axis: str, constants: dict | None = None):
@@ -111,17 +109,13 @@ def sc_position_cm(first_time, second_time, axis: str, constants: dict | None = 
     ``axis`` is ``'x'`` (channels 0, 1) or ``'y'`` (channels 2, 3);
     ``first_time``/``second_time`` are the stop times of the axis' first and
     second channel (scalars or arrays). Bit-identical to ``dld/x``/``dld/y``
-    for the same four stops.
+    for the same four stops (see :mod:`sc_geometry`). ``constants`` may carry
+    the geometry keys of :func:`load_detector_constants`.
     """
-    constants = constants or _SURFACE_CONCEPT_DEFAULT_CONSTANTS
-    if axis == 'x':
-        time_dif_min = constants.get('time_dif_min_x', SC_TIME_DIF_MIN_X)
-    else:
-        time_dif_min = constants.get('time_dif_min_y', SC_TIME_DIF_MIN_Y)
-    difference = np.asarray(first_time, dtype=np.float64) - np.asarray(second_time, dtype=np.float64)
-    position_bin = np.floor((difference - time_dif_min) / constants.get('binning_factor', BINNING_FACTOR))
-    position = (position_bin - constants['xy_bin_shift']) * constants['xy_factor'] * 0.1
-    return float(position) if np.ndim(position) == 0 else position
+    geometry = dict(sc_geometry.DEFAULT_GEOMETRY)
+    if constants:
+        geometry.update({key: constants[key] for key in geometry if key in constants})
+    return sc_geometry.stops_to_cm(first_time, second_time, axis, geometry)
 
 DEFAULT_ROENTDEK_DETX_COLUMNS = (6, 10, 14, 18)
 DEFAULT_ROENTDEK_DETY_COLUMNS = (7, 11, 15, 19)
@@ -153,8 +147,7 @@ _SURFACE_CONCEPT_DEFAULT_CONSTANTS = {
     'detector_limit_cm': 4.0,
     'xy_factor': XY_FACTOR,
     'xy_bin_shift': XY_BIN_SHIFT,
-    'time_dif_min_x': SC_TIME_DIF_MIN_X,
-    'time_dif_min_y': SC_TIME_DIF_MIN_Y,
+    **sc_geometry.DEFAULT_GEOMETRY,
 }
 
 # RoentDek default — keep the 80 mm geometry so existing fixtures still work.
@@ -220,8 +213,7 @@ def load_detector_constants(detector_kind: str, conf=None) -> dict[str, float]:
     constants['xy_bin_shift'] = constants['detector_bins'] / constants['binning_factor'] / 2.0
     if kind == 'surface_concept' or kind == 'single_delay_line':
         constants['tof_ns_per_bin_1d'] = constants['tof_ns_per_bin'] * 2.0
-        constants['time_dif_min_x'] = int(_config_get(conf, 'sc_time_dif1_min', SC_TIME_DIF_MIN_X))
-        constants['time_dif_min_y'] = int(_config_get(conf, 'sc_time_dif2_min', SC_TIME_DIF_MIN_Y))
+        constants.update(sc_geometry.geometry_from_config(conf if hasattr(conf, '__getitem__') else None))
     return constants
 
 

@@ -36,6 +36,7 @@ from __future__ import annotations
 import numpy as np
 
 from pyccapt.calibration.reconstructions import reconstruction
+from pyccapt.calibration.core.exceptions import CalibrationInputError
 
 __all__ = [
     "lattice_vectors",
@@ -137,6 +138,32 @@ def build_hv(variables):
     return np.asarray(variables.dld_high_voltage, dtype=float)
 
 
+def active_selection_mask(variables):
+    """Optional full-source analysis selection; never use it to shorten depth history."""
+    value = getattr(variables, 'reconstruction_selection_mask', None)
+    if value is None:
+        return None
+    mask = np.asarray(value)
+    if mask.dtype != bool or mask.shape != np.asarray(variables.dld_high_voltage).shape:
+        raise CalibrationInputError('reconstruction_selection_mask must be boolean and aligned to every source event')
+    if not mask.any():
+        raise CalibrationInputError('The active reconstruction selection contains no events')
+    return mask
+
+
+def validate_full_source_metadata(variables):
+    """A recorded cropped export cannot recreate the missing acquisition prefix."""
+    frame = getattr(variables, 'data', None)
+    metadata = getattr(frame, 'attrs', {}).get('pyccapt_selection', {})
+    if not isinstance(metadata, dict):
+        raise CalibrationInputError('Recorded source selection metadata is invalid')
+    source_events = metadata.get('source_events', len(variables.dld_high_voltage))
+    if (not isinstance(source_events, (int, np.integer)) or source_events < 0):
+        raise CalibrationInputError('Recorded source event count must be a nonnegative integer')
+    if metadata.get('preserves_full_source') is False or source_events > len(variables.dld_high_voltage):
+        raise CalibrationInputError('Recorded cropped export lacks the full acquisition prefix; reload the original source or its complete session')
+
+
 def reconstruct_xyz(variables, kf, icf, det_eff, field_evap, avg_dens,
                     flight_path_length, mode="Geiser"):
     """Reconstruct (x, y, z) in nm for ALL events without mutating ``variables``.
@@ -144,13 +171,16 @@ def reconstruct_xyz(variables, kf, icf, det_eff, field_evap, avg_dens,
     z is a global cumulative sum, so the full set must be reconstructed even
     when only a pole ROI is analysed afterwards.
     """
+    validate_full_source_metadata(variables)
     detx = np.asarray(variables.dld_x_det, dtype=float)
     dety = np.asarray(variables.dld_y_det, dtype=float)
     hv = build_hv(variables)
     if mode == "Bas":
         fn = reconstruction.atom_probe_recons_Bas_et_al
-    else:
+    elif mode == "Geiser":
         fn = reconstruction.atom_probe_recons_from_detector_Geiser_et_al
+    else:
+        raise CalibrationInputError('Reconstruction mode must be Geiser or Bas')
     x, y, z = fn(detx, dety, hv, flight_path_length, kf, det_eff, icf, field_evap, avg_dens)
     return np.asarray(x), np.asarray(y), np.asarray(z)
 
@@ -163,7 +193,9 @@ def detector_roi_mask(variables, cx, cy, radius):
     """
     detx = np.asarray(variables.dld_x_det, dtype=float)
     dety = np.asarray(variables.dld_y_det, dtype=float)
-    return (detx - cx) ** 2 + (dety - cy) ** 2 <= radius ** 2
+    selected = (detx - cx) ** 2 + (dety - cy) ** 2 <= radius ** 2
+    active = active_selection_mask(variables)
+    return selected if active is None else selected & active
 
 
 # ---------------------------------------------------------------------------
@@ -247,19 +279,26 @@ def detect_pole_candidates(contrast, x_edges, y_edges, n=6, min_separation=5, mi
 # Pole -> +z rotation (planes become perpendicular to z -> clean z-SDM)
 # ---------------------------------------------------------------------------
 
-def pole_axis_from_detector(cx, cy, flight_path_length, icf):
-    """Unit pole-axis direction in reconstruction space from a detector ROI center.
+def pole_axis_from_detector(cx, cy, flight_path_length, icf, mode="Geiser"):
+    """Inward pole-plane normal in reconstruction coordinates from a detector ROI.
 
     cx, cy in cm; flight_path_length in mm. Uses the same launch-angle geometry
-    as the Geiser reconstruction. A pole at the detector centre returns +z.
+    as the selected reconstruction. Since xyz=(R ux, R uy, H+R(1-uz)),
+    the inward surface normal is (-ux, -uy, uz), not the launch direction.
+    A pole at the detector centre returns +z.
     """
     rad = np.hypot(cx * 10.0, cy * 10.0)  # cm -> mm to match flight path units
     az = np.arctan2(cy, cx)
+    if not np.isfinite([cx, cy, flight_path_length, icf]).all() or flight_path_length <= 0 or icf <= 0:
+        raise CalibrationInputError('Pole geometry must be finite with positive flight length and ICF')
     theta_p = np.arctan2(rad, flight_path_length)
-    theta_a = theta_p + np.arcsin(np.clip((icf - 1.0) * np.sin(theta_p), -1.0, 1.0))
+    argument = icf * rad / flight_path_length if mode == 'Bas' else (icf - 1.0) * np.sin(theta_p)
+    if mode not in {'Bas', 'Geiser'} or abs(argument) > 1:
+        raise CalibrationInputError('Invalid reconstruction mode or pole outside projection domain')
+    theta_a = np.arcsin(argument) + (theta_p if mode == 'Geiser' else 0.0)
     d = np.array([
-        np.sin(theta_a) * np.cos(az),
-        np.sin(theta_a) * np.sin(az),
+        -np.sin(theta_a) * np.cos(az),
+        -np.sin(theta_a) * np.sin(az),
         np.cos(theta_a),
     ])
     n = np.linalg.norm(d)
@@ -324,6 +363,10 @@ def z_sdm(x, y, z, bin_size=0.01, z_max=2.0, lateral_radius=1.5, max_atoms=20000
     """
     from scipy.spatial import cKDTree
 
+    if (not np.isfinite([bin_size, z_max, lateral_radius, max_atoms]).all()
+            or min(bin_size, z_max, lateral_radius) <= 0 or max_atoms < 2 or int(max_atoms) != max_atoms):
+        raise CalibrationInputError('SDM sizes must be positive; max_atoms must be an integer >= 2')
+
     pts = np.column_stack([x, y, z]).astype(float)
     pts = pts[np.isfinite(pts).all(axis=1)]
     if pts.shape[0] > max_atoms:
@@ -364,7 +407,7 @@ def find_sdm_peaks(centers, counts, min_spacing=0.05, prominence_frac=0.05):
 
     centers = np.asarray(centers, dtype=float)
     counts = np.asarray(counts, dtype=float)
-    if counts.max() <= 0:
+    if not counts.size or not np.isfinite(counts).all() or counts.max() <= 0:
         return {"peak_positions": np.array([]), "spacing": float("nan"), "n_peaks": 0}
 
     bin_size = float(np.median(np.diff(centers))) if centers.size > 1 else min_spacing
@@ -423,14 +466,14 @@ def corrected_kf(kf, d_theo, d_obs):
 def observed_pole_angle(xy1, xy2, flight_path_length):
 	"""Observed angle (degrees) between two detector poles, seen from the tip.
 
-	Mirrors the Day & Breen spreadsheet: ``S = |p1 - p2|`` is the in-plane
-	detector separation and the angle is ``atan(S / flight_path_length)``.
+	Uses the angle between the two rays from the tip, including off-axis poles.
 	``xy1``/``xy2`` and ``flight_path_length`` must share the same length unit
 	(the spreadsheet uses mm for both).
 	"""
-	(x1, y1), (x2, y2) = xy1, xy2
-	s = float(np.hypot(x1 - x2, y1 - y2))
-	return float(np.degrees(np.arctan2(s, float(flight_path_length))))
+	if not np.isfinite([*xy1, *xy2, flight_path_length]).all() or flight_path_length <= 0:
+		raise CalibrationInputError('Pole coordinates must be finite and flight length positive')
+	r1, r2 = np.array([*xy1, flight_path_length]), np.array([*xy2, flight_path_length])
+	return float(np.degrees(np.arctan2(np.linalg.norm(np.cross(r1, r2)), np.dot(r1, r2))))
 
 
 def icf_from_pole_angles(poles, a, b, c, alpha, beta, gamma, flight_path_length):
@@ -481,7 +524,7 @@ def icf_from_pole_angles(poles, a, b, c, alpha, beta, gamma, flight_path_length)
 def grid_sweep_kf_icf(variables, roi_center, roi_radius, det_eff, field_evap,
                       avg_dens, flight_path_length, kf_values, icf_values,
                       mode="Geiser", bin_size=0.01, z_max=2.0, lateral_radius=1.5,
-                      max_atoms=20000, progress=None):
+                      max_atoms=20000, progress=None, expected_spacing=None, spacing_tolerance=0.10):
     """Sweep a (kf, icf) grid maximising z-SDM peakiness in the fixed pole ROI.
 
     ``roi_center`` = (cx, cy) detector coords (cm); ``roi_radius`` in cm.
@@ -489,13 +532,27 @@ def grid_sweep_kf_icf(variables, roi_center, roi_radius, det_eff, field_evap,
     callable ``progress(done, total)`` for a status bar.
 
     Returns dict(strength [len(kf) x len(icf)], kf_values, icf_values,
-    best=dict(kf, icf, strength, spacing)).
+    best=dict(kf, icf, strength, spacing) or None). A zero-signal, invalid,
+    tied, or boundary maximum is not a supported parameter estimate. When
+    expected_spacing is supplied, candidates must also match that spacing.
+    This remains a heuristic SDM search, not a probabilistic calibration.
     """
     cx, cy = roi_center
     roi_mask = detector_roi_mask(variables, cx, cy, roi_radius)
     n_roi = int(roi_mask.sum())
     kf_values = np.asarray(kf_values, dtype=float)
     icf_values = np.asarray(icf_values, dtype=float)
+    for values in (kf_values, icf_values):
+        if values.ndim != 1 or not values.size or not np.isfinite(values).all() or np.any(values <= 0):
+            raise CalibrationInputError('Parameter grids must contain positive finite values')
+        if np.unique(values).size != values.size:
+            raise CalibrationInputError('Parameter grids must not contain duplicates')
+    if n_roi < 2:
+        raise CalibrationInputError('The detector ROI must contain at least two events')
+    if expected_spacing is not None and (not np.isfinite(expected_spacing) or expected_spacing <= 0):
+        raise CalibrationInputError('Expected spacing must be positive and finite')
+    if not np.isfinite(spacing_tolerance) or spacing_tolerance <= 0:
+        raise CalibrationInputError('Spacing tolerance must be positive and finite')
     S = np.zeros((kf_values.size, icf_values.size))
     spacing = np.full_like(S, np.nan)
 
@@ -506,7 +563,7 @@ def grid_sweep_kf_icf(variables, roi_center, roi_radius, det_eff, field_evap,
             x, y, z = reconstruct_xyz(variables, kf, icf, det_eff, field_evap,
                                       avg_dens, flight_path_length, mode=mode)
             xr = x[roi_mask]; yr = y[roi_mask]; zr = z[roi_mask]
-            pole_dir = pole_axis_from_detector(cx, cy, flight_path_length, icf)
+            pole_dir = pole_axis_from_detector(cx, cy, flight_path_length, icf, mode=mode)
             xr, yr, zr, _ = align_pole_to_z(xr, yr, zr, pole_dir)
             centers, counts = z_sdm(xr, yr, zr, bin_size=bin_size, z_max=z_max,
                                     lateral_radius=lateral_radius, max_atoms=max_atoms)
@@ -516,13 +573,22 @@ def grid_sweep_kf_icf(variables, roi_center, roi_radius, det_eff, field_evap,
             if progress is not None:
                 progress(done, total)
 
-    bi, bj = np.unravel_index(np.argmax(S), S.shape)
-    best = {
-        "kf": float(kf_values[bi]),
-        "icf": float(icf_values[bj]),
-        "strength": float(S[bi, bj]),
-        "spacing": float(spacing[bi, bj]),
-    }
+    usable = np.isfinite(S) & (S > 0) & np.isfinite(spacing) & (spacing > 0)
+    if expected_spacing is not None:
+        usable &= np.abs(spacing / expected_spacing - 1) <= spacing_tolerance
+    best, status = None, 'no_evidence'
+    if usable.any():
+        maximum = np.max(S[usable])
+        winners = np.argwhere(usable & np.isclose(S, maximum, rtol=1e-10, atol=1e-12))
+        status = 'ambiguous'
+        if len(winners) == 1:
+            bi, bj = winners[0]
+            boundary = ((len(kf_values) > 1 and kf_values[bi] in (kf_values.min(), kf_values.max()))
+                        or (len(icf_values) > 1 and icf_values[bj] in (icf_values.min(), icf_values.max())))
+            status = 'boundary' if boundary else 'candidate'
+            if not boundary:
+                best = dict(kf=float(kf_values[bi]), icf=float(icf_values[bj]),
+                            strength=float(S[bi, bj]), spacing=float(spacing[bi, bj]))
     return {
         "strength": S,
         "spacing": spacing,
@@ -530,4 +596,6 @@ def grid_sweep_kf_icf(variables, roi_center, roi_radius, det_eff, field_evap,
         "icf_values": icf_values,
         "roi_atoms": n_roi,
         "best": best,
+        "status": status,
+        "usable": usable,
     }

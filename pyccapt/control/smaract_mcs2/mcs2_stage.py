@@ -67,6 +67,10 @@ class SmarActStageError(RuntimeError):
     """Raised when a SmarAct call fails or the SDK is unavailable."""
 
 
+class SmarActReferenceCancelled(SmarActStageError):
+    """Raised when the operator stops a reference search before it finishes."""
+
+
 def _hint_for(code: int, locator: str = "") -> str:
     hints = {
         0xF003: "SA_CTL_ERROR_NOT_FOUND - device not found.",
@@ -358,10 +362,11 @@ class SmarActStage:
 
         Args:
                 timeout_s: per-axis timeout for the wait loop.
-                cancel_event: ``threading.Event``.  When set, ``_wait`` issues
-                        ctl.Stop on the current axis and returns; subsequent axes
-                        are skipped.  Lets the GUI's STOP button interrupt the
-                        search instead of being blocked by ``_wait``.
+                cancel_event: ``threading.Event``.  When set, every axis is
+                        stopped and ``SmarActReferenceCancelled`` is raised.  Lets
+                        the GUI's STOP button interrupt the search instead of
+                        being blocked by ``_wait``.  A timeout also stops every
+                        axis before ``SmarActStageError`` is raised.
                 referencing_options: SmarAct REFERENCING_OPTIONS bitmask.
                         Defaults to ``REFERENCING_OPTIONS_DEFAULT`` (0x06 =
                         REVERSE_DIR | AUTO_ZERO).  Pass 0 to reproduce the old
@@ -395,15 +400,25 @@ class SmarActStage:
         except ctl.Error as exc:
             raise _wrap_ctl("find_reference (start)", exc)
         for channel in (AXIS_X, AXIS_Y, AXIS_Z):
-            self._wait(channel, timeout_s=timeout_s, cancel_event=cancel_event)
+            try:
+                self._wait(channel, timeout_s=timeout_s, cancel_event=cancel_event)
+            except Exception:
+                # All three searches were started above: a timeout or error on
+                # one axis must not leave the others driving toward end stops.
+                self._stop_all_channels()
+                raise
             if cancel_event is not None and cancel_event.is_set():
-                # Skip remaining axes - the user asked us to abort.
-                for ch in (AXIS_X, AXIS_Y, AXIS_Z):
-                    try:
-                        ctl.Stop(self._handle, ch)
-                    except Exception:
-                        pass
-                return
+                # Skip remaining axes - the user asked us to abort. The axes are
+                # not referenced, so this must not look like a completed search.
+                self._stop_all_channels()
+                raise SmarActReferenceCancelled("Reference search cancelled; axes are not referenced.")
+
+    def _stop_all_channels(self) -> None:
+        for channel in (AXIS_X, AXIS_Y, AXIS_Z):
+            try:
+                ctl.Stop(self._handle, channel)
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------

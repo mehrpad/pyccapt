@@ -1,0 +1,59 @@
+"""Check notebook/kernel compatibility before rendering the guided controls."""
+from importlib import import_module
+from pathlib import Path
+import sys
+
+
+EXPECTED_STAGES = ("Import", "Inspect", "Crop", "Calibrate", "Range", "Reconstruct", "Analyze", "Export")
+GUIDED_UI_API_VERSION = 7
+
+
+def enable_calibration_widgets():
+    """Enable the original tools' interactive spectra on an explicit notebook click.
+
+    Headless scripts/tests retain their backend. The legacy notebook activates
+    ipympl with a magic cell; the guided notebook needs the same backend for its
+    embedded peak selectors, even though its crop canvas is self-contained.
+    """
+    from IPython import get_ipython
+    from matplotlib import get_backend
+    shell = get_ipython()
+    if shell is None or not hasattr(shell, "kernel") or "ipympl" in get_backend().lower():
+        return
+    try:
+        shell.run_line_magic("matplotlib", "ipympl")
+    except (ImportError, RuntimeError, ValueError) as error:
+        from pyccapt.calibration.core.exceptions import CalibrationStateError
+        raise CalibrationStateError(
+            "Interactive calibration spectra need ipympl in this kernel. Install the calibration notebook "
+            "dependencies and restart the kernel; your initial mass preview is still available.") from error
+
+
+def load_guided_workflow(*, repository_root=None):
+    """Return the current panel factory or explain how to recover a stale kernel.
+
+    Reloading scientific modules around live sessions can mix incompatible class
+    definitions. Require an explicit kernel restart rather than doing that here.
+    """
+    package = import_module("pyccapt")
+    package_directory = Path(package.__file__).resolve().parent
+    restart = "Save any needed session, then choose Kernel > Restart Kernel and Run All."
+    if repository_root is not None:
+        expected = Path(repository_root).resolve() / "pyccapt"
+        if package_directory != expected:
+            raise RuntimeError(
+                f"This kernel loaded PyCCAPT from {package_directory}, but this notebook uses {expected}. "
+                f"{restart} Select the environment installed for this checkout if the paths still differ.")
+    core = import_module("pyccapt.calibration.core.guided_workflow")
+    helper = import_module("pyccapt.calibration.tutorials.tutorials_helpers.helper_guided_workflow")
+    if (getattr(helper, "GUIDED_UI_API_VERSION", None) != GUIDED_UI_API_VERSION or
+            tuple(getattr(core, "STAGES", ())) != EXPECTED_STAGES or
+            tuple(getattr(helper, "STAGES", ())) != EXPECTED_STAGES or
+            getattr(helper, "GuidedWorkflow", None) is not core.GuidedWorkflow):
+        raise RuntimeError(
+            "Jupyter is still using an older guided workflow. The current panel must include the Crop tab, Browse dataset and Start calibration controls. "
+            f"{restart} Rerunning an import cell alone does not refresh cached Python modules.")
+    print(f"Guided workflow: {' → '.join(EXPECTED_STAGES)}")
+    print(f"PyCCAPT source: {package_directory}")
+    print(f"Python kernel: {sys.executable}")
+    return helper.show_guided_workflow

@@ -15,6 +15,7 @@ from sklearn.model_selection import cross_val_score
 
 from pyccapt.calibration.core.exceptions import CalibrationInputError
 from pyccapt.calibration.core.mc_plot_peak_helpers import gaussian_mrp_report
+from pyccapt.calibration.core.validation import CALIBRATION_MODES, ensure_choice, ensure_matching_lengths
 
 
 # ---------------------------------------------------------------------------
@@ -47,8 +48,9 @@ def _build_feature_matrix(voltage, x_det, y_det, ion_seq_norm):
 def _normalise_voltage(voltage):
     """Centre and scale voltage to roughly unit variance."""
     v = np.asarray(voltage, dtype=float)
-    center = np.nanmedian(v)
-    scale = np.nanstd(v)
+    finite = v[np.isfinite(v)]
+    center = np.median(finite) if finite.size else 0.0
+    scale = np.std(finite) if finite.size else 1.0
     if scale < 1e-12:
         scale = 1.0
     return (v - center) / scale, center, scale
@@ -58,7 +60,9 @@ def _normalise_spatial(x_det, y_det):
     """Scale detector coordinates to roughly unit range."""
     x = np.asarray(x_det, dtype=float)
     y = np.asarray(y_det, dtype=float)
-    scale = max(np.nanstd(x), np.nanstd(y), 1e-12)
+    finite_x, finite_y = x[np.isfinite(x)], y[np.isfinite(y)]
+    scale = max(np.std(finite_x) if finite_x.size else 0.0,
+                np.std(finite_y) if finite_y.size else 0.0, 1e-12)
     return x / scale, y / scale, scale
 
 
@@ -98,11 +102,15 @@ def _extract_training_data(
     # Partial-recovered rows have NaN x_det / y_det -> NaN feature
     # vectors -> sklearn GradientBoostingRegressor.fit raises. Exclude
     # them from the training set entirely.
-    finite_xy_train = np.isfinite(np.asarray(x_det, dtype=float)) & np.isfinite(np.asarray(y_det, dtype=float))
+    finite_xy_train = (
+        np.isfinite(np.asarray(x_det, dtype=float))
+        & np.isfinite(np.asarray(y_det, dtype=float))
+        & np.isfinite(np.asarray(voltage, dtype=float))
+    )
     if not finite_xy_train.all():
         print(
             f'[_extract_training_data] Excluding {int((~finite_xy_train).sum())} '
-            'partial-recovered rows (NaN x_det / y_det) from ML training.'
+            'rows with unavailable detector coordinates or voltage from ML training.'
         )
 
     for peak in peaks:
@@ -202,16 +210,35 @@ def _train_gbcs(X, y, n_estimators=200, max_depth=5, learning_rate=0.05, subsamp
 # ---------------------------------------------------------------------------
 
 
-def _predict_correction(model, voltage, x_det, y_det, ion_seq_norm, norm_params, clamp_low=0.9, clamp_high=1.1):
-    """Predict the correction factor for every ion and clamp for safety."""
+def _predict_correction(model, voltage, x_det, y_det, ion_seq_norm, norm_params, clamp_low=0.9, clamp_high=1.1,
+                        chunk_size=250000):
+    """Predict the same per-ion factors in bounded chunks, preserving partials."""
     v_center, v_scale, s_scale = norm_params
-    v_norm = (np.asarray(voltage, dtype=float) - v_center) / v_scale
-    x_norm = np.asarray(x_det, dtype=float) / s_scale
-    y_norm = np.asarray(y_det, dtype=float) / s_scale
-
-    X, _ = _build_feature_matrix(v_norm, x_norm, y_norm, ion_seq_norm)
-    raw_pred = model.predict(X)
-    return np.clip(raw_pred, clamp_low, clamp_high)
+    voltage = np.asarray(voltage, dtype=float)
+    x_det = np.asarray(x_det, dtype=float)
+    y_det = np.asarray(y_det, dtype=float)
+    sequence = np.asarray(ion_seq_norm, dtype=float)
+    if int(chunk_size) < 1:
+        raise CalibrationInputError("Prediction chunk_size must be positive")
+    ensure_matching_lengths(voltage, x_det, y_det, sequence,
+                            field_names=("voltage", "x_det", "y_det", "ion_sequence"))
+    # A joint spatial model has no justified prediction for missing features.
+    # Preserve those ions, as the polynomial bowl workflow already does.
+    correction = np.ones(voltage.shape, dtype=float)
+    for start in range(0, len(voltage), int(chunk_size)):
+        stop = start + int(chunk_size)
+        v_norm = (voltage[start:stop] - v_center) / v_scale
+        x_norm, y_norm = x_det[start:stop] / s_scale, y_det[start:stop] / s_scale
+        seq = sequence[start:stop]
+        valid = np.isfinite(v_norm) & np.isfinite(x_norm) & np.isfinite(y_norm) & np.isfinite(seq)
+        if not np.any(valid):
+            continue
+        X, _ = _build_feature_matrix(v_norm[valid], x_norm[valid], y_norm[valid], seq[valid])
+        raw_pred = model.predict(X)
+        if not np.all(np.isfinite(raw_pred)):
+            raise CalibrationInputError("ML correction returned non-finite predictions")
+        correction[start:stop][valid] = np.clip(raw_pred, clamp_low, clamp_high)
+    return correction
 
 
 # ---------------------------------------------------------------------------
@@ -267,6 +294,7 @@ def ml_calibration(
     clamp_high=1.1,
     max_samples_per_peak=20000,
     verbose=True,
+    diagnostic_cv=False,
 ):
     """Apply gradient-boosted correction surface calibration.
 
@@ -288,6 +316,8 @@ def ml_calibration(
         Maximum training samples drawn from each peak.
     verbose : bool
         Print progress information.
+    diagnostic_cv : bool
+        Run additional cross-validation fits for diagnostics. Independent of logging.
 
     Returns
     -------
@@ -298,11 +328,13 @@ def ml_calibration(
     from pyccapt.calibration.core import calibration as cal
     from pyccapt.calibration.core.adaptive_residual_calibration import _mode_aware_defaults
 
-    calibration_key = "tof" if calibration_mode == "tof" else "mc"
+    calibration_key = ensure_choice(calibration_mode, field_name="calibration_mode", allowed=CALIBRATION_MODES)
     cal_array = np.asarray(variables.get_calibration_array(calibration_key), dtype=float)
     voltage = np.asarray(variables.dld_high_voltage, dtype=float)
     x_det = np.asarray(variables.dld_x_det, dtype=float)
     y_det = np.asarray(variables.dld_y_det, dtype=float)
+    ensure_matching_lengths(cal_array, voltage, x_det, y_det,
+                            field_names=("calibration_array", "voltage", "x_det", "y_det"))
 
     # Mode-aware histogram bin size for peak detection
     _, hist_bin_size = _mode_aware_defaults(cal_array, calibration_mode, 0.01)
@@ -345,9 +377,7 @@ def ml_calibration(
     if verbose:
         print(f"[ML-GBCS] Training samples: {X.shape[0]}")
 
-    # 3. Train model. The CV R^2 is a verbose-only diagnostic that retrains
-    # the GBR cv extra times (~cv+1x cost) and does not affect acceptance, so
-    # only compute it when verbose.
+    # 3. CV trains additional models solely for a diagnostic, not acceptance.
     model, diagnostics = _train_gbcs(
         X,
         y,
@@ -356,7 +386,7 @@ def ml_calibration(
         learning_rate=learning_rate,
         subsample=subsample,
         verbose=verbose,
-        compute_cv=verbose,
+        compute_cv=diagnostic_cv,
     )
 
     # 4. Predict correction for all ions
@@ -411,10 +441,10 @@ def ml_calibration(
     # histogram noise). This is the actual overfitting guard: a model that
     # only sharpens the training peaks will fail it. With <=2 peaks there is
     # no holdout, so fall back to the overall-improvement gate alone.
-    if len(holdout_peaks) and np.isfinite(holdout_baseline) and np.isfinite(holdout_final):
-        holdout_ok = holdout_final >= holdout_baseline * 0.99
-    else:
-        holdout_ok = True
+    holdout_ok = not holdout_peaks or (
+        np.isfinite(holdout_baseline) and np.isfinite(holdout_final)
+        and holdout_final >= holdout_baseline * 0.99
+    )
     if overall_improved and holdout_ok:
         if calibration_key == "tof":
             variables.dld_t_calib = calibrated

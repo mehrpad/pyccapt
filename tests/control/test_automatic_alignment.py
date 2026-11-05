@@ -16,6 +16,7 @@ def settings(**changes):
     cfg = AlignmentConfig(motion_calibrated=True, bounds_mm=((-1, 1), (-1, 1), (-1, 1)),
                           xy_range_um=(1., 1.), xy_step_um=1., xy_jacobian_mm_per_um=((1., 0.), (0., 1.)),
                           approach_enabled=False, z_max_advance_um=0.,
+                          z_response_calibrated=True, z_response_calibration_id='synthetic-response',
                           z_direction=1, transfer_z_mm=-0.5)
     return replace(cfg, **changes)
 
@@ -1044,3 +1045,57 @@ def test_measured_z_overshoot_stops_even_when_command_target_was_within_20_um(tm
     assert v.alignment_move_status['state'] == 'error'
     assert 'Measured sample Z' in v.alignment_move_status['error']
     assert motor.stopped and v.alignment_cancel_motion
+
+
+# --- 2026-10 alignment review fixes -------------------------------------------
+
+@pytest.mark.parametrize('background', [.1, .2, .4])
+def test_dense_region_survives_uniform_background_at_full_window(background):
+    rng = np.random.default_rng(7)
+    n_background = int(2000*background)
+    points = np.concatenate((disk(rng, 2000-n_background, 10, centre=(3., -2.)), disk(rng, n_background, 40)))
+    region = estimate_dense_region(points, 40, 200)
+    # The 5th-percentile background let background pixels join the region at
+    # >=1000 events, so it touched the detector edge and was rejected.
+    assert region.valid, region.reason
+    assert np.hypot(region.centre_mm[0]-3., region.centre_mm[1]+2.) < 1.5
+    assert not estimate_dense_region(disk(rng, 2000, 40), 40, 200).valid
+
+
+def _fine_rig(tmp_path, **changes):
+    fit = Footprint(True, 'sample', (0., 0.), 10., .06, .9, .01, 1.)
+    rig = Rig(tmp_path, settings(**changes), footprint=fit)
+    rig.v.specimen_voltage = 1000.
+    rig.until(lambda: rig.engine.phase == 'fine', rate=1.)
+    return rig
+
+
+def test_fine_voltage_step_waits_for_an_independent_observation(tmp_path):
+    rig = _fine_rig(tmp_path)
+    voltage, started = rig.engine.target_voltage, rig.time
+    rig.step(rate=.5)  # centred, but one below-target sample is not evidence
+    assert rig.engine.phase == 'fine' and rig.engine.target_voltage == voltage
+    rig.until(lambda: rig.engine.phase == 'ramp', rate=.5, limit=20)
+    assert rig.engine.target_voltage == voltage+rig.cfg.voltage_increment
+    assert rig.time-started >= rig.cfg.stable_s
+
+
+def test_fine_rate_far_above_target_steps_dc_down(tmp_path):
+    rig = _fine_rig(tmp_path)
+    voltage = rig.engine.target_voltage
+    rig.until(lambda: rig.engine.phase == 'ramp', rate=3., limit=20)
+    assert rig.engine.target_voltage == voltage-rig.cfg.voltage_increment
+    assert rig.engine.voltage_step(voltage, .5) < 0
+    rig.until(lambda: rig.engine.phase == 'fine', rate=1., limit=20)
+
+
+def test_alignment_rate_ceiling_must_exceed_target():
+    with pytest.raises(ValueError, match='ceiling'):
+        settings(max_rate_multiple=1.).validate()
+
+
+def test_alignment_timeout_skips_the_sample_instead_of_failing(tmp_path):
+    rig = Rig(tmp_path)
+    rig.engine.cfg = replace(rig.engine.cfg, timeout_s=5.)  # startup validation needs a longer one
+    rig.until(lambda: rig.engine.phase == 'finished', limit=40)
+    assert rig.engine.outcome == 'timeout' and 'skipping sample' in rig.engine.reason

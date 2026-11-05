@@ -125,3 +125,17 @@ TELEMETRY_UNITS = {
     'wavelength_nm': 'nm', 'wavelength_index': '1', 'aom_percent': '%',
     'status_code': '1', 'valid': '1',
 }
+
+
+def telemetry_value(snapshot, key):
+    """One numeric telemetry sample; missing, None or non-numeric is NaN.
+
+    A snapshot always carries ``status_code``, but it is ``None`` when the
+    StatusRead reply is unparseable; that must not abort the experiment loop.
+    A missing ``valid`` flag means not valid (0).
+    """
+    value = snapshot.get(key, 0. if key == 'valid' else math.nan)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return math.nan

@@ -41,7 +41,8 @@ What is recovered
     dld/x, y, t, high_voltage, voltage_pulse, laser_pulse, start_counter
     tdc/channel, time_data, start_counter, high_voltage, voltage_pulse, laser_pulse
     apt/id, timestamps, num_events, num_raw_signals, temperature,
-        experiment_chamber_vacuum, laser_x/y/z, stage_x/y/z
+        experiment_chamber_vacuum, laser_x/y/z, stage_x/y/z, laser telemetry
+        (apt/laser_output_power_mw, ...)
         -- loaded from the apt_* metadata chunks flushed during the run
            (APT_Exp_Control._flush_apt_meta_chunks).
 
@@ -62,6 +63,8 @@ from pathlib import Path
 
 import h5py
 import numpy as np
+
+from pyccapt.control.nkt_photonics.readback import TELEMETRY_UNITS
 
 # ---------------------------------------------------------------------------
 # Dataset schema
@@ -105,6 +108,8 @@ APT_MAPPING: list[tuple[str, str, str]] = [
     ("apt/stage_y", "apt_stage_y", "float64"),
     ("apt/stage_z", "apt_stage_z", "float64"),
 ]
+# Per-iteration laser telemetry, same stems as hdf5_creator._APT_CHUNK_STEMS.
+APT_MAPPING.extend(("apt/laser_" + key, "apt_laser_" + key, "float64") for key in TELEMETRY_UNITS)
 
 ALL_MAPPING = DLD_MAPPING + TDC_MAPPING
 

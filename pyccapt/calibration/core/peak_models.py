@@ -17,6 +17,28 @@ def _gaussian(x, amp, mu, sigma, bg):
 _FWHM_FACTOR = 2.0 * np.sqrt(2.0 * np.log(2.0))
 
 
+def _fit_is_usable(popt, pcov, lower, upper, y_scale, *, free_lower=()):
+    """Reject fits pinned on a bound or without a finite covariance.
+
+    ``curve_fit`` returns a "successful" result when a parameter is clipped to
+    its box (e.g. the centre on the window edge or a width at its limit) or the
+    covariance cannot be estimated. Such fits are not converged peak models.
+    Indices in ``free_lower`` may legitimately sit on their lower bound (a zero
+    background, or a vanishing Lorentzian/Gaussian component).
+    """
+    popt = np.asarray(popt, dtype=float)
+    pcov = np.asarray(pcov, dtype=float)
+    if not np.all(np.isfinite(popt)) or pcov.shape != (popt.size, popt.size) or not np.all(np.isfinite(np.diag(pcov))):
+        return False
+    for index, (value, low, high) in enumerate(zip(popt, lower, upper)):
+        tol = 1e-6 * (high - low) if np.isfinite(high) else 1e-9 * max(1.0, float(y_scale))
+        if index not in free_lower and value <= low + tol:
+            return False
+        if np.isfinite(high) and value >= high - tol:
+            return False
+    return True
+
+
 def _fit_gaussian_mrp(x, y, peak_idx):
     """Fit a Gaussian around *peak_idx* and return MRP at 0.5, 0.1, 0.01."""
     nan3 = [float('nan')] * 3
@@ -37,20 +59,22 @@ def _fit_gaussian_mrp(x, y, peak_idx):
     bg0 = float(np.min(yw))
     sigma0 = (x[min(peak_idx + 2, len(x) - 1)] - x[max(peak_idx - 2, 0)]) / _FWHM_FACTOR
 
+    lower = [0, xw[0], 1e-12, 0]
+    upper = [np.inf, xw[-1], xw[-1] - xw[0], np.inf]
     try:
-        popt, _ = curve_fit(
+        popt, pcov = curve_fit(
             _gaussian,
             xw,
             yw,
             p0=[amp0 - bg0, mu0, sigma0, bg0],
-            bounds=([0, xw[0], 1e-12, 0], [np.inf, xw[-1], xw[-1] - xw[0], np.inf]),
+            bounds=(lower, upper),
             maxfev=2000,
         )
     except (RuntimeError, ValueError):
         return nan3, False
 
     _, mu_fit, sigma_fit, _ = popt
-    if sigma_fit <= 0:
+    if sigma_fit <= 0 or not _fit_is_usable(popt, pcov, lower, upper, amp0, free_lower=(3,)):
         return nan3, False
 
     result = []
@@ -192,16 +216,23 @@ def _fit_voigt_mrp(x, y, peak_idx):
     sigma0 = (x[min(peak_idx + 2, len(x) - 1)] - x[max(peak_idx - 2, 0)]) / _FWHM_FACTOR
     gamma0 = sigma0
 
+    lower = [0, xw[0], 1e-12, 1e-12, 0]
+    upper = [np.inf, xw[-1], xw[-1] - xw[0], xw[-1] - xw[0], np.inf]
     try:
-        popt, _ = curve_fit(
+        popt, pcov = curve_fit(
             _voigt,
             xw,
             yw,
             p0=[amp0 - bg0, mu0, sigma0, gamma0, bg0],
-            bounds=([0, xw[0], 1e-12, 1e-12, 0], [np.inf, xw[-1], xw[-1] - xw[0], xw[-1] - xw[0], np.inf]),
+            bounds=(lower, upper),
             maxfev=4000,
         )
     except (RuntimeError, ValueError):
+        return nan3, False, float('nan'), 'unknown'
+
+    # Either width component may vanish (pure Gaussian/Lorentzian), not both.
+    pinned_widths = all(popt[i] <= lower[i] + 1e-6 * (upper[i] - lower[i]) for i in (2, 3))
+    if pinned_widths or not _fit_is_usable(popt, pcov, lower, upper, amp0, free_lower=(2, 3, 4)):
         return nan3, False, float('nan'), 'unknown'
 
     _, mu_fit, sigma_fit, gamma_fit, _ = popt
@@ -347,6 +378,12 @@ def _fit_asymmetric_mrp(x, y, peak_idx):
     rough_fwhm = _FWHM_FACTOR * sigma_fit + 1.5 * tail_fit
     wide_half_span = max(fit_span / 2.0, 15.0 * rough_fwhm)
 
+    # MRP is position/width at the profile maximum. The erf centre is not the
+    # maximum: for a slow decay (tail > ~1.25 sigma) the apex lies to its right.
+    # It solves phi(z)/Phi(z) = sigma/tail, so z < 8 for any practical tail.
+    x_apex = np.linspace(mu_fit, mu_fit + 8.0 * sigma_fit, 4001)
+    peak_position = float(x_apex[np.argmax(_err_exp_decay(x_apex, *popt))])
+
     result = []
     widths = []
     fwhm_value = float('nan')
@@ -374,7 +411,7 @@ def _fit_asymmetric_mrp(x, y, peak_idx):
             continue
         fw = float(above[-1] - above[0])
         widths.append(fw)
-        result.append(round(float(mu_fit / fw), 2) if fw > 0 else float('nan'))
+        result.append(round(float(peak_position / fw), 2) if fw > 0 else float('nan'))
         if frac == 0.5 and fw > 0:
             fwhm_value = fw
 

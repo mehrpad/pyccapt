@@ -301,8 +301,12 @@ class AlignmentGuiMixin:
         outcome = self.variables.alignment_outcome
         if outcome == 'voltage_limit':
             self.error_message(f'Sample {self.variables.alignment_sample}: alignment voltage limit reached; sample skipped.')
+        elif outcome == 'timeout':
+            self.error_message(f'Sample {self.variables.alignment_sample}: alignment time limit reached; sample skipped.')
+        # Allowlist: an unrecognised outcome stops the sequence. 'voltage_limit'
+        # and 'timeout' only mean this sample could not be found; skip it.
         can_continue = (not self._operator_stopped and not run_error and self.variables.hardware_safe
-                        and outcome not in ('attempt_limit', 'timeout', 'fault', 'clearance_limit', 'cancelled')
+                        and outcome in ('aligned', 'stop_condition', 'voltage_limit', 'timeout')
                         and self._alignment_batch_index+1 < len(self._alignment_batch))
         if not can_continue:
             self._end_alignment_batch(run_error)

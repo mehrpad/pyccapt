@@ -36,3 +36,11 @@ def test_health_snapshot_reports_queue_drop_and_safe_state():
     assert snapshot.dropped_records == 10
     assert snapshot.write_latency_ms == 2.5
     assert "UNSAFE" in snapshot.summary()
+
+
+def test_coherent_event_transport_is_counted_once():
+    buffer = _Buffer(3, 7)
+    snapshot = build_health_snapshot(SimpleNamespace(), SimpleNamespace(backend=None),
+                                     [buffer, buffer, buffer, buffer], heartbeat_monotonic=0.)
+    assert snapshot.queue_depth == 3
+    assert snapshot.dropped_records == 7

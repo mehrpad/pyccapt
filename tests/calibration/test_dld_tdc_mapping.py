@@ -259,13 +259,14 @@ def test_filter_tdc_by_dld_full_dld_keeps_all_tdc():
     assert len(filtered) == len(tdc_df)
 
 
-def test_filter_tdc_by_dld_empty_dld_keeps_only_orphans():
+def test_filter_tdc_by_dld_empty_dld_keeps_no_rows():
     dld_df, tdc_df = _make_linked_pair()
 
     filtered = data_loadcrop.filter_tdc_by_dld(dld_df.iloc[0:0], tdc_df)
-    # Only orphan rows survive.
-    assert (~filtered["has_dld_match"]).all()
-    assert len(filtered) == int((~tdc_df["has_dld_match"]).sum())
+    # Every dld event was cropped away, so no acquisition span survives and
+    # orphan pulses from the cropped-away region must not be kept either
+    # (audit 2026-10; previously all orphans were always preserved).
+    assert len(filtered) == 0
 
 
 def test_filter_tdc_by_dld_requires_event_group_columns():

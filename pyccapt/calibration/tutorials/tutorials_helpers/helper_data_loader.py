@@ -1,3 +1,4 @@
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -182,11 +183,16 @@ def load_data(
             Detector-geometry key forwarded to the partial-hit recovery.
             Use ``'roentdek'`` for RoentDek hardware. Ignored when
             ``merge_partial_tdc=False``.
+
+    The partial-hit merge outcome is stored on
+    ``variables.partial_merge_status`` (``'not requested'``, ``'skipped: ...'``,
+    ``'ok'`` or ``'failed: ...'``). A failed merge also emits a
+    ``RuntimeWarning`` and the progress bar ends with ``partial-hit merge
+    FAILED``; ``variables.data`` then holds only the native DLD events.
     """
-    if tdc == 'pyccapt':
-        # Check that the dataset is a valid pyccapt dataset with .h5 extension
-        if not dataset_path.endswith(('.h5', '.H5')):
-            raise ValueError('The dataset should be a valid pyccapt dataset with .h5 extension')
+    if tdc in {'pyccapt', 'nexus'}:
+        if Path(dataset_path).suffix.lower() not in {'.h5', '.nxs', '.nx5'}:
+            raise ValueError('The dataset should be PyCCAPT HDF5/NeXus with .h5, .nxs or .nx5 extension')
     elif tdc == 'leap_epos':
         # Check that the dataset is a valid leap_epos dataset with .epos extension
         if not dataset_path.endswith(('.epos', '.EPOS')):
@@ -251,6 +257,8 @@ def load_data(
                     dld_group_storage, tdc_df = loaded
                 else:
                     dld_group_storage = loaded
+                if dld_group_storage is None:
+                    raise ValueError('No raw DLD table; try a processed PyCCAPT/NeXus table')
                 print('The data is loaded in raw mode' + (' (with raw tdc)' if tdc_df is not None else ''))
                 mode = 'raw'
             except Exception:
@@ -358,17 +366,25 @@ def load_data(
     variables.max_tof = max_tof
     variables.flight_path_length = flightPathLength
     variables.pulse_mode = pulse_mode
+    from pyccapt.instrument_metadata import record_calibration_settings
+    record_calibration_settings(
+        variables.data, flight_path_length_mm=flightPathLength, pulse_mode=pulse_mode,
+        source='legacy loader explicit arguments; loaded calibration may have different historical settings',
+        context='legacy_workflow_inputs')
     variables.sync_from_data(update_backups=True)
     progress.update(1)  # phase 2: shared variables synchronized
 
+    variables.partial_merge_status = 'not requested'
     if merge_partial_tdc:
         progress.set_postfix_str("recovering partial hits")
         if tdc != 'pyccapt':
+            variables.partial_merge_status = f'skipped: requires a pyccapt h5 dataset (tdc={tdc!r})'
             print(
                 'WARNING: merge_partial_tdc=True requires a pyccapt h5 dataset; '
                 f'ignoring (tdc={tdc!r}).'
             )
         elif not load_tdc_raw or tdc_df is None:
+            variables.partial_merge_status = 'skipped: no raw /tdc loaded'
             print(
                 'WARNING: merge_partial_tdc=True requires load_tdc_raw=True with '
                 'a successful raw /tdc load; ignoring.'
@@ -387,10 +403,19 @@ def load_data(
                     multihit_match_tol_cm=float(multihit_match_tol_cm),
                 )
             except Exception as exc:
-                print(f'WARNING: merge_partial_tdc failed: {exc}')
+                variables.partial_merge_status = f'failed: {type(exc).__name__}: {exc}'
+                message = (
+                    f'merge_partial_tdc failed ({type(exc).__name__}: {exc}); variables.data '
+                    'contains only the native DLD events, no recovered partial hits.'
+                )
+                print(f'ERROR: {message}')
+                warnings.warn(message, RuntimeWarning, stacklevel=2)
+            else:
+                variables.partial_merge_status = 'ok'
 
     progress.update(1)  # phase 3: partial-hit recovery (or skipped)
-    progress.set_postfix_str("done")
+    merge_failed = str(variables.partial_merge_status).startswith('failed')
+    progress.set_postfix_str("done (partial-hit merge FAILED)" if merge_failed else "done")
     progress.close()
 
 
@@ -567,6 +592,13 @@ def add_columns(variables, max_mc):
         variables.data.insert(5, 'mc_uc (Da)', variables.mc_uc)
     else:
         variables.data['mc_uc (Da)'] = variables.mc_uc
+    # A t0 preview becomes the uncorrected-mass baseline only at this copy.
+    from copy import deepcopy
+    from pyccapt.instrument_metadata import ATTR
+    metadata = deepcopy(variables.data.attrs.get(ATTR, {}))
+    if 'conversion_preview' in metadata:
+        metadata['uncorrected_conversion'] = deepcopy(metadata['conversion_preview'])
+        variables.data.attrs[ATTR] = metadata
     if 't_c (ns)' not in variables.data:
         variables.data.insert(8, 't_c (ns)', np.zeros(len(variables.dld_t)))
 

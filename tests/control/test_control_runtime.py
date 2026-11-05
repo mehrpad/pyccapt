@@ -47,7 +47,7 @@ def test_create_shared_context_has_queues_and_variables():
         assert shared.t_plot is not None
         assert shared.main_v_dc_plot is not None
     finally:
-        shared.manager.shutdown()
+        runtime.release_shared_context(shared)
 
 
 def test_load_project_config_requires_toml(tmp_path):
@@ -56,3 +56,29 @@ def test_load_project_config_requires_toml(tmp_path):
 
     with pytest.raises(FileNotFoundError):
         runtime.load_project_config(root=tmp_path, change_cwd=False)
+
+
+def test_statistics_snapshot_is_fresh_single_rpc_and_excludes_control_inputs(monkeypatch):
+    conf, _ = runtime.load_project_config(change_cwd=False)
+    shared = runtime.create_shared_context(conf)
+    try:
+        variables = shared.variables
+        variables.total_ions = 13
+        variables.specimen_voltage_plot = 700.
+        variables.detection_rate_current_plot = 2.5
+        calls = []
+        original = shared.namespace._callmethod
+        def record(method, args=(), kwds=None):
+            calls.append(method)
+            return original(method, args, kwds or {})
+        monkeypatch.setattr(shared.namespace, '_callmethod', record)
+        fields = ('total_ions', 'specimen_voltage_plot', 'detection_rate_current_plot')
+        assert variables.statistics_snapshot(*fields) == dict(zip(fields, (13, 700., 2.5)))
+        assert calls == ['read_fields']
+        variables.total_ions = 14
+        assert variables.statistics_snapshot('total_ions') == {'total_ions': 14}
+        for field in ('stop_flag', 'vdc_min', 'x', 'control_state_detector'):
+            with pytest.raises(ValueError, match='numeric telemetry'):
+                variables.statistics_snapshot(field)
+    finally:
+        runtime.release_shared_context(shared)

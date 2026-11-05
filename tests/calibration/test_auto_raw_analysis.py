@@ -801,11 +801,11 @@ def test_classify_pulse_chunks_per_chunk_not_per_pulse():
     of the PyCCAPT paper). The previous per-pulse classifier capped the
     contribution of any length-N pulse to 1.
 
-    A length-8 SC pulse with multiset {0,1,2,3,0,1,2,3} sorts to
-    [0,0,1,1,2,2,3,3] and splits into two chunks-of-4: [0,0,1,1] (only the
-    (0,1) pair fired → partial) and [2,2,3,3] (only the (2,3) pair → partial).
-    So under sort-chunk semantics it contributes 2 entries to the *partial*
-    bar at x=8 — not 1, and not in the complete bar.
+    A length-8 SC pulse [0,1,2,3,0,1,2,3] is ordered by occurrence rank (as
+    the legacy ``_normalize_sequence`` does) into two chunks-of-4 [0,1,2,3]
+    and [0,1,2,3], so it contributes 2 entries to the *complete* bar at x=8.
+    (A plain channel sort used to give [0,0,1,1] + [2,2,3,3] → two partials,
+    contradicting the docstring; audit 2026-10.)
     """
     tdc = _tdc(
         [
@@ -827,9 +827,9 @@ def test_classify_pulse_chunks_per_chunk_not_per_pulse():
     )
     out = helper_auto_raw_analysis._classify_pulse_chunks(tdc, "event_group_id", "surface_concept")
     assert out["frequency"].tolist() == [4, 8]  # one entry per pulse
-    # Per-chunk: pulse 0 → 1 complete; pulse 1 → 2 partial under sort-chunk.
-    assert out["complete"].tolist() == [4]
-    assert out["partial"].tolist() == [8, 8]
+    # Per-chunk: pulse 0 → 1 complete; pulse 1 → 2 complete sub-events.
+    assert out["complete"].tolist() == [4, 8, 8]
+    assert out["partial"].tolist() == []
     # Sanity check: total chunks emitted = 3 (the per-pulse classifier would
     # have emitted at most 2, one per pulse).
     total_chunks = len(out["complete"]) + len(out["midtier"]) + len(out["partial"])

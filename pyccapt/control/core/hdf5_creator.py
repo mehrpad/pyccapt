@@ -16,8 +16,9 @@ import numpy as np
 import pyccapt
 
 from pyccapt.control.apt.detector_models import normalize_tdc_model
-from pyccapt.control.core import chunk_store
+from pyccapt.control.core import chunk_store, detector_hdf
 from pyccapt.control.nkt_photonics.readback import TELEMETRY_UNITS, json_safe
+from pyccapt.instrument_metadata import acquisition_metadata, write_instrument_metadata
 
 logger = logging.getLogger("apt")
 
@@ -102,17 +103,31 @@ _APT_CHUNK_STEMS.extend(('apt_laser_'+key, 'apt/laser_'+key, 'float64') for key 
 
 
 def _load_apt_from_chunks(chunk_dir: Path,
-                          manifest_files: dict[str, list[Path]] | None = None) -> dict[str, np.ndarray] | None:
+                          manifest_files: dict[str, list[Path]] | None = None,
+                          problems: list[dict] | None = None) -> dict[str, np.ndarray] | None:
     """Load apt/* metadata from chunk files.
 
     Returns a dict {hdf5_path: array} if at least one apt chunk stem is present,
     or None if no apt chunk files exist (so callers can fall back to in-memory data).
+    Chunk files that cannot be loaded are skipped and described in *problems*
+    (when given) so callers can report the loss instead of hiding it.
     """
+    if problems is None:
+        problems = []
     result: dict[str, np.ndarray] = {}
     any_found = False
     for stem, ds_path, dtype in _APT_CHUNK_STEMS:
-        files = _sorted_chunk_files(chunk_dir, stem, manifest_files)
+        try:
+            files = _sorted_chunk_files(chunk_dir, stem, manifest_files) if chunk_dir.is_dir() else []
+        except ValueError as exc:
+            # Legacy (manifest-less) chunks with an id gap.
+            problems.append({'stem': stem, 'file': '', 'error': str(exc)})
+            any_found = True
+            continue
         if not files:
+            if isinstance(manifest_files, chunk_store.ValidatedChunkIndex) and manifest_files.declares(stem):
+                result[ds_path] = np.empty(0, dtype=dtype)
+                any_found = True
             continue
         any_found = True
         target = np.dtype(dtype)
@@ -126,11 +141,59 @@ def _load_apt_from_chunks(chunk_dir: Path,
                     arr = arr.astype(target)
                 parts.append(arr.copy())
                 del arr
-            except Exception:
-                pass
+            except Exception as exc:
+                problems.append({'stem': stem, 'file': f.name, 'error': f'{type(exc).__name__}: {exc}'})
         if parts:
             result[ds_path] = np.concatenate(parts)
     return result if any_found else None
+
+
+def _resolve_apt_datasets(variables, time_counter, time_ex, apt_meta, apt_from_chunks,
+                          chunk_problems, flush_errors) -> tuple[dict[str, tuple[object, str]], dict]:
+    """Choose the apt/* source and describe it for provenance.
+
+    ``apt_meta`` holds the experiment process's complete in-memory columns
+    (keyed by chunk stem). When they are complete they are authoritative: the
+    periodic chunks are only crash checkpoints, so a failed final flush cannot
+    drop the tail. Otherwise committed chunks are used and any flush error,
+    unloadable chunk or misaligned column marks the acquisition incomplete.
+    """
+    memory: dict[str, object] = {"apt/id": time_counter, "apt/timestamps": time_ex}
+    if apt_meta is not None:
+        for stem, ds_path, _ in _APT_CHUNK_STEMS:
+            if stem in apt_meta:
+                memory[ds_path] = apt_meta[stem]
+    for ds_path, attr in (("apt/num_events", "main_counter"), ("apt/num_raw_signals", "main_raw_counter"),
+                          ("apt/temperature", "main_temperature"),
+                          ("apt/experiment_chamber_vacuum", "main_chamber_vacuum")):
+        if ds_path not in memory:
+            memory[ds_path] = getattr(variables, attr)
+    dtypes = {ds_path: dtype for _, ds_path, dtype in _APT_CHUNK_STEMS}
+    rows = len(time_counter)
+    memory_complete = apt_meta is not None and all(
+        ds_path in memory and len(memory[ds_path]) == rows for ds_path in dtypes)
+    chunk_rows = {ds_path: int(len(values)) for ds_path, values in (apt_from_chunks or {}).items()}
+    report = {'flush_errors': [str(error) for error in flush_errors],
+              'unloadable_chunks': list(chunk_problems), 'chunk_rows': chunk_rows}
+    if memory_complete:
+        source = 'memory'
+        selected = {ds_path: memory[ds_path] for ds_path in dtypes}
+    elif apt_from_chunks is not None:
+        source = 'chunks'
+        selected = dict(apt_from_chunks)
+        # Fill stems without chunk files from memory so the group stays complete.
+        for ds_path, values in memory.items():
+            selected.setdefault(ds_path, values)
+    else:
+        source = 'memory'
+        selected = memory
+    lengths = {ds_path: int(len(values)) for ds_path, values in selected.items()}
+    report.update(source=source, rows=max(lengths.values(), default=0))
+    if len(set(lengths.values())) > 1:
+        report['length_mismatch'] = lengths
+    report['degraded'] = source == 'chunks' and bool(
+        report['flush_errors'] or report['unloadable_chunks'] or 'length_mismatch' in report)
+    return {ds_path: (values, dtypes[ds_path]) for ds_path, values in selected.items()}, report
 
 
 def _coerce_chunk_to_target(values: np.ndarray, target_dtype: np.dtype,
@@ -282,6 +345,8 @@ def _write_surface_concept_detector_data(hdf_file, variables, manifest_files=Non
 		chunk_files = _sorted_chunk_files(chunk_dir, chunk_stem, manifest_files) if chunk_dir_exists else []
 		if chunk_files:
 			_write_chunked_dataset(hdf_file, dataset_name, chunk_files, dtype)
+		elif isinstance(manifest_files, chunk_store.ValidatedChunkIndex) and manifest_files.declares(chunk_stem):
+			_create_dataset(hdf_file, dataset_name, [], dtype)
 		else:
 			# Lazy: only fetch the (possibly large, Manager-backed) array when
 			# this stream was NOT chunked, so a fully-chunked run never pulls
@@ -289,7 +354,7 @@ def _write_surface_concept_detector_data(hdf_file, variables, manifest_files=Non
 			_create_dataset(hdf_file, dataset_name, getattr(variables, var_attr), dtype)
 
 
-def hdf_creator(variables, conf, time_counter, time_ex):
+def hdf_creator(variables, conf, time_counter, time_ex, *, apt_meta=None, apt_meta_flush_errors=()):
     """
     Save experiment data to an HDF5 file.
 
@@ -298,6 +363,11 @@ def hdf_creator(variables, conf, time_counter, time_ex):
             conf (dict): A dictionary containing configuration settings.
             time_counter (list): A list of time counter data.
             time_ex (list): A list of timestamp of iteration.
+            apt_meta (dict | None): Complete in-memory apt/* columns keyed by
+                chunk stem (``apt_num_events``, ``apt_laser_x``, ...). When
+                complete they take precedence over the checkpoint chunks.
+            apt_meta_flush_errors (Iterable[str]): apt metadata checkpoint
+                write failures, recorded in provenance.
 
     Returns:
             None
@@ -319,14 +389,45 @@ def hdf_creator(variables, conf, time_counter, time_ex):
         # validated index local to this save: every checksum is checked once,
         # rather than reopening all chunks for each metadata/detector field.
         manifest_files = chunk_store.validated_files_by_stem(chunk_dir)
+        manifest_files = detector_hdf.align_hsd_chunks(manifest_files)
+        integrity = (manifest_files.integrity_report() if manifest_files is not None else
+                     {'status': 'unverified', 'scope': 'legacy input without chunk manifests',
+                      'streams': {}, 'rejected_records': []})
+        detector_error = str(getattr(variables, 'detector_error', '') or '')
+        unattributed = sorted(path.name for path in (chunk_dir.parent / 'unattributed').glob('*.npz'))
+        if bool(getattr(variables, 'flag_tdc_failure', False)) or detector_error or unattributed:
+            integrity['status'] = 'incomplete'
+        integrity.update(detector_error=detector_error, unattributed_packets=unattributed,
+                         detector_warning=str(getattr(variables, 'detector_warning', '') or ''))
+        apt_chunk_problems: list[dict] = []
+        apt_from_chunks = _load_apt_from_chunks(chunk_dir, manifest_files, apt_chunk_problems)
+        apt_datasets, apt_report = _resolve_apt_datasets(
+            variables, time_counter, time_ex, apt_meta, apt_from_chunks,
+            apt_chunk_problems, apt_meta_flush_errors)
+        integrity['apt_metadata'] = apt_report
+        if apt_report['degraded']:
+            integrity['status'] = 'incomplete'
         logger.info('Acquisition chunk validation completed in %.3f s; writing HDF5',
                     time.monotonic()-save_started)
         with h5py.File(tmp_path, "w") as hdf_file:
+            instrument_metadata = getattr(variables, 'acquisition_instrument_metadata', None)
+            # Old callers have no run-mode history. Do not label the GUI's
+            # final/default mode as the mode of every acquired event.
+            write_instrument_metadata(hdf_file, instrument_metadata or acquisition_metadata(conf))
             provenance = hdf_file.require_group("provenance")
             provenance.attrs["schema_version"] = "2.0"
             provenance.attrs["pyccapt_version"] = pyccapt.__version__
             provenance.attrs["created_utc"] = dt.datetime.now(dt.timezone.utc).isoformat()
             provenance.attrs["experiment_name"] = str(variables.exp_name)
+            # Temporal coverage is the available control-loop observations,
+            # not a claim of detector-electronics start/end synchronization.
+            finite_times = np.asarray(time_ex, dtype=float)
+            finite_times = finite_times[np.isfinite(finite_times)]
+            if len(finite_times):
+                provenance.attrs['control_first_observation_utc'] = dt.datetime.fromtimestamp(
+                    float(finite_times[0]), dt.timezone.utc).isoformat()
+                provenance.attrs['control_last_observation_utc'] = dt.datetime.fromtimestamp(
+                    float(finite_times[-1]), dt.timezone.utc).isoformat()
             provenance.attrs["electrode_name"] = str(getattr(variables, "electrode", ""))
             provenance.attrs['laser_readback_revision'] = 'unit-aware-1'
             provenance.attrs['laser_pulse_energy_storage_unit'] = 'pJ (nJ readback multiplied by 1000)'
@@ -361,7 +462,13 @@ def hdf_creator(variables, conf, time_counter, time_ex):
             provenance.attrs["calibration_input_sha256"] = str(
                 getattr(calibration_dataset, "source_hash", "")
             )
-            provenance.attrs["excluded_row_count"] = int(getattr(variables, "excluded_row_count", 0))
+            excluded_events = sum(stream['excluded_rows'] for name, stream in integrity['streams'].items()
+                                  if name in {'dld', 'roentdek', 'hsd_events'})
+            provenance.attrs["excluded_row_count"] = int(getattr(variables, "excluded_row_count", 0)) + excluded_events
+            provenance.attrs['acquisition_completeness'] = integrity['status']
+            provenance.attrs['chunk_integrity_json'] = json.dumps(integrity, sort_keys=True)
+            if tdc_model == 'HSD':
+                provenance.attrs['drs_acquisition_mode'] = str(conf.get('drs_acquisition_mode', 'normal'))
             provenance.attrs["model_provenance_json"] = json.dumps(
                 getattr(variables, "calibration_model_provenance", {}), sort_keys=True, default=str
             )
@@ -370,145 +477,123 @@ def hdf_creator(variables, conf, time_counter, time_ex):
             for manifest in manifests:
                 manifest_hash.update(manifest.read_bytes())
             provenance.attrs["chunk_manifest_sha256"] = manifest_hash.hexdigest() if manifests else ""
-            # apt/* group: prefer chunk files written during the run (crash-safe),
-            # fall back to the in-memory lists for backwards-compatibility with
-            # experiments that ran before chunk flushing was introduced.
-            apt_from_chunks = _load_apt_from_chunks(chunk_dir, manifest_files)
-            if apt_from_chunks is not None:
-                for ds_path, arr in apt_from_chunks.items():
-                    _create_dataset(hdf_file, ds_path, arr, arr.dtype)
-                # Fill any stems that had no chunk files with in-memory data so
-                # the apt group is always structurally complete.
-                written = set(apt_from_chunks.keys())
-                if "apt/id"                         not in written:
-                    _create_dataset(hdf_file, "apt/id", time_counter, np.uint64)
-                if "apt/num_events"                 not in written:
-                    _create_dataset(hdf_file, "apt/num_events", variables.main_counter, np.uint32)
-                if "apt/num_raw_signals"            not in written:
-                    _create_dataset(hdf_file, "apt/num_raw_signals", variables.main_raw_counter, np.uint32)
-                if "apt/temperature"                not in written:
-                    _create_dataset(hdf_file, "apt/temperature", variables.main_temperature, np.float64)
-                if "apt/experiment_chamber_vacuum"  not in written:
-                    _create_dataset(hdf_file, "apt/experiment_chamber_vacuum", variables.main_chamber_vacuum, np.float64)
-                if "apt/timestamps"                 not in written:
-                    _create_dataset(hdf_file, "apt/timestamps", time_ex, np.float64)
-            else:
-                # No apt chunks: use the in-memory lists (pre-chunk-flush experiments).
-                _create_dataset(hdf_file, "apt/id", time_counter, np.uint64)
-                _create_dataset(hdf_file, "apt/num_events", variables.main_counter, np.uint32)
-                _create_dataset(hdf_file, "apt/num_raw_signals", variables.main_raw_counter, np.uint32)
-                _create_dataset(hdf_file, "apt/temperature", variables.main_temperature, np.float64)
-                _create_dataset(hdf_file, "apt/experiment_chamber_vacuum", variables.main_chamber_vacuum, np.float64)
-                _create_dataset(hdf_file, "apt/timestamps", time_ex, np.float64)
+            # apt/* group: the complete in-memory columns when the experiment
+            # supplies them, otherwise the committed checkpoint chunks filled
+            # from memory (see _resolve_apt_datasets). Both paths write the
+            # same datasets, including stage/laser positions and telemetry.
+            for ds_path, (values, dtype) in apt_datasets.items():
+                _create_dataset(hdf_file, ds_path, values, dtype)
 
             if conf["tdc"] == "on" and tdc_model == "Surface_Concept" and variables.counter_source == "TDC":
                 _write_surface_concept_detector_data(hdf_file, variables, manifest_files)
 
             elif conf["tdc"] == "on" and tdc_model == "RoentDek" and variables.counter_source == "TDC":
-                _create_dataset(hdf_file, "dld/x", variables.x, np.float64)
-                _create_dataset(hdf_file, "dld/y", variables.y, np.float64)
-                _create_dataset(hdf_file, "dld/t", variables.t, np.float64)
-                _create_dataset(hdf_file, "dld/high_voltage", variables.main_v_dc_dld, np.float64)
-                _create_dataset(hdf_file, "dld/voltage_pulse", variables.main_v_p_dld, np.float64)
-                _create_dataset(hdf_file, "dld/laser_pulse", variables.main_l_p_dld, np.float64)
-                _create_dataset(hdf_file, "dld/start_counter", variables.time_stamp, np.uint64)
-                # RoentDek raw: convert per-channel arrays ch0..ch7 (one entry
-                # per pulse trigger per channel) into the same flat
-                # (channel, time_data, start_counter, ...) layout that
-                # Surface Concept uses, so the calibration loader at
-                # data_loadcrop.fetch_dataset_from_dld_grp(extract_mode='tdc_ro')
-                # can read both detectors with one code path. Each event
-                # contributes 8 rows (one per channel); rows where the
-                # channel did not fire (raw value == 0) are kept so the
-                # per-event grouping by start_counter stays intact, but the
-                # downstream partial-hit recovery can filter them via
-                # ``time_data != 0``.
-                _ch_stack = np.column_stack(
-                    [
-                        np.asarray(variables.ch0, dtype=np.uint64).reshape(-1),
-                        np.asarray(variables.ch1, dtype=np.uint64).reshape(-1),
-                        np.asarray(variables.ch2, dtype=np.uint64).reshape(-1),
-                        np.asarray(variables.ch3, dtype=np.uint64).reshape(-1),
-                        np.asarray(variables.ch4, dtype=np.uint64).reshape(-1),
-                        np.asarray(variables.ch5, dtype=np.uint64).reshape(-1),
-                        np.asarray(variables.ch6, dtype=np.uint64).reshape(-1),
-                        np.asarray(variables.ch7, dtype=np.uint64).reshape(-1),
-                    ]
-                )  # shape (n_events, 8)
-                _n_events = _ch_stack.shape[0]
+                if not detector_hdf.write_roentdek_chunks(hdf_file, chunk_dir, manifest_files):
+                    _create_dataset(hdf_file, "dld/x", variables.x, np.float64)
+                    _create_dataset(hdf_file, "dld/y", variables.y, np.float64)
+                    _create_dataset(hdf_file, "dld/t", variables.t, np.float64)
+                    _create_dataset(hdf_file, "dld/high_voltage", variables.main_v_dc_dld, np.float64)
+                    _create_dataset(hdf_file, "dld/voltage_pulse", variables.main_v_p_dld, np.float64)
+                    _create_dataset(hdf_file, "dld/laser_pulse", variables.main_l_p_dld, np.float64)
+                    _create_dataset(hdf_file, "dld/start_counter", variables.time_stamp, np.uint64)
+                    # RoentDek raw: convert per-channel arrays ch0..ch7 (one entry
+                    # per pulse trigger per channel) into the same flat
+                    # (channel, time_data, start_counter, ...) layout that
+                    # Surface Concept uses, so the calibration loader at
+                    # data_loadcrop.fetch_dataset_from_dld_grp(extract_mode='tdc_ro')
+                    # can read both detectors with one code path. Each event
+                    # contributes 8 rows (one per channel); rows where the
+                    # channel did not fire (raw value == 0) are kept so the
+                    # per-event grouping by start_counter stays intact, but the
+                    # downstream partial-hit recovery can filter them via
+                    # ``time_data != 0``.
+                    _ch_stack = np.column_stack(
+                        [
+                            np.asarray(variables.ch0, dtype=np.uint64).reshape(-1),
+                            np.asarray(variables.ch1, dtype=np.uint64).reshape(-1),
+                            np.asarray(variables.ch2, dtype=np.uint64).reshape(-1),
+                            np.asarray(variables.ch3, dtype=np.uint64).reshape(-1),
+                            np.asarray(variables.ch4, dtype=np.uint64).reshape(-1),
+                            np.asarray(variables.ch5, dtype=np.uint64).reshape(-1),
+                            np.asarray(variables.ch6, dtype=np.uint64).reshape(-1),
+                            np.asarray(variables.ch7, dtype=np.uint64).reshape(-1),
+                        ]
+                    )  # shape (n_events, 8)
+                    _n_events = _ch_stack.shape[0]
 
-                # Validate per-event auxiliary arrays are long enough BEFORE
-                # slicing. Previously ``[:_n_events]`` silently truncated a
-                # short array, writing tdc/* groups of inconsistent length
-                # that crash the calibration reader much later. Fail loudly
-                # at write time instead.
-                _start_counter_per_event = np.asarray(variables.time_stamp, dtype=np.uint64).reshape(-1)
-                _hv_per_event = np.asarray(variables.main_v_dc_tdc, dtype=np.float64).reshape(-1)
-                _vp_per_event = np.asarray(variables.main_v_p_tdc, dtype=np.float64).reshape(-1)
-                _lp_per_event = np.asarray(variables.main_l_p_tdc, dtype=np.float64).reshape(-1)
-                for _name, _arr in (
-                    ("time_stamp", _start_counter_per_event),
-                    ("main_v_dc_tdc", _hv_per_event),
-                    ("main_v_p_tdc", _vp_per_event),
-                    ("main_l_p_tdc", _lp_per_event),
-                ):
-                    if _arr.shape[0] < _n_events:
-                        raise ValueError(
-                            f"RoentDek auxiliary array {_name!r} has length "
-                            f"{_arr.shape[0]} < {_n_events} events; cannot build "
-                            f"consistent tdc/* groups. (Did the per-event and "
-                            f"per-channel buffers desync during acquisition?)"
-                        )
+                    # Validate per-event auxiliary arrays are long enough BEFORE
+                    # slicing. Previously ``[:_n_events]`` silently truncated a
+                    # short array, writing tdc/* groups of inconsistent length
+                    # that crash the calibration reader much later. Fail loudly
+                    # at write time instead.
+                    _start_counter_per_event = np.asarray(variables.time_stamp, dtype=np.uint64).reshape(-1)
+                    _hv_per_event = np.asarray(variables.main_v_dc_tdc, dtype=np.float64).reshape(-1)
+                    _vp_per_event = np.asarray(variables.main_v_p_tdc, dtype=np.float64).reshape(-1)
+                    _lp_per_event = np.asarray(variables.main_l_p_tdc, dtype=np.float64).reshape(-1)
+                    for _name, _arr in (
+                        ("time_stamp", _start_counter_per_event),
+                        ("main_v_dc_tdc", _hv_per_event),
+                        ("main_v_p_tdc", _vp_per_event),
+                        ("main_l_p_tdc", _lp_per_event),
+                    ):
+                        if _arr.shape[0] < _n_events:
+                            raise ValueError(
+                                f"RoentDek auxiliary array {_name!r} has length "
+                                f"{_arr.shape[0]} < {_n_events} events; cannot build "
+                                f"consistent tdc/* groups. (Did the per-event and "
+                                f"per-channel buffers desync during acquisition?)"
+                            )
 
-                # MEMORY: build-write-free each flat array in turn so peak
-                # RAM is ~ _ch_stack + ONE 8*n_events flat array, not all six
-                # at once (~17 GB for 50M events with the old up-front build).
-                # tdc/time_data is a view of _ch_stack, so keep _ch_stack
-                # alive until that one is written.
-                _create_dataset(hdf_file, "tdc/time_data", _ch_stack.reshape(-1), np.uint64)
-                del _ch_stack
+                    # MEMORY: build-write-free each flat array in turn so peak
+                    # RAM is ~ _ch_stack + ONE 8*n_events flat array, not all six
+                    # at once (~17 GB for 50M events with the old up-front build).
+                    # tdc/time_data is a view of _ch_stack, so keep _ch_stack
+                    # alive until that one is written.
+                    _create_dataset(hdf_file, "tdc/time_data", _ch_stack.reshape(-1), np.uint64)
+                    del _ch_stack
 
-                _channel_flat = np.tile(np.arange(8, dtype=np.uint32), _n_events)
-                _create_dataset(hdf_file, "tdc/channel", _channel_flat, np.uint32)
-                del _channel_flat
+                    _channel_flat = np.tile(np.arange(8, dtype=np.uint32), _n_events)
+                    _create_dataset(hdf_file, "tdc/channel", _channel_flat, np.uint32)
+                    del _channel_flat
 
-                _create_dataset(
-                    hdf_file, "tdc/start_counter",
-                    np.repeat(_start_counter_per_event[:_n_events], 8), np.uint64,
-                )
-                _create_dataset(
-                    hdf_file, "tdc/high_voltage",
-                    np.repeat(_hv_per_event[:_n_events], 8), np.float64,
-                )
-                _create_dataset(
-                    hdf_file, "tdc/voltage_pulse",
-                    np.repeat(_vp_per_event[:_n_events], 8), np.float64,
-                )
-                _create_dataset(
-                    hdf_file, "tdc/laser_pulse",
-                    np.repeat(_lp_per_event[:_n_events], 8), np.float64,
-                )
+                    _create_dataset(
+                        hdf_file, "tdc/start_counter",
+                        np.repeat(_start_counter_per_event[:_n_events], 8), np.uint64,
+                    )
+                    _create_dataset(
+                        hdf_file, "tdc/high_voltage",
+                        np.repeat(_hv_per_event[:_n_events], 8), np.float64,
+                    )
+                    _create_dataset(
+                        hdf_file, "tdc/voltage_pulse",
+                        np.repeat(_vp_per_event[:_n_events], 8), np.float64,
+                    )
+                    _create_dataset(
+                        hdf_file, "tdc/laser_pulse",
+                        np.repeat(_lp_per_event[:_n_events], 8), np.float64,
+                    )
 
             elif conf["tdc"] == "on" and tdc_model == "HSD" and variables.counter_source == "HSD":
-                # DRS readout: GetTime returns ns and GetWave returns mV as
-                # C float — both are signed real values, NOT unsigned ints.
-                # Casting to uint64 (the previous behaviour) silently
-                # truncated fractional ns and wrapped negative mV samples
-                # (range ±500 mV at SetInputRange(0)) to ~1.8e19, ruining
-                # every saved HSD file. Persist as float32 to match the
-                # native dtype.
-                _create_dataset(hdf_file, "hsd/ch0_time", variables.ch0_time, np.float32)
-                _create_dataset(hdf_file, "hsd/ch0_wave", variables.ch0_wave, np.float32)
-                _create_dataset(hdf_file, "hsd/ch1_time", variables.ch1_time, np.float32)
-                _create_dataset(hdf_file, "hsd/ch1_wave", variables.ch1_wave, np.float32)
-                _create_dataset(hdf_file, "hsd/ch2_time", variables.ch2_time, np.float32)
-                _create_dataset(hdf_file, "hsd/ch2_wave", variables.ch2_wave, np.float32)
-                _create_dataset(hdf_file, "hsd/ch3_time", variables.ch3_time, np.float32)
-                _create_dataset(hdf_file, "hsd/ch3_wave", variables.ch3_wave, np.float32)
-                # ch4/ch5 and laser_pulse are not produced by drs.experiment_measure,
-                # so we don't write empty datasets for them.
-                _create_dataset(hdf_file, "hsd/high_voltage", variables.main_v_dc_drs, np.float64)
-                _create_dataset(hdf_file, "hsd/voltage_pulse", variables.main_v_p_drs, np.float64)
+                if not detector_hdf.write_hsd_chunks(hdf_file, chunk_dir, manifest_files):
+                    # DRS readout: GetTime returns ns and GetWave returns mV as
+                    # C float — both are signed real values, NOT unsigned ints.
+                    # Casting to uint64 (the previous behaviour) silently
+                    # truncated fractional ns and wrapped negative mV samples
+                    # (range ±500 mV at SetInputRange(0)) to ~1.8e19, ruining
+                    # every saved HSD file. Persist as float32 to match the
+                    # native dtype.
+                    _create_dataset(hdf_file, "hsd/ch0_time", variables.ch0_time, np.float32)
+                    _create_dataset(hdf_file, "hsd/ch0_wave", variables.ch0_wave, np.float32)
+                    _create_dataset(hdf_file, "hsd/ch1_time", variables.ch1_time, np.float32)
+                    _create_dataset(hdf_file, "hsd/ch1_wave", variables.ch1_wave, np.float32)
+                    _create_dataset(hdf_file, "hsd/ch2_time", variables.ch2_time, np.float32)
+                    _create_dataset(hdf_file, "hsd/ch2_wave", variables.ch2_wave, np.float32)
+                    _create_dataset(hdf_file, "hsd/ch3_time", variables.ch3_time, np.float32)
+                    _create_dataset(hdf_file, "hsd/ch3_wave", variables.ch3_wave, np.float32)
+                    # ch4/ch5 and laser_pulse are not produced by drs.experiment_measure,
+                    # so we don't write empty datasets for them.
+                    _create_dataset(hdf_file, "hsd/high_voltage", variables.main_v_dc_drs, np.float64)
+                    _create_dataset(hdf_file, "hsd/voltage_pulse", variables.main_v_p_drs, np.float64)
         # h5py has flushed and closed the file. Atomically replace any prior
         # .h5 file in this folder. ``os.replace`` is atomic on POSIX and
         # atomic-or-best-effort on Windows.

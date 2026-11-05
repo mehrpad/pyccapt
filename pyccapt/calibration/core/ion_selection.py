@@ -17,6 +17,7 @@ import pandas as pd
 from faker import Factory
 
 from pyccapt.calibration.data_tools import data_tools
+from pyccapt.calibration.core.exceptions import CalibrationInputError
 
 
 def _load_bundled_table(filename, reader=None):
@@ -432,20 +433,33 @@ def molecule_manual(target_element, charge, latex=True, variables=None):
     isotope_number = dataframe['isotope'].to_numpy()
     abundance = dataframe['abundance'].to_numpy()
     weight = dataframe['weight'].to_numpy()
-    # Extract numbers enclosed in curly braces and store them in a list
-    isotope_list = [int(match.group(1)) for match in re.finditer(r'{(\d+)}', target_element)]
-    # Extract uppercase letters and store them in a list
-    element_list = re.findall(r'[A-Z][a-z]*', target_element)
+    if not np.isfinite(charge) or charge <= 0 or int(charge) != charge:
+        raise CalibrationInputError('Charge must be a positive integer')
+    token = re.compile(r'\{(\d+)\}([A-Z][a-z]*)(\d*)')
+    compact = re.sub(r'\s+', '', target_element)
+    matches = list(token.finditer(compact))
+    if not matches or ''.join(match.group(0) for match in matches) != compact:
+        raise CalibrationInputError('Use isotope-qualified formulas such as {40}Ca1 or {12}C{16}O2')
+    composition = {}
+    for match in matches:
+        isotope, element, count = int(match[1]), match[2], int(match[3] or 1)
+        if count <= 0:
+            raise CalibrationInputError('Atom counts must be positive integers')
+        composition[element, isotope] = composition.get((element, isotope), 0) + count
+    entries = sorted(composition)
+    element_list = [element for element, _ in entries]
+    isotope_list = [isotope for _, isotope in entries]
+    complexity_list = [composition[key] for key in entries]
 
-    # Extract numbers that follow the uppercase letters and store them in a list
-    complexity_list = [int(match[1]) for match in re.findall(r'([A-Z][a-z]*)(\d+)', target_element)]
-
-    total_weight = 0
-    abundance_c = 1
-    for i, isotop in enumerate(isotope_list):
-        index = np.where(isotope_number == isotop)
-        total_weight += weight[index] * complexity_list[i]
-        abundance_c *= (abundance[index] / 100) ** complexity_list[i]
+    total_weight = 0.0
+    abundance_c = 1.0
+    for element, isotope, count in zip(element_list, isotope_list, complexity_list):
+        indices = np.flatnonzero((elements == element) & (isotope_number == isotope))
+        if len(indices) != 1:
+            raise CalibrationInputError(f'Expected one isotope record for {element}-{isotope}, found {len(indices)}')
+        index = indices[0]
+        total_weight += float(weight[index]) * count
+        abundance_c *= (float(abundance[index]) / 100) ** count
 
     total_weight = total_weight / charge
     if latex:
@@ -463,7 +477,7 @@ def molecule_manual(target_element, charge, latex=True, variables=None):
         if charge > 1:
             formula = r'$(' + formula + ')^{%s+}$' % charge
         else:
-            formula = r'$' + formula + ')^{+}$'
+            formula = r'$' + formula + '^{+}$'
     else:
         formula = target_element
 
@@ -506,25 +520,15 @@ def transform_combination_and_isotopes(combination, isotopes):
     Returns:
         list: The new combination list.
     """
-    new_combination = []
-    new_isotopes = []
-    complexity = []
-
+    if len(combination) != len(isotopes):
+        raise CalibrationInputError('Elements and isotope numbers must be aligned')
+    counts = {}
     for element, isotope in zip(combination, isotopes):
-        if element not in new_combination:
-            new_combination.append(element)
-            new_isotopes.append(isotope)
-            complexity.append(1)
-        else:
-            index = new_combination.index(element)
-            if isotope != new_isotopes[index]:
-                new_combination.append(element)
-                new_isotopes.append(isotope)
-                complexity.append(1)
-            else:
-                complexity[index] += 1
-
-    return new_combination, new_isotopes, complexity
+        key = (str(element), int(isotope))
+        counts[key] = counts.get(key, 0) + 1
+    keys = sorted(counts)
+    return ([element for element, _ in keys], [isotope for _, isotope in keys],
+            [counts[key] for key in keys])
 
 
 def molecule_create(element_list, max_complexity, charge, abundance_threshold, variables=None, latex=True):

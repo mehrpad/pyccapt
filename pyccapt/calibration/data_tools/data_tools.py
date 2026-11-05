@@ -6,7 +6,10 @@ import os
 from pathlib import Path
 import warnings
 import ast
+import inspect
 import re
+import tempfile
+from copy import deepcopy
 
 import h5py
 import numpy as np
@@ -16,6 +19,7 @@ import scipy.io
 from pyccapt.calibration.data_tools import ato_tools
 from pyccapt.calibration.leap_tools import ccapt_tools, leap_tools
 from pyccapt.calibration.mc import tof_tools
+from pyccapt.instrument_metadata import ATTR as INSTRUMENT_ATTR, attach_instrument_metadata
 
 
 def _as_path(path_value: str | Path) -> Path:
@@ -37,7 +41,7 @@ def _resolve_variable_output_file(variables, *, filename: str, data_directory: b
     return filename
 
 
-def read_hdf5(filename: str | Path, *, lazy: bool = False):
+def read_hdf5(filename: str | Path, *, lazy: bool = False, groups=None):
     """
     Read non-pandas HDF5 content into a dictionary of dataframes.
 
@@ -51,11 +55,17 @@ def read_hdf5(filename: str | Path, *, lazy: bool = False):
             :meth:`LazyTable.iter_chunks` to stream the rows. The caller is
             responsible for closing the table (preferably with a
             ``with`` block).
+        groups: Optional iterable of top-level group names to materialize.
+            Eager reads only; ``None`` retains the complete legacy read.
+            Selecting ``("dld",)`` avoids reading unrelated TDC events.
 
     Returns:
         dict[str, pd.DataFrame] | LazyTable | None
     """
     file_path = _as_path(filename)
+    if groups is not None and lazy:
+        raise ValueError("groups is supported only for eager read_hdf5 calls")
+    selected_groups = None if groups is None else set((groups,) if isinstance(groups, str) else groups)
     if lazy:
         from pyccapt.calibration.data_tools import lazy_io
 
@@ -73,13 +83,19 @@ def read_hdf5(filename: str | Path, *, lazy: bool = False):
         group_dict: dict[str, list[str]] = {}
 
         with h5py.File(file_path, "r") as hdf:
-            groups = list(hdf.keys())
-            for item in groups:
-                group_dict[item] = list(hdf[item].keys())
+            for item in hdf:
+                if selected_groups is not None and item not in selected_groups:
+                    continue
+                if isinstance(hdf[item], h5py.Group):
+                    group_dict[item] = list(hdf[item].keys())
 
             for key, value in group_dict.items():
                 for item in value:
-                    dataset = pd.DataFrame(np.array(hdf[f"{key}/{item}"]), columns=["values"])
+                    node = hdf[f"{key}/{item}"]
+                    # Metadata collections/scalars are not event tables.
+                    if not isinstance(node, h5py.Dataset) or node.ndim == 0:
+                        continue
+                    dataset = pd.DataFrame(np.array(node), columns=["values"])
                     dataframe_storage[f"{key}/{item}"] = dataset
 
         return dataframe_storage
@@ -263,6 +279,11 @@ def store_df_to_hdf(dataframe, key, filename, *, format: str = "fixed"):
             dataframe.to_hdf(file_path, key=str(key), mode="w", format="table")
         else:
             raise
+    identity_attrs = {name: value for name, value in dataframe.attrs.items() if name.startswith('pyccapt_')}
+    if identity_attrs:
+        from pyccapt.calibration.data_tools.analysis_session import canonical_json
+        with pd.HDFStore(file_path, mode='a') as store:
+            store.get_storer(str(key)).attrs.pyccapt_source_json = canonical_json(identity_attrs)
 
 
 def store_df_to_csv(data: pd.DataFrame, path: str | Path) -> None:
@@ -347,6 +368,9 @@ def save_data(
     end_index=-1,
     save_tdc=False,
     save_range=False,
+    analysis_session=None,
+    nexus_metadata=None,
+    nexus=True,
 ):
     """Persist data in one or more supported export formats.
 
@@ -362,6 +386,15 @@ def save_data(
         If True and ``hdf=True`` and ``variables.range_data`` is non-empty,
         also write the current range table under ``/range`` so the calibrated,
         raw, and ranging information all live in a single h5 file.
+    analysis_session : tuple[dict, dict], optional
+        Metadata and numeric arrays from ``GuidedWorkflow.to_state()`` to embed
+        alongside the dataframe. Source masks retain their full-session scope.
+    nexus_metadata : dict, optional
+        Available experimental metadata for an explicitly partial NXapm mapping.
+        Passing an empty dictionary requests a mapping with missing context listed.
+    nexus : bool, default True
+        Include the partial NeXus mapping alongside the compatible /df table.
+        Set False for a legacy-only HDF5; instrument provenance is still retained.
     """
     if name is not None:
         data_name = name
@@ -370,7 +403,30 @@ def save_data(
     else:
         data_name = variables.result_data_name
 
-    export_data = _slice_data_for_export(data, start_index=start_index, end_index=end_index)
+    export_data = _slice_data_for_export(data, start_index=start_index, end_index=end_index).copy(deep=False)
+    export_data.attrs = deepcopy(data.attrs)
+    if len(export_data) != len(data):
+        selection = deepcopy(export_data.attrs.get('pyccapt_selection', {}))
+        selection.update(schema_version='1.0', source_events=selection.get('source_events', len(data)),
+                         selected_events=len(export_data), preserves_full_source=False,
+                         export_input_events=len(data),
+                         criteria={'prior': selection.get('criteria', {}),
+                                   'export_input_row_slice': {'start_inclusive': start_index, 'end_inclusive': end_index}})
+        export_data.attrs['pyccapt_selection'] = selection
+    from pyccapt.calibration.core.calibration_metadata import CalibrationMetadata
+    calibration_metadata = CalibrationMetadata.from_frame(data)
+    calibration_metadata.record('export_result', parameters={'rows': len(export_data), 'formats':
+        [kind for kind, enabled in [('hdf5', hdf), ('epos', epos), ('pos', pos), ('ato', ato_6v), ('csv', csv)] if enabled]})
+    calibration_metadata.checkpoint(export_data)
+    receipt = getattr(variables, 'guided_calibration_receipt', None)
+    reconstruction_parameters = getattr(variables, 'reconstruction_parameters', None)
+    ratio_result = getattr(variables, 'reconstruction_ratio_result', None)
+    if receipt or reconstruction_parameters or ratio_result:
+        export_data.attrs['pyccapt_analysis'] = {
+            'schema_version': 'pyccapt-analysis-1', 'export_rows': len(export_data),
+            'receipt_scope': 'original source dataset; export may be a subset',
+            'guided_calibration': receipt or {}, 'reconstruction_parameters': reconstruction_parameters or {},
+            'reconstruction_ratio_result': ratio_result or {}}
     if not any([hdf, epos, pos, ato_6v, csv]):
         print("No export format was selected.")
         return None
@@ -385,9 +441,26 @@ def save_data(
         # step after the first crashed -- no rollback, and the file path
         # downstream loaders look at was in a half-written state.
         output_h5_path = _as_path(output_h5)
-        tmp_h5_path = output_h5_path.with_suffix(output_h5_path.suffix + '.tmp')
+        output_h5_path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary_name = tempfile.mkstemp(prefix=f'.{output_h5_path.name}.', suffix='.tmp',
+                                                       dir=output_h5_path.parent)
+        os.close(descriptor)
+        tmp_h5_path = Path(temporary_name)
         try:
             store_df_to_hdf(export_data, "df", str(tmp_h5_path))
+            # Accepted optional-model mathematics/units travel with the result.
+            # The receipt describes its original source dataset; an export may
+            # be a subset, so never imply that source masks align to export rows.
+            if receipt or reconstruction_parameters or ratio_result:
+                import json
+                with pd.HDFStore(tmp_h5_path, mode='a') as store:
+                    metadata = {'schema_version': 'pyccapt-analysis-1',
+                                'export_rows': len(export_data),
+                                'receipt_scope': 'original source dataset; export may be a subset',
+                                'guided_calibration': receipt or {},
+                                'reconstruction_parameters': reconstruction_parameters or {},
+                                'reconstruction_ratio_result': ratio_result or {}}
+                    store.get_storer('df').attrs.pyccapt_analysis_json = json.dumps(metadata, allow_nan=False)
             tdc_status: str | None = None
             if save_tdc:
                 tdc_full = getattr(variables, "data_tdc", None)
@@ -423,6 +496,22 @@ def save_data(
                     range_table.to_hdf(tmp_h5_path, key="range", mode="a")
                     range_status = f"{output_h5} (/range, {len(range_table)} rows)"
             # All writes succeeded -- atomically replace the target.
+            import h5py
+            with h5py.File(tmp_h5_path, 'a') as handle:
+                calibration_metadata.write_hdf5(handle)
+                if INSTRUMENT_ATTR in export_data.attrs:
+                    from pyccapt.instrument_metadata import write_instrument_metadata
+                    write_instrument_metadata(handle, export_data.attrs[INSTRUMENT_ATTR])
+                if analysis_session is not None:
+                    from pyccapt.calibration.data_tools.analysis_session import write_session_group
+                    write_session_group(handle, *analysis_session)
+                if nexus or nexus_metadata is not None:
+                    from pyccapt.calibration.data_tools.nexus_export import write_nexus_mapping
+                    write_nexus_mapping(handle, export_data, metadata=nexus_metadata,
+                                        ranges=getattr(variables, 'range_data', None),
+                                        reconstruction=getattr(variables, 'reconstruction_parameters', {}))
+            with tmp_h5_path.open('rb+') as stream:
+                os.fsync(stream.fileno())
             os.replace(tmp_h5_path, output_h5_path)
             saved_outputs["hdf"] = output_h5
             if tdc_status is not None:
@@ -473,10 +562,24 @@ def save_data(
         store_df_to_csv(export_data, output_csv)
         saved_outputs["csv"] = output_csv
 
+    for format_name in ("epos", "pos", "ato", "csv"):
+        if format_name in saved_outputs:
+            calibration_metadata.write_json(str(saved_outputs[format_name]) + ".calibration.json")
     for format_name, output_path in saved_outputs.items():
         print(f"Saved {format_name.upper()}: {output_path}")
 
     return None
+
+
+# The original notebook passes this callable directly to interact_manual.
+# ipywidgets cannot infer controls from the optional None-valued metadata
+# arguments. Expose scalar controls for discovery and accept explicitly supplied
+# fixed metadata through **export_metadata. This changes introspection only:
+# save_data still accepts its documented positional and keyword arguments above.
+save_data.__signature__ = inspect.signature(save_data).replace(parameters=[
+    parameter for parameter in inspect.signature(save_data).parameters.values()
+    if parameter.name not in {'analysis_session', 'nexus_metadata'}
+] + [inspect.Parameter('export_metadata', inspect.Parameter.VAR_KEYWORD)])
 
 
 def load_data(dataset_path, data_type, mode="processed", *, load_tdc=False, tdc_extract_mode="tdc_sc"):
@@ -505,23 +608,52 @@ def load_data(dataset_path, data_type, mode="processed", *, load_tdc=False, tdc_
             raise ValueError("load_tdc is only supported for pyccapt h5 datasets")
         return ato_tools.ato_to_ccapt(dataset_path, mode="pyccapt")
 
-    if data_type == "pyccapt":
+    if data_type in {"pyccapt", "nexus"}:
         if mode == "raw":
             from pyccapt.calibration.data_tools import data_loadcrop
 
             if load_tdc:
+                # The /tdc layout differs between detectors; if the requested
+                # layout cannot be read, try the other one but say so: the
+                # channel semantics (and so every DLTS classification) follow
+                # the layout that was actually loaded.
                 primary_mode = tdc_extract_mode
                 fallback_modes = [mode_name for mode_name in ("tdc_sc", "tdc_ro") if mode_name != primary_mode]
                 last_error = None
                 for mode_name in [primary_mode, *fallback_modes]:
                     try:
-                        return data_loadcrop.fetch_dataset_with_tdc(dataset_path, tdc_extract_mode=mode_name)
+                        result = data_loadcrop.fetch_dataset_with_tdc(dataset_path, tdc_extract_mode=mode_name)
                     except Exception as error:
                         last_error = error
+                        continue
+                    if mode_name != primary_mode:
+                        warnings.warn(
+                            f"Raw /tdc could not be read with tdc_extract_mode={primary_mode!r} "
+                            f"({type(last_error).__name__}: {last_error}); loaded it with "
+                            f"tdc_extract_mode={mode_name!r} instead. Check the detector type.",
+                            RuntimeWarning,
+                            stacklevel=2,
+                        )
+                    return result
                 raise last_error
             return data_loadcrop.fetch_dataset_from_dld_grp(dataset_path)
         if mode == "processed":
-            data = pd.read_hdf(dataset_path, key="df", mode="r")
+            with h5py.File(dataset_path, 'r') as handle:
+                has_dataframe = 'df' in handle
+            source_json = None
+            if not has_dataframe:
+                from pyccapt.calibration.data_tools.nexus_export import load_nexus_mapping
+                data = load_nexus_mapping(dataset_path)
+            else:
+                with pd.HDFStore(dataset_path, mode='r') as store:
+                    data = store['df']
+                    source_json = getattr(store.get_storer('df').attrs, 'pyccapt_source_json', None)
+            if source_json is not None:
+                import json
+                source_attrs = json.loads(source_json)
+                data.attrs.update({key: value for key, value in source_attrs.items() if key.startswith('pyccapt_')})
+            attach_instrument_metadata(data, dataset_path)
+            unavailable = set(data.attrs.get('pyccapt_unavailable_columns', []))
             if "pulse_v (V)" not in data.columns:
                 if "pulse" in data.columns:
                     insert_at = data.columns.get_loc("pulse") + 1
@@ -540,9 +672,13 @@ def load_data(dataset_path, data_type, mode="processed", *, load_tdc=False, tdc_
                         else len(data.columns)
                     )
                     data.insert(insert_at, "pulse_v (V)", pulse_v)
+                    unavailable.add('pulse_v (V)')
             if "pulse_l (pJ)" not in data.columns:
                 pulse_l = np.zeros(len(data), dtype=float)
                 data.insert(data.columns.get_loc("pulse_v (V)") + 1, "pulse_l (pJ)", pulse_l)
+                unavailable.add('pulse_l (pJ)')
+            if unavailable:
+                data.attrs['pyccapt_unavailable_columns'] = sorted(unavailable)
             if load_tdc:
                 try:
                     tdc_df = pd.read_hdf(dataset_path, key="tdc", mode="r")
@@ -725,6 +861,21 @@ def pyccapt_raw_to_processed(data):
     data_processed["start_counter"] = data["start_counter"].to_numpy()
     if "event_group_id" in data.columns:
         data_processed["event_group_id"] = data["event_group_id"].to_numpy()
+    if 'event_id' in data.columns:
+        data_processed['event_id'] = data['event_id'].to_numpy()
+    data_processed.attrs = dict(data.attrs)
+    if 'mc_uc (Da)' not in data and n > 0 and {'t (ns)', 'high_voltage (V)', 'x_det (cm)', 'y_det (cm)'}.issubset(data):
+        from pyccapt.instrument_metadata import record_calibration_settings
+        record_calibration_settings(
+            data_processed, flight_path_length_mm=110., t0_ns=0., pulse_mode='voltage',
+            source='legacy raw converter defaults with zero pulse voltage; not instrument measurements',
+            status='assumed_legacy_conversion', context='uncorrected_conversion')
+    unavailable = set(data.attrs.get('pyccapt_unavailable_columns', []))
+    unavailable.update(('x (nm)', 'y (nm)', 'z (nm)'))
+    unavailable.update(column for column in ('mc (Da)', 't_c (ns)', 'delta_p', 'multi') if column not in data)
+    if 'mc_uc (Da)' not in data and not (n > 0 and {'t (ns)', 'high_voltage (V)', 'x_det (cm)', 'y_det (cm)'}.issubset(data)):
+        unavailable.add('mc_uc (Da)')
+    data_processed.attrs['pyccapt_unavailable_columns'] = sorted(unavailable)
     return data_processed
 
 

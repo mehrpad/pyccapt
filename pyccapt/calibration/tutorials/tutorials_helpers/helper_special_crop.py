@@ -40,6 +40,10 @@ def apply_crop(variables, out, use_manual_values, center_x_widget, center_y_widg
                 update_backups=False,
                 clear_selection=False,
             )
+            from pyccapt.calibration.core.calibration_metadata import record_step
+            record_step(variables, 'detector_crop', parameters={'center_x_cm': variables.selected_x_fdm,
+                'center_y_cm': variables.selected_y_fdm, 'radius_cm': variables.roi_fdm,
+                'unknown_detector_positions': 'retained by legacy crop', 'retained_events': len(variables.data)})
             print(
                 'The crop for center x:',
                 round(float(variables.selected_x_fdm), 4),
@@ -54,7 +58,7 @@ def apply_crop(variables, out, use_manual_values, center_x_widget, center_y_widg
             print(f'Invalid spatial crop: {exc}')
 
 
-def call_plot_crop_fdm(variables):
+def call_plot_crop_fdm(variables, *, display_panel=True):
     frac_widget = widgets.FloatText(value=1.0)
     frac_label = widgets.Label(value="Fraction:", layout=label_layout)
 
@@ -70,6 +74,7 @@ def call_plot_crop_fdm(variables):
     mode_selector_label = widgets.Label(value="Selector:", layout=label_layout)
 
     use_manual_values = widgets.Checkbox(value=False, description='Use manual crop values')
+    suggest = widgets.Checkbox(value=True, description='Suggest circle from detector density')
     use_manual_label = widgets.Label(value="Manual Crop:", layout=label_layout)
     center_x_widget = widgets.FloatText(value=float(variables.selected_x_fdm))
     center_y_widget = widgets.FloatText(value=float(variables.selected_y_fdm))
@@ -99,9 +104,7 @@ def call_plot_crop_fdm(variables):
             out.clear_output()
             print('Loaded the current drawn crop values into the manual fields.')
 
-    def on_button_click(_, variables):
-        button_plot.disabled = True
-
+    def plot_preview(variables):
         frac = frac_widget.value
         bins = (bins_x.value, bins_y.value)
         figure_size = (figure_size_x.value, figure_size_y.value)
@@ -116,10 +119,19 @@ def call_plot_crop_fdm(variables):
                 center_y_widget.value,
                 radius_widget.value,
             )
+        elif suggest.value:
+            from pyccapt.calibration.core.crop_suggestions import suggest_detector_circle
+            proposal = suggest_detector_circle(variables.data)
+            variables.crop_suggestion_detector = proposal
+            if proposal['supported']:
+                _apply_manual_spatial_values(variables, *proposal['circle_cm'])
+                center_x_widget.value, center_y_widget.value, radius_widget.value = proposal['circle_cm']
 
         with out:
             out.clear_output()
             try:
+                if not use_manual_values.value and suggest.value:
+                    print('Suggested circle:', proposal['reason'], 'Review/resize it before Apply crop.')
                 data = variables.data.copy()
                 data_loadcrop.plot_crop_fdm(
                     data['x_det (cm)'].to_numpy(),
@@ -138,7 +150,7 @@ def call_plot_crop_fdm(variables):
                     range_z=[],
                     range_vol=[],
                     data_crop=True,
-                    draw_circle=use_manual_values.value and variables.roi_fdm > 0,
+                    draw_circle=variables.roi_fdm > 0,
                     mode_selector=mode_selector,
                     save=save,
                     figname=figname,
@@ -146,11 +158,19 @@ def call_plot_crop_fdm(variables):
                 if use_manual_values.value:
                     print('Manual spatial crop preview updated on the FDM plot.')
                 else:
-                    print('Draw a crop on the plot or enable manual values and re-plot for a preview.')
+                    print('Resize/move the circle, then Apply crop. Load drawn values copies its center/radius into the manual fields.')
             except ValueError as exc:
                 print(f'Invalid spatial crop preview: {exc}')
 
-        button_plot.disabled = False
+    def on_button_click(_, variables):
+        button_plot.disabled = True
+        try:
+            plot_preview(variables)
+        except ValueError as exc:
+            with out:
+                print(f'Invalid spatial crop preview: {exc}')
+        finally:
+            button_plot.disabled = False
 
     button_plot.on_click(lambda b: on_button_click(b, variables))
     button_apply.on_click(
@@ -166,6 +186,7 @@ def call_plot_crop_fdm(variables):
             widgets.HBox([figure_size_label, widgets.HBox([figure_size_x, figure_size_y])]),
             widgets.HBox([mode_selector_label, mode_selector_widget]),
             widgets.HBox([use_manual_label, use_manual_values]),
+            suggest,
             widgets.HBox([center_label, widgets.HBox([center_x_widget, center_y_widget])]),
             widgets.HBox([radius_label, radius_widget]),
             widgets.HBox([save_label, save_widget]),
@@ -173,5 +194,10 @@ def call_plot_crop_fdm(variables):
             widgets.HBox([button_plot, button_sync, button_apply, button_reset]),
         ]
     )
-    display(widget_container)
-    display(out)
+    widget_container.controls = {'Plot': button_plot, 'Apply crop': button_apply, 'suggest': suggest,
+        'manual': use_manual_values, 'x': center_x_widget, 'y': center_y_widget, 'radius': radius_widget, 'output': out}
+    if display_panel:
+        display(widget_container)
+        display(out)
+        return None
+    return widget_container

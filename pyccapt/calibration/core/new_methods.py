@@ -30,6 +30,7 @@ Method #8 (differentiable pipeline + SGD) is deferred.
 from __future__ import annotations
 
 import warnings
+from copy import copy
 
 import numpy as np
 from scipy.interpolate import SmoothBivariateSpline
@@ -41,9 +42,9 @@ from pyccapt.calibration.core.validation import (
     ensure_positive,
 )
 
-# Re-use the pseudo-Voigt + Gaussian helpers from mc_plot_peak_helpers so we
+# Re-use the pseudo-Voigt + Gaussian helpers from the domain peak models so we
 # stay consistent with the rest of the pipeline.
-from pyccapt.calibration.core.mc_plot_peak_helpers import (
+from pyccapt.calibration.core.peak_models import (
     _gaussian,
     _voigt,
     _FWHM_FACTOR,
@@ -85,6 +86,11 @@ def voltage_corr_time_dependent(
 
     ensure_choice(calibration_mode, field_name='calibration_mode', allowed=CALIBRATION_MODES)
     bin_size = ensure_positive(bin_size, field_name='bin_size')
+
+    if not apply:
+        # The legacy warm-start writes its result to Variables. A preview must
+        # use separate state so the live spectrum remains unchanged.
+        variables = copy(variables)
 
     # --- Stage 1: legacy voltage correction ---
     if use_legacy_v:
@@ -262,8 +268,7 @@ def voltage_corr_v_t_joint(
 
     factor = predicted / target
     factor = np.where(np.isfinite(factor) & (factor > 0.5) & (factor < 1.5), factor, 1.0)
-    if calibration_mode == 'tof':
-        factor = np.sqrt(np.maximum(factor, 1e-6))
+    # Prediction and target are both in the active calibration domain.
     candidate = calib / factor
 
     # Global FWHM gate
@@ -498,7 +503,8 @@ def bowl_correction_spline(
     y_mm = np.asarray(dld_y_cm, dtype=float) * 10.0
 
     left, right = variables.get_calibration_peak_range(calibration_mode)
-    mask = (calib > left) & (calib < right)
+    position_capable = np.isfinite(x_mm) & np.isfinite(y_mm)
+    mask = (calib > left) & (calib < right) & position_capable
     if mask.sum() < 500:
         return calib
 
@@ -535,8 +541,9 @@ def bowl_correction_spline(
             # smoothing > 0 regularises; large enough to suppress overfit
             sm = smoothing if smoothing is not None else max(1.0, ok.sum() * 0.05)
             rbf = RBFInterpolator(pts, z, smoothing=sm, kernel='thin_plate_spline')
-            xy = np.column_stack([x_mm, y_mm])
-            factors = rbf(xy)
+            xy = np.column_stack([x_mm[position_capable], y_mm[position_capable]])
+            factors = np.ones_like(calib)
+            factors[position_capable] = rbf(xy)
         except Exception:
             factors = None
 
@@ -545,15 +552,15 @@ def bowl_correction_spline(
         try:
             sm = smoothing if smoothing is not None else ok.sum() * 0.02
             spline = SmoothBivariateSpline(cx[ok], cy[ok], z, s=sm, kx=3, ky=3)
-            factors = spline.ev(x_mm, y_mm)
+            factors = np.ones_like(calib)
+            factors[position_capable] = spline.ev(x_mm[position_capable], y_mm[position_capable])
         except Exception:
             return calib
 
     # Aggressive clip: bowl corrections in real APT are < 5%
     factors = np.where(np.isfinite(factors), factors, 1.0)
     factors = np.clip(factors, 0.95, 1.05)
-    if calibration_mode == 'tof':
-        factors = np.sqrt(np.maximum(factors, 1e-6))
+    # Cell means/target already define a ratio in mass or time units.
     candidate = calib / factors
 
     # Gate: require FWHM improvement on the bracketed peak
@@ -878,10 +885,7 @@ def drift_correction_self_similarity(
     per_ion_log_shift = np.clip(per_ion_log_shift, -max_shift_frac, max_shift_frac)
     factor = np.exp(per_ion_log_shift)
     # Apply: corrected = raw * factor (factor brings raw onto reference grid).
-    if mode == 'tof':
-        candidate = raw * np.sqrt(factor)
-    else:
-        candidate = raw * factor
+    candidate = raw * factor  # log-shifts were fitted directly to this domain
 
     # Audit gate
     def _audit(arr):
@@ -906,12 +910,11 @@ def drift_correction_self_similarity(
     pre = _audit(raw)
     post = _audit(candidate)
     accepted = (
-        post['n_peaks'] >= pre['n_peaks']
-        and (
-            not np.isfinite(pre['geomean_mrp'])
-            or not np.isfinite(post['geomean_mrp'])
-            or post['geomean_mrp'] >= pre['geomean_mrp'] * (1.0 - float(mrp_drop_tolerance))
-        )
+        pre['n_peaks'] > 0
+        and post['n_peaks'] >= pre['n_peaks']
+        and np.isfinite(pre['geomean_mrp'])
+        and np.isfinite(post['geomean_mrp'])
+        and post['geomean_mrp'] >= pre['geomean_mrp'] * (1.0 - float(mrp_drop_tolerance))
     )
     info = {
         "ok": bool(accepted),

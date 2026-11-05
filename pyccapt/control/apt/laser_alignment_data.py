@@ -7,7 +7,6 @@ class LaserAlignmentPublisher:
     def __init__(self, variables):
         self.v = variables
         self.epoch = None
-        self.times = []
         self.count = 0
         self.last_publish = 0.0
 
@@ -18,7 +17,6 @@ class LaserAlignmentPublisher:
             return
         if epoch != self.epoch:
             self.epoch = epoch
-            self.times = []
             self.count = 0
             self.started = now
             self.last_publish = now
@@ -27,12 +25,10 @@ class LaserAlignmentPublisher:
         values = np.asarray(tof_ns, dtype=float).ravel()
         values = values[np.isfinite(values)]
         self.count += len(values)
-        self.times.extend(values[-20000:].tolist())
-        self.times = self.times[-20000:]
         if now-self.last_publish >= 0.1:
             self.v.laser_alignment_observation = {
                 'epoch': epoch, 'time': now, 'start': self.started,
-                'count': self.count, 'tof_ns': self.times,
+                'count': self.count,
             }
             self.last_publish = now
 

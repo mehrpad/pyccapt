@@ -149,6 +149,63 @@ Run calibration tutorials:
 jupyter lab
 ```
 
+For the guided workflow, open
+[`data_processing_guided.ipynb`](pyccapt/calibration/tutorials/jupyter_files/data_processing_guided.ipynb).
+After cropping, **Start calibration** creates an initial mass and opens the
+original voltage/bowl and automatic calibration tools. Preview corrected results,
+then accept before ranging; [calibration steps](docs/guided_workflow.md#calibration-after-cropping)
+explain the separate mass and ToF outputs.
+The existing [`data_processing.ipynb`](pyccapt/calibration/tutorials/jupyter_files/data_processing.ipynb)
+remains available. The guided notebook connects import, inspection, cropping, calibration,
+peak-by-peak ranging review, reconstruction, analysis and export. Suggestions
+require acceptance, preserve locked ranging decisions, support undo, and can be
+saved as resumable HDF5 sessions.
+Use **Browse dataset** or paste a path; **Format → Auto detect** chooses the reader
+and inspects HDF5 layout on import. After drawing/editing a crop, click **Preview
+crop** to enable **Accept crop**; the adjacent status explains draft and error states.
+
+Raw `/dld` data does not need a mass column: inspect and crop it, confirm the
+flight length/time zero/pulse mode, then preview its initial mass spectrum.
+Draw the sequence rectangle on DC voltage and the detector circle on the density
+map; review and accept the crop separately. Raw hit import skips unrelated TDC
+arrays to reduce loading time and memory.
+Optional reference fitting reports improvements and regressions against that
+baseline before acceptance. Full source history remains in the session even
+when the exported table contains only selected events.
+
+Control exports now retain run-start instrument settings and observed pulse
+modes, including configured flight length and time offsets. Both calibration
+workflows preserve these metadata separately from preview and fitted settings.
+The original notebook also reads this project's partial NeXus mapping and writes
+it alongside `/df` by default; `save_data(..., nexus=False)` opts out.
+
+Both notebooks combine **3D reconstruction** (first tab) and optional **ICF/kf
+calibration** (second tab) in one panel with shared parameters, a
+compact inline 3D plot by default and an optional browser view. Their crop plots
+propose editable voltage intervals and dense-region circles. A shared calibration
+journal is saved automatically in HDF5 (and as a sidecar for exchange formats),
+including model settings and verified same-source result restoration. See the
+[workflow instructions](docs/guided_workflow.md#shared-calibration-record-and-exact-saved-result-restoration).
+
+Reconstruction suggestions estimate **q = ICF/kf** from independently reviewed
+near-axis crystallographic spacing and show compatible ICF/kf pairs. They report
+insufficient evidence instead of forcing a unique answer. See the
+[guided workflow](docs/guided_workflow.md) and [calibration mathematics](docs/calibration_math.md).
+
+The [same-dataset validation report](docs/workflow_validation.md) includes the
+6.06-million-event raw Al import, physical conversion and save/resume replay, and
+compares both workflows on 5.84 million processed events, including exact mass/ToF persistence, ranging,
+calibration timings and conditional ICF/kf diagnostics. It records the limits of
+the historical labels and where the new method abstains instead of suggesting
+unsupported parameters.
+
+[Analysis sessions and exports](docs/analysis_sessions.md) describe stable integer
+event IDs, learned-model snapshots, checksums, processing history, an explicitly
+partial NXapm-aligned mapping, storage benchmarks and opt-in SWMR readers.
+Detector-based [laser](pyccapt/control/LASER_ALIGNMENT.md) and
+[sample alignment](pyccapt/control/AUTOMATIC_ALIGNMENT.md) retain the user's fixed
+laser settings and existing motion/interlock constraints.
+
 Then open notebooks under `pyccapt/calibration/tutorials`.
 
 ## Configuration

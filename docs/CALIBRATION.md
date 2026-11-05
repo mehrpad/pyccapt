@@ -2,6 +2,19 @@
 
 The `pyccapt.calibration` package provides workflows for atom probe tomography data preparation, calibration, reconstruction, and visualization.
 
+The separate [guided notebook](../pyccapt/calibration/tutorials/jupyter_files/data_processing_guided.ipynb)
+adds accepted-state stages, reversible peak decisions, automatic range proposals,
+conditional ICF/kf ratio profiling and resumable sessions. The existing
+`data_processing.ipynb` remains available. See the [guided workflow](guided_workflow.md),
+[calibration mathematics](calibration_math.md) and [session/export contract](analysis_sessions.md)
+for input requirements, validation and the scope of each new method.
+
+Both notebooks propose editable crop regions and group ICF/kf tuning and compact
+inline reconstruction into two ordered tabs. Their shared `CalibrationMetadata`
+journal automatically records actions and model state in saved results.
+[Same-source restoration](guided_workflow.md#shared-calibration-record-and-exact-saved-result-restoration)
+checks measurements and event IDs before restoring exact exported arrays.
+
 ![Calibration visualization](../pyccapt/files/readme_images/visualization_gif.gif)
 
 ## Core Workflows
@@ -232,7 +245,9 @@ dataframes when the file is loaded with `load_tdc_raw=True`. The column rides
 through every cropping step in the calibration workflow (TOF clip, ROI, FDM,
 sequence range, manual mask drops); at save time the linked tdc rows for
 deleted dld rows are dropped, while orphan tdc rows (pulses that never produced
-a reconstructible dld event) are always preserved. See
+a reconstructible dld event) are preserved only inside the kept acquisition span
+(between the first and last surviving dld event, in acquisition order), so a
+temporal crop also drops the orphans of the cropped-away pulses. See
 [Calibration_DATA_STRUCTURE.md](Calibration_DATA_STRUCTURE.md) for the on-disk
 schema of the optional `/tdc` group and the linking semantics.
 

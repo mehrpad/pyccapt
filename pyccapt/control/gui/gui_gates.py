@@ -508,7 +508,7 @@ class Ui_Gates(object):
             Returns:
                 None
             """
-            if self.variables.start_flag:
+            if self.variables.start_flag or self.variables.sample_selection_locked:
                 self.error_message("!!! An experiment is running !!!")
             else:
                 self.error_message("!!! Close the previous opened gate first !!!")
@@ -546,8 +546,11 @@ class Ui_Gates(object):
 
         # Main gate
         if gate_num == 1:
+            # sample_selection_locked stays set between the runs of a TOML
+            # plan or alignment batch, when start_flag is briefly False.
             if (
                 not self.variables.start_flag
+                and not self.variables.sample_selection_locked
                 and (
                     not self.variables.flag_load_gate
                     and not self.variables.flag_cryo_gate

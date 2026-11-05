@@ -67,8 +67,8 @@ class Variables:
         "exp_name": ("main", ("exp",)),
         "electrode": ("main", ("exp",)),
         "email": ("main", ("exp",)),
-        "vdc_min": ("main", ("exp",)),
-        "vdc_max": ("main", ("exp",)),
+        "vdc_min": ("main/viz", ("exp",)),
+        "vdc_max": ("main", ("exp", "viz")),
         "vdc_step_up": ("main", ("exp",)),
         "vdc_step_down": ("main", ("exp",)),
         "v_p_min": ("main", ("exp",)),
@@ -130,6 +130,8 @@ class Variables:
         "flag_stop_tdc": ("exp", ("tdc",)),
         "flag_tdc_failure": ("tdc", ("exp", "main")),
         "detector_error": ("tdc", ("exp", "main")),
+        # Non-fatal detector condition (e.g. shutdown packets kept unattributed).
+        "detector_warning": ("tdc", ("exp", "main")),
         # --- Visualization controls / clear handshakes -------------------
         "vdc_hold": ("viz", ("exp",)),
         "reset_heatmap": ("viz", ("viz",)),  # internal to viz
@@ -159,6 +161,7 @@ class Variables:
         "laser_alignment_command": ("main", ("exp",)),
         "laser_alignment_cancel": ("main/exp", ("main/exp",)),
         "laser_alignment_run": ("exp", ("main",)),
+        "laser_alignment_solution_cache": ("exp", ("main",)),
         "laser_alignment_status": ("exp", ("main",)),
         "laser_alignment_plot": ("exp", ("main",)),
         "laser_alignment_move_request": ("exp", ("main",)),
@@ -499,6 +502,7 @@ class Variables:
         "pulse_voltage": 0.0,
         "control_algorithm": "",
         "pulse_mode": "",
+        "acquisition_instrument_metadata": {},
         "count_last": 0,
         "count_temp": 0,
         "avg_n_count": 0,
@@ -510,6 +514,7 @@ class Variables:
         "flag_finished_tdc": False,
         "flag_tdc_failure": False,
         "detector_error": "",
+        "detector_warning": "",
         "plot_clear_flag": False,
         "clear_index_save_image": False,
         "experiment_plan_count": 0,
@@ -540,6 +545,7 @@ class Variables:
         "laser_alignment_command": {},
         "laser_alignment_cancel": True,
         "laser_alignment_run": {},
+        "laser_alignment_solution_cache": {},
         "laser_alignment_status": {},
         "laser_alignment_plot": {},
         "laser_alignment_move_request": {},
@@ -723,6 +729,30 @@ class Variables:
                 # State telemetry must never turn a successful legacy write
                 # into a failed hardware action or interrupt acquisition.
                 logging.getLogger("pyccapt.state").exception("Could not adapt shared field %s", field)
+
+    def statistics_snapshot(self, *fields: str) -> dict[str, Any]:
+        """Read selected current numeric telemetry in one RPC for one UI tick.
+
+        No cache, bulk acquisition data, setup inputs, or stop/interlock fields
+        enter this path. Locks match existing scalar writers and are acquired
+        in a fixed order; older Namespace callers retain scalar compatibility.
+        """
+        allowed = self._EXP_FIELDS | self._DATA_PLOT_FIELDS
+        if not set(fields).issubset(allowed):
+            raise ValueError('Statistics snapshots only support numeric telemetry fields')
+        if not self.lock_exp.acquire(timeout=.05):
+            raise TimeoutError('Statistics publisher is busy')
+        try:
+            if not self.lock_data_plot.acquire(timeout=.05):
+                raise TimeoutError('Plot telemetry publisher is busy')
+            try:
+                if hasattr(type(self.ns), 'read_fields'):
+                    return self.ns.read_fields(fields)
+                return {field: getattr(self.ns, field) for field in fields}
+            finally:
+                self.lock_data_plot.release()
+        finally:
+            self.lock_exp.release()
 
     @contextmanager
     def _state_transaction(self, device, timeout_s):

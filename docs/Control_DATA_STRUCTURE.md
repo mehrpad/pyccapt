@@ -80,3 +80,13 @@ High-speed digitizer (DRS) waveforms and synchronized metadata.
 
 - Some historical files may use older dataset names.
 - `control/control_data_tool.py` contains migration helpers for legacy structures.
+
+## Acquisition completeness
+
+Final HDF5 provenance separates structural validity from acquisition completeness
+(`complete`, `incomplete` or `unverified`). Committed-manifest checks report row
+counts, internal chunk gaps, rejected groups, recovery actions and quarantine
+locations; detector failures remain visible. Recovery cannot prove the absence
+of an uncommitted tail after a crash. See the
+[package data structure](../pyccapt/control/DATA_STRUCTURE.md) and
+[session/export documentation](analysis_sessions.md) for the validation contract.

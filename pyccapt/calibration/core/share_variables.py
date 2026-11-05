@@ -256,6 +256,10 @@ class SharedVariablesBase:
         frame = dataset.frame
         self.dataset = dataset
         self.data = frame
+        self.event_ids = dataset.event_ids
+        from pyccapt.calibration.core.calibration_metadata import CalibrationMetadata
+        self.calibration_metadata = CalibrationMetadata.from_frame(frame)
+        self.calibration_metadata.attach(frame)
         if update_backups or self.data_backup is None:
             self.data_backup = frame.copy()
 
@@ -308,6 +312,10 @@ class SharedVariablesBase:
         # V/Bowl correction on top of uncalibrated t (ns).
         self.initial_calibration_done_mc = False
         self.initial_calibration_done_tof = False
+        self.reconstruction_parameters = {}
+        self.reconstruction_ratio_result = {}
+        self.guided_calibration_receipt = {}
+        self.guided_calibration_valid_mask = np.zeros(0, dtype=bool)
         if clear_selection:
             self.clear_peak_range()
             self.selected_x_fdm = 0
@@ -319,7 +327,13 @@ class SharedVariablesBase:
         """Restore the original dataframe snapshot and resynchronize shared arrays."""
         if self.data_backup is None:
             raise CalibrationStateError("No backup dataframe is available for restore")
-        return self.sync_from_data(self.data_backup.copy(), update_backups=False, clear_selection=True)
+        metadata = getattr(self, 'calibration_metadata', None)
+        restored = self.sync_from_data(self.data_backup.copy(), update_backups=False, clear_selection=True)
+        if metadata is not None:
+            self.calibration_metadata = metadata
+            from pyccapt.calibration.core.calibration_metadata import record_step
+            record_step(self, 'reset_to_imported_source')
+        return restored
 
     @staticmethod
     def _dir_as_string(directory: str | Path) -> str:
@@ -418,6 +432,10 @@ class Variables(SharedVariablesBase):
         self.range_path = None
 
         self.plotly_3d_reconstruction = None
+        self.reconstruction_parameters = {}
+        self.reconstruction_ratio_result = {}
+        self.guided_calibration_receipt = {}
+        self.guided_calibration_valid_mask = np.zeros(0, dtype=bool)
         self.data = None
         self.dataset = None
         self.data_backup = None

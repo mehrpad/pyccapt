@@ -1,5 +1,24 @@
 from tqdm.auto import tqdm
 
+# Delay-line time-sum tolerance (TDC bins). For one ion both crossed delay
+# lines satisfy t0 + t1 = t2 + t3; the Surface Concept quadrupel finder
+# accepts a 4-stop set only when |(t0 + t1) - (t2 + t3)| is within its
+# SumDifMin/SumDifMax window (±200 bins by default). The same default is used
+# by the combinatorial recovery (``pair_sum_tolerance_bins``).
+PAIR_SUM_TOLERANCE_BINS = 200.0
+
+
+def pair_sums_consistent(chunk_times, pair_sum_tolerance_bins=PAIR_SUM_TOLERANCE_BINS) -> bool:
+    """Return True when a ``[0, 1, 2, 3]`` chunk's x- and y-pair sums agree.
+
+    ``chunk_times`` are the stop times of channels 0, 1, 2, 3 (in that order).
+    ``pair_sum_tolerance_bins=None`` disables the check.
+    """
+    if pair_sum_tolerance_bins is None:
+        return True
+    t0, t1, t2, t3 = (float(value) for value in chunk_times)
+    return abs((t0 + t1) - (t2 + t3)) <= float(pair_sum_tolerance_bins)
+
 
 def _sort_sequence_by_channel(start_counter_values, channel_values, time_values):
     indexed_channels = sorted(enumerate(channel_values), key=lambda item: item[1])
@@ -10,21 +29,29 @@ def _sort_sequence_by_channel(start_counter_values, channel_values, time_values)
     return sorted_channels, sorted_time, sorted_start_counter
 
 
-def _build_valid_event_flags(sorted_channels):
+def _build_valid_event_flags(sorted_channels, sorted_time=None, pair_sum_tolerance_bins=PAIR_SUM_TOLERANCE_BINS):
+    """Flag each chunk-of-4 that is a complete ``[0, 1, 2, 3]`` event.
+
+    When ``sorted_time`` is given, a chunk is only valid if its two delay-line
+    pair sums also agree (:func:`pair_sums_consistent`); otherwise a multi-hit
+    pulse paired by arrival order could label a crossed pairing complete.
+    """
     length = len(sorted_channels)
     if length < 4:
         return [False]
-    if length == 4:
-        return [sorted_channels == [0, 1, 2, 3]]
 
     valid_event = []
     for index_valid_event in range((length + 3) // 4):
-        chunk = sorted_channels[index_valid_event * 4 : (index_valid_event + 1) * 4]
-        valid_event.append(chunk == [0, 1, 2, 3])
+        start, stop = index_valid_event * 4, (index_valid_event + 1) * 4
+        chunk = sorted_channels[start:stop]
+        is_valid = chunk == [0, 1, 2, 3]
+        if is_valid and sorted_time is not None:
+            is_valid = pair_sums_consistent(sorted_time[start:stop], pair_sum_tolerance_bins)
+        valid_event.append(is_valid)
     return valid_event
 
 
-def _normalize_sequence(current_sequence, ch, time):
+def _normalize_sequence(current_sequence, ch, time, pair_sum_tolerance_bins=PAIR_SUM_TOLERANCE_BINS):
     if not (len(current_sequence) == len(ch) == len(time)):
         raise ValueError("start-counter, channel, and time sequences must have equal lengths")
 
@@ -41,7 +68,7 @@ def _normalize_sequence(current_sequence, ch, time):
     ch_sorted = [ch[idx] for idx in index]
     sorted_time = [time[idx] for idx in index]
     sorted_start_counter = [current_sequence[idx] for idx in index]
-    valid_event = _build_valid_event_flags(ch_sorted)
+    valid_event = _build_valid_event_flags(ch_sorted, sorted_time, pair_sum_tolerance_bins)
     return ch_sorted, sorted_time, sorted_start_counter, valid_event
 
 
@@ -480,7 +507,15 @@ def find_consecutive_sequences(start_counter, channel, time_data, high_voltage, 
     return result
 
 
-def iter_consecutive_sequences(start_counter, channel, time_data, high_voltage, pulse, show_progress=False):
+def iter_consecutive_sequences(
+    start_counter,
+    channel,
+    time_data,
+    high_voltage,
+    pulse,
+    show_progress=False,
+    pair_sum_tolerance_bins=PAIR_SUM_TOLERANCE_BINS,
+):
     """Generator version of :func:`find_consecutive_sequences`.
 
     Yields one pulse-record dict at a time instead of building the full list,
@@ -514,7 +549,7 @@ def iter_consecutive_sequences(start_counter, channel, time_data, high_voltage, 
             time_list.append(time_data[i])
         else:
             length = len(current_sequence)
-            ch_norm, time_norm, sc_norm, valid_event = _normalize_sequence(current_sequence, ch, time_list)
+            ch_norm, time_norm, sc_norm, valid_event = _normalize_sequence(current_sequence, ch, time_list, pair_sum_tolerance_bins)
             yield {
                 'channels': ch_norm,
                 'time_data': time_norm,
@@ -534,7 +569,7 @@ def iter_consecutive_sequences(start_counter, channel, time_data, high_voltage, 
 
     # Emit the last pulse group
     length = len(current_sequence)
-    ch_norm, time_norm, sc_norm, valid_event = _normalize_sequence(current_sequence, ch, time_list)
+    ch_norm, time_norm, sc_norm, valid_event = _normalize_sequence(current_sequence, ch, time_list, pair_sum_tolerance_bins)
     yield {
         'channels': ch_norm,
         'time_data': time_norm,

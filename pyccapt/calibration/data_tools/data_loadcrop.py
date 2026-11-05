@@ -159,10 +159,22 @@ def fetch_dataset_with_tdc(
     return dld_df, tdc_df
 
 def filter_tdc_by_dld(dld_df: pd.DataFrame, tdc_df: pd.DataFrame) -> pd.DataFrame:
-    """Return tdc rows whose dld counterpart still exists, plus all orphan rows.
+    """Return tdc rows whose dld counterpart still exists, plus in-range orphan rows.
 
-    Rule: drop a tdc row only when its linked dld row was deleted. Orphan tdc
-    rows (pulses that never produced a dld event) are always preserved.
+    Rules:
+
+    - A matched tdc row is kept iff its linked dld group survives in ``dld_df``.
+    - An orphan tdc row (a pulse that never produced a dld event) is kept iff
+      it lies inside the kept acquisition span: in tdc row (= acquisition)
+      order, between the first and the last surviving matched tdc row. The
+      span is extended to the start (end) of the table when no matched group
+      was removed before (after) it, so an uncropped dld keeps every orphan.
+      Row order is used instead of ``start_counter`` values because the
+      counter wraps. A temporal crop therefore drops the orphans of the
+      cropped-away pulses; a spatial crop cannot localise orphans (they have
+      no position) and keeps those inside the span. If ``tdc_df`` has no
+      matched rows at all there is nothing to anchor the span and every
+      orphan is kept.
     """
     if EVENT_GROUP_ID_COLUMN not in tdc_df.columns or TDC_HAS_DLD_MATCH_COLUMN not in tdc_df.columns:
         raise ValueError("tdc_df is missing the event_group_id/has_dld_match columns; load it via fetch_dataset_with_tdc().")
@@ -170,7 +182,21 @@ def filter_tdc_by_dld(dld_df: pd.DataFrame, tdc_df: pd.DataFrame) -> pd.DataFram
         raise ValueError("dld_df is missing the event_group_id column; load it via fetch_dataset_with_tdc().")
 
     surviving_groups = pd.unique(dld_df[EVENT_GROUP_ID_COLUMN].to_numpy())
-    keep = (~tdc_df[TDC_HAS_DLD_MATCH_COLUMN].to_numpy()) | (tdc_df[EVENT_GROUP_ID_COLUMN].isin(surviving_groups).to_numpy())
+    has_match = tdc_df[TDC_HAS_DLD_MATCH_COLUMN].to_numpy(dtype=bool)
+    orphan = ~has_match
+    matched_keep = has_match & tdc_df[EVENT_GROUP_ID_COLUMN].isin(surviving_groups).to_numpy()
+    matched_pos = np.flatnonzero(has_match)
+    if matched_pos.size:
+        kept_pos = np.flatnonzero(matched_keep)
+        if kept_pos.size == 0:
+            orphan = np.zeros_like(orphan)
+        else:
+            lo = 0 if kept_pos[0] == matched_pos[0] else kept_pos[0]
+            hi = len(tdc_df) if kept_pos[-1] == matched_pos[-1] else kept_pos[-1] + 1
+            in_span = np.zeros(len(tdc_df), dtype=bool)
+            in_span[lo:hi] = True
+            orphan &= in_span
+    keep = orphan | matched_keep
     return tdc_df.loc[keep].reset_index(drop=True).copy()
 
 def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld', *, lazy: bool = False):
@@ -202,7 +228,7 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld', *, lazy: bool 
     flag_old_pyccpat_data = False
     if extract_mode == 'dld':
         try:
-            hdf5_data = data_tools.read_hdf5(filename)
+            hdf5_data = data_tools.read_hdf5(filename, groups=("dld",))
             if hdf5_data is None:
                 raise FileNotFoundError
             dld_high_voltage = hdf5_data['dld/high_voltage'].to_numpy()
@@ -235,13 +261,24 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld', *, lazy: bool 
             # (N,) or (N, 1) datasets; the previous np.concatenate(axis=1)
             # raised AxisError if any column came back 1-D. Column order
             # MUST match hdf5_schema.DLD_COLUMNS / create_pandas_dataframe.
-            dld_group_array = hdf5_schema.stack_columns(
+            dld_group_array = hdf5_schema.column_mapping(hdf5_schema.DLD_COLUMNS,
                 (dld_high_voltage, dld_pulse_v, dld_pulse_l, dld_start_counter, dld_t, dld_x, dld_y)
             )
             dld_group_storage = create_pandas_dataframe(
                 dld_group_array, mode='dld', flag_old_pyccpat_data=flag_old_pyccpat_data
             )
-            return dld_group_storage
+            missing = []
+            for column, aliases in {
+                'pulse_v (V)': ('dld/pulse', 'dld/voltage_pulse', 'dld/pulse_voltage'),
+                'pulse_l (pJ)': hdf5_schema.DLD_GROUP_ALIASES['pulse_l (pJ)'],
+                'start_counter': ('dld/start_counter',),
+            }.items():
+                if not any(alias in hdf5_data for alias in aliases):
+                    missing.append(column)
+            if missing:
+                dld_group_storage.attrs['pyccapt_unavailable_columns'] = missing
+            from pyccapt.instrument_metadata import attach_instrument_metadata
+            return attach_instrument_metadata(dld_group_storage, filename)
         except KeyError as error:
             print(error)
             print("[*] Keys missing in the dataset")
@@ -250,7 +287,7 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld', *, lazy: bool 
             print("[*] HDF5 file not found")
     elif extract_mode in {'tdc_sc', 'tdc_ro'}:
         try:
-            hdf5_data = data_tools.read_hdf5(filename)
+            hdf5_data = data_tools.read_hdf5(filename, groups=("tdc",))
             if hdf5_data is None:
                 raise FileNotFoundError
             channel = hdf5_data['tdc/channel'].to_numpy()
@@ -272,11 +309,14 @@ def fetch_dataset_from_dld_grp(filename: str, extract_mode='dld', *, lazy: bool 
 
             # Shape-robust stack (see DLD branch). Column order MUST match
             # hdf5_schema.TDC_COLUMNS / create_pandas_dataframe('tdc_*').
-            dld_group_array = hdf5_schema.stack_columns(
+            dld_group_array = hdf5_schema.column_mapping(hdf5_schema.TDC_COLUMNS,
                 (channel, start_counter, high_voltage, voltage_pulse, laser_pulse, time_data)
             )
             dld_group_storage = create_pandas_dataframe(dld_group_array, mode=extract_mode)
-            return dld_group_storage
+            if 'tdc/laser_pulse' not in hdf5_data:
+                dld_group_storage.attrs['pyccapt_unavailable_columns'] = ['pulse_l (pJ)']
+            from pyccapt.instrument_metadata import attach_instrument_metadata
+            return attach_instrument_metadata(dld_group_storage, filename)
         except KeyError as error:
             print(error)
             print("[*] Keys missing in the dataset")
@@ -338,6 +378,7 @@ def _fetch_dataset_from_dld_grp_lazy(filename: str, extract_mode: str):
         selected,
         source_path=raw.source_path,
         close=raw.close,
+        attrs=raw.attrs,
     )
 
 def concatenate_dataframes_of_dld_grp(dataframe_list: list) -> pd.DataFrame:
@@ -487,15 +528,18 @@ def plot_crop_experiment_history(
 
     if data_crop:
         if dc_plot and pulse_plot:
-            rectangle_box_selector(ax3, variables)
+            selector = rectangle_box_selector(ax3, variables)
         elif dc_plot and not pulse_plot:
-            rectangle_box_selector(ax2, variables)
+            selector = rectangle_box_selector(ax2, variables)
         elif not dc_plot and pulse_plot:
-            rectangle_box_selector(ax3, variables)
+            selector = rectangle_box_selector(ax3, variables)
         elif not pulse_plot and not dc_plot:
-            rectangle_box_selector(ax1, variables)
+            selector = rectangle_box_selector(ax1, variables)
         plt.connect('key_press_event', selectors_data.toggle_selector(variables))
-    if draw_rect:
+    if draw_rect and data_crop:
+        selector.set_visible(True)
+        selector.extents = (variables.selected_x1, variables.selected_x2, *selector.ax.get_ylim())
+    elif draw_rect:
         left, bottom, width, height = (variables.selected_x1, 0, variables.selected_x2 - variables.selected_x1, np.max(tof))
         rect = Rectangle((left, bottom), width, height, fill=True, alpha=0.3, color="r", linewidth=5)
         ax1.add_patch(rect)
@@ -657,8 +701,12 @@ def plot_crop_fdm(
 
     if variables is not None:
         if data_crop:
-            elliptical_shape_selector(ax1, fig1, variables, mode=mode_selector)
-        if draw_circle:
+            selector = elliptical_shape_selector(ax1, fig1, variables, mode=mode_selector)
+            if draw_circle and variables.roi_fdm > 0:
+                x0, y0, radius = variables.selected_x_fdm, variables.selected_y_fdm, variables.roi_fdm
+                selector.set_visible(True)
+                selector.extents = (x0-radius, x0+radius, y0-radius, y0+radius)
+        if draw_circle and not data_crop:
             print('x:', variables.selected_x_fdm, 'y:', variables.selected_y_fdm, 'roi:', variables.roi_fdm)
             circ = Circle(
                 (variables.selected_x_fdm, variables.selected_y_fdm),
@@ -760,6 +808,7 @@ def rectangle_box_selector(axisObject, variables):
         spancoords='pixels',
         interactive=True,
     )
+    return selectors_data.toggle_selector.RS
 
 def crop_dataset(dld_master_dataframe, variables):
     """
@@ -804,7 +853,7 @@ def elliptical_shape_selector(axisObject, figureObject, variables, mode='circle'
         None
     """
     if mode == 'circle':
-        selectors_data.toggle_selector.ES = selectors_data.CircleSelector(
+        selectors_data.toggle_selector.ES = selectors_data.CropCircleSelector(
             axisObject,
             lambda eclick, erelease: selectors_data.onselect(eclick, erelease, variables),
             useblit=True,
@@ -813,6 +862,8 @@ def elliptical_shape_selector(axisObject, figureObject, variables, mode='circle'
             minspany=1,
             spancoords='pixels',
             interactive=True,
+            use_data_coordinates=True,
+            drag_from_anywhere=True,
         )
     elif mode == 'ellipse':
         selectors_data.toggle_selector.ES = EllipseSelector(
@@ -827,6 +878,7 @@ def elliptical_shape_selector(axisObject, figureObject, variables, mode='circle'
         )
 
     figureObject.canvas.mpl_connect('key_press_event', selectors_data.toggle_selector)
+    return selectors_data.toggle_selector.ES
 
 def crop_data_after_selection(data_crop, variables):
     """
@@ -856,14 +908,23 @@ def crop_data_after_selection(data_crop, variables):
 
     # Partial-recovered rows (merge_partial_tdc=True) carry NaN on the
     # delay-line axis that could not be reconstructed. Their detector
-    # position is *unknown*, not "outside the ROI" -- silently dropping
-    # them would throw away ToF / mass / pulse info that is still valid.
-    # Build the in/out mask only from rows where both axes are finite,
-    # and force partials to pass through unconditionally so the spatial
-    # crop is non-destructive to them.
-    finite_mask = np.isfinite(x) & np.isfinite(y)
+    # position is only partly *unknown*, not "outside the ROI" -- silently
+    # dropping them would throw away ToF / mass / pulse info that is still
+    # valid. Build the in/out mask from rows where both axes are finite.
+    # A single-axis partial is kept only if its known coordinate is within
+    # the crop radius of the centre on that axis (a necessary condition for
+    # lying inside the circle); rows with no finite axis are kept.
+    finite_x = np.isfinite(x)
+    finite_y = np.isfinite(y)
+    finite_mask = finite_x & finite_y
     partial_mask = ~finite_mask
-    n_partials = int(partial_mask.sum())
+    partial_keep = partial_mask.copy()
+    x_only = finite_x & ~finite_y
+    y_only = finite_y & ~finite_x
+    partial_keep[x_only] = np.abs(x[x_only] - center_x) <= radius
+    partial_keep[y_only] = np.abs(y[y_only] - center_y) <= radius
+    n_partials = int(partial_keep.sum())
+    n_partials_dropped = int(partial_mask.sum()) - n_partials
 
     x_finite = x[finite_mask]
     y_finite = y[finite_mask]
@@ -879,14 +940,16 @@ def crop_data_after_selection(data_crop, variables):
 
     detector_dist = np.full(len(data_crop), np.inf, dtype=np.float64)
     detector_dist[finite_mask] = np.sqrt((x_finite - center_x) ** 2 + (y_finite - center_y) ** 2)
-    mask_fdm = (detector_dist <= radius) | partial_mask  # keep partials always
+    mask_fdm = (detector_dist <= radius) | partial_keep
     if not np.any(mask_fdm & finite_mask):
         raise ValueError('Spatial crop does not contain any position-capable detector hits')
 
-    if n_partials > 0:
+    if n_partials > 0 or n_partials_dropped > 0:
         print(
             f'[crop_data_after_selection] Keeping {n_partials} partial-recovered rows '
-            '(NaN x_det/y_det) unconditionally; spatial-only analyses must still filter them.'
+            f'(NaN x_det/y_det) whose known axis lies within the crop radius; dropped '
+            f'{n_partials_dropped} whose known axis lies outside. Spatial-only analyses '
+            'must still filter the kept partials.'
         )
 
     cropped = data_crop.loc[mask_fdm].copy()
@@ -917,9 +980,15 @@ def create_pandas_dataframe(data_crop, mode='dld', flag_old_pyccpat_data=False):
             XYFACTOR = 80 / DETBINS * BINNINGFAC  # XXX mm/bin
             XYBINSHIFT = DETBINS / BINNINGFAC / 2  # to center detector
 
-            data_crop[:, 4] = data_crop[:, 4] * TOFFACTOR  # in ns
-            data_crop[:, 5] = ((data_crop[:, 5] - XYBINSHIFT) * XYFACTOR) * 0.1  # from mm to in cm by dividing by 10
-            data_crop[:, 6] = ((data_crop[:, 6] - XYBINSHIFT) * XYFACTOR) * 0.1  # from mm to in cm by dividing by 10
+            if isinstance(data_crop, dict):
+                data_crop = dict(data_crop)
+                data_crop['t (ns)'] = data_crop['t (ns)'] * TOFFACTOR
+                for name in ('x_det (cm)', 'y_det (cm)'):
+                    data_crop[name] = ((data_crop[name] - XYBINSHIFT) * XYFACTOR) * .1
+            else:
+                data_crop[:, 4] = data_crop[:, 4] * TOFFACTOR  # in ns
+                data_crop[:, 5] = ((data_crop[:, 5] - XYBINSHIFT) * XYFACTOR) * 0.1
+                data_crop[:, 6] = ((data_crop[:, 6] - XYBINSHIFT) * XYFACTOR) * 0.1
 
         hdf_dataframe = pd.DataFrame(
             data=data_crop,
@@ -981,9 +1050,13 @@ def calculate_ppi_and_ipp(data, max_start_counter):
         return delta_p, multi
     progress_step = max(1, total_iterations // 5)
 
-    previous_counter = counter[0]
+    # Python ints: ``start_counter`` is stored as uint64, so numpy
+    # subtraction at a counter wrap would underflow to ~1.8e19 instead of
+    # going negative, and the wrap branch below would never fire.
+    previous_counter = int(counter[0])
     run_start = 0
     for i, current_counter in enumerate(counter):
+        current_counter = int(current_counter)
         if i == 0:
             delta_p[i] = 0
         else:

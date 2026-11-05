@@ -32,7 +32,7 @@ of expected ``ReferenceLine`` (m/z, tolerance, weight), the optimizer:
 5. Predicts the per-ion correction factor and applies::
 
       corrected_mc  = raw / factor                  (mc)
-      corrected_tof = raw / sqrt(factor)            (tof)
+      corrected_tof = raw / factor                  (tof)
 
 6. Acceptance gate: revert if ``n_peaks`` drops, if ``ref_hit`` drops,
    or if geomean MRP drops beyond ``mrp_tolerance``.
@@ -54,6 +54,7 @@ from scipy.optimize import least_squares
 
 from pyccapt.calibration.core import calibration as _cal
 from pyccapt.calibration.core import event_filters as _ef
+from pyccapt.calibration.core.exceptions import CalibrationInputError
 from pyccapt.calibration.core.mc_plot_peak_helpers import fast_mrp
 
 
@@ -231,7 +232,8 @@ def _cell_observations(
     # chunk would propagate NaN to obs_x/obs_y, blowing up the joint
     # voltage+spatial least-squares fit. Restrict the in-peak mask to
     # position-capable rows before chunk aggregation.
-    finite_xy_global = np.isfinite(np.asarray(x_det, dtype=float)) & np.isfinite(np.asarray(y_det, dtype=float))
+    finite_xy_global = (np.isfinite(x_det) & np.isfinite(y_det)
+                        & np.isfinite(voltage) & (voltage > 0))
     for det_idx, ref_idx, _dist in matches:
         peak = detected_peaks[det_idx]
         ref = references[ref_idx]
@@ -381,6 +383,12 @@ def fit_reference_constrained(
     x_det = np.asarray(variables.dld_x_det, dtype=float)
     y_det = np.asarray(variables.dld_y_det, dtype=float)
     n_ions = raw.size
+    if any(values.shape != raw.shape for values in (voltage, x_det, y_det)):
+        raise CalibrationInputError("Calibration, voltage and detector arrays must have matching shapes")
+    valid_features = (np.isfinite(voltage) & (voltage > 0)
+                      & np.isfinite(x_det) & np.isfinite(y_det))
+    if not np.any(valid_features):
+        return {"ok": False, "reason": "no_complete_features"}
 
     # Build calibration mask (single-hit etc.). The correction factor
     # is fit using the masked ions but applied to ALL ions.
@@ -466,9 +474,9 @@ def fit_reference_constrained(
         return {"ok": False, "reason": "no_cells"}
 
     # Normalise features
-    v_mean = float(np.mean(voltage)); v_std = max(float(np.std(voltage)), 1e-6)
-    x_mean = float(np.mean(x_det)); x_std = max(float(np.std(x_det)), 1e-6)
-    y_mean = float(np.mean(y_det)); y_std = max(float(np.std(y_det)), 1e-6)
+    v_mean = float(np.mean(voltage[valid_features])); v_std = max(float(np.std(voltage[valid_features])), 1e-6)
+    x_mean = float(np.mean(x_det[valid_features])); x_std = max(float(np.std(x_det[valid_features])), 1e-6)
+    y_mean = float(np.mean(y_det[valid_features])); y_std = max(float(np.std(y_det[valid_features])), 1e-6)
 
     def _norm(arr_val, mean, std):
         return (arr_val - mean) / std
@@ -539,30 +547,32 @@ def fit_reference_constrained(
 
     params = result.x
     # Predict per-ion factor
-    vn_full = _norm(voltage, v_mean, v_std)
-    xn_full = _norm(x_det, x_mean, x_std)
-    yn_full = _norm(y_det, y_mean, y_std)
+    vn_full = _norm(voltage[valid_features], v_mean, v_std)
+    xn_full = _norm(x_det[valid_features], x_mean, x_std)
+    yn_full = _norm(y_det[valid_features], y_mean, y_std)
     tn_full = (np.arange(n_ions, dtype=float) / max(1.0, n_ions - 1)) * 2.0 - 1.0
-    factor = _factor_from_params(params, vn_full, xn_full, yn_full, tn_full, effective_bowl_degree)
-    factor = np.clip(factor, correction_bounds[0], correction_bounds[1])
-
-    if calibration_mode == "tof":
-        factor_applied = np.sqrt(np.maximum(factor, 1e-6))
-    else:
-        factor_applied = factor
-    candidate = raw / np.maximum(factor_applied, 1e-6)
+    factor = np.ones(n_ions, dtype=float)
+    factor[valid_features] = np.clip(
+        _factor_from_params(params, vn_full, xn_full, yn_full,
+                            tn_full[valid_features], effective_bowl_degree),
+        correction_bounds[0], correction_bounds[1],
+    )
+    # The residual fits observed/reference in the requested domain. Applying
+    # its square root in ToF mode would leave half of a small fitted drift.
+    candidate = raw / np.maximum(factor, 1e-6)
 
     # Acceptance gate: compare candidate against raw on the audit metric
     pre = _audit_simple(raw, lim, reference_lines)
     post = _audit_simple(candidate, lim, reference_lines)
     accepted = (
-        post["n_peaks"] >= pre["n_peaks"]
+        result.success
+        and np.all(np.isfinite(factor))
+        and pre["n_peaks"] > 0
+        and post["n_peaks"] >= pre["n_peaks"]
         and post["ref_hit"] >= pre["ref_hit"]
-        and (
-            not np.isfinite(pre["geomean_mrp"])
-            or not np.isfinite(post["geomean_mrp"])
-            or post["geomean_mrp"] >= pre["geomean_mrp"] * (1.0 - float(mrp_drop_tolerance))
-        )
+        and np.isfinite(pre["geomean_mrp"])
+        and np.isfinite(post["geomean_mrp"])
+        and post["geomean_mrp"] >= pre["geomean_mrp"] * (1.0 - float(mrp_drop_tolerance))
     )
     info = {
         "ok": bool(accepted),

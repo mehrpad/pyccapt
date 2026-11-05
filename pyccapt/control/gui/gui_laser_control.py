@@ -1617,11 +1617,15 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             and (getattr(self.laser_device, 'protocol', None) != 'nktpbus' or code == 9))
         self.laser_rate.setEnabled(idle and not running and bool(getattr(self, '_frequency_table', {})))
         self.laser_divition_factor.setEnabled(known and not running)
-        self.laser_power.setEnabled(known and not self._laser_alignment_busy()
+        # dev broadened the laser-power lock to cover sample alignment too
+        # (_alignment_laser_settings_locked = laser alignment OR running sample
+        # alignment); the watt setpoint is laser power as well, so both the AOM
+        # slider and the watt field use the broader lock.
+        self.laser_power.setEnabled(known and not self._alignment_laser_settings_locked()
                                     and getattr(self, '_laser_power_control_mode', 'aom') == 'aom')
         if hasattr(self, 'laser_ir_power_control'):
             native = getattr(self.laser_device, 'protocol', None) == 'nktpbus'
-            watt_enabled = (native and known and not running and not self._laser_alignment_busy()
+            watt_enabled = (native and known and not running and not self._alignment_laser_settings_locked()
                             and getattr(self, '_laser_power_control_mode', 'watts') == 'watts')
             self.laser_ir_power_control.setEnabled(watt_enabled)
             if not watt_enabled:
@@ -1632,6 +1636,9 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
                    if native else 'Watt control requires a native connection. Selecting Use watts (W) from AOM mode '
                    'connects it explicitly and stops output once. This controls IR feeding the selected output.')
             self.laser_ir_power_control.setToolTip(tip)
+        # Supersedes dev's inline LED loop: _render_laser_indicators drives the
+        # same four LEDs and additionally blinks pending requests (code 17
+        # warm-up included, which is what dev's LaserState.SETUP branch showed).
         self._render_laser_indicators()
         self._update_laser_power_mode_button()
         self._update_laser_mode_buttons()

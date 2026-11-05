@@ -331,7 +331,8 @@ def test_tracking_verification_must_preserve_baseline_improvement(tmp_path, veri
     if retained:
         assert e.phase == 'tracking_wait' and e.best_position == (1e-6, 0., 0.)
     else:
-        assert e.pending[2] == 'retry'
+        # A verification failure after a scan with signal is a recheck, not "no signal".
+        assert e.pending[2] == 'recheck'
         assert v.laser_alignment_move_request['target_m'] == e.centre
 
 
@@ -372,3 +373,146 @@ def test_auto_laser_waits_for_stage_alignment_then_takes_voltage_ownership(tmp_p
     assert runtime.engine is not None and runtime.engine.owns_voltage
     assert runtime.voltage_step(1500., .1) == 0.
     assert v.laser_alignment_move_request
+
+
+# --- 2026-10 alignment review fixes -------------------------------------------
+
+def _aligned(tmp_path):
+    sim = Simulation(tmp_path)
+    for _ in range(200):
+        sim.tick()
+        if sim.engine.phase == 'tracking_wait': break
+    assert sim.engine.aligned
+    return sim
+
+
+@pytest.mark.parametrize('glitch', ['readback', 'stage', 'heartbeat', 'output_off'])
+def test_idle_tracker_glitch_never_fails_the_experiment(tmp_path, glitch):
+    sim = _aligned(tmp_path)
+    assert not sim.engine.owns_voltage and not sim.v.laser_alignment_status['active']
+    for _ in range(20):
+        sim.now += 1
+        if glitch == 'readback':
+            sim.v.laser_telemetry = {**sim.v.laser_telemetry, 'valid': False, 'monotonic': sim.now}
+        elif glitch == 'output_off':
+            sim.v.laser_telemetry = {**sim.v.laser_telemetry, 'status_code': 1, 'monotonic': sim.now}
+        elif glitch == 'heartbeat':
+            sim.v.laser_alignment_heartbeat = 0.
+        # 'stage': the snapshot is left to go stale
+        sim.engine.tick(sim.now)
+    assert sim.engine.phase == 'tracking_wait' and not sim.engine.finished
+
+
+def test_tracking_due_with_bad_readback_pauses_instead_of_failing(tmp_path):
+    sim = _aligned(tmp_path)
+    sim.v.laser_alignment_tracking = True
+    sim.now += sim.engine.cfg.tracking_interval_s
+    sim.v.laser_telemetry = {**sim.v.laser_telemetry, 'valid': False, 'monotonic': sim.now}
+    sim.engine.tick(sim.now)
+    assert sim.engine.phase == 'tracking_wait' and 'Tracking paused' in sim.engine.reason
+
+
+def test_error_during_tracking_scan_pauses_tracking(tmp_path):
+    sim = _aligned(tmp_path)
+    sim.v.laser_alignment_tracking = True
+    sim.now += sim.engine.cfg.tracking_interval_s
+    sim.tick()
+    assert sim.engine.kind == 'tracking' and sim.engine.owns_voltage
+    sim.v.pulse_mode = 'Voltage'
+    sim.tick()
+    assert sim.engine.phase == 'tracking_wait' and not sim.engine.finished
+    assert 'Tracking paused' in sim.engine.reason
+
+
+def test_unsuccessful_tracking_never_escalates(tmp_path):
+    sim = _aligned(tmp_path)
+    e = sim.engine
+    e.kind, voltage = 'tracking', e.target_voltage
+    e._retry(signal_seen=True)
+    assert e.phase == 'tracking_wait' and e.kind == 'tracking'
+    assert e.target_voltage == voltage and e.fine_failures == 0 and e.recoveries == 0
+
+
+def test_coarse_verification_failure_with_signal_rescans_at_same_dc(tmp_path):
+    v, conf, now = rig(tmp_path)
+    e = LaserAlignment(v, conf, now=now)
+    voltage = e.target_voltage
+    for attempt in (1, 2):
+        e.pending = None
+        e._retry(signal_seen=True)
+        assert e.kind == 'coarse' and e.target_voltage == voltage and e.coarse_rechecks == attempt
+    e.pending = None
+    e._retry(signal_seen=True)  # repeated unverifiable candidates: now DC may rise
+    assert e.phase == 'ramp' and e.target_voltage == voltage+e.cfg.voltage_increment
+
+
+def test_kept_centre_is_verified_against_its_latest_measurement(tmp_path):
+    v, conf, now = rig(tmp_path)
+    e = LaserAlignment(v, conf, now=now)
+    e.pending = None
+    first = e._record(1.0, .003, 100000, {})
+    neighbour = e._record(1.001, .003, 100100, {})
+    neighbour['position_m'] = (1e-6, 0., 0.)
+    repeat = e._record(.75, .003, 75000, {})  # the rate decayed during the scan
+    e.records = [first, neighbour, repeat]
+    e._complete_scan()
+    assert e.candidate is repeat
+    e.pending = None
+    e._accepted(e._record(.75, .003, 75000, {}))
+    assert e.kind == 'fine'  # accepted, not rejected against the stale first point
+
+
+def test_rate_overshoot_steps_dc_down_and_restarts_scan(tmp_path):
+    sim = Simulation(tmp_path)
+    sim.v.detection_rate = 1.
+    while sim.engine.phase != 'coarse':
+        sim.tick()
+    sim.v.detection_rate_current = 3.
+    sim.engine.tick(sim.now+.1)
+    assert not sim.engine.finished
+    assert sim.engine.phase == 'ramp' and sim.engine.target_voltage == 1450.
+    assert sim.engine.voltage_step(1500., .1) < 0
+    sim.v.detection_rate_current = 1.
+    sim.tick()  # simulated supply reaches the lower target
+    sim.tick()
+    assert sim.engine.kind == 'coarse' and sim.engine.phase in ('moving', 'coarse')
+
+
+def test_rate_overshoot_at_minimum_voltage_still_stops(tmp_path):
+    sim = Simulation(tmp_path)
+    sim.v.detection_rate, sim.v.vdc_min = 1., 1500.
+    while sim.engine.phase != 'coarse':
+        sim.tick()
+    sim.v.detection_rate_current = 3.
+    sim.engine.tick(sim.now+.1)
+    assert sim.engine.phase == 'failed' and 'overshoot' in sim.engine.reason
+
+
+def test_operator_request_replaces_idle_tracker(tmp_path):
+    from pyccapt.control.apt.laser_alignment_runtime import LaserAlignmentRuntime
+    sim = _aligned(tmp_path)
+    owner = SimpleNamespace(variables=sim.v, conf=sim.conf, log_apt=Mock(), _run_failure='',
+                            _switch_control_algorithm=Mock())
+    sim.v.laser_alignment_command = {}
+    runtime = LaserAlignmentRuntime(owner)
+    runtime.engine = old = sim.engine
+    sim.v.laser_alignment_cancel = False
+    sim.v.laser_alignment_command = {'id': 'new', 'mode': 'fine', 'issued': time.monotonic()}
+    sim.v.laser_stage_snapshot = (*sim.v.laser_stage_snapshot[:3], time.monotonic())
+    sim.v.laser_telemetry = {**sim.v.laser_telemetry, 'monotonic': time.monotonic()}
+    runtime.tick()
+    assert old.finished and runtime.engine is not old and runtime.engine.kind == 'fine'
+
+
+def test_rate_overshoot_during_a_move_ramps_down_after_the_move(tmp_path):
+    sim = Simulation(tmp_path)
+    sim.v.detection_rate = 1.
+    assert sim.engine.pending
+    sim.v.detection_rate_current = 3.
+    sim.engine.tick(sim.now+.1)
+    assert not sim.engine.finished and sim.engine.pending[2] == 'ramp'
+    sim.engine.tick(sim.now+.2)  # still overshooting while moving: no stacked decrease
+    assert sim.engine.target_voltage == 1450. and sim.engine.overshoots == 1
+    sim.v.detection_rate_current = 1.
+    sim.tick()  # the move is acknowledged
+    assert sim.engine.phase == 'ramp' and sim.engine.target_voltage == 1450.

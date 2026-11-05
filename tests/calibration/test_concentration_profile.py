@@ -35,12 +35,12 @@ def test_profile_uses_all_events_as_denominator_and_stoichiometry():
     # First window: H contributes 1 atom, H2 contributes 2, O contributes 1,
     # and the unranged event contributes one unknown atom-equivalent.
     assert profile["H (element)"].tolist() == [60.0, 0.0]
-    assert profile["H2 (ion)"].tolist() == [40.0, 0.0]
+    assert profile["H2 (ion atoms)"].tolist() == [40.0, 0.0]
     assert profile["ranged_atoms"].tolist() == [4.0, 2.0]
     assert profile["unranged_events"].tolist() == [1, 0]
     assert profile["total_atom_equivalents"].tolist() == [5.0, 2.0]
     assert np.isclose(profile.attrs["overall_percentages"]["H (element)"], 300 / 7)
-    assert np.isclose(profile.attrs["overall_percentages"]["H2 (ion)"], 200 / 7)
+    assert np.isclose(profile.attrs["overall_percentages"]["H2 (ion atoms)"], 200 / 7)
 
 
 def test_plot_legend_reports_only_selected_overall_percentages():

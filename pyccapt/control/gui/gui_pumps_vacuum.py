@@ -73,6 +73,10 @@ class Ui_Pumps_Vacuum(PumpLayoutMixin):
         self.flag_vent_cll_partial = False
         self.variables.flag_vent_cryo_load_lock_partial = False
         self._vent_valve_task = None
+        # Incremented on every press/deselect. Delayed valve steps only run if
+        # they belong to the current cycle, so a timer from an earlier cycle
+        # cannot act inside a later one with the same flag value.
+        self._cll_vent_cycle = 0
 
         # --- LL baking log state ---
         # Latest LL temperature (deg C) seen on the temp_ll signal; cached so
@@ -561,11 +565,10 @@ class Ui_Pumps_Vacuum(PumpLayoutMixin):
         self._sync_pump_action_styles()
         # Full CLL venting is unlocked by the shared Gates override.
         self.pump_cryo_load_lock_switch.setEnabled(False)
-        # Initialise the CLL vent valve CLOSED and HOLD the line low. The
-        # USB-6501 output floats HIGH via its pull-up when undriven, which would
-        # leave the active-high vent relay energised (CLL venting) at startup.
-        # Driving it low here opens a held task so the CLL starts un-vented.
-        self._set_vent_valve(True)  # True = closed, False = open
+        # Initialise the CLL vent valve CLOSED and HOLD the line: the USB-6501
+        # output floats HIGH via its pull-up when undriven, so a held task is
+        # opened here. The closing level is set by cll_vent_valve_open_level.
+        self._set_vent_valve_open(False)
         # Set 8 digits for each LCD to show
         self.vacuum_main.setDigitCount(8)
         self.vacuum_buffer.setDigitCount(8)
@@ -1320,6 +1323,8 @@ class Ui_Pumps_Vacuum(PumpLayoutMixin):
                     self.timer.start(8000)
                     return
                 self.flag_vent_cll_partial = True
+                self._cll_vent_cycle += 1
+                cycle = self._cll_vent_cycle
                 self._set_action_button_active(
                     self.vent_cryo_load_lock_partial_switch, True, self.vent_partial_default_style
                 )
@@ -1328,76 +1333,82 @@ class Ui_Pumps_Vacuum(PumpLayoutMixin):
                 self._set_cll_valve_6525(self.conf['cll_turbo_valve_line'], False)
                 # Vent valve on after a short delay (then held on).
                 delay_ms = int(float(self.conf.get('cll_vent_on_delay', 2)) * 1000)
-                QTimer.singleShot(delay_ms, self._vent_cll_press_delayed)
+                QTimer.singleShot(delay_ms, lambda: self._vent_cll_press_delayed(cycle))
                 self.error_message("!!! Venting CLL for sample/cryo exchange !!!")
             else:
                 # ---- stop venting / restore pumping ----
                 # Always allowed - restoring the pumps is the safe direction.
                 self.flag_vent_cll_partial = False
+                self._cll_vent_cycle += 1
+                cycle = self._cll_vent_cycle
                 self._set_action_button_active(
                     self.vent_cryo_load_lock_partial_switch, False, self.vent_partial_default_style
                 )
                 # Close the vent valve and re-open the backing valve immediately.
-                self._set_vent_valve(True)  # True = closed, False = open
+                self._set_vent_valve_open(False)
                 self.variables.flag_vent_cryo_load_lock_partial = False
                 self._set_cll_valve_6525(self.conf['cll_backing_valve_line'], True)
                 # Backing valve closes again after a delay; Turbo valve opens
                 # after a longer delay (protects the turbo). Both are guarded
                 # against a re-press within the delay window.
                 backing_off_ms = int(float(self.conf.get('cll_backing_off_delay', 90)) * 1000)
-                QTimer.singleShot(backing_off_ms, self._vent_cll_deselect_backing_off)
+                QTimer.singleShot(backing_off_ms, lambda: self._vent_cll_deselect_backing_off(cycle))
                 turbo_on_ms = int(float(self.conf.get('cll_turbo_on_delay', 90)) * 1000)
-                QTimer.singleShot(turbo_on_ms, self._vent_cll_deselect_turbo_on)
+                QTimer.singleShot(turbo_on_ms, lambda: self._vent_cll_deselect_turbo_on(cycle))
                 self.error_message("!!! CLL vent closed - restoring pumps !!!")
         except Exception as e:
             print('Error in vent_cryo_load_lock_partial function')
             print(e)
 
-    def _vent_cll_press_delayed(self):
+    def _vent_cll_press_delayed(self, cycle=None):
         """Delayed part of the "Vent CLL" press sequence: open the vent valve.
 
-        Guarded by ``flag_vent_cll_partial`` so a quick deselect within the
-        delay window cancels it (leaves the vent valve closed).
+        Runs only for the press that scheduled it (``cycle``), so a quick
+        deselect within the delay window cancels it (leaves the vent valve
+        closed), even if the operator has pressed Vent again since.
 
         Args:
-                None
+                cycle: ``_cll_vent_cycle`` when the press was made.
 
         Return:
                 None
         """
-        if self.flag_vent_cll_partial:
-            self._set_vent_valve(False) # True = closed, False = open
+        if self.flag_vent_cll_partial and cycle in (None, self._cll_vent_cycle):
+            self._set_vent_valve_open(True)
             self.variables.flag_vent_cryo_load_lock_partial = True
 
-    def _vent_cll_deselect_backing_off(self):
+    def _vent_cll_deselect_backing_off(self, cycle=None):
         """Delayed part of the "Vent CLL" deselect sequence: close the backing valve.
 
         On deselect the backing valve opens immediately and then closes again
-        after ``cll_backing_off_delay`` s. Guarded by ``flag_vent_cll_partial``
-        so a quick re-press within the delay window cancels it.
+        after ``cll_backing_off_delay`` s. Runs only for the deselect that
+        scheduled it, so a re-press (or a later vent/deselect cycle) within
+        the delay window cancels it.
 
         Args:
-                None
+                cycle: ``_cll_vent_cycle`` when the deselect was made.
 
         Return:
                 None
         """
-        if not self.flag_vent_cll_partial:
+        if not self.flag_vent_cll_partial and cycle in (None, self._cll_vent_cycle):
             self._set_cll_valve_6525(self.conf['cll_backing_valve_line'], False)
 
-    def _vent_cll_deselect_turbo_on(self):
+    def _vent_cll_deselect_turbo_on(self, cycle=None):
         """Delayed part of the "Vent CLL" deselect sequence: open the Turbo valve.
 
-        Guarded by ``flag_vent_cll_partial`` so a quick re-press within the
-        delay window cancels it (leaves the Turbo valve closed while venting).
+        Runs only for the deselect that scheduled it, so a re-press within the
+        delay window cancels it (leaves the Turbo valve closed while venting),
+        and a stale timer from an earlier deselect cannot open the turbo early
+        after a later vent/deselect cycle.
 
         Args:
-                None
+                cycle: ``_cll_vent_cycle`` when the deselect was made.
 
         Return:
                 None
         """
-        if not self.flag_vent_cll_partial:
+        if not self.flag_vent_cll_partial and cycle in (None, self._cll_vent_cycle):
             self._set_cll_valve_6525(self.conf['cll_turbo_valve_line'], True)
 
     def _set_cll_valve_6525(self, line_num, state):
@@ -1444,23 +1455,39 @@ class Ui_Pumps_Vacuum(PumpLayoutMixin):
             except Exception:
                 pass
 
+    def _set_vent_valve_open(self, open_valve):
+        """Open (vent) or close the CLL vent valve.
+
+        Which line level opens the valve is ``cll_vent_valve_open_level``
+        ("high" or "low"). The default "low" reproduces the levels this GUI has
+        always written (open -> LOW, closed -> HIGH). The config wiring note and
+        the 6501 pull-up behaviour describe HIGH = venting instead, so confirm
+        on the instrument (devices_test/vent_valve.py) and set the key.
+
+        Args:
+                open_valve: True to vent, False to close the vent valve.
+
+        Return:
+                None
+        """
+        open_level = str(self.conf.get('cll_vent_valve_open_level', 'low')).strip().lower()
+        if open_level not in ('high', 'low'):
+            raise ValueError('cll_vent_valve_open_level must be "high" or "low".')
+        self._set_vent_valve((open_level == 'high') == bool(open_valve))
+
     def _set_vent_valve(self, state):
-        """Drive the CLL vent-valve relay on/off and HOLD the line.
+        """Drive the CLL vent-valve relay line to a level and HOLD it.
 
         The vent valve is a level-controlled relay on the NI USB-6501
         (``COM_PORT_cll_vent_valve``). The 6501 DIO lines are open-collector
         with a weak on-board 4.7 kOhm pull-up, so a line that is NOT actively
-        driven floats HIGH (~5 V) and leaves an active-high relay stuck ON.
-        The DAQmx task is therefore kept OPEN for the life of the panel and
-        just writes the level:
-                True  -> relay ON  (vent open)   - line released/high
-                False -> relay OFF (vent closed)  - line actively driven LOW
-        The task is NOT closed on the off-path: closing it would release the
-        line back to the pull-up and re-energise the relay (this was the bug
-        where the vent could never be switched off).
+        driven floats HIGH (~5 V). The DAQmx task is therefore kept OPEN for
+        the life of the panel and just writes the level. It is NOT closed on
+        the off-path: closing it would release the line back to the pull-up.
+        Use :meth:`_set_vent_valve_open` for open/close semantics.
 
         Args:
-                state: True to open (vent), False to close the vent valve.
+                state: True drives the line HIGH, False drives it LOW.
 
         Return:
                 None

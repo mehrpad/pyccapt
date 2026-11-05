@@ -767,7 +767,7 @@ def test_combinatorial_recovery_complete_events_require_pair_sum_coincidence():
 
 def test_combinatorial_recovery_axis_aware_detector_gate():
     """A 2-DLTS x-axis partial is rejected ONLY by its reconstructed det_x;
-    its y coordinate (always 0.0) is not used as a rejection criterion."""
+    its y coordinate (unknown, NaN) is not used as a rejection criterion."""
     # Times chosen so the x-pair has a huge difference → |det_x| outside.
     record = _record(
         channels=[0, 1],

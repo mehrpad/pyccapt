@@ -227,7 +227,12 @@ def surface_concept_hits_to_processed_dataframe(
     pulse_mode: str = 'voltage',
     max_start_counter: int = 20000,
 ) -> pd.DataFrame:
-    """Convert recovered Surface Concept hits into a PyCCAPT-style processed dataframe."""
+    """Convert recovered Surface Concept hits into a PyCCAPT-style processed dataframe.
+
+    ``dlts`` and ``detector_axis`` are carried over when present so 2-DLTS
+    partial hits (one detector coordinate ``NaN``) stay identifiable in
+    downstream plots and FDMs instead of passing as ordinary ions.
+    """
     frame = hit_table.copy()
     if 'in_detector' in frame.columns:
         frame = frame[frame['in_detector']]
@@ -259,6 +264,9 @@ def surface_concept_hits_to_processed_dataframe(
             'start_counter': frame['start_counter'].to_numpy(dtype=np.uint32),
         }
     )
+    for column in ('dlts', 'detector_axis'):
+        if column in frame.columns:
+            processed[column] = frame[column].to_numpy()
     return processed
 
 

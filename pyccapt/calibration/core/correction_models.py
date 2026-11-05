@@ -138,10 +138,12 @@ class EstimatorCorrectionModel(CalibrationModel):
     def provenance(self) -> dict:
         parameters = self.estimator.get_params(deep=False) if hasattr(self.estimator, "get_params") else {}
         serializable = {key: value for key, value in parameters.items() if isinstance(value, (str, int, float, bool, type(None)))}
+        from pyccapt.calibration.data_tools.model_state import export_model_state
         return {
             "model_type": type(self).__name__,
             "estimator_type": type(self.estimator).__name__,
             "parameters": serializable,
+            "learned_state": export_model_state(self.estimator),
             "valid_domain": {key: list(value) for key, value in self._valid_domain.items()},
         }
 
@@ -244,6 +246,22 @@ def _predict_voltage_model(model_name, fitresult, voltage_values):
     if model_name == "curve_fit":
         return voltage_corr(voltage_values, *fitresult)
     return fitresult.predict(voltage_values.reshape(-1, 1))
+
+
+def _voltage_correction_factors(model_name, fitresult, voltage_values):
+    """Positive per-row voltage factors; rows with non-finite voltage get 1.
+
+    Matches the joint voltage/bowl policy: an event without a usable voltage
+    keeps its current calibrated value instead of becoming NaN (or making a
+    robust sklearn model reject the whole array).
+    """
+    voltage_values = np.asarray(voltage_values, dtype=float)
+    factors = np.ones(voltage_values.shape, dtype=float)
+    finite = np.isfinite(voltage_values)
+    if np.any(finite):
+        predicted = np.asarray(_predict_voltage_model(model_name, fitresult, voltage_values[finite]), dtype=float)
+        factors[finite] = np.clip(predicted, np.finfo(float).eps, None)
+    return factors
 
 
 def _predict_bowl_model(fit_mode, parameters, dld_x, dld_y):
@@ -458,5 +476,6 @@ __all__ = [
     "robust_fit",
     "refine_correction_nelder_mead",
     "_predict_voltage_model",
+    "_voltage_correction_factors",
     "_predict_bowl_model",
 ]

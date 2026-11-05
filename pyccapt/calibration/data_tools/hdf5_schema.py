@@ -86,8 +86,8 @@ HSD_GROUPS = (
 INTEGER_COLUMNS = ("channel", "start_counter", "time_data")
 
 
-def stack_columns(columns):
-    """Assemble per-column arrays into a single ``(N, k)`` matrix.
+def _normalized_columns(columns):
+    """Validate per-column arrays and return aligned one-dimensional views.
 
     Each input may be shape ``(N,)`` or ``(N, 1)`` (the reader gets
     ``(N, 1)`` today because ``read_hdf5`` wraps every dataset in a
@@ -108,7 +108,24 @@ def stack_columns(columns):
                 f"{n_rows}; the /dld or /tdc groups have inconsistent "
                 f"lengths (writer/reader schema mismatch)."
             )
-        normalized.append(arr.astype(object, copy=False))
+        normalized.append(arr)
     if not normalized:
         raise ValueError("stack_columns received no columns")
-    return np.column_stack(normalized)
+    return normalized
+
+
+def column_mapping(names, columns):
+    """Typed columns for DataFrame construction without an object matrix.
+
+    Mixed float/uint64 columns must never share a homogeneous floating array:
+    counters above 2**53 would lose bits before their final integer cast.
+    """
+    arrays = _normalized_columns(columns)
+    if len(names) != len(arrays):
+        raise ValueError('Column names and arrays must have equal lengths')
+    return dict(zip(names, arrays))
+
+
+def stack_columns(columns):
+    """Legacy mixed-type matrix API; prefer column_mapping for DataFrames."""
+    return np.column_stack([arr.astype(object, copy=False) for arr in _normalized_columns(columns)])

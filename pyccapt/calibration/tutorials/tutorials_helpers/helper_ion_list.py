@@ -220,6 +220,14 @@ def call_ion_list(variables, selector, mode, path='../../../files/'):
                 else:
                     print('Number of peaks is less than 2. Select more peaks at least 2 peaks')
 
+            if 'fitresult' in locals():
+                from pyccapt.calibration.core.calibration_metadata import record_step
+                record_step(variables, 'parametric_mass_rescale', status='working', model=fitresult,
+                    parameters={'mode': calibration_mode.value, 'observed_peaks': peaks_chos,
+                        'reference_masses_Da': variables.list_material,
+                        'formula': 'c*(t-t0)**2+d*t' if calibration_mode.value == 'tof_calib' else
+                                   ('mc**a+b*mc+c' if len(peaks_chos) > 2 else 'mc**a+b'),
+                        'input': 'working t' if calibration_mode.value == 'tof_calib' else 'backup mc'})
             with out_mc:
                 print('parametric fit done')
         button_fit.disabled = False
@@ -468,6 +476,10 @@ def call_ion_list(variables, selector, mode, path='../../../files/'):
                     return
 
                 variables.mc_calib = corrected
+                from pyccapt.calibration.core.calibration_metadata import record_step
+                record_step(variables, 'nist_mass_rescale', status='working', model=popt,
+                    parameters={'observed_peaks': observed_pairs, 'reference_masses_Da': ideal_pairs,
+                        'input': 'current working mc', 'formula': 'mc**a+b*mc+c' if n_matched >= 3 else 'mc**a+b'})
                 print(f'NIST mc-shift accepted. Press "Plot result" to view.')
         finally:
             button_fit.disabled = False

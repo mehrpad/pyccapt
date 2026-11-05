@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 
 import numpy as np
+from pyccapt.control.core.shared_ring_buffer import publish_plot_events
 
 
 def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_event) -> None:
@@ -23,19 +24,19 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
             y = rng.normal(0.0, 0.8, batch_size)
             tof = rng.normal(100.0, 2.0, batch_size)
             voltage = np.full(batch_size, float(variables.specimen_voltage))
-            x_plot.write(x)
-            y_plot.write(y)
-            t_plot.write(tof)
-            main_v_dc_plot.write(voltage)
+            publish_plot_events(x_plot, y_plot, t_plot, main_v_dc_plot, x, y, tof, voltage)
             event_count += batch_size
             raw_count += batch_size * 4
             variables.total_ions = event_count
             variables.total_raw_signals = raw_count
             pulse_frequency = max(float(variables.pulse_frequency) * 1000.0, 1.0)
-            variables.detection_rate_current = batch_size * 100.0 / pulse_frequency
+            interval_s = max(0.0, float(getattr(variables, "simulator_interval_s", 0.02)))
+            # One batch per interval: rate [% of pulses] = events/s * 100 / pulses/s,
+            # as in the real backends (events*100 / (frequency*elapsed)).
+            variables.detection_rate_current = batch_size * 100.0 / (pulse_frequency * max(interval_s, 1e-3))
             variables.detection_rate_current_plot = variables.detection_rate_current
             batch_count += 1
-            time.sleep(max(0.0, float(getattr(variables, "simulator_interval_s", 0.02))))
+            time.sleep(interval_s)
     except Exception as exc:
         variables.flag_tdc_failure = True
         variables.detector_error = f"Simulator failed: {exc.__class__.__name__}: {exc}"

@@ -86,6 +86,32 @@ def plot_full_spectrum(*args, **kwargs):
 # Top-level analysis runner
 # ---------------------------------------------------------------------------
 
+def effective_peak_units(peak_source: str, peak_units: str) -> str:
+    """Range-table windows are always mc (Da); only manual windows may be TOF."""
+    return "mc" if peak_source == "range" else peak_units
+
+
+def resolve_raw_t0_ns(variables, frame) -> tuple[float, str]:
+    """Return ``(t0_ns, source)`` for the raw hit-table mc conversion.
+
+    Uses ``variables.t0`` when set, else the ``t0_ns`` recorded in the
+    dataset's instrument metadata, else 0 ns (reported as unavailable).
+    """
+    value = getattr(variables, "t0", None)
+    try:
+        if value is not None and np.isfinite(float(value)):
+            return float(value), "`variables.t0`"
+    except (TypeError, ValueError):
+        pass
+    if frame is not None:
+        from pyccapt.instrument_metadata import extract_instrument_settings
+
+        recorded = extract_instrument_settings(frame).get("t0_ns")
+        if recorded is not None and np.isfinite(float(recorded)):
+            return float(recorded), "dataset instrument metadata"
+    return 0.0, "not available — assumed 0 ns"
+
+
 def run_analysis(
     variables,
     species: list[dict],
@@ -204,6 +230,17 @@ def run_analysis(
         # full hit table. This is what keeps the "Full spectrum" view
         # honest — noise events between peaks are still in the hit table.
         max_tof_ns = float(getattr(variables, "max_tof_ns", 5000.0) or 5000.0)
+        t0_ns, t0_source = resolve_raw_t0_ns(variables, dld_df)
+        _md(
+            f"_Hit-table mc uses `tof2mc` with t0 = {t0_ns:g} ns ({t0_source}), "
+            f"flight path = {flight_path_length:g} mm, pulse mode `{pulse_mode}`. "
+            "No voltage or bowl calibration is applied to it._"
+        )
+        if peak_units == "mc" and windows_for_recovery:
+            _md(
+                "_**Note:** mc peak windows (e.g. from a range file, which holds calibrated mc) are matched "
+                "against this uncalibrated hit-table mc, so peaks can sit off their windows._"
+            )
         combinatorial_analysis = analyze_surface_concept_tdc_frame_combinatorial(
             tdc_df,
             peak_windows=windows_for_recovery,
@@ -212,7 +249,7 @@ def run_analysis(
             max_tof_ns=max_tof_ns,
             mode=recovery_mode_value,
             pair_sum_tolerance_bins=float(pair_sum_tolerance_bins),
-            t0=0.0,
+            t0=t0_ns,
             flight_path_length_mm=flight_path_length,
             pulse_mode=pulse_mode,
             show_progress=True,
@@ -754,9 +791,8 @@ def call_auto_raw_data_analysis(variables) -> None:
             if has_range:
                 summary.value = (
                     f"Range table loaded with <b>{len(range_species)}</b> usable rows. "
-                    f"Windows are <b>mc</b> ranges from the table; the dropdown "
-                    f"selection (<i>{unit_label}</i>) controls only how the "
-                    f"per-peak ratio table is binned. Click <i>Run analysis</i>."
+                    f"Range-table windows are <b>mass/charge (Da)</b>, so peak units "
+                    f"are fixed to mc in this mode. Click <i>Run analysis</i>."
                 )
             else:
                 summary.value = (
@@ -774,7 +810,7 @@ def call_auto_raw_data_analysis(variables) -> None:
     )
     peak_units = widgets.Dropdown(
         options=[("TOF (ns)", "tof"), ("Mass/charge (Da)", "mc")],
-        value="tof",
+        value=effective_peak_units(peak_source.value, "tof"),
         description="Peak units:",
         layout=widgets.Layout(width="320px"),
     )
@@ -817,6 +853,7 @@ def call_auto_raw_data_analysis(variables) -> None:
             pair_sum_tol,
         ):
             control.disabled = busy
+        peak_units.disabled = busy or peak_source.value == "range"
         # Manual rows: while busy, force-disabled. Otherwise, restore the
         # source-driven disabled state (rows are disabled in "From range" mode).
         rows_disabled = busy or peak_source.value == "range"
@@ -826,6 +863,8 @@ def call_auto_raw_data_analysis(variables) -> None:
 
     def _on_source_change(_change):
         _set_rows_disabled(manual_rows, peak_source.value == "range")
+        peak_units.value = effective_peak_units(peak_source.value, peak_units.value)
+        peak_units.disabled = peak_source.value == "range"
         _refresh_summary()
 
     def _on_units_change(_change):
@@ -863,7 +902,7 @@ def call_auto_raw_data_analysis(variables) -> None:
                     variables,
                     species,
                     save_plots=bool(save_plots.value),
-                    peak_units=str(peak_units.value),
+                    peak_units=effective_peak_units(peak_source.value, str(peak_units.value)),
                     recovery_mode=str(recovery_mode.value),
                     pair_sum_tolerance_bins=float(pair_sum_tol.value),
                 )
@@ -876,6 +915,7 @@ def call_auto_raw_data_analysis(variables) -> None:
 
     # Initialize disabled state to match the dropdown's starting value.
     _set_rows_disabled(manual_rows, peak_source.value == "range")
+    peak_units.disabled = peak_source.value == "range"
     _refresh_summary()
 
     panel = widgets.VBox(

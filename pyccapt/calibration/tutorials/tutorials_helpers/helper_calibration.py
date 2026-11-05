@@ -31,9 +31,21 @@ from pyccapt.calibration.tutorials.tutorials_helpers._helper_calibration_pure im
 )
 
 
-def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse_mode, t0=0.0):
+def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse_mode, t0=0.0, *, display_panel=True):
+    """Show the original correction tools, or return an embeddable private panel."""
+    # The panel can be rendered before a dataset is loaded. Only a real working
+    # frame can carry these inputs; rendering must not manufacture source data.
+    if variables.data is not None:
+        from pyccapt.instrument_metadata import record_calibration_settings
+        record_calibration_settings(
+            variables.data, flight_path_length_mm=flight_path_length, t0_ns=t0,
+            pulse_mode=pulse_mode, source='legacy calibration panel explicit arguments; inputs, not proof of applied corrections',
+            context='legacy_workflow_inputs')
     out = Output()
     out_status = Output()
+
+    def clear_diagnostics():
+        clear_plot_on_click(out, out_status, clear_cell=display_panel)
 
     plot_button = widgets.Button(description='Plot hist', layout=label_layout, button_style='primary')
     plot_stat_button = widgets.Button(description='Plot stat', layout=label_layout, button_style='primary')
@@ -233,6 +245,9 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             variables.dld_t_calib = np.copy(state)
         else:
             variables.mc_calib = np.copy(state)
+        from pyccapt.calibration.core.calibration_metadata import record_step, vector_digest
+        record_step(variables, 'restore_working_candidate', status='working',
+                    parameters={'mode': _calibration_mode_key(), 'output_sha256': vector_digest(state)})
 
     def _capture_selection():
         mode_key = _calibration_mode_key()
@@ -662,7 +677,8 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     def hist_plot(_, variables, output, calibration_mode_widget):
         plot_button.disabled = True
         figure_size = (figure_mc_size_x.value, figure_mc_size_y.value)
-        clear_output(wait=True)
+        if display_panel:
+            clear_output(wait=True)
         with out_status:
             out_status.clear_output()
         with output:
@@ -811,6 +827,11 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             if calibration_mode_widget.value == 'tof_calib':
                 # Step 1: Naive flight-path + voltage factor correction
                 variables.dld_t_calib = calibration.initial_calibration(variables.data, flight_path_length_value)
+                from pyccapt.calibration.core.calibration_metadata import record_step
+                record_step(variables, 'initial_tof_normalization', status='working', parameters={
+                    'flight_path_length_mm': flight_path_length_value, 'input': 'raw t (ns)',
+                    'formula': 't * sqrt(mean(L2+x2+y2)/(L2+x2+y2)) * sqrt(V/mean(V))',
+                    'detector_input_units': 'cm converted to mm'})
                 print('Initial ToF calibration is done')
                 # Step 2: Re-select peak window on the corrected data
                 _force_reselect_peak_window()
@@ -837,6 +858,9 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
                 # (which _ensure_initial_calibration now does on every Auto
                 # press) compounds bowl corrections on m/c.
                 variables.mc_calib = variables.data['mc_uc (Da)'].to_numpy()
+                from pyccapt.calibration.core.calibration_metadata import record_step
+                record_step(variables, 'initial_mass_baseline_reset', status='working',
+                            parameters={'input': 'dataframe mc_uc (Da)'})
                 # Always re-pick the peak window for *this* mode before
                 # running bowl correction. Otherwise, when called from the
                 # combined mc+tof FAST/BEST flow, variables.selected_x1/x2
@@ -1372,7 +1396,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     save_button.on_click(lambda b: save_on_click(variables, calibration_mode))
     vol_button.on_click(lambda b: vol_correction(b, variables, out, out_status, calibration_mode, pulse_mode))
     bowl_button.on_click(lambda b: bowl_correction(b, variables, out, out_status, calibration_mode, pulse_mode))
-    clear_plot.on_click(lambda b: clear_plot_on_click(out, out_status))
+    clear_plot.on_click(lambda b: clear_diagnostics())
     auto_button.on_click(lambda b: run_auto_for_mode(calibration_mode.value))
     auto_button_bowl.on_click(
         lambda b: automatic_bowl_calibration(b, variables, out, out_status, calibration_mode, pulse_mode)
@@ -1385,8 +1409,9 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         names='value',
     )
 
-    plot_button.click()
-    sample_size_v_set(sample_size_v)
+    if display_panel:
+        plot_button.click()
+        sample_size_v_set(sample_size_v)
 
     column11 = widgets.VBox(
         [
@@ -1514,7 +1539,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     simple_save_button.on_click(lambda _: save_on_click(variables, calibration_mode))
     simple_reset_back_button.on_click(lambda _: reset_back_on_click(variables, calibration_mode))
     simple_reset_button.on_click(lambda _: reset_on_click(variables, calibration_mode))
-    simple_clear_button.on_click(lambda _: clear_plot_on_click(out, out_status))
+    simple_clear_button.on_click(lambda _: clear_diagnostics())
     simple_gaussian_button.on_click(on_gaussian_mrp)
     simple_plot_stat_button.on_click(lambda _: stat_plot(_, variables, calibration_mode, out))
     simple_auto_button.on_click(lambda _: run_auto_for_mode(calibration_mode.value))
@@ -1605,7 +1630,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
         _save_both_corrections,
         _restore_both_corrections,
         _reset_both_corrections,
-        lambda: clear_plot_on_click(out, out_status),
+        clear_diagnostics,
         _print_gaussian_for_current_mode,
         run_adaptive_for_mode,
         _ensure_initial_calibration,
@@ -1707,23 +1732,14 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             variables.residual_coarse_to_fine_top_k = 1
             _adaptive_apply_profile('old')
         else:
-            # Sequential V+Bowl (old): legacy iterative V+Bowl + adaptive
-            # residual. Coarse-to-fine top_k=1 is enabled here too because
-            # it speeds the residual ~3x on the legacy warm-start as well
-            # (the c2f trick is warm-start-agnostic: it just replaces the
-            # all-candidate Voigt scoring with fast_mrp ranking + 1-of-K
-            # Voigt verification). If quality regresses on this preset for
-            # a given dataset, unset variables.residual_coarse_to_fine_top_k
-            # before pressing Hybrid.
+            # Legacy evaluates every candidate with the full quality score.
             _reset_widgets_to_old()
             _clear_opt_in_attrs()
             variables.calibration_profile = 'old'
-            variables.residual_coarse_to_fine_top_k = 1
             _adaptive_apply_profile('old')
 
     calibration_profile.observe(_apply_profile, names='value')
-    # Initialize variables.calibration_profile (defaults to 'old' = current behavior).
-    variables.calibration_profile = 'old'
+    _apply_profile(calibration_profile.value)
 
     # User-facing summary of what each preset actually changes. Kept in sync
     # with _apply_profile above and the per-button code paths
@@ -1745,8 +1761,7 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
             'below.</li>'
             '<li><b>Legacy adaptive residual</b>: V+Bowl &rarr; adaptive '
             'residual without the coarse-to-fine speedup. Slower but '
-            'matches the pre-2026 reference behaviour exactly if you '
-            'need bit-identical results.</li>'
+            'evaluates every residual candidate with the full score.</li>'
             '</ol></div>'
         ),
         layout=widgets.Layout(width='720px'),
@@ -1761,4 +1776,32 @@ def call_voltage_bowl_calibration(variables, det_diam, flight_path_length, pulse
     mode_tabs.selected_index = 0
     _sync_mode_ui()
     _render_top_content()
-    display(widgets.VBox([profile_panel, mode_tabs]))
+    panel = widgets.VBox([profile_panel, mode_tabs])
+    panel.controls = dict(mode_tabs=mode_tabs, calibration_mode=calibration_mode,
+        plot=plot_button, voltage=vol_button, bowl=bowl_button, auto=auto_button,
+        clear=clear_plot, profile=calibration_profile)
+    # Widgets retain callback closures in their global comm registry. Explicitly
+    # release embedded panels so repeated trials don't retain selected datasets.
+    owned = [value for value in locals().values() if isinstance(value, widgets.DOMWidget)]
+
+    def dispose():
+        import matplotlib.pyplot as plt
+        plotter = getattr(variables, "AptHistPlotter", None)
+        figure = getattr(plotter, "fig", None)
+        if figure is not None:
+            plt.close(figure)
+        pending, seen = list(owned), set()
+        while pending:
+            widget = pending.pop()
+            if id(widget) in seen:
+                continue
+            seen.add(id(widget))
+            pending.extend(getattr(widget, "children", ()))
+            widget.close()
+        owned.clear()
+
+    panel.dispose = dispose
+    if display_panel:
+        display(panel)
+        return None
+    return panel

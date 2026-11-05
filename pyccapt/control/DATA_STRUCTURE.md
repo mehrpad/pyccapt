@@ -23,6 +23,70 @@ control configuration plus its SHA-256, the chunk-manifest SHA-256, excluded-row
 provenance. Every numeric dataset also carries a `units` attribute (`1` for dimensionless quantities). These attributes
 are checked by `pyccapt validate-hdf5` and let downstream tools distinguish schema evolution from data corruption.
 
+## Group `instrument_metadata`
+
+This is an **additional metadata group**. Existing `apt`, `dld`, `tdc` or `hsd`
+data and all existing `provenance` attributes remain in the same file. It uses
+the NeXus [NXcollection](https://manual.nexusformat.org/classes/base_classes/NXcollection.html)
+container for project-specific metadata, with an explicit `conformance`
+attribute. NXcollection contents are not NXDL validated. Raw control output
+does **not** claim complete [NXapm](https://manual.nexusformat.org/classes/applications/NXapm.html)
+conformance or write `definition=NXapm`; the separate calibration exporter can
+add the documented partial `/entry` mapping.
+
+`instrument_metadata/json` uses `pyccapt-instrument-1`. The `acquisition`
+subgroup exposes typed scalar flight path (`flight_path_length_mm`, mm),
+configured voltage/laser offsets (`t0_voltage_ns`, `t0_laser_ns`, ns), detector
+diameter (mm), instrument name and detector model. Each scalar has `units`,
+`status` and `source`; unknown numbers are NaN in HDF5 and null in JSON.
+Configured constants are not labelled as measured calibration results.
+
+The experiment owner snapshots these constants at run start. Selected pulse
+modes are recorded at start and on observed mode changes, with UTC time and
+control iteration in `pulse_mode_history`. These observations do not establish
+exact detector-event transition boundaries. A run with multiple modes is marked
+`mixed`; combined VoltageLaser and mixed runs have no single `t0_ns`. Both
+configured offsets remain available for review. Older writer callers without a
+run snapshot retain the available configuration but have unknown run mode and
+unknown selected offset; the GUI default/final mode is not substituted.
+
+Before starting control, set the instrument-specific values in the loaded
+`pyccapt/config.toml` (or the explicitly selected TOML configuration). These
+constants currently have no separate control-GUI editor:
+
+| Configuration key | Saved acquisition field | Units |
+| --- | --- | --- |
+| `flight_path_length` | `flight_path_length_mm` | mm |
+| `t_0_voltage` | `t0_voltage_ns` | ns |
+| `t_0_laser` | `t0_laser_ns` | ns |
+| `detector_diameter` | `detector_diameter_mm` | mm |
+| `device_name` | `instrument_name` | dimensionless text |
+| `tdc_model` | `detector_model` | dimensionless text |
+
+Restart control after editing the file so the intended configuration is loaded.
+The values shipped with the repository are not measurements of a user's
+instrument. Missing, nonfinite or invalid numeric settings, including boolean
+values, are recorded as unknown; the metadata writer does not invent defaults.
+Flight length and detector diameter must be positive. A finite zero t0 is valid.
+For a single-mode run, `t0_ns` references the corresponding configured offset.
+The full mode-change history, including its observation scope, is retained in
+`instrument_metadata/json`; it is not a per-ion pulse-mode assignment.
+
+The configuration JSON and SHA-256 in `provenance` also remain available.
+Instrument constants use the run-start snapshot even if the configuration
+object later changes before finalization. Metadata availability is distinct
+from acquisition completeness: unknown settings do not establish event loss,
+and known settings do not prove that all detector events were saved.
+
+Calibration loaders retain this metadata. The independent `calibration`
+context records explicit calibration inputs/fitted offsets after acceptance;
+it never overwrites the acquisition context. See the calibration
+[data structure](../calibration/DATA_STRUCTURE.md#instrument-settings-and-nexus-interoperability).
+
+`provenance/control_first_observation_utc` and
+`control_last_observation_utc` record the available control-loop timestamp
+coverage, not independently synchronized detector start/end times.
+
 ## Group `apt`
 
 Control-loop metadata recorded each iteration.
@@ -30,8 +94,8 @@ Control-loop metadata recorded each iteration.
 - `id` `(n,)` (`N/A`, `uint64`): control-loop iteration index
 - `num_events` `(n,)` (`N/A`, `uint32`): number of detected ions in loop interval
 - `num_raw_signals` `(n,)` (`N/A`, `uint32`): number of raw detector signals
-- `temperature` `(n,)` (`K`, `float64`): sample temperature
-- `experiment_chamber_vacuum` `(n,)` (`mbar`, `float64`): main-chamber vacuum
+- `temperature` `(n,)` (`K`, `float64`): sample temperature; NaN when the sensor was unavailable
+- `experiment_chamber_vacuum` `(n,)` (`mbar`, `float64`): main-chamber vacuum; NaN when the gauge was unavailable
 - `timestamps` `(n,)` (`UNIX s`, `float64`): acquisition timestamp
 - `stage_x`, `stage_y`, `stage_z` `(n,)` (`m`, `float64`): specimen-stage position
   (SmarAct MCS2 `stage_smartact_main`), one sample per control-loop iteration
@@ -105,3 +169,27 @@ High-speed digitizer (DRS) waveforms and synchronized metadata.
 
 - Some historical files may use older dataset names.
 - `control/control_data_tool.py` contains migration helpers for older structures.
+# Acquisition completeness and validation
+
+Finalized files record `provenance/acquisition_completeness` as an attribute:
+`complete` means the available committed manifests have no detected gaps or
+rejected chunks and the detector reported no failure; `incomplete` records
+known loss/failure; `unverified` identifies legacy inputs without manifests.
+This does not prove the detector electronics delivered every physical event.
+
+The `chunk_integrity_json` attribute preserves per-stream written and excluded
+rows, expected manifest rows, missing chunk-ID ranges, rejected group IDs and
+reasons, detector errors and warnings, and unattributed-packet filenames. Quarantined files
+remain in the archived chunk evidence. `excluded_row_count` includes rejected
+primary event rows; raw-signal and metadata exclusions are reported separately
+per stream to avoid counting the same physical event repeatedly.
+Rejected records also identify the recovery action and quarantine location when
+available; the report lists validation checks applied. These describe observed
+evidence rather than estimating unrecorded physical events.
+
+`validate_hdf5` distinguishes `structurally_valid` from overall `valid` and
+returns the completeness status. Schema-2 validation checks required datasets,
+known dtypes/units, aligned stream lengths and the configuration content hash.
+Known incomplete acquisitions are not reported as valid. Crash recovery keeps
+this evidence but never promotes a successful recovery to proof that a crashed
+acquisition had no uncommitted tail.

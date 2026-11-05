@@ -2,6 +2,19 @@
 
 This document summarizes the data layout used by the calibration module and its range files.
 
+Processed datasets now retain unsigned `event_id` values and source identity
+through cropping and HDF5 round trips. The optional `pyccapt-session-2` group
+stores the full guided analysis, including source data, fitted models, masks,
+accepted outputs and review history. It supplements the legacy dataframe layout.
+Both processing workflows also save a shared journal and result checkpoint at
+`/calibration_provenance/json` (schema `pyccapt-calibration-history-1`), linked in
+the partial NeXus mapping. It records working/applied actions, model settings and
+raw/output fingerprints. Exchange formats get `.calibration.json` sidecars.
+[Exact restoration](guided_workflow.md#shared-calibration-record-and-exact-saved-result-restoration)
+requires the full matching source; it does not refit or transfer to a new run.
+See [analysis sessions](analysis_sessions.md) for checksums, schema migration,
+missing-value status and the explicitly partial NXapm v2026.01 mapping.
+
 The canonical machine-readable definition of the raw acquisition groups
 (`/dld`, `/tdc`, `/hsd`) — column names, order, dtypes, and the group
 aliases accepted across pyccapt versions — lives in
@@ -84,16 +97,22 @@ columns of a Surface Concept tdc dataframe plus two link fields:
 - `event_group_id`: `(m,)` `(N/A, int64)` shared id used to link each tdc row
   to the dld row(s) for the same pulse trigger; `-1` for orphan rows
 - `has_dld_match`: `(m,)` `(N/A, bool)` `True` iff the pulse trigger produced
-  at least one dld row at load time. Orphan rows (`False`) are always preserved
-  during save filtering, regardless of which dld rows the user removed.
+  at least one dld row at load time. Orphan rows (`False`) are preserved during
+  save filtering only inside the kept acquisition span (see below).
 
 ### Linking and filtering rules
 
 - The link is built once at load time by walking the consecutive `start_counter`
   runs in both groups in time order. This is robust to counter wraparound, since
   the algorithm never compares counter values across different runs.
-- A tdc row is kept on save iff `has_dld_match == False` OR its
-  `event_group_id` is still present in the calibrated dld dataframe.
+- A matched tdc row is kept on save iff its `event_group_id` is still present in
+  the calibrated dld dataframe.
+- An orphan tdc row (`has_dld_match == False`) is kept iff it lies, in tdc row
+  (acquisition) order, between the first and last surviving matched tdc row.
+  The span extends to the start/end of the table when no matched group was
+  removed before/after it, so an uncropped dataset keeps every orphan. Row
+  order is used because `start_counter` wraps. Orphans have no position, so a
+  spatial crop keeps the orphans inside the span.
 - Multi-hit pulses (multiple dld rows for the same trigger) are treated at the
   group level: if any dld row in the group survives filtering, all tdc rows for
   that group are preserved.

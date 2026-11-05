@@ -28,7 +28,12 @@ using namespace std::chrono;
 // The MCP is the group trigger, so every time in a group is relative to the MCP (t_mcp = 0).
 #define START_CHANNEL (6)
 #define MCP_CHANNEL (7)
-#define VALUES_PER_EVENT (12)
+// Event row: 12 first-hit values (layout of DLL builds before 2026-11), then
+// the hit count of each channel and up to HITS_PER_CHANNEL hits per channel,
+// so Python can recover ions whose first hit is a reflection or noise pulse.
+#define FIRST_HIT_VALUES (12)
+#define HITS_PER_CHANNEL (4)
+#define VALUES_PER_EVENT (FIRST_HIT_VALUES + 8 + 8 * HITS_PER_CHANNEL)
 
 
 // Hexanode constants, same values and meaning as DAn-part2.ccf (Parameter 1102..1120).
@@ -215,7 +220,11 @@ void Wrraper_tdc::reconstruct_hit(double& x, double& y, double& tof)
 }
 
 
-// One event row: ch0..ch7 first-hit bins (0 = no hit), X [mm], Y [mm], TOF [ns], timestamp [bins].
+// One event row (VALUES_PER_EVENT values):
+//   [0..7]   ch0..ch7 first-hit bins (0 = no hit)
+//   [8..11]  X [mm], Y [mm], TOF [ns] of the first-hit reconstruction, timestamp [bins]
+//   [12..19] number of hits per channel (as counted by the driver, up to 10)
+//   [20..]   HITS_PER_CHANNEL hits per channel, channel-major (0 = unused slot)
 void Wrraper_tdc::store_event(double* row)
 {
 	reconstruct_hit(X, Y, TOF);
@@ -226,6 +235,13 @@ void Wrraper_tdc::store_event(double* row)
 	row[9] = Y;
 	row[10] = TOF;
 	row[11] = static_cast<double>(ui64_HPTDC_AbsoluteTimeStamp);
+	for (int i = 0; i < 8; ++i) {
+		row[FIRST_HIT_VALUES + i] = static_cast<double>(CNT[i]);
+		for (int h = 0; h < HITS_PER_CHANNEL; ++h) {
+			row[FIRST_HIT_VALUES + 8 + HITS_PER_CHANNEL * i + h] =
+				h < static_cast<int>(CNT[i]) ? static_cast<double>(TDC_data[i][h]) : 0.;
+		}
+	}
 }
 
 
@@ -383,6 +399,9 @@ extern "C"
 	__declspec(dllexport) int stop_tdc(Wrraper_tdc* Wrraper_tdc) { return Wrraper_tdc->stop_tdc(); }
 	__declspec(dllexport) double* get_data_tdc(Wrraper_tdc* Wrraper_tdc) { return Wrraper_tdc->get_data_tdc(); }
 	__declspec(dllexport) double* get_data_tdc_buf(Wrraper_tdc* Wrraper_tdc) { return Wrraper_tdc->get_data_tdc_buf(); }
+	// Packet layout, so Python can tell this build from the 12-value first-hit builds.
+	__declspec(dllexport) int values_per_event() { return VALUES_PER_EVENT; }
+	__declspec(dllexport) int hits_per_channel() { return HITS_PER_CHANNEL; }
 }
 
 

@@ -160,13 +160,19 @@ def _parse_ccf_parameters(path: str | Path) -> dict[int, float]:
 
 @dataclass
 class HexanodeCorrection:
-    """Smooth 2-D polynomial map from analytic to CoboldPC positions (mm)."""
+    """Smooth 2-D polynomial map from analytic to CoboldPC positions (mm).
+
+    ``sum_walk`` optionally carries the time-sum walk of the same detector
+    (:func:`fit_sum_walk`), so live acquisition can gate on walk-corrected
+    sums without fitting it per packet.
+    """
 
     degree: int
     coef_x: np.ndarray
     coef_y: np.ndarray
     scale_mm: float = 40.0
     stats: dict = field(default_factory=dict)
+    sum_walk: np.ndarray | None = None
 
     def _design(self, x, y):
         xs = np.asarray(x, dtype=np.float64) / self.scale_mm
@@ -179,14 +185,35 @@ class HexanodeCorrection:
         return design @ self.coef_x, design @ self.coef_y
 
     def to_dict(self) -> dict:
-        return {'degree': self.degree, 'coef_x': self.coef_x.tolist(), 'coef_y': self.coef_y.tolist(),
+        data = {'degree': self.degree, 'coef_x': self.coef_x.tolist(), 'coef_y': self.coef_y.tolist(),
                 'scale_mm': self.scale_mm, 'stats': self.stats}
+        if self.sum_walk is not None:
+            data['sum_walk'] = np.asarray(self.sum_walk).tolist()
+        return data
 
     @classmethod
     def from_dict(cls, data: dict) -> 'HexanodeCorrection':
+        sum_walk = data.get('sum_walk')
         return cls(int(data['degree']), np.asarray(data['coef_x'], dtype=np.float64),
                    np.asarray(data['coef_y'], dtype=np.float64), float(data.get('scale_mm', 40.0)),
-                   dict(data.get('stats', {})))
+                   dict(data.get('stats', {})), None if sum_walk is None else np.asarray(sum_walk, dtype=np.float64))
+
+
+def _finish_positions(x, y, params: HexanodeParameters, correction: HexanodeCorrection | None):
+    """Detector offsets, rotation and optional correction map (NaN stays NaN)."""
+    x = np.asarray(x, dtype=np.float64) + params.x_offset_mm
+    y = np.asarray(y, dtype=np.float64) + params.y_offset_mm
+    if params.rotation_deg:
+        cx, cy = params.rotation_center_mm
+        angle = np.deg2rad(params.rotation_deg)
+        dx, dy = x - cx, y - cy
+        x = cx + dx * np.cos(angle) - dy * np.sin(angle)
+        y = cy + dx * np.sin(angle) + dy * np.cos(angle)
+    valid = np.isfinite(x)
+    if correction is not None and valid.any():
+        x_corr, y_corr = correction.apply(x[valid], y[valid])
+        x[valid], y[valid] = x_corr, y_corr
+    return x, y
 
 
 def reconstruct_hexanode(
@@ -278,18 +305,7 @@ def reconstruct_hexanode(
             y[~present[:, start]] = np.nan
     valid = np.isfinite(x)
     mask = np.where(valid, mask, 0)
-
-    x = x + params.x_offset_mm
-    y = y + params.y_offset_mm
-    if params.rotation_deg:
-        cx, cy = params.rotation_center_mm
-        angle = np.deg2rad(params.rotation_deg)
-        dx, dy = x - cx, y - cy
-        x = cx + dx * np.cos(angle) - dy * np.sin(angle)
-        y = cy + dx * np.sin(angle) + dy * np.cos(angle)
-    if correction is not None and valid.any():
-        x_corr, y_corr = correction.apply(x[valid], y[valid])
-        x[valid], y[valid] = x_corr, y_corr
+    x, y = _finish_positions(x, y, params, correction)
 
     n_reconstructed = sum(((mask & bit) > 0) & ~full[name] for name, bit in LAYER_BITS.items())
     return {
@@ -306,28 +322,518 @@ def reconstruct_hexanode(
     }
 
 
-def load_roentdek_tdc_channels(path: str | Path) -> dict[str, np.ndarray]:
-    """Load first-hit RoentDek channels from a pyccapt HDF5 file.
+@dataclass
+class RoentdekHits:
+    """Every TDC hit of every event in compressed-row (CSR) form.
 
-    Supports both layouts pyccapt has written:
+    The hits of event ``i`` are ``channel[offsets[i]:offsets[i + 1]]`` and
+    ``value[...]`` (TDC bins relative to the MCP group trigger), grouped by
+    channel and in arrival order within a channel. Zero values are dropped
+    (pyccapt uses 0 for "no hit"); the MCP trigger itself is implicit.
+    """
 
-    * legacy per-channel datasets ``tdc/ch0`` .. ``tdc/ch7``;
-    * the flat ``tdc/channel`` + ``tdc/time_data`` table with 8 rows per event.
-      ``time_data`` is stored as uint64; negative TDC bins (the start channel
-      precedes the MCP trigger) are recovered by reinterpreting it as int64.
+    offsets: np.ndarray
+    channel: np.ndarray
+    value: np.ndarray
+    timestamp_ns: np.ndarray | None = None
+
+    def __len__(self) -> int:
+        return len(self.offsets) - 1
+
+    def event_index(self) -> np.ndarray:
+        return np.repeat(np.arange(len(self)), np.diff(self.offsets))
+
+    def counts(self, n_channels: int = 8) -> np.ndarray:
+        """``(n, n_channels)`` number of hits per event and channel."""
+        flat = self.event_index() * n_channels + self.channel
+        return np.bincount(flat, minlength=len(self) * n_channels).reshape(len(self), n_channels)
+
+    def first_hits(self, n_channels: int = 8) -> np.ndarray:
+        """``(n, n_channels)`` first hit per channel, 0 when the channel did not fire."""
+        event = self.event_index()
+        first = np.ones(len(event), dtype=bool)
+        first[1:] = (event[1:] != event[:-1]) | (self.channel[1:] != self.channel[:-1])
+        out = np.zeros((len(self), n_channels), dtype=np.int64)
+        out[event[first], self.channel[first]] = self.value[first]
+        return out
+
+    @classmethod
+    def from_rows(cls, event, channel, value, n_events: int, timestamp_ns=None) -> 'RoentdekHits':
+        """Build from one row per hit (``event`` ascending); drops zero values."""
+        event = np.asarray(event, dtype=np.int64)
+        channel = np.asarray(channel, dtype=np.int64)
+        value = np.asarray(value, dtype=np.int64)
+        keep = value != 0
+        event, channel, value = event[keep], channel[keep], value[keep]
+        order = np.lexsort((channel, event))  # stable: arrival order kept within a channel
+        event, channel, value = event[order], channel[order], value[order]
+        offsets = np.zeros(n_events + 1, dtype=np.int64)
+        np.cumsum(np.bincount(event, minlength=n_events), out=offsets[1:])
+        return cls(offsets, channel.astype(np.int8), value, timestamp_ns)
+
+    @classmethod
+    def from_first_hits(cls, channels) -> 'RoentdekHits':
+        """Wrap an ``(n, 8)`` first-hit array (older pyccapt files)."""
+        channels = np.asarray(channels, dtype=np.int64)
+        n, width = channels.shape
+        event = np.repeat(np.arange(n), width)
+        return cls.from_rows(event, np.tile(np.arange(width), n), channels.reshape(-1), n)
+
+
+def read_lmf_txt(path: str | Path) -> RoentdekHits:
+    """Read every hit from an ``lmf2txt`` dump of a CoboldPC LMF file (``*_raw.txt``).
+
+    Event blocks look like ``------- #N -------``, ``T  = <ns> ns = ...`` and
+    one ``chan <c> <n> <bin> <bin> ...`` line per channel (1-based channel,
+    hit count, then the hits in TDC bins).
+    """
+    events, channels, values, stamps = [], [], [], []
+    event = -1
+    with open(path, 'r', encoding='utf-8', errors='replace') as handle:
+        for line in handle:
+            if line.startswith('chan'):
+                parts = line.split()
+                count = int(parts[2])
+                if count:
+                    hits = parts[3:3 + count]
+                    events.extend([event] * len(hits))
+                    channels.extend([int(parts[1]) - 1] * len(hits))
+                    values.extend(hits)
+            elif line.startswith('------- #'):
+                event += 1
+                stamps.append(np.nan)
+            elif line.startswith('T ') and event >= 0:
+                try:
+                    stamps[event] = float(line.split('=')[1].split()[0])
+                except (IndexError, ValueError):
+                    pass
+    return RoentdekHits.from_rows(np.asarray(events, dtype=np.int64), np.asarray(channels, dtype=np.int64),
+                                  np.asarray(values, dtype=np.int64), event + 1, np.asarray(stamps))
+
+
+def _layer_specs(params: HexanodeParameters):
+    channels = params.anode_channels
+    return (
+        (channels[0], channels[1], params.fu, 0.0, params.sum_offset_u_ns, params.sum_halfwidth_u_ns, params.runtime_u_ns),
+        (channels[2], channels[3], params.fv, 0.0, params.sum_offset_v_ns, params.sum_halfwidth_v_ns, params.runtime_v_ns),
+        (channels[4], channels[5], params.fw, params.w_offset_ns, params.sum_offset_w_ns, params.sum_halfwidth_w_ns,
+         params.runtime_w_ns),
+    )
+
+
+def _xy_from_layers(mask: int, u: float, v: float, w: float) -> tuple[float, float]:
+    if mask == 7:
+        return (2.0 * u + v + w) / 3.0, (w - v) / _SQRT3
+    if mask == 3:
+        return u, (u - 2.0 * v) / _SQRT3
+    if mask == 5:
+        return u, (2.0 * w - u) / _SQRT3
+    return v + w, (w - v) / _SQRT3
+
+
+def fit_sum_walk(channels, params: HexanodeParameters | None = None, *, degree: int = 4,
+                 min_events: int = 2000) -> np.ndarray:
+    """Time-sum walk of each layer: corrected sum (ns) as a polynomial of the layer position (mm).
+
+    The anode time sum drifts across the detector (here by up to ~2.7 ns on
+    the w layer), which pushes real hits at the detector edge out of the
+    time-sum gate. CoboldPC gates on walk-corrected sums; this fits the walk
+    from first-hit events with three complete, mutually consistent layers.
+    Returns a ``(3, degree + 1)`` array of ``np.polyval`` coefficients for
+    u, v, w (all zero when fewer than ``min_events`` clean events exist).
+    """
+    params = params or HexanodeParameters()
+    channels = np.asarray(channels)
+    result = reconstruct_hexanode(channels, params)
+    clean = (result['layer_mask'] == 7) & (result['n_reconstructed'] == 0) & (np.abs(result['hex_delta_mm']) < 1.0)
+    walk = np.zeros((3, degree + 1))
+    if clean.sum() < min_events:
+        return walk
+    times = channels[clean].astype(np.float64) * params.tdc_bin_ns
+    for k, (a, b, factor, offset, _sum_offset, _halfwidth, _runtime) in enumerate(_layer_specs(params)):
+        position = 0.5 * factor * (times[:, a] - times[:, b] + offset)
+        corrected_sum = result[f'sum_{"uvw"[k]}_ns'][clean]
+        keep = np.abs(corrected_sum - np.median(corrected_sum)) < 3 * corrected_sum.std()
+        walk[k] = np.polyfit(position[keep], corrected_sum[keep], degree)
+    return walk
+
+
+def _horner(coefficients, x: float) -> float:
+    value = 0.0
+    for c in coefficients:
+        value = value * x + c
+    return value
+
+
+def _event_particles(times, params, layers, walk, max_particles, hex_tolerance_mm, max_pairs, min_free_layers,
+                     share_signals, single_signal_window_ns, duplicate_mm=2.0, duplicate_ns=2.0):
+    """Particles of one event from per-channel hit times (ns); see reconstruct_hexanode_multihit."""
+    used = [[False] * len(channel_times) for channel_times in times]
+    start = params.start_channel
+    t_start = times[start][0] if start is not None and times[start] else None
+    if params.require_start and start is not None and t_start is None:
+        return []
+    half = [0.5 * layer[5] for layer in layers]
+
+    def pairs(k, t_mcp):
+        # (|arrival - t_mcp|, arrival, position, hits) of complete pairs of layer k
+        a, b, factor, offset, sum_offset, halfwidth, runtime = layers[k]
+        out = []
+        for i, ta in enumerate(times[a]):
+            if used[a][i]:
+                continue
+            for j, tb in enumerate(times[b]):
+                if used[b][j] or abs(ta - tb) > runtime + halfwidth:
+                    continue
+                position = 0.5 * factor * (ta - tb + offset)
+                arrival = 0.5 * (ta + tb + sum_offset - _horner(walk[k], position))
+                if t_mcp is not None and abs(arrival - t_mcp) > half[k]:
+                    # Keep what the plain (walk-free) gate accepts, as the first-hit reconstruction does.
+                    plain = 0.5 * (ta + tb + sum_offset)
+                    if abs(plain - t_mcp) > half[k]:
+                        continue
+                    arrival = plain
+                out.append((abs(arrival - t_mcp) if t_mcp is not None else 0.0, arrival, position, ((a, i), (b, j))))
+        if t_mcp is None:
+            return sorted(out, key=lambda item: item[1])
+        out.sort(key=lambda item: item[0])
+        return out[:max_pairs]
+
+    def singles(k, t_mcp, need_empty_partner, allow_used=False):
+        # (position, hits) of layer k rebuilt from one signal at arrival time t_mcp
+        a, b, factor, offset, sum_offset, halfwidth, runtime = layers[k]
+        free_a = [i for i, flag in enumerate(used[a]) if allow_used or not flag]
+        free_b = [j for j, flag in enumerate(used[b]) if allow_used or not flag]
+        out = []
+        for channel, free, sign, partner in ((a, free_a, 1.0, free_b), (b, free_b, -1.0, free_a)):
+            if need_empty_partner and partner:
+                continue
+            for i in free:
+                position = 0.0
+                for _ in range(2):  # the walk depends on the position being rebuilt
+                    target = 2.0 * t_mcp - sum_offset + _horner(walk[k], position)
+                    diff = sign * (2.0 * times[channel][i] - target)
+                    position = 0.5 * factor * (diff + offset)
+                if abs(diff) <= runtime + halfwidth:
+                    out.append((position, ((channel, i),)))
+        return out
+
+    def three_layers(cands_or_singles, base_score, arrival, n_rebuilt, best):
+        # cands_or_singles: per layer a list of (score, position, hits)
+        for cu in cands_or_singles[0]:
+            for cv in cands_or_singles[1]:
+                for cw in cands_or_singles[2]:
+                    delta = abs(cu[1] - (cv[1] + cw[1]))
+                    if delta > hex_tolerance_mm:
+                        continue
+                    score = base_score + cu[0] + cv[0] + cw[0] + delta / hex_tolerance_mm
+                    if best is None or score < best[0]:
+                        best = (score, 7, (cu[1], cv[1], cw[1]), cu[2] + cv[2] + cw[2], n_rebuilt, arrival)
+        return best
+
+    def as_scored(cands, k):
+        return [(c[0] / half[k], c[2], c[3]) for c in cands]
+
+    def as_rebuilt(rebuilt):
+        return [(1.0, r[0], r[1]) for r in rebuilt]
+
+    def best_with_mcp():
+        cands = [pairs(k, 0.0) for k in range(3)]
+        full = [k for k in range(3) if cands[k]]
+        best = None
+        if len(full) == 3:
+            best = three_layers([as_scored(cands[k], k) for k in range(3)], 0.0, 0.0, 0, None)
+            if best is not None:
+                return best
+        if len(full) >= 2:
+            for k1, k2 in ((0, 1), (0, 2), (1, 2)):
+                for c1 in cands[k1]:
+                    for c2 in cands[k2]:
+                        score = c1[0] / half[k1] + c2[0] / half[k2]
+                        if best is None or score < best[0]:
+                            position = [0.0, 0.0, 0.0]
+                            position[k1], position[k2] = c1[2], c2[2]
+                            best = (score, (1 << k1) | (1 << k2), tuple(position), c1[3] + c2[3], 0, 0.0)
+            return best
+        if len(full) == 1:
+            k = full[0]
+            others = [m for m in range(3) if m != k]
+            per_layer = [None, None, None]
+            per_layer[k] = as_scored(cands[k], k)
+            per_layer[others[0]] = as_rebuilt(singles(others[0], 0.0, False))
+            per_layer[others[1]] = as_rebuilt(singles(others[1], 0.0, False))
+            best = three_layers(per_layer, 0.0, 0.0, 2, None)
+            if best is not None:
+                return best
+            lone = cands[k][0]
+            for m in others:
+                rebuilt = singles(m, 0.0, True)
+                if rebuilt:
+                    position = [0.0, 0.0, 0.0]
+                    position[k], position[m] = lone[2], rebuilt[0][0]
+                    return (0.0, (1 << k) | (1 << m), tuple(position), lone[3] + rebuilt[0][1], 1, 0.0)
+            return None
+        # No complete layer: three single signals rebuilt against the MCP (CoboldPC
+        # does the same); only accepted when the hexanode redundancy holds.
+        return three_layers([as_rebuilt(singles(k, 0.0, False)) for k in range(3)], 3.0, 0.0, 3, None)
+
+    def best_free():
+        # A later ion arrives after the MCP trigger: an earlier one would have
+        # triggered the group itself.
+        earliest = -min(half)
+        cands = [[c for c in pairs(k, None) if c[1] >= earliest] for k in range(3)]
+        best = None
+        for k1, k2 in ((0, 1), (0, 2), (1, 2)):
+            k3 = 3 - k1 - k2
+            for c1 in cands[k1]:
+                for c2 in cands[k2]:
+                    if abs(c1[1] - c2[1]) > half[k1] + half[k2]:
+                        continue
+                    arrival = 0.5 * (c1[1] + c2[1])
+                    per_layer = [None, None, None]
+                    per_layer[k1] = [(abs(c1[1] - arrival) / half[k1], c1[2], c1[3])]
+                    per_layer[k2] = [(abs(c2[1] - arrival) / half[k2], c2[2], c2[3])]
+                    third = [(abs(c[1] - arrival) / half[k3], c[2], c[3]) for c in cands[k3]
+                             if abs(c[1] - arrival) <= half[k3] and not set(c[3]) & set(c1[3] + c2[3])]
+                    if third:
+                        per_layer[k3] = third
+                        best = three_layers(per_layer, 0.0, arrival, 0, best)
+                    else:
+                        per_layer[k3] = as_rebuilt(singles(k3, arrival, False, share_signals))
+                        best = three_layers(per_layer, 1.0, arrival, 1, best)
+                    if min_free_layers <= 2:
+                        # Two layers only: no redundancy check, so rank below any three-layer match.
+                        score = 10.0 + abs(c1[1] - c2[1]) / (half[k1] + half[k2])
+                        if best is None or score < best[0]:
+                            position = [0.0, 0.0, 0.0]
+                            position[k1], position[k2] = c1[2], c2[2]
+                            best = (score, (1 << k1) | (1 << k2), tuple(position), c1[3] + c2[3], 0, arrival)
+        # One complete layer gives the arrival time; the other two layers are
+        # rebuilt from single signals (the partner signals of a close double
+        # hit are often lost in the anode dead time) and must pass the hexanode check.
+        for k in range(3):
+            others = [m for m in range(3) if m != k]
+            for c in cands[k]:
+                per_layer = [None, None, None]
+                per_layer[k] = [(0.0, c[2], c[3])]
+                for m in others:
+                    per_layer[m] = as_rebuilt(singles(m, c[1], False, share_signals))
+                best = three_layers(per_layer, 2.0, c[1], 2, best)
+        if best is None and single_signal_window_ns:
+            best = three_singles()
+        return best
+
+    def three_singles():
+        # One signal per layer and no complete layer: u = v + w fixes the arrival
+        # time. There is no redundancy left, so accept only a unique solution.
+        options = []
+        for k in range(3):
+            a, b, factor, offset, sum_offset, halfwidth, runtime = layers[k]
+            options.append([(channel, i, sign) for channel, sign in ((a, 1.0), (b, -1.0))
+                            for i, flag in enumerate(used[channel]) if not flag])
+        solutions = []
+        for pick in ((x, y, z) for x in options[0] for y in options[1] for z in options[2]):
+            walk_terms = [0.0, 0.0, 0.0]
+            for _ in range(2):
+                intercept, slope = [], []
+                for k, (channel, i, sign) in enumerate(pick):
+                    factor, offset, sum_offset = layers[k][2], layers[k][3], layers[k][4]
+                    # position_k = intercept_k - slope_k * arrival
+                    intercept.append(0.5 * factor * (sign * (2.0 * times[channel][i] + sum_offset - walk_terms[k]) + offset))
+                    slope.append(factor * sign)
+                arrival = (intercept[0] - intercept[1] - intercept[2]) / (slope[0] - slope[1] - slope[2])
+                position = [intercept[k] - slope[k] * arrival for k in range(3)]
+                walk_terms = [_horner(walk[k], position[k]) for k in range(3)]
+            if not -min(half) <= arrival <= single_signal_window_ns:
+                continue
+            if any(abs(2.0 * position[k] / layers[k][2] - layers[k][3]) > layers[k][6] + layers[k][5] for k in range(3)):
+                continue
+            solutions.append((3.0, 7, tuple(position), tuple((c, i) for c, i, _ in pick), 3, arrival))
+        return solutions[0] if len(solutions) == 1 else None
+
+    particles = []
+    found = best_with_mcp()
+    if found is not None:
+        particles.append(found)
+    while len(particles) < max_particles:
+        if found is not None:
+            for channel, index in found[3]:
+                used[channel][index] = True
+        found = best_free()
+        if found is None:
+            break
+        x_new, y_new = _xy_from_layers(found[1], *found[2])
+        if any(abs(found[5] - p[5]) < duplicate_ns and np.hypot(x_new - px, y_new - py) < duplicate_mm
+               for p, (px, py) in zip(particles, (_xy_from_layers(p[1], *p[2]) for p in particles))):
+            break  # same ion seen again through shared signals
+        particles.append(found)
+    out = []
+    for score, mask, (u, v, w), hits, n_rebuilt, arrival in particles:
+        x, y = _xy_from_layers(mask, u, v, w)
+        tof = arrival - t_start + params.tof_offset_ns if t_start is not None else np.nan
+        out.append((x, y, tof, mask, n_rebuilt, arrival))
+    return out  # the MCP-referenced particle first, then later particles in search order
+
+
+def reconstruct_hexanode_multihit(
+    hits: RoentdekHits,
+    params: HexanodeParameters | None = None,
+    correction: HexanodeCorrection | None = None,
+    *,
+    sum_walk=None,
+    max_particles: int = 4,
+    hex_tolerance_mm: float = 1.5,
+    max_pairs: int = 4,
+    min_free_layers: int = 3,
+    share_signals: bool = False,
+    single_signal_window_ns: float = 0.0,
+) -> dict[str, np.ndarray]:
+    """Reconstruct every particle of every event from all TDC hits (LMF-like).
+
+    Time sums are corrected for their position dependence (``sum_walk``:
+    ``None`` uses ``correction.sum_walk`` when present and otherwise fits it
+    from this data with :func:`fit_sum_walk`, ``False`` disables it, or pass
+    the ``(3, d)`` coefficients). A pair the plain time-sum gate accepts is
+    always kept, as in :func:`reconstruct_hexanode`.
+
+    The first particle is referenced to the MCP group trigger (t = 0): per
+    layer the hit pair with the smallest walk-corrected time sum inside the
+    gate is taken; three layers must agree within ``hex_tolerance_mm``
+    (``u = v + w``), otherwise the best two layers are used. With one
+    complete layer the missing layers are rebuilt from single signals and the
+    time sum; with none, three single signals (one per layer) are accepted
+    only when they satisfy the hexanode check. This recovers events whose
+    first hit on a channel is a reflection or noise pulse.
+
+    Later particles have no MCP signal of their own (the TDC records only the
+    trigger), so, like CoboldPC, their arrival time is rebuilt from the anode
+    time sums of complete layers built from unused hits: two layers whose
+    arrival times agree within the half-gates plus a third layer (complete, or
+    rebuilt from one signal at that arrival time), or one complete layer plus
+    two layers rebuilt from single signals; every three-layer particle must
+    pass the hexanode check, and must arrive after the MCP trigger (an earlier
+    ion would have triggered the group). Options, all off by default because
+    the extra particles mostly disagree with CoboldPC on runs 194-207:
+    ``min_free_layers=2`` accepts two complete layers without a third;
+    ``share_signals`` lets a rebuilt layer reuse a signal of an earlier
+    particle; ``single_signal_window_ns > 0`` accepts one signal per layer
+    with no complete layer when ``u = v + w`` gives a unique arrival time
+    within that window. A later particle within 2 mm and 2 ns of an earlier one
+    is treated as the same ion and ends the search.
+
+    CoboldPC reports many more second particles (6014 vs ~180 on run 198),
+    but more than half of them have none of their own signals in the raw data
+    (their predicted signals fall within the anode dead time of the first
+    particle), so they cannot be measured independently.
+
+    Events with at most one hit per channel and a valid first-hit position go
+    through the vectorised :func:`reconstruct_hexanode`.
 
     Returns:
-        ``channels`` as an ``(n, 8)`` int64 array plus any per-event
-        ``start_counter``, ``high_voltage``, ``voltage_pulse`` and
-        ``laser_pulse`` arrays found in the ``tdc`` group.
+        Per-particle arrays ``event``, ``x_mm``, ``y_mm``, ``tof_ns``,
+        ``layer_mask``, ``n_reconstructed`` and ``arrival_ns`` (relative to
+        the MCP trigger; 0 for the trigger particle), ordered by event then
+        search order (the MCP-referenced particle first), plus per-event
+        ``n_particles`` and the ``sum_walk`` coefficients used.
     """
+    params = params or HexanodeParameters()
+    if params.rotation_deg:
+        raise NotImplementedError('rotation is not supported by the multi-hit reconstruction yet')
+    n = len(hits)
+    counts = hits.counts()
+    first = hits.first_hits()
+    if sum_walk is None and correction is not None and correction.sum_walk is not None:
+        walk = np.asarray(correction.sum_walk, dtype=np.float64)
+    elif sum_walk is None:
+        walk = fit_sum_walk(first, params)
+    elif sum_walk is False:
+        walk = np.zeros((3, 1))
+    else:
+        walk = np.asarray(sum_walk, dtype=np.float64)
+    walk_rows = [list(row) for row in walk]
+
+    anode = list(params.anode_channels)
+    single_channels = anode + ([params.start_channel] if params.start_channel is not None else [])
+    simple = (counts[:, single_channels] <= 1).all(axis=1)
+    base = reconstruct_hexanode(first[simple], params)
+    base_valid = base['valid']
+    simple_events = np.flatnonzero(simple)
+    keep = simple_events[base_valid]
+    # Positions from reconstruct_hexanode already carry the detector offsets;
+    # undo them so every particle goes through one _finish_positions pass.
+    rows_event = [keep]
+    rows = [np.column_stack([base['x_mm'][base_valid] - params.x_offset_mm, base['y_mm'][base_valid] - params.y_offset_mm,
+                             base['tof_ns'][base_valid], base['layer_mask'][base_valid],
+                             base['n_reconstructed'][base_valid], np.zeros(base_valid.sum()),
+                             np.zeros(base_valid.sum())])]
+
+    has_start = counts[:, params.start_channel] > 0 if params.start_channel is not None else np.ones(n, dtype=bool)
+    retry = np.zeros(n, dtype=bool)
+    retry[simple_events[~base_valid]] = True
+    retry &= has_start & (counts[:, anode].sum(axis=1) >= 3)
+    loop_events = np.flatnonzero(~simple | retry)
+
+    layers = _layer_specs(params)
+    bin_ns = params.tdc_bin_ns
+    offsets, channel, value = hits.offsets, hits.channel, hits.value
+    loop_rows, loop_event = [], []
+    for event in loop_events:
+        lo, hi = offsets[event], offsets[event + 1]
+        times = [[] for _ in range(8)]
+        for c, t in zip(channel[lo:hi].tolist(), value[lo:hi].tolist()):
+            if c < 8:
+                times[c].append(t * bin_ns)
+        particles = _event_particles(times, params, layers, walk_rows, max_particles, hex_tolerance_mm, max_pairs,
+                                     min_free_layers, share_signals, single_signal_window_ns)
+        for rank, particle in enumerate(particles):
+            loop_rows.append(particle + (rank,))
+            loop_event.append(event)
+    if loop_rows:
+        rows.append(np.asarray(loop_rows, dtype=np.float64))
+        rows_event.append(np.asarray(loop_event, dtype=np.int64))
+
+    table = np.concatenate(rows)
+    event = np.concatenate(rows_event)
+    order = np.lexsort((table[:, 6], event))  # MCP particle first, then later particles
+    table, event = table[order], event[order]
+    x, y = _finish_positions(table[:, 0], table[:, 1], params, correction)
+    return {
+        'event': event,
+        'x_mm': x,
+        'y_mm': y,
+        'tof_ns': table[:, 2],
+        'layer_mask': table[:, 3].astype(np.int8),
+        'n_reconstructed': table[:, 4].astype(np.int8),
+        'arrival_ns': table[:, 5],
+        'n_particles': np.bincount(event, minlength=n),
+        'sum_walk': walk,
+    }
+
+
+def first_particle(result: dict[str, np.ndarray], n_events: int) -> dict[str, np.ndarray]:
+    """Per-event view (``x_mm``, ``y_mm``, ``tof_ns``, ``valid``) of the first (MCP-referenced) particle."""
+    event = result['event']
+    first = np.ones(len(event), dtype=bool)
+    first[1:] = event[1:] != event[:-1]
+    out = {'valid': np.zeros(n_events, dtype=bool)}
+    for key in ('x_mm', 'y_mm', 'tof_ns'):
+        out[key] = np.full(n_events, np.nan)
+        out[key][event[first]] = result[key][first]
+    out['valid'][event[first]] = True
+    out['layer_mask'] = np.zeros(n_events, dtype=np.int8)
+    out['layer_mask'][event[first]] = result['layer_mask'][first]
+    return out
+
+
+def _read_tdc_group(path: str | Path):
+    """Raw RoentDek ``tdc`` group: ``('per_channel', (n, 8) bins, {})`` or
+    ``('flat', (time_data, channel, event, n_events), per-event extras)``."""
     import h5py
 
     with h5py.File(path, 'r') as handle:
         if 'tdc/ch0' in handle:
             columns = [np.asarray(handle[f'tdc/ch{i}'][:]) for i in range(8)]
-            channels = np.stack([_as_signed(column) for column in columns], axis=1)
-            return {'channels': channels}
+            return 'per_channel', np.stack([_as_signed(column) for column in columns], axis=1), {}
         if 'tdc/time_data' not in handle or 'tdc/channel' not in handle:
             raise KeyError(f'{path} has no RoentDek tdc channels (tdc/ch0..ch7 or tdc/time_data)')
         time_data = _as_signed(np.asarray(handle['tdc/time_data'][:]))
@@ -337,23 +843,58 @@ def load_roentdek_tdc_channels(path: str | Path) -> dict[str, np.ndarray]:
                   if f'tdc/{name}' in handle}
 
     if len(channel) % 8 == 0 and np.array_equal(channel, np.tile(np.arange(8), len(channel) // 8)):
-        result = {'channels': time_data.reshape(-1, 8)}
-        result.update({name: values[::8] for name, values in extras.items()})
-        return result
-
-    if 'start_counter' not in extras:
+        starts = np.arange(0, len(channel), 8)
+    elif 'start_counter' in extras:
+        start_counter = extras['start_counter'].astype(np.int64)
+        starts = np.r_[0, np.flatnonzero(np.diff(start_counter) != 0) + 1] if len(start_counter) else np.zeros(0, np.int64)
+    else:
         raise ValueError('flat tdc table is not 8 rows per event and has no start_counter to group by')
-    start_counter = extras['start_counter']
-    starts = np.r_[0, np.flatnonzero(np.diff(start_counter.astype(np.int64)) != 0) + 1]
-    event = np.repeat(np.arange(len(starts)), np.diff(np.r_[starts, len(start_counter)]))
-    channels = np.zeros((len(starts), 8), dtype=np.int64)
-    keep = (channel >= 0) & (channel < 8)
+    event = np.repeat(np.arange(len(starts)), np.diff(np.r_[starts, len(channel)]))
+    return 'flat', (time_data, channel, event, len(starts)), {name: values[starts] for name, values in extras.items()}
+
+
+def load_roentdek_tdc_channels(path: str | Path) -> dict[str, np.ndarray]:
+    """Load first-hit RoentDek channels from a pyccapt HDF5 file.
+
+    Supports every layout pyccapt has written:
+
+    * legacy per-channel datasets ``tdc/ch0`` .. ``tdc/ch7``;
+    * the flat ``tdc/channel`` + ``tdc/time_data`` table, either 8 rows per
+      event (first hits, 0 = no hit) or one row per hit grouped by
+      ``start_counter`` (all hits, see :func:`load_roentdek_hits`).
+      ``time_data`` is stored as uint64; negative TDC bins (the start channel
+      precedes the MCP trigger) are recovered by reinterpreting it as int64.
+
+    Returns:
+        ``channels`` as an ``(n, 8)`` int64 array plus any per-event
+        ``start_counter``, ``high_voltage``, ``voltage_pulse`` and
+        ``laser_pulse`` arrays found in the ``tdc`` group.
+    """
+    layout, data, extras = _read_tdc_group(path)
+    if layout == 'per_channel':
+        return {'channels': data}
+    time_data, channel, event, n_events = data
+    channels = np.zeros((n_events, 8), dtype=np.int64)
+    keep = np.flatnonzero((channel >= 0) & (channel < 8) & (time_data != 0))
     # Reverse order so the first value per (event, channel) wins the write.
-    order = np.flatnonzero(keep)[::-1]
+    order = keep[::-1]
     channels[event[order], channel[order]] = time_data[order]
-    result = {'channels': channels}
-    result.update({name: values[starts] for name, values in extras.items()})
-    return result
+    return {'channels': channels, **extras}
+
+
+def load_roentdek_hits(path: str | Path) -> tuple[RoentdekHits, dict[str, np.ndarray]]:
+    """Load every RoentDek hit of a pyccapt HDF5 file (any layout).
+
+    Files written before all hits were stored only hold the first hit per
+    channel; they load as one hit per channel. Returns the hits and the
+    per-event ``tdc`` metadata (``start_counter``, ``high_voltage``, ...).
+    """
+    layout, data, extras = _read_tdc_group(path)
+    if layout == 'per_channel':
+        return RoentdekHits.from_first_hits(data), extras
+    time_data, channel, event, n_events = data
+    keep = (channel >= 0) & (channel < 8)
+    return RoentdekHits.from_rows(event[keep], channel[keep], time_data[keep], n_events), extras
 
 
 def _as_signed(values: np.ndarray) -> np.ndarray:
@@ -370,6 +911,8 @@ def reconstruct_roentdek_hdf5(
     correction: HexanodeCorrection | None = None,
     *,
     invalid_value: float = np.nan,
+    all_particles: bool = False,
+    **multihit_options,
 ):
     """Rebuild ``x_det``/``y_det``/``t`` for every TDC event of an HDF5 file.
 
@@ -379,8 +922,38 @@ def reconstruct_roentdek_hdf5(
     ``n_reconstructed`` and the per-event ``tdc`` metadata when present.
     Rows without a position get ``invalid_value`` for x, y and t (pass 0.0
     to match CoboldPC's convention for events with no particle).
+
+    With ``all_particles=True`` every stored hit is used
+    (:func:`reconstruct_hexanode_multihit`, ``multihit_options`` passed
+    through) and the frame has one row per particle with its ``event`` index,
+    ``particle`` number (0 = MCP-referenced) and ``arrival (ns)``; events
+    without a particle have no row.
     """
     import pandas as pd
+
+    if all_particles:
+        hits, extras = load_roentdek_hits(path)
+        result = reconstruct_hexanode_multihit(hits, params, correction, **multihit_options)
+        event = result['event']
+        first = np.ones(len(event), dtype=bool)
+        first[1:] = event[1:] != event[:-1]
+        starts = np.flatnonzero(first)
+        particle = np.arange(len(event)) - np.repeat(starts, np.diff(np.r_[starts, len(event)]))
+        frame = pd.DataFrame({
+            'event': event,
+            'particle': particle,
+            'x_det (cm)': result['x_mm'] / 10.0,
+            'y_det (cm)': result['y_mm'] / 10.0,
+            't (ns)': result['tof_ns'],
+            'layer_mask': result['layer_mask'],
+            'n_reconstructed': result['n_reconstructed'],
+            'arrival (ns)': result['arrival_ns'],
+        })
+        for name, column in (('start_counter', 'start_counter'), ('high_voltage', 'high_voltage (V)'),
+                             ('voltage_pulse', 'pulse_v (V)'), ('laser_pulse', 'pulse_l (pJ)')):
+            if name in extras:
+                frame[column] = extras[name][event]
+        return frame
 
     loaded = load_roentdek_tdc_channels(path)
     result = reconstruct_hexanode(loaded['channels'], params, correction)

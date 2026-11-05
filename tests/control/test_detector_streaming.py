@@ -193,8 +193,8 @@ def test_roentdek_packet_rebuilds_xyt_from_raw_channels():
     # The DLL's own x/y/t columns (all 0 here) are ignored.
     row = [1784, 2774, 2665, 1855, 1372, 3164, -201845, 0, 0., 0., 0., 123.]
     no_start = [1784, 2774, 2665, 1855, 1372, 3164, 0, 0, 0., 0., 0., 124.]
-    arrays, valid = module.events_from_packet(np.array([row, no_start], dtype=float),
-                                              module.HexanodeParameters())
+    arrays, valid, hits = module.events_from_packet(np.array([row, no_start], dtype=float),
+                                                    module.HexanodeParameters())
     np.testing.assert_array_equal(valid, [True, False])
     assert arrays["x"][0] == pytest.approx(-1.23483, abs=0.06)
     assert arrays["y"][0] == pytest.approx(-1.55235, abs=0.06)
@@ -202,6 +202,48 @@ def test_roentdek_packet_rebuilds_xyt_from_raw_channels():
     assert arrays["x"][1] == arrays["y"][1] == arrays["t"][1] == 0.
     assert arrays["ch6"].dtype == np.uint64 and arrays["ch6"].view(np.int64)[0] == -201845
     np.testing.assert_array_equal(arrays["time_stamp"], [123., 124.])
+    # 12-value DLL packets: one hit row per fired channel plus the MCP trigger.
+    np.testing.assert_array_equal(hits["hit_channel"], [0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 7])
+    np.testing.assert_array_equal(hits["hit_time_stamp"], [123.] * 8 + [124.] * 7)
+    assert hits["hit_time"].view(np.int64)[6] == -201845
+
+
+def _multi_hit_row(first_hits, counts, hits, time_stamp, k=4):
+    """One 52-value packet row of a DLL that sends every hit (k hits per channel)."""
+    block = np.zeros((8, k))
+    for channel, values in enumerate(hits):
+        block[channel, :len(values)] = values[:k]
+    return np.concatenate([first_hits, [np.nan, np.nan, np.nan, time_stamp], counts, block.ravel()])
+
+
+def test_roentdek_multi_hit_packet_recovers_ion_behind_a_reflection():
+    from pyccapt.control.tdc_roentdek import tdc_roentdek as module
+    # Run 198, event 1, with reflection pulses arriving on u1 and v1 before the real signals:
+    # only the w layer passes the time-sum gate with first hits, so that position is lost.
+    hits = [[900, 1784], [2774], [1000, 2665], [1855], [1372], [3164], [-201845], [0]]
+    first = [h[0] for h in hits]
+    row = _multi_hit_row(first, [len(h) for h in hits], hits, 77.)
+    from pyccapt.calibration.data_tools.roentdek_hexanode import reconstruct_hexanode
+    assert not reconstruct_hexanode(np.array([first]))["valid"][0]
+    arrays, valid, hit_rows = module.events_from_packet(np.array([row]), module.HexanodeParameters(),
+                                                        hits_per_channel=4)
+    assert valid[0]
+    assert arrays["x"][0] == pytest.approx(-1.23483, abs=0.06)
+    assert arrays["y"][0] == pytest.approx(-1.55235, abs=0.06)
+    assert arrays["t"][0] == pytest.approx(5069.8293, abs=0.05)
+    assert arrays["ch0"][0] == 900  # the stored first hit is unchanged
+    np.testing.assert_array_equal(hit_rows["hit_channel"], [0, 0, 1, 2, 2, 3, 4, 5, 6, 7])
+    np.testing.assert_array_equal(hit_rows["hit_time"].view(np.int64),
+                                  [900, 1784, 2774, 1000, 2665, 1855, 1372, 3164, -201845, 0])
+
+
+def test_roentdek_packet_layout_detects_dll_build():
+    from types import SimpleNamespace
+    from pyccapt.control.tdc_roentdek import tdc_roentdek as module
+    assert module.packet_layout(object()) == (12, 0)
+    assert module.packet_layout(SimpleNamespace(values_per_event=lambda: 52, hits_per_channel=lambda: 4)) == (52, 4)
+    with pytest.raises(ValueError):
+        module.packet_layout(SimpleNamespace(values_per_event=lambda: 50, hits_per_channel=lambda: 4))
 
 
 def test_roentdek_hexanode_setup_reads_ccf_and_correction(tmp_path):

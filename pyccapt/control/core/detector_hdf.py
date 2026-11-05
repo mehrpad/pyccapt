@@ -88,6 +88,18 @@ def write_roentdek_chunks(handle, directory, index):
                ('time_stamp', 'dld/start_counter', np.uint64)]
     for stem, name, dtype in mapping:
         hdf._write_chunked_dataset(handle, name, hdf._sorted_chunk_files(directory, stem, index), dtype)
+    hit_files = hdf._sorted_chunk_files(directory, 'hit_channel', index)
+    if _declared(index, 'hit_channel', hit_files):
+        # Acquisitions since 2026-11 stream every TDC hit (one row per hit, the
+        # MCP trigger included); tdc/start_counter is the group timestamp that
+        # links each hit to its dld event.
+        hit_mapping = [('hit_channel', 'tdc/channel', np.uint32), ('hit_time', 'tdc/time_data', np.uint64),
+                       ('hit_time_stamp', 'tdc/start_counter', np.uint64), ('hit_voltage', 'tdc/high_voltage', np.float64),
+                       ('hit_voltage_pulse', 'tdc/voltage_pulse', np.float64),
+                       ('hit_laser_pulse', 'tdc/laser_pulse', np.float64)]
+        for stem, name, dtype in hit_mapping:
+            hdf._write_chunked_dataset(handle, name, hdf._sorted_chunk_files(directory, stem, index), dtype)
+        return True
     stems = {f'ch{i}': np.uint64 for i in range(8)}
     stems.update(time_stamp=np.uint64, voltage=np.float64, voltage_pulse=np.float64, laser_pulse=np.float64)
     by_id = {}

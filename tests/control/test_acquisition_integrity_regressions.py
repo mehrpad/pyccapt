@@ -114,6 +114,35 @@ def test_roentdek_chunk_finalization_matches_existing_flat_layout(tmp_path):
     assert validate_hdf5(tmp_path/'run.h5')['valid']
 
 
+def test_roentdek_hit_stream_finalizes_one_tdc_row_per_hit(tmp_path):
+    from pyccapt.calibration.data_tools.roentdek_hexanode import load_roentdek_hits, load_roentdek_tdc_channels
+    directory = tmp_path/'temp_data'/'chunks'
+    stamps = np.array([10, 11], dtype=np.uint64)
+    events = {name: np.zeros(2) for name in ('x', 'y', 't', 'voltage', 'voltage_pulse', 'laser_pulse')}
+    events['time_stamp'] = stamps
+    first = np.array([[900, 2774, 2665, 1855, 1372, 3164, -201845, 0], [5, 0, 0, 0, 0, 0, 0, 0]], dtype=np.int64)
+    events.update({f'ch{i}': first[:, i].view(np.uint64) for i in range(8)})
+    chunk_store.atomic_write_chunk_group(directory, stream_name='roentdek', chunk_id=1, arrays=events)
+    # Event 10 has a second u1 hit (the real signal behind a reflection); event 11 only u1 and the MCP.
+    channel = np.array([0, 0, 1, 2, 3, 4, 5, 6, 7, 0, 7], dtype=np.uint32)
+    time = np.array([900, 1784, 2774, 2665, 1855, 1372, 3164, -201845, 0, 5, 0], dtype=np.int64)
+    hits = {'hit_time_stamp': np.repeat(stamps, [9, 2]), 'hit_channel': channel, 'hit_time': time.view(np.uint64),
+            'hit_voltage': np.full(11, 4000.), 'hit_voltage_pulse': np.zeros(11), 'hit_laser_pulse': np.full(11, 2.)}
+    chunk_store.atomic_write_chunk_group(directory, stream_name='roentdek_hits', chunk_id=1, arrays=hits)
+    hdf_creator(_variables(tmp_path), {'tdc': 'on', 'tdc_model': 'RoentDek'}, [1], [0.])
+    with h5py.File(tmp_path/'run.h5') as file:
+        np.testing.assert_array_equal(file['tdc/channel'], channel)
+        np.testing.assert_array_equal(file['tdc/time_data'][:].view(np.int64), time)
+        np.testing.assert_array_equal(file['tdc/start_counter'], hits['hit_time_stamp'])
+        assert file['tdc/time_data'].dtype == np.dtype('uint64')
+    loaded, extras = load_roentdek_hits(tmp_path/'run.h5')
+    assert len(loaded) == 2
+    np.testing.assert_array_equal(loaded.counts()[0], [2, 1, 1, 1, 1, 1, 1, 0])  # MCP trigger rows are implicit
+    np.testing.assert_array_equal(extras['start_counter'], stamps)
+    np.testing.assert_array_equal(load_roentdek_tdc_channels(tmp_path/'run.h5')['channels'][0], first[0])
+    assert validate_hdf5(tmp_path/'run.h5')['valid']
+
+
 def test_hsd_chunk_finalization_preserves_fractional_signed_samples(tmp_path):
     directory = tmp_path/'temp_data'/'chunks'
     samples = np.resize(np.array([-.25, .125, -1.75], dtype=np.float32), 1024)

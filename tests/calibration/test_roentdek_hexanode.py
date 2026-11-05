@@ -129,3 +129,112 @@ def test_read_cobold_txt(tmp_path):
     assert list(frame['n_particles']) == [0, 2]
     assert frame.loc[1, 'x2_mm'] == pytest.approx(24.7025)
     assert frame.loc[1, 'method1'] == 14
+
+
+# --- all hits (LMF-like) -----------------------------------------------------
+
+def _hits(*events):
+    """RoentdekHits from per-event lists of (channel, bin)."""
+    event = [i for i, hits in enumerate(events) for _ in hits]
+    channel = [c for hits in events for c, _ in hits]
+    value = [v for hits in events for _, v in hits]
+    return hx.RoentdekHits.from_rows(event, channel, value, len(events))
+
+
+def _as_hits(bins, arrival_bins=0):
+    """(channel, bin) pairs of one ideal ion; anode times shifted by ``arrival_bins``."""
+    return [(c, int(b) + (arrival_bins if c < 6 else 0)) for c, b in enumerate(bins) if c != 7]
+
+
+def test_hits_container_counts_and_first_hits():
+    hits = _hits([(0, 5), (3, 7), (0, 9), (7, 0)], [])
+    assert len(hits) == 2
+    np.testing.assert_array_equal(hits.counts()[0], [2, 0, 0, 1, 0, 0, 0, 0])  # zeros (MCP rows) are dropped
+    np.testing.assert_array_equal(hits.first_hits()[0], [5, 0, 0, 7, 0, 0, 0, 0])
+    np.testing.assert_array_equal(hits.offsets, [0, 3, 3])
+    single = hx.RoentdekHits.from_first_hits(np.array([[1, 2, 0, 4, 0, 0, -3, 0]]))
+    np.testing.assert_array_equal(single.first_hits(), [[1, 2, 0, 4, 0, 0, -3, 0]])
+
+
+def test_read_lmf_txt(tmp_path):
+    path = tmp_path / 'run_raw.txt'
+    path.write_text(
+        'Number of events = 2\n\n------- #1 -------\nT  = 0.000 ns = \t0.000000 s\n'
+        'chan     1     2  1163  1500\nchan     2     0\nchan     7     1 -201845\nchan     8     1     0\n'
+        'Levelinfo: 0\n\n------- #2 -------\nT  = 131.350 ns = \t0.000000 s\nchan     1     0\n'
+        'chan     8     1     0\n'
+    )
+    hits = hx.read_lmf_txt(path)
+    assert len(hits) == 2
+    np.testing.assert_array_equal(hits.first_hits()[0], [1163, 0, 0, 0, 0, 0, -201845, 0])
+    np.testing.assert_array_equal(hits.counts()[:, 0], [2, 0])
+    np.testing.assert_allclose(hits.timestamp_ns, [0.0, 131.35])
+
+
+def test_multihit_recovers_ion_behind_reflections_on_two_layers():
+    ion = _event(10.0, -5.0, 3000.)
+    reflections = [(0, int(ion[0]) - 900), (2, int(ion[2]) - 700)]  # earlier pulses on u1 and v1
+    hits = _hits(reflections + _as_hits(ion))
+    assert not hx.reconstruct_hexanode(hits.first_hits())['valid'][0]
+    result = hx.reconstruct_hexanode_multihit(hits, sum_walk=False)
+    np.testing.assert_array_equal(result['n_particles'], [1])
+    assert result['x_mm'][0] == pytest.approx(10.0, abs=0.05)
+    assert result['y_mm'][0] == pytest.approx(-5.0, abs=0.05)
+    assert result['tof_ns'][0] == pytest.approx(3000., abs=0.05)
+    assert result['layer_mask'][0] == 7 and result['n_reconstructed'][0] == 0
+
+
+def test_multihit_single_signals_need_the_hexanode_check():
+    ion = _event(-12.0, 8.0, 2000.)
+    one_per_layer = [(0, ion[0]), (3, ion[3]), (4, ion[4]), (6, ion[6])]  # u1, v2, w1 + start
+    result = hx.reconstruct_hexanode_multihit(_hits(one_per_layer), sum_walk=False)
+    assert result['layer_mask'][0] == 7 and result['n_reconstructed'][0] == 3
+    assert result['x_mm'][0] == pytest.approx(-12.0, abs=0.1)
+    assert result['y_mm'][0] == pytest.approx(8.0, abs=0.1)
+    inconsistent = [(0, ion[0]), (3, ion[3] + 400), (4, ion[4]), (6, ion[6])]
+    assert hx.reconstruct_hexanode_multihit(_hits(inconsistent), sum_walk=False)['n_particles'][0] == 0
+
+
+def test_multihit_finds_a_later_ion_without_its_own_mcp_signal():
+    first, second = _event(5.0, 5.0, 2500.), _event(-20.0, 15.0, 2500.)
+    later = int(round(15.0 / hx.HexanodeParameters().tdc_bin_ns))  # second ion arrives 15 ns after the trigger
+    hits = _hits(_as_hits(first) + [hit for hit in _as_hits(second, later) if hit[0] < 6])
+    result = hx.reconstruct_hexanode_multihit(hits, sum_walk=False)
+    np.testing.assert_array_equal(result['n_particles'], [2])
+    np.testing.assert_allclose(result['x_mm'], [5.0, -20.0], atol=0.05)
+    np.testing.assert_allclose(result['y_mm'], [5.0, 15.0], atol=0.05)
+    np.testing.assert_allclose(result['tof_ns'], [2500., 2515.], atol=0.05)
+    assert result['arrival_ns'][1] == pytest.approx(15.0, abs=0.05)
+    assert hx.first_particle(result, 1)['x_mm'][0] == pytest.approx(5.0, abs=0.05)
+
+
+def test_multihit_rejects_a_later_ion_before_the_trigger():
+    first, second = _event(5.0, 5.0, 2500.), _event(-20.0, 15.0, 2500.)
+    early = -int(round(15.0 / hx.HexanodeParameters().tdc_bin_ns))
+    hits = _hits(_as_hits(first) + [hit for hit in _as_hits(second, early) if hit[0] < 6])
+    assert hx.reconstruct_hexanode_multihit(hits, sum_walk=False)['n_particles'][0] == 1
+
+
+def test_sum_walk_round_trips_through_the_correction():
+    walk = np.array([[0.01, 0.2], [0.0, -0.1], [0.02, 0.3]])
+    correction = hx.HexanodeCorrection(1, np.array([0., 0., 1.]), np.array([0., 1., 0.]), sum_walk=walk)
+    restored = hx.HexanodeCorrection.from_dict(correction.to_dict())
+    np.testing.assert_array_equal(restored.sum_walk, walk)
+    hits = _hits(_as_hits(_event(1.0, 2.0)))
+    np.testing.assert_array_equal(hx.reconstruct_hexanode_multihit(hits, correction=restored)['sum_walk'], walk)
+    assert np.all(hx.fit_sum_walk(np.stack([_event(1.0, 2.0)] * 10)) == 0)  # too few events to fit
+
+
+def test_all_particles_from_a_per_hit_hdf5_table(tmp_path):
+    ion = _event(3.0, 4.0, 4000.)
+    rows = [(0, int(ion[0]) - 900)] + _as_hits(ion) + [(7, 0)]  # reflection on u1, then the ion
+    path = tmp_path / 'hits.h5'
+    with h5py.File(path, 'w') as handle:
+        handle['tdc/channel'] = np.array([c for c, _ in rows] + [7], dtype=np.uint32)
+        handle['tdc/time_data'] = np.array([v for _, v in rows] + [0], dtype=np.int64).view(np.uint64)
+        handle['tdc/start_counter'] = np.array([50] * len(rows) + [51], dtype=np.uint64)
+    frame = hx.reconstruct_roentdek_hdf5(path, all_particles=True, sum_walk=False)
+    assert frame['event'].tolist() == [0] and frame['particle'].tolist() == [0]
+    assert frame['x_det (cm)'][0] == pytest.approx(0.3, abs=0.005)
+    assert frame['start_counter'][0] == 50
+    assert len(hx.load_roentdek_hits(path)[0]) == 2

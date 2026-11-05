@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 from numpy.ctypeslib import ndpointer
 from pyccapt.calibration.data_tools.roentdek_hexanode import (
-    HexanodeCorrection, HexanodeParameters, reconstruct_hexanode,
+    HexanodeCorrection, HexanodeParameters, RoentdekHits, first_particle, reconstruct_hexanode_multihit,
 )
 from pyccapt.control.apt.detector_chunks import (
     ChunkStream, ChunkWriter, preserve_unattributed_packet, finite_rate_frequency_hz, read_event_metadata,
@@ -41,26 +41,80 @@ def hexanode_setup(conf):
     return params, correction
 
 
-def events_from_packet(data, params, correction=None):
-    """Detector columns for one SDK packet of ``(n, 12)`` event rows.
+FIRST_HIT_VALUES = 12
+MCP_CHANNEL = 7
+HIT_DTYPES = {"hit_time_stamp": np.uint64, "hit_channel": np.uint32, "hit_time": np.uint64,
+              "hit_voltage": np.float64, "hit_voltage_pulse": np.float64, "hit_laser_pulse": np.float64}
 
-    Columns 0..7 are the first-hit TDC bins (0 = no hit); x/y/t are rebuilt
-    from them with the shared hexanode reconstruction instead of trusting
-    the DLL's columns 8..10, so the result does not depend on the DLL build.
-    Events without a position get x = y = t = 0 (CoboldPC convention). The
-    channel bins are signed (the start channel precedes the MCP trigger) and
-    are stored two's-complement in the uint64 schema; read them back with
-    ``.view(np.int64)``.
+
+def packet_layout(tdc_lib):
+    """``(values_per_event, hits_per_channel)`` of the loaded wrapper DLL.
+
+    Builds from 2026-11 export both and send every hit (up to
+    ``hits_per_channel`` per channel); older builds send 12 first-hit values.
     """
+    try:
+        values, hits = int(tdc_lib.values_per_event()), int(tdc_lib.hits_per_channel())
+    except (AttributeError, TypeError, ValueError, OSError):
+        return FIRST_HIT_VALUES, 0
+    if hits < 1 or values != FIRST_HIT_VALUES + 8 + 8 * hits:
+        raise ValueError(f"Unexpected RoentDek DLL packet layout: {values} values, {hits} hits per channel")
+    return values, hits
+
+
+def packet_hits(data, hits_per_channel):
+    """``(event, channel, bins)`` of every hit in an SDK packet.
+
+    Rows are ordered by event, channel and arrival. The MCP trigger of every
+    event is always included (bin 0), so each event keeps at least one row.
+    """
+    n = len(data)
+    if hits_per_channel:
+        counts = np.rint(data[:, FIRST_HIT_VALUES:FIRST_HIT_VALUES + 8]).astype(np.int64)
+        start = FIRST_HIT_VALUES + 8
+        block = np.rint(data[:, start:start + 8 * hits_per_channel]).astype(np.int64).reshape(n, 8, hits_per_channel)
+        present = np.arange(hits_per_channel)[None, None, :] < np.minimum(counts, hits_per_channel)[:, :, None]
+    else:
+        block = np.rint(data[:, :8]).astype(np.int64)[:, :, None]
+        present = block != 0
+    present[:, MCP_CHANNEL, 0] = True
+    event, channel, slot = np.nonzero(present)
+    return event, channel, block[event, channel, slot]
+
+
+def events_from_packet(data, params, correction=None, *, hits_per_channel=0):
+    """Detector columns for one SDK packet of ``(n, values_per_event)`` event rows.
+
+    Columns 0..7 are the first-hit TDC bins (0 = no hit); with a DLL that
+    sends every hit (``hits_per_channel > 0``) the hit counts and hits follow
+    from column 12 (see ``source/wrapper_read_TDC8HP.cpp``). x/y/t are the
+    first (MCP-referenced) particle of the multi-hit hexanode reconstruction,
+    which recovers ions whose first hit on a channel is a reflection or noise
+    pulse, instead of trusting the DLL's columns 8..10. Events without a
+    position get x = y = t = 0 (CoboldPC convention). Channel bins are signed
+    (the start channel precedes the MCP trigger) and are stored
+    two's-complement in the uint64 schema; read them back with
+    ``.view(np.int64)``.
+
+    Returns ``(arrays, valid, hit_arrays)``: the per-event columns, the mask of
+    events with a position and the per-hit columns of ``HIT_DTYPES`` (without
+    the voltage columns, which the caller fills per packet).
+    """
+    n = len(data)
     channels = np.rint(data[:, :8]).astype(np.int64)
-    hits = reconstruct_hexanode(channels, params, correction)
-    valid = hits["valid"]
-    arrays = {"x": np.where(valid, hits["x_mm"] / 10., 0.),
-              "y": np.where(valid, hits["y_mm"] / 10., 0.),
-              "t": np.where(valid, hits["tof_ns"], 0.),
+    event, channel, value = packet_hits(data, hits_per_channel)
+    hits = RoentdekHits.from_rows(event, channel, value, n)
+    sum_walk = correction.sum_walk if correction is not None and correction.sum_walk is not None else False
+    result = first_particle(reconstruct_hexanode_multihit(hits, params, correction, sum_walk=sum_walk), n)
+    valid = result["valid"]
+    arrays = {"x": np.where(valid, result["x_mm"] / 10., 0.),
+              "y": np.where(valid, result["y_mm"] / 10., 0.),
+              "t": np.where(valid, np.nan_to_num(result["tof_ns"]), 0.),
               "time_stamp": data[:, 11]}
     arrays.update({f"ch{i}": channels[:, i].view(np.uint64) for i in range(8)})
-    return arrays, valid
+    hit_arrays = {"hit_time_stamp": data[event, 11], "hit_channel": channel.astype(np.uint32),
+                  "hit_time": value.view(np.uint64)}
+    return arrays, valid, hit_arrays
 
 
 class TDC:
@@ -68,7 +122,7 @@ class TDC:
     This class sets up the parameters for the TDC and allows users to read experiment TDC values.
     """
 
-    def __init__(self, tdc_lib, buf_size=30000, time_out=300):
+    def __init__(self, tdc_lib, buf_size=30000, time_out=300, values_per_event=FIRST_HIT_VALUES):
         """
         Constructor function which initializes function parameters.
 
@@ -76,6 +130,7 @@ class TDC:
                 tdc_lib (ctypes.CDLL): The TDC library.
                 buf_size (int): Buffer size.
                 time_out (int): Timeout value.
+                values_per_event (int): Packet row length (see ``packet_layout``).
         """
         self.tdc_lib = tdc_lib
         self.buf_size = buf_size
@@ -88,7 +143,8 @@ class TDC:
         tdc_lib.run_tdc.argtypes = [ctypes.c_void_p]
         tdc_lib.stop_tdc.restype = ctypes.c_int
         tdc_lib.stop_tdc.argtypes = [ctypes.c_void_p]
-        tdc_lib.get_data_tdc_buf.restype = ndpointer(dtype=ctypes.c_double, shape=(12 * self.buf_size + 1,))
+        tdc_lib.get_data_tdc_buf.restype = ndpointer(dtype=ctypes.c_double,
+                                                     shape=(values_per_event * self.buf_size + 1,))
         tdc_lib.get_data_tdc_buf.argtypes = [ctypes.c_void_p]
 
         self.obj = tdc_lib.Warraper_tdc_new(self.buf_size, self.time_out)
@@ -161,7 +217,15 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
         variables.flag_tdc_failure = True
         variables.flag_finished_tdc = True
         return 1
-    tdc = TDC(tdc_lib, buf_size=30000, time_out=100)
+    try:
+        values_per_event, hits_per_channel = packet_layout(tdc_lib)
+    except ValueError as exc:
+        print(exc)
+        variables.detector_error = f"{type(exc).__name__}: {exc}"
+        variables.flag_tdc_failure = True
+        variables.flag_finished_tdc = True
+        return 1
+    tdc = TDC(tdc_lib, buf_size=30000, time_out=100, values_per_event=values_per_event)
 
     ret_code = tdc.init_tdc()
     if ret_code < 0:
@@ -178,7 +242,7 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
     start_time = time.monotonic()
     pulse_frequency = finite_rate_frequency_hz(experiment_frequency_hz(variables))
     last_buf_error = None
-    writer = stream = None
+    writer = stream = hit_stream = None
     failure = None
     from pyccapt.control.apt.laser_alignment_data import LaserAlignmentPublisher
     from pyccapt.control.apt.alignment_vision import AlignmentEventPublisher
@@ -190,6 +254,9 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
                   ("x", "y", "t", "voltage", "voltage_pulse", "laser_pulse")}
         dtypes.update({name: np.uint64 for name in ("time_stamp", *(f"ch{i}" for i in range(8)))})
         stream = ChunkStream(writer, "roentdek", dtypes)
+        # Every TDC hit (one row per hit, MCP trigger included) for offline
+        # multi-hit reconstruction; finalized into the flat tdc/* table.
+        hit_stream = ChunkStream(writer, "roentdek_hits", HIT_DTYPES)
         tdc.run_tdc()
         while not stop_event.is_set() and not variables.flag_stop_tdc:
             writer.check()
@@ -206,18 +273,23 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
             if buffer_length < 0 or buffer_length > 30000:
                 raise ValueError(f"Invalid RoentDek SDK event count: {buffer_length}")
             if buffer_length:
-                data = np.copy(return_value[1:buffer_length*12+1].reshape(buffer_length, 12))
+                data = np.copy(return_value[1:buffer_length*values_per_event+1].reshape(buffer_length, values_per_event))
                 try:
                     dc, pulse, laser = read_event_metadata(variables, pulse_energy_pj)
                 except Exception:
                     preserve_unattributed_packet(Path(variables.path)/"temp_data", "roentdek", {"events": data})
                     raise
                 voltage = np.full(buffer_length, dc)
-                arrays, valid = events_from_packet(data, hex_params, hex_correction)
+                arrays, valid, hit_arrays = events_from_packet(data, hex_params, hex_correction,
+                                                               hits_per_channel=hits_per_channel)
                 arrays.update({"voltage": voltage,
                                "voltage_pulse": np.full(buffer_length, pulse),
                                "laser_pulse": np.full(buffer_length, laser)})
+                n_hits = len(hit_arrays["hit_channel"])
+                hit_arrays.update({"hit_voltage": np.full(n_hits, dc), "hit_voltage_pulse": np.full(n_hits, pulse),
+                                   "hit_laser_pulse": np.full(n_hits, laser)})
                 stream.append(arrays)
+                hit_stream.append(hit_arrays)
                 events_detected += buffer_length
                 raw_signal_detected += buffer_length
                 events_detected_tmp += buffer_length
@@ -248,11 +320,12 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
     except Exception as exc:
         failure = exc
     finally:
-        if stream is not None:
-            try:
-                stream.finish()
-            except Exception as exc:
-                failure = failure or exc
+        for open_stream in (stream, hit_stream):
+            if open_stream is not None:
+                try:
+                    open_stream.finish()
+                except Exception as exc:
+                    failure = failure or exc
         if writer is not None:
             try:
                 writer.close()

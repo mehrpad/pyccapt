@@ -565,8 +565,10 @@ def summarize_surface_concept_sequences(
             if is_valid:
                 dld4_counts[length] += 1
             else:
+                # combine_axes=False: these are 2-DLTS (per-axis) counts, consistent
+                # with the hit table; the default would merge axes into full xy hits.
                 partial_hits = _recover_surface_concept_partial_hits(
-                    chunk_channels, chunk_times, detector_radius_cm=detector_limit_cm
+                    chunk_channels, chunk_times, detector_radius_cm=detector_limit_cm, combine_axes=False
                 )
                 if partial_hits:
                     dld2_counts[length] += len(partial_hits)

@@ -13,7 +13,10 @@ from pyccapt.calibration.data_tools._raw_workflow_common import (
     DLTS_COLORS, _calculate_delta_p_and_multi, _normalize_signal_kind,
     normalize_signal_windows, summarize_signal_windows,
 )
-from pyccapt.calibration.data_tools._raw_workflow_surface_concept import analyze_surface_concept_dataset
+
+# _raw_workflow_surface_concept re-exports this module's functions at import
+# time, so importing it here at module level would be circular (this module
+# could not be imported first). It is imported where it is used instead.
 
 def summarize_surface_concept_peak_windows(
     hit_table: pd.DataFrame,
@@ -72,10 +75,16 @@ def summarize_surface_concept_peak_windows(
             )
         )
     )
-    outside_detector_count = int(
-        np.count_nonzero(recovery_diagnostics['status'].isin(['2 DLTS outside detector', '4 DLTS outside detector']))
-    )
-    unrecoverable_count = int(np.count_nonzero(recovery_diagnostics['status'] == 'unrecoverable'))
+    # The combinatorial path returns an empty diagnostics frame (no 'status').
+    if recovery_diagnostics is not None and 'status' in getattr(recovery_diagnostics, 'columns', ()):
+        status = recovery_diagnostics['status']
+        outside_detector_count = int(
+            np.count_nonzero(status.isin(['2 DLTS outside detector', '4 DLTS outside detector']))
+        )
+        unrecoverable_count = int(np.count_nonzero(status == 'unrecoverable'))
+    else:
+        outside_detector_count = 0
+        unrecoverable_count = 0
 
     count_rows = []
     ratio_rows = []
@@ -279,6 +288,7 @@ def reconstruct_surface_concept_dataset(
     detector_limit_cm: float = 4.0,
 ) -> pd.DataFrame:
     """Reconstruct a processed PyCCAPT-style dataset from a Surface Concept raw HDF5 file."""
+    from pyccapt.calibration.data_tools._raw_workflow_surface_concept import analyze_surface_concept_dataset
     analysis = analyze_surface_concept_dataset(
         hdf5_path,
         detector_limit_cm=detector_limit_cm,

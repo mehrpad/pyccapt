@@ -246,6 +246,35 @@ def test_unmatched_and_ambiguous_pulses_excluded():
     assert matched_dld_tdc_residuals(dld_a, tdc_a)["n_compared"] == 0
 
 
+def test_firmware_half_bin_rounding_in_float32_is_within_tolerance():
+    # Odd ch1-ch0 difference: the firmware rounds the half bin, so the residual
+    # of a correct match is exactly one detector bin (= pos_tol). Old files
+    # store dld/x as float32, which alone pushed this just over the tolerance
+    # (real 2023 SC data: 72 % "within tolerance" instead of 95 %).
+    xy_cm_per_bin = 80 / 4900 * 2 * 0.1
+    times = [159847, 157940, 158436, 159372]  # ch0..ch3, x difference odd
+    _, y, t = _hit4(times)
+    x_firmware = 954 * xy_cm_per_bin  # (159847-157940)/2 = 953.5 rounded up
+    pulses = [dict(sc=5, gid=0, channels=[0, 1, 2, 3], times=times, has_match=True)]
+    dld, tdc = _make_frames(pulses, [dict(gid=0, x=x_firmware, y=y, t=t, quality="native")])
+    dld = dld.astype({"x_det (cm)": np.float32, "y_det (cm)": np.float32, "t (ns)": np.float32})
+    res = matched_dld_tdc_residuals(dld, tdc)
+    assert res["n_compared"] == 1
+    assert res["dx_max_cm"] > res["pos_tol_cm"]  # float32 storage rounding
+    assert res["frac_x_within_tol"] == 1.0
+    assert res["frac_y_within_tol"] == 1.0
+    assert res["frac_tof_within_tol"] == 1.0
+
+
+def test_negative_event_group_ids_are_never_compared():
+    # Without has_dld_match, an orphan tdc pulse (gid -1) must not be compared
+    # with the first unmatched dld run, which also carries gid -1.
+    pulses = [dict(sc=5, gid=-1, channels=[0, 1, 2, 3], times=[100, 140, 130, 110], has_match=True)]
+    dld, tdc = _make_frames(pulses, [dict(gid=-1, x=2.0, y=-2.0, t=999.0, quality="native")])
+    tdc = tdc.drop(columns=["has_dld_match"])
+    assert matched_dld_tdc_residuals(dld, tdc)["n_compared"] == 0
+
+
 def test_missing_inputs_report_reason():
     res = matched_dld_tdc_residuals(pd.DataFrame(), None)
     assert res["n_compared"] == 0

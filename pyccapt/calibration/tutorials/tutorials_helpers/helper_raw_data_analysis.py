@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import ipywidgets as widgets
 from IPython.display import display
@@ -318,7 +319,15 @@ def call_raw_data_workflow(variables=None):
                 "(channel, start_counter, high_voltage, pulse, time_data). "
                 "Re-export from the cameca raw import workflow if the source is LEAP."
             )
-        unique_channels = sorted(int(c) for c in df_tdc['channel'].unique())
+        if not isinstance(df_tdc, pd.DataFrame):
+            # Low-memory (lazy) load: analyze_roentdek_tdc_frame needs a DataFrame
+            # (.iloc, .unique), so materialize the table here and release the file.
+            lazy_table = df_tdc
+            try:
+                df_tdc = lazy_table.to_dataframe()
+            finally:
+                lazy_table.close()
+        unique_channels = sorted(int(c) for c in np.unique(df_tdc['channel'].to_numpy()))
         print(f"Loaded 3DL tdc frame: {len(df_tdc):,} rows, channels={unique_channels}.")
         if len(unique_channels) > 6:
             print(

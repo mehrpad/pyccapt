@@ -67,6 +67,51 @@ def test_find_nth_max_repeated_indices_is_one_based_for_rank():
     assert (start, end, count, number) == (0, 2, 3, 1)
 
 
+def test_find_nth_max_repeated_indices_masked_run_separates_runs():
+    nums = [5, 5, 7, 7, 7, 5, 5, 9]
+    # after masking the 7-run, the two 5-runs must not merge into one run of 4
+    assert find_nth_max_repeated_indices(nums, 2) == (0, 1, 2, 5)
+    assert nums == [5, 5, 7, 7, 7, 5, 5, 9]  # input not modified
+
+
+def test_peak_summary_accepts_empty_recovery_diagnostics():
+    # the combinatorial analysis returns an empty diagnostics frame
+    hit_table = pd.DataFrame({"mc (Da)": [10.0, 10.1], "dlts": [4, 2], "in_detector": [True, True]})
+    summary = summarize_surface_concept_peak_windows(
+        hit_table, pd.DataFrame(), windows=[{"label": "p", "min": 5, "max": 15}], signal_kind="mc",
+    )
+    assert summary["outside_detector_count"] == 0
+    assert summary["unrecoverable_count"] == 0
+
+
+def test_surface_concept_submodules_import_first_without_circular_import():
+    import subprocess
+    import sys
+    for module in ("_raw_workflow_sc_peaks", "_raw_workflow_sc_combinatorial"):
+        result = subprocess.run(
+            [sys.executable, "-c", f"import pyccapt.calibration.data_tools.{module}"],
+            capture_output=True, text=True, timeout=300,
+        )
+        assert result.returncode == 0, result.stderr[-2000:]
+
+
+def test_dlts_stats_count_per_axis_hits_like_the_hit_table():
+    # x and y pairs whose sums disagree by 300 bins: two per-axis (2 DLTS) hits,
+    # not one merged full hit counted under "2 DLTS"
+    frame = pd.DataFrame({
+        "start_counter": np.full(4, 7, dtype=np.uint64),
+        "channel": np.array([0, 1, 2, 3], dtype=np.uint32),
+        "time_data": np.array([10000, 10040, 10150, 10190], dtype=np.uint64),
+        "high_voltage (V)": np.full(4, 5000.0),
+        "pulse_v (V)": np.zeros(4),
+    })
+    result = analyze_surface_concept_tdc_frame(frame)
+    two_dlts_rows = int((result["hit_table"]["dlts"] == 2).sum())
+    assert two_dlts_rows == 2
+    assert sum(result["sequence_stats"]["dld2"].values()) == two_dlts_rows
+    assert sum(result["sequence_stats"]["dld4"].values()) == 0
+
+
 def test_same_pulse_detector_separations_and_peak_summary():
     hit_table = pd.DataFrame(
         {

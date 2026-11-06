@@ -17,10 +17,11 @@ from pyccapt.calibration.data_tools import raw_data_surface_concept
 from pyccapt.calibration.data_tools._raw_workflow_common import (
     DLTS_COLORS, TOF_FACTOR_NS, TOF_FACTOR_NS_1D, XY_BIN_SHIFT, XY_FACTOR,
 )
-from pyccapt.calibration.data_tools._raw_workflow_surface_concept import (
-    _recover_surface_concept_partial_hits, _surface_concept_pulse_column, filter_peak_hits,
-)
 from pyccapt.calibration.mc import mc_tools
+# _recover_surface_concept_partial_hits, _surface_concept_pulse_column and
+# filter_peak_hits come from _raw_workflow_surface_concept, which re-exports
+# this module; they are imported at the END of this file to avoid a circular
+# import when this module is imported first.
 
 # ---------------------------------------------------------------------------
 # Combinatorial per-pulse hit recovery (greedy / exhaustive).
@@ -724,7 +725,10 @@ def analyze_surface_concept_tdc_frame_combinatorial(
             if is_valid:
                 dld4_counts[length] += 1
             else:
-                ph = _recover_surface_concept_partial_hits(cc, ct, detector_radius_cm=detector_limit_cm)
+                # combine_axes=False: count per-axis (2 DLTS) hits, consistent with
+                # the hit table; the default would merge axes into full xy hits.
+                ph = _recover_surface_concept_partial_hits(cc, ct, detector_radius_cm=detector_limit_cm,
+                                                           combine_axes=False)
                 if ph:
                     dld2_counts[length] += len(ph)
                 else:
@@ -985,3 +989,9 @@ def plot_peak_detector_diagnostics(
 
     fig.tight_layout()
     return fig
+
+
+# Imported last: see the note at the top of this module (circular import).
+from pyccapt.calibration.data_tools._raw_workflow_surface_concept import (  # noqa: E402
+    _recover_surface_concept_partial_hits, _surface_concept_pulse_column, filter_peak_hits,
+)

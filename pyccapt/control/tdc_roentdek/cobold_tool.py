@@ -87,6 +87,7 @@ def copy_xytof_from_cobold_txt_to_hdf5(txt_path, save_path):
             dc_v = append_number_at_index(dc_v, index + 1, dc_v[index])
             pulse = append_number_at_index(pulse, index + 1, pulse[index])
             sc = append_number_at_index(sc, index + 1, sc[index])
+            index = index + 1   # (was missing: later multi-hits were inserted one row too early)
         index = index + 1
         if ((i + 1) / len(tof_2)) * 100 % 10 == 0:
             print("Processed {} percent".format(int(((i + 1) / len(tof_2)) * 100)))

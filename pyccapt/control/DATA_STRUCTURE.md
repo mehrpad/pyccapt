@@ -151,9 +151,28 @@ Raw time-to-digital converter stream. Exact channel schema depends on the TDC ba
 
 ### RoentDek backend
 
-- `ch0..ch7` `(n,)` (`N/A`, `uint64`): per-channel raw counters
-- `voltage_pulse` `(n,)` (`V`, `float64`)
-- `laser_pulse` `(n,)` (`pJ`, `float64`)
+Since 2026-11 (wrapper DLL v3 + Resort64c, see `pyccapt/control/tdc_roentdek/README.md`):
+
+`dld` has one row per reconstructed ion (several ions can share one TDC group):
+`x`, `y` (cm) and `t` (ns) come from RoentDek's Resort64c, configured from the CoboldPC DAn ccf.
+`t` is `NaN` for ions whose group had no laser start (x/y are valid).
+`start_counter` is the 64-bit TDC time stamp of the ion's group (TDC bins).
+`reco_method` `(n,)` (`1`, `int16`) is the Resort64c/CoboldPC reconstruction method.
+The `dld` attribute `roentdek_reconstruction` says which reconstruction was used: `Resort64c: …` (then
+`roentdek_resort_cfg` holds its configuration) or the PyCCAPT fallback, used when RoentDek's
+`resort64c_VS2010_x64.dll` was not installed (it is not part of the repository).
+
+`tdc` has one row per TDC hit of every group (all hits, up to 10 per channel):
+
+- `channel` `(n,)` (`1`, `uint32`): TDC input 0..7 (Cobold channel = channel + 1; 0..5 anode, 6 laser start, 7 MCP/trigger)
+- `time_data` `(n,)` (`bin`, `uint64`): signed TDC bins relative to the group trigger **plus 2²³**
+  (attribute `roentdek_time_offset`). Subtract it before use: `time_data.astype(int64) - 2**23`
+- `start_counter` `(n,)` (`pulse`, `uint64`): TDC time stamp of the group (same value as `dld/start_counter`)
+- `high_voltage`, `voltage_pulse`, `laser_pulse` as for Surface Concept
+
+The complete raw data are also saved as `output.lmf` (CoboldPC format) in the experiment folder.
+Files written before 2026-11 have one `tdc` row per channel and group, with only the first hit
+(`channel`, `time_data` = first hit cast to uint64; negative start times are not recoverable there).
 
 ## Group `hsd`
 

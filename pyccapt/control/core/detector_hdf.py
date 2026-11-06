@@ -75,9 +75,71 @@ def write_hsd_chunks(handle, directory, index):
     return True
 
 
+ROENTDEK_RAW_TIME_OFFSET = 1 << 23   # must match tdc_roentdek.RAW_TIME_OFFSET
+ROENTDEK_RECONSTRUCTION_FILE = 'roentdek_reconstruction.txt'   # must match tdc_roentdek.RECONSTRUCTION_FILE
+
+
+def _write_roentdek_ion_and_hit_chunks(handle, directory, index):
+    """Layout of the RoentDek reader since 2026-11 (wrapper DLL v3 + Resort64c).
+
+    ``roentdek`` stream: one row per reconstructed ion -> dld/*
+    ``roentdek_raw`` stream: one row per TDC hit of every group -> tdc/*
+    (tdc/time_data = signed TDC bins + ROENTDEK_RAW_TIME_OFFSET)
+    """
+    from pyccapt.control.core import hdf5_creator as hdf
+    ion_map = [('x', 'dld/x', np.float64), ('y', 'dld/y', np.float64), ('t', 'dld/t', np.float64),
+               ('voltage', 'dld/high_voltage', np.float64), ('voltage_pulse', 'dld/voltage_pulse', np.float64),
+               ('laser_pulse', 'dld/laser_pulse', np.float64), ('time_stamp', 'dld/start_counter', np.uint64),
+               ('ro_reco_method', 'dld/reco_method', np.int16)]
+    raw_map = [('ro_raw_channel', 'tdc/channel', np.uint32), ('ro_raw_time', 'tdc/time_data', np.uint64),
+               ('ro_raw_time_stamp', 'tdc/start_counter', np.uint64),
+               ('ro_raw_voltage', 'tdc/high_voltage', np.float64),
+               ('ro_raw_voltage_pulse', 'tdc/voltage_pulse', np.float64),
+               ('ro_raw_laser_pulse', 'tdc/laser_pulse', np.float64)]
+    for mapping, label in ((ion_map, 'ion'), (raw_map, 'raw hit')):
+        files = {stem: hdf._sorted_chunk_files(directory, stem, index) for stem, _, _ in mapping}
+        ids = {stem: [int(path.stem.rsplit('_', 1)[1]) for path in paths] for stem, paths in files.items()}
+        first = next(iter(ids.values()))
+        if any(chunk_ids != first for chunk_ids in ids.values()):
+            raise ValueError(f'RoentDek {label} chunk fields do not share the same chunk groups')
+        for stem, name, dtype in mapping:
+            hdf._write_chunked_dataset(handle, name, files[stem], dtype)
+    dld_lengths = {len(handle[name]) for _, name, _ in ion_map}
+    tdc_lengths = {len(handle[name]) for _, name, _ in raw_map}
+    if len(dld_lengths) != 1 or len(tdc_lengths) != 1:
+        raise ValueError('RoentDek dld/ or tdc/ datasets have different lengths')
+    time_data = handle['tdc/time_data']
+    time_data.attrs['roentdek_time_offset'] = ROENTDEK_RAW_TIME_OFFSET
+    time_data.attrs['encoding'] = ('RoentDek TDC8HP: signed TDC bins relative to the group trigger + '
+                                   'roentdek_time_offset (2**23); every row is one real hit')
+    handle['dld/reco_method'].attrs['description'] = ('RoentDek Resort64c/CoboldPC reconstruction method '
+                                                     'number of each ion (PyCCAPT codes 0-3 if the Resort64c '
+                                                     'DLL was not available)')
+    handle['dld/t'].attrs['missing_start'] = 'NaN: the group had no laser start signal (TOF unknown, x/y valid)'
+    # which reconstruction produced dld/x, y, t (written by tdc_roentdek.record_reconstruction)
+    reconstruction = ''
+    try:
+        info_path = Path(directory).parent / ROENTDEK_RECONSTRUCTION_FILE
+        if info_path.is_file():
+            reconstruction = info_path.read_text().strip()
+            handle['dld'].attrs['roentdek_reconstruction'] = reconstruction
+    except Exception:
+        reconstruction = ''
+    if not reconstruction or reconstruction.startswith('Resort64c'):
+        try:
+            from pyccapt.control.tdc_roentdek.roentdek_resort import DEFAULT_CFG
+            handle['dld'].attrs['roentdek_resort_cfg'] = Path(DEFAULT_CFG).read_text()
+        except Exception:
+            pass
+    return True
+
+
 def write_roentdek_chunks(handle, directory, index):
     from pyccapt.control.core import hdf5_creator as hdf
     directory = Path(directory)
+    if _declared(index, 'ro_raw_channel', hdf._sorted_chunk_files(directory, 'ro_raw_channel', index)):
+        return _write_roentdek_ion_and_hit_chunks(handle, directory, index)
+    # previous layout: one row per TDC group with the first hit of each channel (ch0..ch7)
     channel_files = hdf._sorted_chunk_files(directory, 'ch0', index)
     if not _declared(index, 'ch0', channel_files):
         return False

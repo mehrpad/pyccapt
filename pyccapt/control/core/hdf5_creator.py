@@ -31,7 +31,7 @@ _DATASET_UNITS = {
     "apt/experiment_chamber_vacuum": "mbar",
     "apt/laser_x": "m", "apt/laser_y": "m", "apt/laser_z": "m",
     "apt/stage_x": "m", "apt/stage_y": "m", "apt/stage_z": "m",
-    "dld/x": "cm", "dld/y": "cm", "dld/t": "ns", "dld/start_counter": "pulse",
+    "dld/x": "cm", "dld/y": "cm", "dld/t": "ns", "dld/start_counter": "pulse", "dld/reco_method": "1",
     "dld/high_voltage": "V", "dld/voltage_pulse": "V", "dld/laser_pulse": "pJ",
     "tdc/channel": "1", "tdc/time_data": "bin", "tdc/start_counter": "pulse",
     "tdc/high_voltage": "V", "tdc/voltage_pulse": "V", "tdc/laser_pulse": "pJ",

@@ -99,6 +99,8 @@ pyccapt = [
   "control/*/*.dll", "control/*/*.lib", "control/*/*.exp", "control/*/*.ocx",
   "control/*/*.chm", "control/*/*.cfg", "control/*/*.ini", "control/*/*.bit",
   "control/*/*.exe", "control/*/*.lmf",
+  "control/tdc_roentdek/*.json", "control/tdc_roentdek/tools/*.exe",
+  "control/tdc_roentdek/source/default_files/*", "control/tdc_roentdek/source/cobold_ccf/*",
 ]
 
 [tool.pytest.ini_options]

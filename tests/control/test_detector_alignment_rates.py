@@ -7,6 +7,37 @@ import numpy as np
 import pytest
 
 
+def _roentdek_groups(n, first_ts=100):
+    """n TDC groups: every channel has one hit, ch7 (MCP trigger) at 0, start (ch6) before it."""
+    ts = np.arange(first_ts, first_ts + n, dtype=np.uint64)
+    cnt = np.ones((n, 8), np.uint32)
+    tdc = np.zeros((n, 8, 10), np.int32)
+    tdc[:, :6, 0] = (np.arange(n)[:, None] + 1) * np.arange(1, 7)[None, :]
+    tdc[:, 6, 0] = -1000 - np.arange(n)
+    return ts, cnt, tdc
+
+
+def _roentdek_fake_sdk(read):
+    sdk = Mock()
+    sdk.init_tdc.return_value = 0
+    sdk.run_tdc.return_value = 0
+    sdk.bin_size_ns.return_value = .025
+    sdk.diagnostics.return_value = {}
+    sdk.last_error.return_value = ''
+    sdk.read.side_effect = read
+    return sdk
+
+
+def _roentdek_fake_reco(*_args, **_kwargs):
+    """one ion per group: x = first u1 hit [mm], y = first v1 hit [mm], t = MCP - start [bins]"""
+    def reconstruct(cnt, tdc, time_stamp=None):
+        n = len(cnt)
+        return {"event": np.arange(n), "hit": np.zeros(n, np.int8), "x": tdc[:, 0, 0].astype(float),
+                "y": tdc[:, 2, 0].astype(float), "t": (tdc[:, 7, 0] - tdc[:, 6, 0]).astype(float),
+                "method": np.zeros(n, np.int8), "time_stamp": time_stamp}
+    return SimpleNamespace(bin_ns=.025, reconstruct=reconstruct, stats_text=lambda: "", signal_warnings=lambda: [])
+
+
 @pytest.mark.parametrize('backend', ['surface', 'roentdek'])
 @pytest.mark.parametrize('elapsed_s', [.5, 1., 2.5])
 def test_detector_rate_uses_actual_elapsed_time(monkeypatch, tmp_path, backend, elapsed_s):
@@ -20,14 +51,14 @@ def test_detector_rate_uses_actual_elapsed_time(monkeypatch, tmp_path, backend, 
 
     if backend == 'roentdek':
         from pyccapt.control.tdc_roentdek import tdc_roentdek as module
-        sdk = Mock()
-        sdk.init_tdc.return_value = 0
+
         def packet():
             clock[0] = elapsed_s
-            return np.concatenate(([count], np.ones((count, 12)).ravel()))
-        sdk.get_data_tdc_buf.side_effect = packet
+            return _roentdek_groups(count)
+        sdk = _roentdek_fake_sdk(packet)
         monkeypatch.setattr(module.ctypes, 'CDLL', lambda *_: object())
         monkeypatch.setattr(module, 'TDC', lambda *_args, **_kwargs: sdk)
+        monkeypatch.setattr(module, 'make_reconstructor', _roentdek_fake_reco)
         run = module.experiment_measure
     else:
         from pyccapt.control.tdc_surface_concept import tdc_surface_concept as module

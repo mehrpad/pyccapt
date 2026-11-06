@@ -151,21 +151,51 @@ def _variables(tmp_path):
                            extend_to=Mock(side_effect=AssertionError("No bulk Manager transfers allowed")))
 
 
+def _roentdek_groups(n, first_ts=100):
+    """n TDC groups: every channel has one hit, ch7 (MCP trigger) at 0, start (ch6) before it."""
+    ts = np.arange(first_ts, first_ts + n, dtype=np.uint64)
+    cnt = np.ones((n, 8), np.uint32)
+    tdc = np.zeros((n, 8, 10), np.int32)
+    tdc[:, :6, 0] = (np.arange(n)[:, None] + 1) * np.arange(1, 7)[None, :]
+    tdc[:, 6, 0] = -1000 - np.arange(n)
+    return ts, cnt, tdc
+
+
+def _roentdek_fake_sdk(read):
+    sdk = Mock()
+    sdk.init_tdc.return_value = 0
+    sdk.run_tdc.return_value = 0
+    sdk.bin_size_ns.return_value = .025
+    sdk.diagnostics.return_value = {}
+    sdk.last_error.return_value = ''
+    sdk.read.side_effect = read
+    return sdk
+
+
+def _roentdek_fake_reco(*_args, **_kwargs):
+    """one ion per group: x = first u1 hit [mm], y = first v1 hit [mm], t = MCP - start [bins]"""
+    def reconstruct(cnt, tdc, time_stamp=None):
+        n = len(cnt)
+        return {"event": np.arange(n), "hit": np.zeros(n, np.int8), "x": tdc[:, 0, 0].astype(float),
+                "y": tdc[:, 2, 0].astype(float), "t": (tdc[:, 7, 0] - tdc[:, 6, 0]).astype(float),
+                "method": np.zeros(n, np.int8), "time_stamp": time_stamp}
+    return SimpleNamespace(bin_ns=.025, reconstruct=reconstruct, stats_text=lambda: "", signal_warnings=lambda: [])
+
+
 def test_roentdek_empty_packets_publish_zero_and_preserve_columns(monkeypatch, tmp_path):
     from pyccapt.control.tdc_roentdek import tdc_roentdek as module
     v = _variables(tmp_path)
     writer = MemoryWriter()
     clock = [0.]
-    data = np.arange(60, dtype=float).reshape(5, 12)
-    packets = deque([(.5, np.concatenate(([5], data.ravel()))), (1., np.zeros(1)), (2., np.zeros(1))])
-    sdk = Mock()
-    sdk.init_tdc.return_value = 0
+    ts, cnt, tdc = _roentdek_groups(5)
+    packets = deque([(.5, (ts, cnt, tdc)), (1., None), (2., None)])
     def packet():
         clock[0], result = packets.popleft()
         return result
-    sdk.get_data_tdc_buf.side_effect = packet
+    sdk = _roentdek_fake_sdk(packet)
     monkeypatch.setattr(module.ctypes, "CDLL", lambda _: object())
     monkeypatch.setattr(module, "TDC", lambda *_args, **_kwargs: sdk)
+    monkeypatch.setattr(module, "make_reconstructor", _roentdek_fake_reco)
     monkeypatch.setattr(module, "ChunkWriter", lambda *_args, **_kwargs: writer)
     monkeypatch.setattr(module, "ChunkStream", lambda *args: ChunkStream(*args, chunk_size=3))
     monkeypatch.setattr(module, "time", SimpleNamespace(monotonic=lambda: clock[0], sleep=lambda _: None))
@@ -174,11 +204,17 @@ def test_roentdek_empty_packets_publish_zero_and_preserve_columns(monkeypatch, t
     assert module.experiment_measure(v, *[Mock() for _ in range(4)],
                                      SimpleNamespace(is_set=lambda: not packets)) == 0
     assert v.detection_rate_current == v.detection_rate_current_plot == 0.
-    assert v.total_ions == 5 and v.flag_finished_tdc
-    for i in range(8):
-        np.testing.assert_array_equal(writer.column(f"ch{i}"), data[:, i])
-    for name, i in (("x", 8), ("y", 9), ("t", 10), ("time_stamp", 11)):
-        np.testing.assert_array_equal(writer.column(name), data[:, i])
+    assert v.total_ions == 5 and v.total_raw_signals == 5 and v.flag_finished_tdc
+    # ions: x/y converted from mm to cm, one row per reconstructed ion
+    np.testing.assert_array_equal(writer.column("x"), tdc[:, 0, 0] / 10.)
+    np.testing.assert_array_equal(writer.column("y"), tdc[:, 2, 0] / 10.)
+    np.testing.assert_array_equal(writer.column("t"), (tdc[:, 7, 0] - tdc[:, 6, 0]).astype(float))
+    np.testing.assert_array_equal(writer.column("time_stamp"), ts)
+    # raw: every hit of every group, signed times stored with the documented offset
+    np.testing.assert_array_equal(writer.column("ro_raw_channel"), np.tile(np.arange(8), 5))
+    np.testing.assert_array_equal(writer.column("ro_raw_time").astype(np.int64) - module.RAW_TIME_OFFSET,
+                                  tdc[:, :, 0].ravel())
+    np.testing.assert_array_equal(writer.column("ro_raw_time_stamp"), np.repeat(ts, 8))
     np.testing.assert_array_equal(writer.column("voltage"), np.full(5, 1500.))
     np.testing.assert_array_equal(writer.column("laser_pulse"), np.full(5, 12.))
     v.extend_to.assert_not_called()

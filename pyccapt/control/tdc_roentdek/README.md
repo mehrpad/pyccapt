@@ -6,7 +6,7 @@
 |---|---|
 | `wrapper_read_TDC8HP_x64.dll` | acquisition DLL, version 3 (Release x64, static C runtime; needs `hptdc_driver_3.5.2_x64.dll` like before) |
 | `roentdek_resort_x64.dll` | reconstruction with RoentDek's **Resort64c** (the library CoboldPC uses); needs `resort64c_VS2010_x64.dll` from CoboldPC (see below) and the VC++ 2010 runtime (MSVCR100/MSVCP100, installed with CoboldPC) |
-| `roentdek_resort.cfg` | Resort64c configuration made from the Cobold DAn ccf (`source/cobold_ccf/DAn-part2_16_07_25.ccf`) |
+| `roentdek_resort.cfg` | Resort64c configuration made from the Cobold DAn ccf `source/cobold_ccf/DAn-part2ForLFIM.ccf` (run 283, 2026-11-09) and `source/cobold_ccf/correction_table_i_det_part3.ccf` |
 | `tdc_roentdek.py` | acquisition process (reads all hits, reconstructs, streams ions + raw hits to chunks) |
 | `roentdek_resort.py` | Python interface to Resort64c, `ccf_to_config()` |
 | `roentdek_reco.py`, `roentdek_calibration.json` | fallback reconstruction, used only if Resort64c cannot be loaded |

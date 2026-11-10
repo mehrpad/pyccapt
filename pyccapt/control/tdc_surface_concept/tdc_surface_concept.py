@@ -15,7 +15,8 @@ from pyccapt.control.devices import initialize_devices
 from pyccapt.control.nkt_photonics.readback import pulse_energy_pj, experiment_frequency_hz
 from pyccapt.control.tdc_surface_concept import scTDC
 from pyccapt.control.apt.detector_chunks import (
-    ChunkStream, ChunkWriter, preserve_unattributed_packet, finite_rate_frequency_hz, read_event_metadata,
+    ChunkStream, ChunkWriter, DetectionRateWindow, preserve_unattributed_packet, finite_rate_frequency_hz,
+    read_event_metadata,
 )
 from pyccapt.control.core.shared_ring_buffer import publish_plot_events
 
@@ -56,6 +57,12 @@ CHUNK_DTYPES = {
 QUEUE_GET_TIMEOUT_S = 0.05
 
 
+def unpack_queue_item(item):
+    """(kind, data, stamp): data packets carry (arrival time, metadata or None); end-of-measurement has none."""
+    kind, data, *rest = item
+    return kind, data, (rest[0] if rest else None)
+
+
 def packet_event_count(data):
     """Number of events in an SDK callback packet (DLD and raw TDC both carry 'time')."""
     try:
@@ -94,6 +101,17 @@ class BufDataCB4(scTDC.buffered_data_callbacks_pipe):
         self.stream_name = 'dld' if dld_events else 'tdc'
         self.shutdown_packets = 0
         self.publication_error = ''
+        self.metadata_reader = None   # set by run_experiment_measure: () -> (dc, pulse, laser)
+
+    def _read_metadata(self):
+        """(dc, pulse, laser) now, or None; the consumer then reads it itself or keeps the packet unattributed."""
+        reader = getattr(self, 'metadata_reader', None)
+        if reader is None:
+            return None
+        try:
+            return reader()
+        except Exception:
+            return None
 
     def _publish(self, item):
         # Closing sets the event before waiting for this bounded put. Once
@@ -135,7 +153,11 @@ class BufDataCB4(scTDC.buffered_data_callbacks_pipe):
                 dcopy[k] = d[k].copy()
             else:
                 dcopy[k] = d[k]
-        if not self._publish((QUEUE_DATA, dcopy)) and packet_event_count(dcopy):
+        # Stamp the packet with the arrival time and the voltage/laser of that moment. The
+        # consumer may take this packet from the queue seconds later (slow disk, plotting, a
+        # burst); it must not label these events with the voltage at that later time.
+        stamp = (time.monotonic(), self._read_metadata())
+        if not self._publish((QUEUE_DATA, dcopy, stamp)) and packet_event_count(dcopy):
             # Output safe-off runs immediately when Stop is requested. A late
             # SDK packet cannot safely inherit the now-changing voltage. Keep
             # its raw evidence explicitly unassigned instead of dropping it.
@@ -321,7 +343,11 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
     laser_alignment_publisher = LaserAlignmentPublisher(variables)
     alignment_publisher = AlignmentEventPublisher(variables, _conf)
     writer = None
-    events_detected = raw_signal_detected = events_detected_tmp = 0
+    events_detected = raw_signal_detected = 0
+    # Rate on the callbacks' arrival times: a queue backlog drained at once is not a rate spike.
+    rate_window = DetectionRateWindow()
+    for callback in (bufdatacb, bufdatacb_raw):
+        callback.metadata_reader = lambda: read_event_metadata(variables, pulse_energy_pj)
     start_time = time.monotonic()
     pulse_frequency = finite_rate_frequency_hz(experiment_frequency_hz(variables))
     streams = []
@@ -345,32 +371,40 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
             packets = []
             for index, callback in enumerate(callbacks):
                 try:
-                    kind, data = callback.queue.get(block=False)
+                    kind, data, stamp = unpack_queue_item(callback.queue.get(block=False))
                 except Empty:
                     continue
                 if kind is not None:
-                    packets.append((index, kind, data))
+                    packets.append((index, kind, data, stamp))
             if not packets:
                 index = idle_index
                 idle_index = 1-idle_index
                 try:
-                    kind, data = callbacks[index].queue.get(timeout=QUEUE_GET_TIMEOUT_S)
+                    kind, data, stamp = unpack_queue_item(callbacks[index].queue.get(timeout=QUEUE_GET_TIMEOUT_S))
                     if kind is not None:
-                        packets.append((index, kind, data))
+                        packets.append((index, kind, data, stamp))
                 except Empty:
                     pass
 
             # Process packets already removed from the queues even if Stop
             # arrives now. Never drop a dequeued packet at a stop boundary.
-            if any(kind == QUEUE_DATA for _, kind, _ in packets):
+            # Voltage/laser come from the callback's arrival stamp; only a packet
+            # without one (metadata could not be read in the callback) is
+            # labelled with the value read now.
+            fallback = None
+            if any(kind == QUEUE_DATA and (stamp is None or stamp[1] is None) for _, kind, _, stamp in packets):
                 try:
-                    specimen_voltage, voltage_pulse, laser_pulse = read_event_metadata(variables, pulse_energy_pj)
+                    fallback = read_event_metadata(variables, pulse_energy_pj)
                 except Exception:
-                    for index, kind, data in packets:
+                    for index, kind, data, _ in packets:
                         if kind == QUEUE_DATA:
                             preserve_unattributed_packet(directory, "dld" if index == 0 else "tdc", data)
                     raise
-            for index, kind, data in packets:
+            for index, kind, data, stamp in packets:
+                if kind == QUEUE_DATA:
+                    arrival = stamp[0] if stamp is not None else time.monotonic()
+                    metadata = stamp[1] if stamp is not None and stamp[1] is not None else fallback
+                    specimen_voltage, voltage_pulse, laser_pulse = metadata
                 if kind == QUEUE_ENDOFMEAS and index == 0 and not stop_event.is_set():
                     retcode = bufdatacb.start_measurement(exposure_time, retries=10)
                     if retcode < 0:
@@ -391,7 +425,7 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
                                 "laser_pulse": np.full(count, laser_pulse),
                                 "start_counter": data["start_counter"]})
                     events_detected += count
-                    events_detected_tmp += count
+                    rate_window.add(count, arrival)
                     publish_plot_events(x_plot, y_plot, t_plot, main_v_dc_plot, x, y, tof, voltage)
                     alignment_publisher.append(x, y)
                     laser_alignment_publisher.append(tof)
@@ -411,12 +445,11 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
                     pulse_frequency = finite_rate_frequency_hz(experiment_frequency_hz(variables), pulse_frequency)
                 except Exception:
                     pass
-                rate = events_detected_tmp*100/(pulse_frequency*elapsed_s)
+                rate = rate_window.rate(elapsed_s, pulse_frequency)
                 variables.detection_rate_current = rate
                 variables.detection_rate_current_plot = rate
                 variables.total_ions = events_detected
                 variables.total_raw_signals = raw_signal_detected
-                events_detected_tmp = 0
                 start_time = current_time
     except Exception as exc:
         failure = exc
@@ -431,7 +464,7 @@ def run_experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, st
         for index, callback in enumerate((bufdatacb, bufdatacb_raw)):
             while True:
                 try:
-                    kind, data = callback.queue.get(block=False)
+                    kind, data, _ = unpack_queue_item(callback.queue.get(block=False))
                 except Empty:
                     break
                 if kind == QUEUE_DATA and packet_event_count(data):

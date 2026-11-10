@@ -11,6 +11,7 @@ import math
 import multiprocessing
 from pathlib import Path
 from queue import Empty, Full
+import threading
 import time
 
 import numpy as np
@@ -204,6 +205,145 @@ def read_event_metadata(variables, energy_reader, *, attempts=3):
             if attempt + 1 == attempts:
                 raise RuntimeError("Cannot associate detector packet with voltage/laser metadata") from exc
             time.sleep(.01)
+
+
+class MetadataHistory:
+    """Time-stamped (DC voltage, pulse voltage, laser energy) samples on the host clock.
+
+    Each detector event gets the value at its own time, so the value doesn't depend on when the
+    acquisition loop got round to reading it. A packet that waited in a driver buffer, or behind a
+    slow disk, keeps the voltage the tip saw when the ions were evaporated.
+
+    ``maxlen`` 3000 at the sampler's 50 ms is the last 2.5 min; older events get the oldest sample.
+    """
+
+    def __init__(self, maxlen=3000):
+        self.samples = deque(maxlen=int(maxlen))
+        self._lock = threading.Lock()
+
+    def append(self, host_time, metadata):
+        with self._lock:
+            if self.samples and host_time < self.samples[-1][0]:
+                return
+            self.samples.append((float(host_time), *map(float, metadata)))
+
+    def __len__(self):
+        return len(self.samples)
+
+    def at(self, host_times):
+        """(dc, pulse, laser) arrays at ``host_times``; linear between samples, clamped at the ends."""
+        with self._lock:
+            table = np.array(self.samples, dtype=np.float64)
+        if not len(table):
+            raise RuntimeError("No voltage/laser metadata sample is available")
+        host_times = np.asarray(host_times, dtype=np.float64)
+        return tuple(_interp_nan_safe(host_times, table[:, 0], table[:, column]) for column in (1, 2, 3))
+
+
+def _interp_nan_safe(x, xp, fp):
+    """np.interp, but a NaN sample (e.g. stale laser telemetry) stays NaN instead of spreading."""
+    finite = np.isfinite(fp)
+    if finite.all():
+        return np.interp(x, xp, fp)
+    out = np.interp(x, xp, np.where(finite, fp, 0.))
+    following = np.searchsorted(xp, x, side='right')
+    before = np.clip(following - 1, 0, len(xp) - 1)
+    # Outside the samples (clamped) or exactly on one, only that sample counts.
+    after = np.where(x <= xp[before], before, np.minimum(following, len(xp) - 1))
+    out[~(finite[before] & finite[after])] = np.nan
+    return out
+
+
+class MetadataSampler:
+    """Background thread that keeps a MetadataHistory filled while the acquisition loop is busy.
+
+    Reconstructing and writing a big packet can block the detector loop for a second or more; the
+    voltage controller keeps changing the voltage meanwhile. Sampling on a separate thread records
+    that history, so late-processed events are still matched to the right voltage.
+    """
+
+    def __init__(self, history, reader, clock=time.monotonic, period_s=.05):
+        self.history = history
+        self.reader = reader
+        self.clock = clock
+        self.period_s = float(period_s)
+        self.failures = 0
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="detector-metadata-sampler", daemon=True)
+
+    def start(self):
+        self._thread.start()
+        return self
+
+    def _run(self):
+        while not self._stop.is_set():
+            try:
+                metadata = self.reader()
+                self.history.append(self.clock(), metadata)
+            except Exception:
+                self.failures += 1
+            self._stop.wait(self.period_s)
+
+    def stop(self):
+        self._stop.set()
+        if self._thread.is_alive():
+            self._thread.join(1.)
+
+
+class DetectorClock:
+    """Maps a detector clock (seconds) onto the host monotonic clock.
+
+    A packet is read at the earliest right after its last event, so ``host_read - detector_last``
+    is never below the true offset; its minimum over all reads is the offset. Reads of a
+    backlogged packet give a larger difference and are ignored automatically. Clock drift
+    (a few ppm, i.e. milliseconds per hour) is negligible compared with how fast the voltage changes.
+    """
+
+    def __init__(self):
+        self.offset = None
+
+    def observe(self, host_read_time, detector_last_time):
+        difference = float(host_read_time) - float(detector_last_time)
+        if self.offset is None or difference < self.offset:
+            self.offset = difference
+
+    def host_time(self, detector_times):
+        if self.offset is None:
+            raise RuntimeError("DetectorClock.observe() must be called before host_time()")
+        return np.asarray(detector_times, dtype=np.float64) + self.offset
+
+
+class DetectionRateWindow:
+    """Detection rate measured on the time the events happened, not when they were read.
+
+    The old rate divided the ions read in a window by host time. A backlog flushed in one read
+    then looked like a huge rate spike and made the voltage controller drop the voltage. Here the
+    denominator is the event-clock span the window's events cover (detector time stamps, or
+    callback arrival times); the host time is only used when that span isn't known yet.
+    """
+
+    def __init__(self):
+        self.count = 0
+        self.last_event_time = None
+        self.previous_end = None
+
+    def add(self, count, last_event_time):
+        if count:
+            self.count += int(count)
+            self.last_event_time = float(last_event_time)
+
+    def rate(self, host_elapsed_s, pulse_frequency_hz):
+        """Rate in % (ions per pulse x 100) for the window just closed; resets the window."""
+        if not self.count:
+            self.previous_end = None
+            return 0.
+        span = host_elapsed_s
+        if self.previous_end is not None and self.last_event_time > self.previous_end:
+            span = self.last_event_time - self.previous_end
+        rate = self.count * 100. / (pulse_frequency_hz * span) if span > 0 else 0.
+        self.previous_end = self.last_event_time
+        self.count = 0
+        return rate
 
 
 def preserve_unattributed_packet(directory, stream_name, arrays):

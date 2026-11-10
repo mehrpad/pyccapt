@@ -66,6 +66,20 @@ The LMF can always be re-evaluated later in CoboldPC.
 * After a new calibration in Cobold, regenerate the config:
   `python -m pyccapt.control.tdc_roentdek.roentdek_resort DAn-part2_xxx.ccf [correction_table.ccf] roentdek_resort.cfg`
 
+## Voltage, laser energy and detection rate per event
+
+* Each ion and raw hit gets the DC voltage, pulse voltage and laser energy at **its own TDC time**:
+  * a thread samples them every 50 ms (`MetadataSampler`), also while the loop is busy reconstructing;
+  * the TDC clock is mapped onto the host clock from the reads (`DetectorClock`).
+* The detection rate the voltage controller uses is ions per TDC time (`DetectionRateWindow`), not ions per
+  read interval.
+* Before this, run 283 had wrong voltages for 82k ions:
+  * a burst of ~135k groups in 3 s was read late, in five full 30000-group packets;
+  * each packet got the single voltage of its read moment;
+  * the flushed backlog looked like a rate spike, so the controller dropped the voltage by 1.6 kV.
+* A full read (30000 groups) means the loop fell behind the TDC. It is printed as a warning; the voltages
+  stay correct.
+
 ## TDC configuration
 
 `global.cfg`:

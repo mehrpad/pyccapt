@@ -34,7 +34,8 @@ from pathlib import Path
 import numpy as np
 from numpy.ctypeslib import ndpointer
 from pyccapt.control.apt.detector_chunks import (
-    ChunkStream, ChunkWriter, preserve_unattributed_packet, finite_rate_frequency_hz, read_event_metadata,
+    ChunkStream, ChunkWriter, DetectionRateWindow, DetectorClock, MetadataHistory, MetadataSampler,
+    preserve_unattributed_packet, finite_rate_frequency_hz, read_event_metadata,
 )
 from pyccapt.control.core.shared_ring_buffer import publish_plot_events
 from pyccapt.control.nkt_photonics.readback import pulse_energy_pj, experiment_frequency_hz
@@ -232,12 +233,19 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
         variables.flag_tdc_failure = False
         return 0
 
-    events_detected = raw_signal_detected = events_detected_tmp = 0
+    events_detected = raw_signal_detected = full_reads = 0
     start_time = time.monotonic()
     status_time = start_time
     pulse_frequency = finite_rate_frequency_hz(experiment_frequency_hz(variables))
-    writer = stream = raw_stream = reco = None
+    writer = stream = raw_stream = reco = sampler = None
     failure = None
+    # Voltage/laser per event at the event's own TDC time (see detector_chunks.MetadataHistory):
+    # a packet that waited while the loop reconstructed a big burst keeps the voltage of the moment
+    # its ions were evaporated, and the rate is measured on TDC time, so a flushed backlog is not a
+    # rate spike for the voltage controller.
+    history = MetadataHistory()
+    tdc_clock = DetectorClock()
+    rate_window = DetectionRateWindow()
     from pyccapt.control.apt.laser_alignment_data import LaserAlignmentPublisher
     from pyccapt.control.apt.alignment_vision import AlignmentEventPublisher
     laser_alignment_publisher = LaserAlignmentPublisher(variables)
@@ -247,7 +255,10 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
         reco = make_reconstructor(bin_ns=bin_ns if bin_ns > 0 else None,
                                   config_file=conf.get("roentdek_resort_config"))
         bin_ns = float(reco.bin_ns)
+        bin_s = bin_ns * 1e-9
         record_reconstruction(Path(variables.path)/"temp_data", reco)
+        sampler = MetadataSampler(history, lambda: read_event_metadata(variables, pulse_energy_pj),
+                                  clock=time.monotonic).start()
         writer = ChunkWriter(Path(variables.path)/"temp_data"/"chunks", stop_event=stop_event)
         stream = ChunkStream(writer, "roentdek", ION_DTYPES)
         raw_stream = ChunkStream(writer, "roentdek_raw", RAW_DTYPES)
@@ -259,34 +270,46 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
             writer.check()
             packet = tdc.read()
             if packet is not None:
+                read_time = time.monotonic()
                 time_stamp, cnt, hits = packet
                 n_groups = len(time_stamp)
-                ions = reco.reconstruct(cnt, hits, time_stamp)
-                group, channel, raw_time = raw_hit_rows(time_stamp, cnt, hits)
+                # Sample right after the read (before the slow reconstruction), so the newest
+                # events of this packet have a fresh sample.
                 try:
-                    dc, pulse, laser = read_event_metadata(variables, pulse_energy_pj)
+                    history.append(read_time, read_event_metadata(variables, pulse_energy_pj))
                 except Exception:
                     preserve_unattributed_packet(Path(variables.path)/"temp_data", "roentdek",
                                                  {"time_stamp": time_stamp, "cnt": cnt, "tdc": hits})
                     raise
+                if n_groups >= MAX_EVENTS_PER_READ:
+                    # A full read means groups were waiting in the driver buffer. Their voltage
+                    # still comes from the history at their own TDC time.
+                    full_reads += 1
+                    if full_reads == 1 or full_reads % 100 == 0:
+                        print(f"[RoentDek] WARNING: {full_reads} full read(s) of {MAX_EVENTS_PER_READ} groups - "
+                              "the acquisition fell behind the TDC (event burst?)")
+                group_s = time_stamp.astype(np.float64) * bin_s
+                tdc_clock.observe(read_time, group_s[-1])
+                group_dc, group_pulse, group_laser = history.at(tdc_clock.host_time(group_s))
+                ions = reco.reconstruct(cnt, hits, time_stamp)
+                group, channel, raw_time = raw_hit_rows(time_stamp, cnt, hits)
                 event = np.asarray(ions["event"], dtype=np.int64)
                 n_ions = len(event)
                 x_cm = np.asarray(ions["x"], dtype=np.float64) / MM_PER_CM
                 y_cm = np.asarray(ions["y"], dtype=np.float64) / MM_PER_CM
                 tof = np.asarray(ions["t"], dtype=np.float64)
-                voltage = np.full(n_ions, dc)
+                voltage = group_dc[event]
                 stream.append({"x": x_cm, "y": y_cm, "t": tof, "voltage": voltage,
-                               "voltage_pulse": np.full(n_ions, pulse), "laser_pulse": np.full(n_ions, laser),
+                               "voltage_pulse": group_pulse[event], "laser_pulse": group_laser[event],
                                "time_stamp": time_stamp[event], "ro_reco_method": ions["method"]})
-                n_hits = len(group)
                 raw_stream.append({"ro_raw_channel": channel, "ro_raw_time": raw_time,
                                    "ro_raw_time_stamp": time_stamp[group],
-                                   "ro_raw_voltage": np.full(n_hits, dc),
-                                   "ro_raw_voltage_pulse": np.full(n_hits, pulse),
-                                   "ro_raw_laser_pulse": np.full(n_hits, laser)})
+                                   "ro_raw_voltage": group_dc[group],
+                                   "ro_raw_voltage_pulse": group_pulse[group],
+                                   "ro_raw_laser_pulse": group_laser[group]})
                 events_detected += n_ions
                 raw_signal_detected += n_groups
-                events_detected_tmp += n_ions
+                rate_window.add(n_ions, group_s[-1])
                 if n_ions:
                     publish_plot_events(x_plot, y_plot, t_plot, main_v_dc_plot, x_cm, y_cm, tof, voltage)
                     alignment_publisher.append(x_cm, y_cm)
@@ -303,12 +326,11 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
                     pulse_frequency = finite_rate_frequency_hz(experiment_frequency_hz(variables), pulse_frequency)
                 except Exception:
                     pass
-                rate = events_detected_tmp*100/(pulse_frequency*elapsed_s)
+                rate = rate_window.rate(elapsed_s, pulse_frequency)
                 variables.detection_rate_current = rate
                 variables.detection_rate_current_plot = rate
                 variables.total_ions = events_detected
                 variables.total_raw_signals = raw_signal_detected
-                events_detected_tmp = 0
                 start_time = current_time
             if current_time - status_time >= STATUS_EVERY_S:
                 status_time = current_time
@@ -318,6 +340,11 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
     except Exception as exc:
         failure = exc
     finally:
+        if sampler is not None:
+            sampler.stop()
+        if full_reads:
+            print(f"[RoentDek] {full_reads} full read(s): the acquisition fell behind the TDC at times; "
+                  "voltage/laser were taken at each event's TDC time")
         for closable in (stream, raw_stream):
             if closable is not None:
                 try:

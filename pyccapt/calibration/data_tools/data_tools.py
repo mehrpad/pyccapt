@@ -106,13 +106,37 @@ def read_hdf5(filename: str | Path, *, lazy: bool = False, groups=None):
     return None
 
 
+def _read_range_h5(file_path: Path) -> pd.DataFrame:
+    """Range table of an ``.h5``: a range file (single pandas table), the
+    ``/range`` table of a processed bundle, or none for a dataset file.
+
+    A dataset ``.h5`` picked in the range browser (raw ``/dld`` + ``/tdc``
+    acquisition, or a bundle saved without ``save_range``) has no range table:
+    it yields an empty range table with a warning instead of failing the load.
+    """
+    with pd.HDFStore(file_path, mode="r") as store:
+        keys = [key.lstrip("/") for key in store.keys()]
+        if "range" in keys:
+            return store["range"]
+        if len(keys) == 1:
+            return store[keys[0]]
+    from pyccapt.calibration.core.share_variables import _create_default_range_data
+
+    warnings.warn(
+        f"{file_path.name} has no range table (it looks like a dataset file, tables: {keys or 'none'}); "
+        "continuing with an empty range table. Pick a range file (range_*.h5, .rrng, .rng) to load ranges.",
+        stacklevel=3,
+    )
+    return _create_default_range_data()
+
+
 def read_range(filename: str | Path) -> pd.DataFrame:
     """Read saved range definitions from `.h5`, `.rrng`, or legacy `.rng` files."""
     file_path = _as_path(filename)
     try:
         suffix = file_path.suffix.lower()
         if suffix == ".h5":
-            return _normalize_range_dataframe(pd.read_hdf(file_path, mode="r"))
+            return _normalize_range_dataframe(_read_range_h5(file_path))
         if suffix == ".rrng":
             return _normalize_range_dataframe(leap_tools.read_rrng(str(file_path)))
         if suffix == ".rng":

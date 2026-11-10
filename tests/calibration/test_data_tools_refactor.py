@@ -347,3 +347,29 @@ def test_frame_metadata_larger_than_an_hdf5_attribute_round_trips(tmp_path: Path
     loaded = data_tools.load_data(str(path), "pyccapt", mode="processed")
     assert json.loads(canonical_json(loaded.attrs["pyccapt_calibration_metadata"])) == {"steps": steps}
     assert "pulse_l (pJ)" in loaded.attrs["pyccapt_unavailable_columns"]
+
+
+def test_read_range_h5_accepts_range_files_bundles_and_dataset_files(tmp_path: Path):
+    import h5py
+
+    from pyccapt.calibration.core.share_variables import _create_default_range_data
+
+    ranges = pd.DataFrame({"name": ["Al"], "ion": ["Al"], "mass": [26.98], "mc": [27.0], "mc_low": [26.8],
+                           "mc_up": [27.2], "color": ["#ff0000"], "element": [["Al"]], "complex": [[1]],
+                           "isotope": [[27]], "charge": [1]})
+    range_file = tmp_path / "range_run.h5"
+    ranges.to_hdf(range_file, key="df")
+    bundle = tmp_path / "bundle.h5"
+    pd.DataFrame({"x (nm)": [0.0]}).to_hdf(bundle, key="df")
+    ranges.to_hdf(bundle, key="range")
+    raw = tmp_path / "raw.h5"
+    with h5py.File(raw, "w") as handle:  # raw acquisition: /dld and /tdc, no pandas table
+        handle["dld/x"] = [0.1]
+        handle["tdc/channel"] = [0]
+
+    expected = data_tools._normalize_range_dataframe(ranges)
+    pd.testing.assert_frame_equal(data_tools.read_range(range_file), expected)
+    pd.testing.assert_frame_equal(data_tools.read_range(bundle), expected)
+    with pytest.warns(UserWarning, match="no range table"):
+        empty = data_tools.read_range(raw)
+    pd.testing.assert_frame_equal(empty, data_tools._normalize_range_dataframe(_create_default_range_data()))

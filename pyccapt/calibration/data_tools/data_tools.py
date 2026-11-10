@@ -282,8 +282,35 @@ def store_df_to_hdf(dataframe, key, filename, *, format: str = "fixed"):
     identity_attrs = {name: value for name, value in dataframe.attrs.items() if name.startswith('pyccapt_')}
     if identity_attrs:
         from pyccapt.calibration.data_tools.analysis_session import canonical_json
+        _write_table_json(file_path, str(key), 'pyccapt_source_json', canonical_json(identity_attrs))
+
+
+# HDF5 keeps attributes in the object header, which holds at most 64 KiB; the
+# processing history (one entry per applied calibration step) can outgrow it.
+# Larger JSON metadata of a table is stored as a dataset /<attr_name>/<key>.
+_JSON_ATTR_LIMIT = 48 * 1024
+
+
+def _write_table_json(file_path, key: str, attr_name: str, text: str) -> None:
+    if len(text.encode('utf-8')) <= _JSON_ATTR_LIMIT:
         with pd.HDFStore(file_path, mode='a') as store:
-            store.get_storer(str(key)).attrs.pyccapt_source_json = canonical_json(identity_attrs)
+            setattr(store.get_storer(key).attrs, attr_name, text)
+        return
+    import h5py
+    with h5py.File(file_path, 'a') as handle:
+        group = handle.require_group(attr_name)
+        if key in group:
+            del group[key]
+        group.create_dataset(key, data=text, dtype=h5py.string_dtype('utf-8'))
+
+
+def _read_table_json(file_path, key: str, attr_name: str) -> str | None:
+    """JSON metadata a table stored as a dataset because it was too large for
+    its attribute (see :func:`_write_table_json`); ``None`` when there is none."""
+    import h5py
+    with h5py.File(file_path, 'r') as handle:
+        name = f'{attr_name}/{key}'
+        return handle[name].asstr()[()] if name in handle else None
 
 
 def store_df_to_csv(data: pd.DataFrame, path: str | Path) -> None:
@@ -453,14 +480,13 @@ def save_data(
             # be a subset, so never imply that source masks align to export rows.
             if receipt or reconstruction_parameters or ratio_result:
                 import json
-                with pd.HDFStore(tmp_h5_path, mode='a') as store:
-                    metadata = {'schema_version': 'pyccapt-analysis-1',
-                                'export_rows': len(export_data),
-                                'receipt_scope': 'original source dataset; export may be a subset',
-                                'guided_calibration': receipt or {},
-                                'reconstruction_parameters': reconstruction_parameters or {},
-                                'reconstruction_ratio_result': ratio_result or {}}
-                    store.get_storer('df').attrs.pyccapt_analysis_json = json.dumps(metadata, allow_nan=False)
+                metadata = {'schema_version': 'pyccapt-analysis-1',
+                            'export_rows': len(export_data),
+                            'receipt_scope': 'original source dataset; export may be a subset',
+                            'guided_calibration': receipt or {},
+                            'reconstruction_parameters': reconstruction_parameters or {},
+                            'reconstruction_ratio_result': ratio_result or {}}
+                _write_table_json(tmp_h5_path, 'df', 'pyccapt_analysis_json', json.dumps(metadata, allow_nan=False))
             tdc_status: str | None = None
             if save_tdc:
                 tdc_full = getattr(variables, "data_tdc", None)
@@ -648,6 +674,8 @@ def load_data(dataset_path, data_type, mode="processed", *, load_tdc=False, tdc_
                 with pd.HDFStore(dataset_path, mode='r') as store:
                     data = store['df']
                     source_json = getattr(store.get_storer('df').attrs, 'pyccapt_source_json', None)
+                if source_json is None:
+                    source_json = _read_table_json(dataset_path, 'df', 'pyccapt_source_json')
             if source_json is not None:
                 import json
                 source_attrs = json.loads(source_json)

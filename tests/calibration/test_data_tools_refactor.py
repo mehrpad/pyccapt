@@ -316,3 +316,34 @@ def test_dataset_path_qt_filters_advertise_rhit_files():
     assert "LEAP CAMECA RHIT (*.rhit *.RHIT)" in dataset_path_qt.DATASET_FILTER
     assert "*.rhit" in dataset_path_qt.GENERIC_FILTER
     assert "*.RHIT" in dataset_path_qt.GENERIC_FILTER
+
+
+@pytest.mark.parametrize("history_steps", [2, 2000])
+def test_frame_metadata_larger_than_an_hdf5_attribute_round_trips(tmp_path: Path, history_steps):
+    # A long processing history (one entry per applied/re-run calibration
+    # step) exceeded the 64 KiB HDF5 object-header limit for attributes:
+    # "object header message is too large" when saving the processed file.
+    import json
+
+    import h5py
+
+    from pyccapt.calibration.data_tools.analysis_session import canonical_json
+
+    frame = pd.DataFrame({"x (nm)": [0.0, 1.0], "mc (Da)": [27.0, 13.5]})
+    steps = [{"sequence": i, "operation": "voltage_correction", "parameters": {"coefficients": [0.1] * 20}}
+             for i in range(history_steps)]
+    frame.attrs["pyccapt_calibration_metadata"] = {"steps": steps}
+    frame.attrs["pyccapt_unavailable_columns"] = ["pulse_l (pJ)"]
+    path = tmp_path / "processed.h5"
+
+    data_tools.store_df_to_hdf(frame, "df", path)
+
+    large = len(canonical_json(frame.attrs)) > 64 * 1024
+    with h5py.File(path, "r") as handle:
+        assert ("pyccapt_source_json" in handle) == large
+        assert ("pyccapt_source_json" in handle["df"].attrs) != large
+    with pd.HDFStore(path, "r") as store:
+        assert store.keys() == ["/df"]
+    loaded = data_tools.load_data(str(path), "pyccapt", mode="processed")
+    assert json.loads(canonical_json(loaded.attrs["pyccapt_calibration_metadata"])) == {"steps": steps}
+    assert "pulse_l (pJ)" in loaded.attrs["pyccapt_unavailable_columns"]

@@ -508,6 +508,31 @@ def concatenate_dataframes_of_dld_grp(dataframe_list: list) -> pd.DataFrame:
     dld_master_dataframe = pd.concat(dataframe_list, axis=1)
     return dld_master_dataframe
 
+def _save_figure_without_selectors(fig, selectors, **save_kwargs):
+    """Save ``fig`` with the interactive crop selectors (box/circle and their
+    handles) hidden, then restore them so the user can keep cropping.
+
+    Blitting is paused during the save: the vector backends (PDF, SVG) swap in
+    a canvas that cannot copy a background, which the selector's draw-event
+    callback would otherwise try to do.
+    """
+    selectors = [selector for selector in selectors if selector is not None]
+    artists = [artist for selector in selectors for artist in selector.artists]
+    visible = [artist.get_visible() for artist in artists]
+    useblit = [selector.useblit for selector in selectors]
+    for artist in artists:
+        artist.set_visible(False)
+    for selector in selectors:
+        selector.useblit = False
+    try:
+        save_figure(fig, **save_kwargs)
+    finally:
+        for artist, was_visible in zip(artists, visible):
+            artist.set_visible(was_visible)
+        for selector, was_blitting in zip(selectors, useblit):
+            selector.useblit = was_blitting
+
+
 def plot_crop_experiment_history(
     data: pd.DataFrame,
     variables,
@@ -640,6 +665,7 @@ def plot_crop_experiment_history(
 
     cbar.set_label('Event Counts', fontsize=10)
 
+    selector = None
     if data_crop:
         if dc_plot and pulse_plot:
             selector = rectangle_box_selector(ax3, variables)
@@ -659,8 +685,9 @@ def plot_crop_experiment_history(
         ax1.add_patch(rect)
 
     if save:
-        save_figure(
+        _save_figure_without_selectors(
             fig1,
+            [selector],
             directory=variables.result_path,
             stem=figname or "experiment_history",
             formats=("png", "pdf"),
@@ -813,6 +840,7 @@ def plot_crop_fdm(
         ax1.set_xlim([min(x_lim), max(x_lim)])
         ax1.set_ylim([min(y_lim), max(y_lim)])
 
+    selector = None
     if variables is not None:
         if data_crop:
             selector = elliptical_shape_selector(ax1, fig1, variables, mode=mode_selector)
@@ -852,7 +880,9 @@ def plot_crop_fdm(
         ax1.set_ylabel(r"$Y_{det} (cm)$", fontsize=10)
 
     if save and variables is not None:
-        save_figure(fig1, directory=variables.result_path, stem=figname or "FDM", formats=("png", "pdf"), dpi=600)
+        _save_figure_without_selectors(
+            fig1, [selector], directory=variables.result_path, stem=figname or "FDM", formats=("png", "pdf"), dpi=600
+        )
     plt.show()
 
 def _legacy_extract_xy(data) -> tuple[np.ndarray, np.ndarray]:

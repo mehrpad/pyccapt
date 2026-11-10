@@ -120,3 +120,37 @@ def test_dld_xy_unit_attribute_is_converted_to_cm(tmp_path, unit, factor):
     with data_loadcrop.fetch_dataset_from_dld_grp(str(path), "dld", lazy=True) as table:
         np.testing.assert_allclose(table["x_det (cm)"][:], x * factor)
         np.testing.assert_allclose(np.asarray(table["y_det (cm)"]), y * factor)
+
+
+def test_crop_figures_are_saved_without_the_interactive_selectors(tmp_path, monkeypatch):
+    import matplotlib
+
+    matplotlib.use("Agg")
+    from types import SimpleNamespace
+
+    seen = []
+
+    def record(fig, **kwargs):
+        selectors = data_loadcrop.selectors_data.toggle_selector
+        current = selectors.RS if kwargs["stem"] == "history" else selectors.ES
+        seen.append((kwargs["stem"], any(artist.get_visible() for artist in current.artists), current.useblit))
+
+    monkeypatch.setattr(data_loadcrop, "save_figure", record)
+    monkeypatch.setattr(data_loadcrop.plt, "show", lambda *a, **k: None)
+    rng = np.random.default_rng(0)
+    n = 2000
+    frame = pd.DataFrame({"t (ns)": rng.uniform(100, 2000, n), "high_voltage (V)": np.linspace(1000, 5000, n),
+                          "pulse_l (pJ)": np.full(n, 2.0), "pulse_v (V)": np.zeros(n),
+                          "x_det (cm)": rng.uniform(-3, 3, n), "y_det (cm)": rng.uniform(-3, 3, n)})
+    variables = SimpleNamespace(result_path=str(tmp_path), selected_x1=100, selected_x2=900,
+                                selected_x_fdm=0.0, selected_y_fdm=0.0, roi_fdm=2.0)
+    data_loadcrop.plot_crop_experiment_history(frame, variables, 0, draw_rect=True, data_crop=True,
+                                               pulse_plot=True, pulse_mode="laser", save=True, figname="history")
+    data_loadcrop.plot_crop_fdm(frame["x_det (cm)"].to_numpy(), frame["y_det (cm)"].to_numpy(), variables=variables,
+                                data_crop=True, draw_circle=True, save=True, figname="fdm")
+    # hidden (and not blitting) while saved ...
+    assert seen == [("history", False, False), ("fdm", False, False)]
+    # ... and back for further cropping afterwards
+    selectors = data_loadcrop.selectors_data.toggle_selector
+    assert selectors.RS.artists[0].get_visible() and selectors.ES.artists[0].get_visible()
+    assert selectors.RS.useblit and selectors.ES.useblit

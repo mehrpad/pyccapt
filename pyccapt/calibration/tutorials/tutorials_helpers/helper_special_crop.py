@@ -83,7 +83,7 @@ def call_plot_crop_fdm(variables, *, display_panel=True):
     center_label = widgets.Label(value="Center (X, Y):", layout=label_layout)
     radius_label = widgets.Label(value="Radius:", layout=label_layout)
 
-    save_widget = widgets.Dropdown(options=[('True', True), ('False', False)], value=False)
+    save_widget = widgets.Dropdown(options=[('True', True), ('False', False)], value=True)
     save_label = widgets.Label(value="Save:", layout=label_layout)
 
     figname_widget = widgets.Text(value='fdm_ini')

@@ -78,7 +78,7 @@ def call_plot_crop_experiment(variables, pulse_mode, *, display_panel=True):
     end_widget = widgets.IntText(value=int(max(variables.selected_x1, variables.selected_x2)))
     index_label = widgets.Label(value="Index Range:", layout=label_layout)
 
-    save_widget = widgets.Dropdown(options=[('True', True), ('False', False)], value=False)
+    save_widget = widgets.Dropdown(options=[('True', True), ('False', False)], value=True)
     save_label = widgets.Label(value="Save:", layout=label_layout)
 
     figname_widget = widgets.Text(value='hist_ini')

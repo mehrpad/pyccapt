@@ -154,3 +154,21 @@ def test_crop_figures_are_saved_without_the_interactive_selectors(tmp_path, monk
     selectors = data_loadcrop.selectors_data.toggle_selector
     assert selectors.RS.artists[0].get_visible() and selectors.ES.artists[0].get_visible()
     assert selectors.RS.useblit and selectors.ES.useblit
+
+
+def test_event_index_is_the_start_counter_when_dld_has_none(tmp_path):
+    # RoentDek runs 283/284 (2026-11) store the TDC group of each ion in
+    # dld/event_index and have no dld/start_counter; zeros made every ion a
+    # multi-hit (100 % "multihit events per pulse").
+    path = tmp_path / "run.h5"
+    with h5py.File(path, "w") as handle:
+        handle["dld/high_voltage"] = np.full(4, 5000.0)
+        handle["dld/t"] = np.array([100.0, 200.0, 300.0, 400.0])
+        handle["dld/x"] = np.zeros(4)
+        handle["dld/y"] = np.zeros(4)
+        handle["dld/event_index"] = np.array([0, 2, 2, 5], dtype=np.int64)
+    frame = data_loadcrop.fetch_dataset_from_dld_grp(str(path), "dld")
+    np.testing.assert_array_equal(frame["start_counter"], [0, 2, 2, 5])
+    assert "start_counter" not in frame.attrs.get("pyccapt_unavailable_columns", [])
+    with data_loadcrop.fetch_dataset_from_dld_grp(str(path), "dld", lazy=True) as table:
+        np.testing.assert_array_equal(table["start_counter"][:], [0, 2, 2, 5])

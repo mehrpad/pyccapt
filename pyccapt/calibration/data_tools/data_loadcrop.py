@@ -336,6 +336,11 @@ def fetch_dataset_from_dld_grp(
             )
             if 'dld/start_counter' in hdf5_data:
                 dld_start_counter = hdf5_data['dld/start_counter'].to_numpy()
+            elif 'dld/event_index' in hdf5_data:
+                # RoentDek files of 2026-11 (e.g. runs 283/284) identify the pulse
+                # (TDC group) of each ion by event_index instead of start_counter;
+                # without it every ion would share counter 0 and count as multi-hit.
+                dld_start_counter = hdf5_data['dld/event_index'].to_numpy()
             else:
                 dld_start_counter = np.zeros(len(dld_high_voltage))
                 dld_start_counter = np.expand_dims(dld_start_counter, axis=1)
@@ -370,7 +375,7 @@ def fetch_dataset_from_dld_grp(
             for column, aliases in {
                 'pulse_v (V)': ('dld/pulse', 'dld/voltage_pulse', 'dld/pulse_voltage'),
                 'pulse_l (pJ)': hdf5_schema.DLD_GROUP_ALIASES['pulse_l (pJ)'],
-                'start_counter': ('dld/start_counter',),
+                'start_counter': ('dld/start_counter', 'dld/event_index'),
             }.items():
                 if not any(alias in hdf5_data for alias in aliases):
                     missing.append(column)
@@ -447,6 +452,7 @@ def _fetch_dataset_from_dld_grp_lazy(filename: str, extract_mode: str, convert_l
             'dld/laser_pulse': 'pulse_l (pJ)',
             'dld/laser_intensity': 'pulse_l (pJ)',
             'dld/start_counter': 'start_counter',
+            'dld/event_index': 'start_counter',
             'dld/t': 't (ns)',
             'dld/x': 'x_det (cm)',
             'dld/y': 'y_det (cm)',

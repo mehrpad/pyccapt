@@ -66,6 +66,10 @@ class LaserAlignmentGuiMixin:
         layout.addWidget(self.laser_alignment_stop, 5, 3)
         self.laser_alignment_label = QtWidgets.QLabel('Start a Laser-mode experiment to scan. Ranges are laser-stage travel.')
         self.laser_alignment_label.setWordWrap(True)
+        self.laser_alignment_label.setTextFormat(QtCore.Qt.TextFormat.PlainText)
+        self.laser_alignment_label.setMinimumHeight(4 * self.laser_alignment_label.fontMetrics().lineSpacing() + 6)
+        self.laser_alignment_label.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum)
         layout.addWidget(self.laser_alignment_label, 6, 0, 1, 4)
         self.gridLayout_5.addWidget(panel, 6, 0, 1, 7)
         self.laser_auto_alignment.toggled.connect(self._set_laser_auto_alignment)
@@ -151,7 +155,9 @@ class LaserAlignmentGuiMixin:
                 text += '\n'+status['progress']
             if status.get('measurements'):
                 text += f" | {status['measurements']} windows, {status.get('ions_observed', 0)} measured ions"
-            self.laser_alignment_label.setText(text+'\nDetector response only; laser power stays fixed. Stop Alignment leaves acquisition running.')
+            self.laser_alignment_label.setText(
+                text+'\nDetector response only; laser power stays fixed.'
+                     '\nOrder: coarse → fine XY → focus Z → fine XY. Stop Alignment leaves acquisition running.')
             self.alignment_plot.append(self.variables.laser_alignment_plot)
         except Exception:
             self.variables.laser_alignment_cancel = True

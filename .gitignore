@@ -161,3 +161,8 @@ scripts/
 benchmark_results/
 # User personal scratch notebooks
 pyccapt/calibration/tutorials/jupyter_files/*-Copy*.ipynb
+
+# RoentDek Resort64c library (licensed with the detector / CoboldPC, not redistributed here).
+# Copy it from the CoboldPC installation, see pyccapt/control/tdc_roentdek/README.md
+pyccapt/control/tdc_roentdek/resort64c_VS2010_x64.dll
+pyccapt/control/tdc_roentdek/source/resort64c/

@@ -93,12 +93,14 @@ exclude = ["tests", "tests.*", "pyccapt.control.devices_test", "pyccapt.control.
 
 [tool.setuptools.package-data]
 pyccapt = [
-  "config.toml", "control/electrode.toml", "files/*.h5", "files/*.png",
+  "config.toml", "control/electrode.toml", "files/*.h5", "files/*.png", "files/*.ico",
   "files/*.jpg", "files/*.txt", "files/*.toml", "files/PyQt6_UI/*.ui",
   "files/PyQt6_UI/*.md", "calibration/reflectron_correction/data/presets/*.csv",
   "control/*/*.dll", "control/*/*.lib", "control/*/*.exp", "control/*/*.ocx",
   "control/*/*.chm", "control/*/*.cfg", "control/*/*.ini", "control/*/*.bit",
   "control/*/*.exe", "control/*/*.lmf",
+  "control/tdc_roentdek/*.json", "control/tdc_roentdek/tools/*.exe",
+  "control/tdc_roentdek/source/default_files/*", "control/tdc_roentdek/source/cobold_ccf/*",
 ]
 
 [tool.pytest.ini_options]

@@ -238,3 +238,25 @@ def test_all_particles_from_a_per_hit_hdf5_table(tmp_path):
     assert frame['x_det (cm)'][0] == pytest.approx(0.3, abs=0.005)
     assert frame['start_counter'][0] == 50
     assert len(hx.load_roentdek_hits(path)[0]) == 2
+
+
+def test_loader_reads_reader_v3_offset_layout(tmp_path):
+    # RoentDek reader v3 (Resort64c): one tdc row per hit, signed bins + 2**23.
+    import h5py
+
+    path = tmp_path / 'v3.h5'
+    event = _event(8., 15.)
+    bins = np.r_[event[:6], 900, event[6], 0]                      # extra (later) start hit on channel 6
+    channel = np.array([0, 1, 2, 3, 4, 5, 6, 6, 7], dtype=np.uint32)
+    with h5py.File(path, 'w') as handle:
+        data = handle.create_dataset('tdc/time_data', data=(bins + (1 << 23)).astype(np.uint64))
+        data.attrs['roentdek_time_offset'] = 1 << 23
+        handle['tdc/channel'] = channel
+        handle['tdc/start_counter'] = np.full(len(bins), 42, dtype=np.uint64)
+    hits, extras = hx.load_roentdek_hits(path)
+    assert len(hits) == 1
+    np.testing.assert_array_equal(extras['start_counter'], [42])
+    np.testing.assert_array_equal(hx.load_roentdek_tdc_channels(path)['channels'][0, :6], event[:6])
+    first = hx.first_particle(hx.reconstruct_hexanode_multihit(hits), len(hits))
+    assert first['valid'][0]
+    np.testing.assert_allclose([first['x_mm'][0], first['y_mm'][0]], [8., 15.], atol=0.05)

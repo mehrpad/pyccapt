@@ -1,0 +1,125 @@
+; --------------------------------------
+; TDC8HP Cobold Command File (CCF)
+; for advanced measurements
+; --------------------------------------
+; written by Achim Czasch
+; RoentDek Handels GmbH
+;
+; for Cobold 2011 R5-2   20. Sep. 2016
+; --------------------------------------
+
+UserSHM,close_scan;
+restart
+;setpath APPLICATIONPATH
+
+LoadDAQModule Pro_DAnDAq_TDC8HP.dll,Applicationpath;
+LoadDANModule Pro_DAnDAq_TDC8HP.dll,Applicationpath;
+
+UserSHM,reseteventdata;
+
+Parameter 1400,0		; do not modify or move this line!
+
+Parameter 2,2			; Save TimeStamp. Always 2 [0=no Timestamp,1=32Bit(Low.Low,Low.high),2=64Bit(L.L,L.h,H.L,H.h)]
+Parameter 5,0			; internally used, do not change until otherwise told (Time scaling)
+Parameter 6,0			; internally used, do not change until otherwise told (DAq version)
+Parameter 7,0			; internally used, do not change until otherwise told (time reference)
+Parameter 8,0			; internally used, do not change until otherwise told (DAq ID)
+Parameter 9,0			; internally used, do not change until otherwise told (LMF format version)
+Parameter 20,0			; internally used, do not change until otherwise told (timing resolution, e.g. TDC binsize)
+Parameter 21,0			; internally used, do not change until otherwise told (TDC data type)
+
+Parameter 32,8			; number of Channels
+Parameter 33,4			; number of hits
+
+Parameter 40,0			; internally used, do not change until otherwise told (data format)
+
+Parameter 50,201409151737	; check-ID (tests compatibility of CCF/DAq)
+
+
+
+Parameter 52,0			; internally used, do not change until otherwise told (driver version)
+Parameter 53,1			; display only every (n)th event (for high rate measurements)
+Parameter 54,0			; internally used, do not change until otherwise told
+
+
+; DAq Parameters for TDCs:
+Parameter 60,0			; TDC8HP only: no file config read
+;Parameter 61,0x000000000	; TDC4HM and TDC8HP: RisingEnable, 0 = none (register trailing edge of NIM signal: transition from -0.8V to 0V) 
+Parameter 61,0x000000080	; TDC4HM and TDC8HP: RisingEnable on channel 8 (for use with CFDx) 
+;Parameter 62,0x1ff1ff1ff	; TDC4HM and TDC8HP: FallingEnable, Channel 1-9 on first TDC (#1 to #9), second TDC (#10 to #18) and third TDC(#19 to #27) 
+Parameter 62,0x0001ff1ff	; default for one or two TDC: register leading edges (0 to -0.8V).in channels defined via Parameter 32
+Parameter 63,0			; TDC4HM and TDC8HP: TriggerEdge, 0 = falling
+Parameter 64,8			; TDC8HP and cTDCx: TriggerChannel, defines "time zero" signal
+Parameter 65,0			; TDC8HP only: OutputLevel, 0 = false
+Parameter 66,1			; TDC8HP only: GroupingEnable,	1 = true  = 25ps binsize and max. +-200 microseconds range
+						;          						0 = false = 16ps binsize and max. +-32  milliseconds range
+Parameter 67,0			; TDC8HP only: AllowOverlap, 0 = false (0 = default)
+Parameter 68,0			; TDC8HP only: TriggerDeadTime, time in ns (0 = auto)
+Parameter 69,-1000		; TDC4HM and TDC8HP and cTDCx: GroupRangeStart, time in ns
+Parameter 70,1000		; TDC4HM and TDC8HP and cTDCx: GroupRangeEnd, time in ns
+Parameter 71,0			; TDC8HP only: External Clock, 0 = false (must be 1 if two TDCs are used)
+Parameter 72,1			; TDC8HP only: OutputRollovers, 1 = true (1 = default)
+Parameter 77,0			; reserved for TDC8HP
+Parameter 78,1			; TDC8HP only: VHR (TDC8HP only: 0 = 100ps LSB, 1 = 25ps LSB)
+Parameter 79,0.2		; TDC8HP only: Group Timeout in seconds (default 0.2s)
+Parameter 80,0			; TDC8HP only: INL, 0 = false = do not read file (default)
+Parameter 81,0			; TDC8HP only: DNL, 0 = false = do not read file (default)
+Parameter 86,1			; TDC8HP only: MMXEnable (never set to 0, always 1)
+Parameter 87,1			; TDC8HP only: DMAEnable (never set to 0, always 1)
+
+Parameter 88,0			; time zero channel for ion trap measurements: (please contact RoentDek before using this parameter!)
+                   		; set all trigger times (see parameter 64) relative to last hit in this channel
+                   		; please set to 0 if not used
+                  		; "Grouping" must be disabled (see parameter 66)
+
+Parameter_bitmask 89,00000 00000; Additional trigger channel mask for cTDCx and TDC8HP (in case of TDC8HP active only when parameter 66 is set to 0)
+
+Parameter 90,3			; TDC8HP: type of binsize (works only with parameter 66 = 0)
+						; binsize = 2^n ps.
+						; maximum TDC range = +-(2^31*2^n) ps
+
+Parameter 91,0			; TDC8HP: veto start in ns  (gating if p92 < p91)
+Parameter 92,0			; TDC8HP: veto end   in ns
+
+Parameter 93,0			; use ATC1 Addon-card for TDC8HP
+
+UserFCall,parameter_bitmask,94,00000 00000; Additional filter (bitmask): The event is discarded (not written/analysed) if no signal was in these channels (all are required) (works only if parameter 66 is set to 1)
+UserFCall,parameter_bitmask,95,00000 00000; Additional filter (bitmask): The event is discarded (not written/analysed) if not at least one signal was in these channels (at least one is required) (works only if parameter 66 is set to 1)
+
+Parameter 96,0			; channel A for advanced trigger logic: dT = trigger_signal - A_signal   (0 = disabled)
+Parameter 97,180		; window (ns) for advanced trigger logic: trigger only if dT is larger    AND...
+Parameter 98,240		; window (ns) for advanced trigger logic: trigger only if dT is smaller
+
+Parameter 99,0			; offset for signals in time zero channel (unit: seconds)
+
+Parameter 900,932;
+Parameter 932,0;
+; Parameters 900 - 932 are reserved for scanning
+
+; // end of DAq - parameters
+
+;UserSHM,open_scan;
+
+new; // the 1st new-command MUST be placed above the line "SetDAqCoordinates ..."
+
+
+; The "coordinates" for the TDC Data:
+SetDAqCoordinates ch??n,ch??s??;
+; the command "UserFCall,SetDAqCoordinates,ch??n,ch??s??"  replaces the old matrix form:
+; coordinate ch01n,ch01s01,ch01s02
+; coordinate ch02n,ch02s01,ch02s02   ...
+
+Coordinate LowResLevelInfo;
+
+; // end of DAq - coordinates
+
+execute DAn-part2_16_07_25.ccf;
+DAnModule,read_correction_table,correction_table_i_det_part3.ccf;
+DAnModule,read_correction_table,correction_table_e_det_part3.ccf;
+
+start;
+;show status;
+view 0;
+
+update 1s,1d;
+view 5;

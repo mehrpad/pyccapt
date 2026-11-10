@@ -35,6 +35,27 @@ def quantity(text):
     return (value, unit.replace('µ', 'u').replace('μ', 'u')) if math.isfinite(value) and value >= 0 else None
 
 
+def selected_harmonic_reply(text, wavelength_index):
+    """Select one module from combined SHG/THG/FHG monitor replies.
+
+    Some controllers report multiple monitors plus trailing acknowledgements.
+    Never pick another harmonic or silently accept duplicate selected readings.
+    Unlabelled replies still go through the strict single-quantity parser.
+    """
+    expected = {1: 'SHG', 2: 'THG', 3: 'FHG'}.get(wavelength_index)
+    if not text or expected is None:
+        return None
+    labelled = []
+    for line in str(text).splitlines():
+        module = re.match(r'^\s*(?:NKT\s+)?(SHG|THG|FHG)\b', line, re.I)
+        if module:
+            labelled.append((module[1].upper(), line))
+    if labelled:
+        selected = [line for module, line in labelled if module == expected]
+        return selected[0] if len(selected) == 1 else None
+    return text
+
+
 def frequency_table(text):
     pairs = re.findall(r'e_freq\s*=\s*(\d+)\s*-+>\s*('+NUMBER+r')\s*Hz', text or '', re.I)
     return {int(index): float(hz) for index, hz in pairs if math.isfinite(float(hz)) and float(hz) > 0}

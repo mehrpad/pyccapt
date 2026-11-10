@@ -28,8 +28,6 @@ import time
 
 import serial
 
-from pyccapt.control.nkt_photonics.readback import scalar
-
 
 class origClass:
     """NKT CLI wrapper. Transactions return complete replies, including units."""
@@ -43,6 +41,7 @@ class origClass:
         self.ser = None
         self.last_error = None
         self._lock = threading.RLock()
+        self._needs_sync = False
 
     def open_port(self):
         try:
@@ -50,6 +49,7 @@ class origClass:
                 stopbits=serial.STOPBITS_ONE, bytesize=serial.EIGHTBITS,
                 rtscts=False, timeout=.05, write_timeout=.5)
             self.last_error = None
+            self._needs_sync = True
             return 0
         except Exception as exc:
             self.last_error = exc
@@ -65,6 +65,8 @@ class origClass:
         with self._lock:
             if self.ser is None:
                 raise ConnectionError('Laser CLI is not connected')
+            if self._needs_sync:
+                self._synchronize_cli()
             self.ser.reset_input_buffer()
             self.ser.write((command+'\r\n').encode('ascii'))
             deadline = time.monotonic()+timeout
@@ -90,6 +92,26 @@ class origClass:
                     f'received {len(response)} bytes: {bytes(response[:256])!r}'
                 )
             return self._reply_text(response, command)
+
+    def _synchronize_cli(self):
+        """Terminate partial input and drain boot/help text before first query.
+
+        Bus probes/reset traffic can leave an unfinished ASCII command in the
+        laser. Clearing the host RX buffer alone cannot clear that input.
+        A standalone newline sends no laser setting or emission command.
+        """
+        self.ser.write(b'\n')
+        self.ser.flush()
+        deadline = time.monotonic() + 3.
+        last_received = time.monotonic()
+        while time.monotonic() < deadline:
+            chunk = self.ser.read(max(1, self.ser.in_waiting))
+            if chunk:
+                last_received = time.monotonic()
+            elif time.monotonic() - last_received >= self.REPLY_IDLE_SECONDS:
+                self._needs_sync = False
+                return
+        raise TimeoutError('Laser CLI stream did not settle after clearing partial input')
 
     def _command(self, command):
         """Send a setter which this firmware may answer with only an echo.
@@ -123,10 +145,16 @@ class origClass:
 
     def StatusRead(self, timeout=2.):
         response = self._query('ly_oxp2_dev_status?', timeout=timeout)
-        value = scalar(response)
-        if value is None or value != int(value) or not 0 <= value <= 255:
+        # Boot announcements can arrive alongside the requested status and
+        # contain serial/version numbers. Only the named status response is
+        # evidence of state; neither a query echo nor another numeric line is.
+        status_lines = [line.strip() for line in response.splitlines()
+                        if re.match(r'^ly_oxp2_dev_status(?:\s|$)', line.strip())]
+        match = (re.fullmatch(r'ly_oxp2_dev_status[ \t]+([0-9]+)', status_lines[0])
+                 if len(status_lines) == 1 else None)
+        if match is None or not 0 <= int(match[1]) <= 255:
             raise ValueError(f'Unrecognised laser status: {response!r}')
-        return f'ly_oxp2_dev_status {int(value)}'
+        return f'ly_oxp2_dev_status {int(match[1])}'
 
     def Temp(self, comPort=None):
         return self._query('ly_oxp2_temp_status')
@@ -174,7 +202,21 @@ class origClass:
         return self._query('ly_oxp2_output?')
 
     def InterbusEnable(self):
-        return self._command('ly_oxp2_nktpbus=1')
+        """Hand the UART to NKTPBus and release it, even without a reply.
+
+        Switching protocol can immediately silence the CLI. This is a write,
+        not a query: waiting for an ASCII acknowledgement would time out after
+        a successful switch and leave the old serial session open.
+        """
+        with self._lock:
+            try:
+                if self.ser is None:
+                    raise ConnectionError('Laser CLI is not connected')
+                self.ser.write(b'ly_oxp2_nktpbus=1\n')
+                self.ser.flush()
+                return ''
+            finally:
+                self.close_port()
 
     def wavelength_read(self):
         return self._query('ls_wavelength?')

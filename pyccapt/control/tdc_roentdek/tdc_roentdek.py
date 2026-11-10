@@ -1,303 +1,296 @@
+"""RoentDek TDC8HP (hexanode) acquisition process.
+
+The wrapper DLL (``wrapper_read_TDC8HP_x64.dll``, version 3, source in ``source/``)
+reads the TDC exactly like the RoentDek example, writes every TDC group unchanged
+to ``output.lmf`` (CoboldPC format, byte-identical to the previous DLLs) and returns
+ALL hits of every group (``cnt[n, 8]``, ``tdc[n, 8, 10]`` in TDC bins, 64-bit time
+stamp).
+
+The groups are sorted with RoentDek's Resort64c (the library CoboldPC uses),
+configured from the Cobold DAn ccf (``roentdek_resort.cfg``); see
+``roentdek_resort.py``. If that DLL cannot be loaded, the PyCCAPT reconstruction
+(``roentdek_reco.py``) is used and a warning is printed.
+
+Streams written to the chunk directory:
+
+``roentdek``      one row per reconstructed ion: x, y (cm), t (ns; NaN if the group has no
+                  laser start), voltage, voltage_pulse, laser_pulse, time_stamp (TDC bins of
+                  the ion's group), ro_reco_method (Resort/Cobold method number)
+``roentdek_raw``  one row per TDC hit of every group: ro_raw_channel (0..7), ro_raw_time
+                  (TDC bins + RAW_TIME_OFFSET, see below), ro_raw_time_stamp, ro_raw_voltage,
+                  ro_raw_voltage_pulse, ro_raw_laser_pulse
+
+``tdc/time_data`` is uint64, but RoentDek hit times are signed (relative to the group
+trigger, the laser start comes before the MCP). They are stored as
+``bins + RAW_TIME_OFFSET`` (2**23, the TDC data are 24-bit signed), so a stored value is
+never 0 for a real hit and channel differences are unchanged.
+"""
 import ctypes
-import json
+import os
+import shutil
 import time
 from pathlib import Path
 
 import numpy as np
 from numpy.ctypeslib import ndpointer
-from pyccapt.calibration.data_tools.roentdek_hexanode import (
-    HexanodeCorrection, HexanodeParameters, RoentdekHits, first_particle, reconstruct_hexanode_multihit,
-)
 from pyccapt.control.apt.detector_chunks import (
     ChunkStream, ChunkWriter, preserve_unattributed_packet, finite_rate_frequency_hz, read_event_metadata,
 )
-from pyccapt.control.core import runtime
 from pyccapt.control.core.shared_ring_buffer import publish_plot_events
 from pyccapt.control.nkt_photonics.readback import pulse_energy_pj, experiment_frequency_hz
+from pyccapt.control.tdc_roentdek.roentdek_resort import make_reconstructor
+
+MODULE_DIR = Path(__file__).resolve().parent
+DLL_NAME = "wrapper_read_TDC8HP_x64.dll"
+LMF_TEMPLATE = "CoboldPC2011R5-2_Header-Template_1TDC8HP.lmf"
+MAX_EVENTS_PER_READ = 30000   # TDC groups per DLL call
+READ_TIMEOUT_MS = 100         # a DLL call returns after this time also without data
+RAW_TIME_OFFSET = 1 << 23     # tdc/time_data = signed TDC bins + RAW_TIME_OFFSET
+MM_PER_CM = 10.0
+STATUS_EVERY_S = 10.0
+RECONSTRUCTION_FILE = "roentdek_reconstruction.txt"   # in temp_data; detector_hdf stores it as dld attribute
+
+ION_DTYPES = {"x": np.float64, "y": np.float64, "t": np.float64, "voltage": np.float64,
+              "voltage_pulse": np.float64, "laser_pulse": np.float64, "time_stamp": np.uint64,
+              "ro_reco_method": np.int16}
+RAW_DTYPES = {"ro_raw_channel": np.uint32, "ro_raw_time": np.uint64, "ro_raw_time_stamp": np.uint64,
+              "ro_raw_voltage": np.float64, "ro_raw_voltage_pulse": np.float64, "ro_raw_laser_pulse": np.float64}
 
 
-def hexanode_setup(conf):
-    """Hexanode constants and optional correction map from ``config.toml``.
-
-    ``ro_hexanode_ccf`` points to a CoboldPC DAn ``.ccf`` with the detector
-    constants (defaults: the values in ``source/DAn-part2.ccf``);
-    ``ro_hexanode_correction`` to a JSON map written from
-    ``HexanodeCorrection.to_dict()``. Relative paths resolve from the
-    project root.
-    """
-    conf = conf or {}
-
-    def resolve(value):
-        path = Path(value)
-        return path if path.is_absolute() else runtime.project_path(str(path))
-
-    params = HexanodeParameters()
-    if conf.get("ro_hexanode_ccf"):
-        params = HexanodeParameters.from_ccf(resolve(conf["ro_hexanode_ccf"]))
-    correction = None
-    if conf.get("ro_hexanode_correction"):
-        with open(resolve(conf["ro_hexanode_correction"]), "r", encoding="utf-8") as handle:
-            correction = HexanodeCorrection.from_dict(json.load(handle))
-    return params, correction
+def reconstruction_info(reco):
+    """one line saying which reconstruction produced dld/x, y, t"""
+    from pyccapt.control.tdc_roentdek.roentdek_resort import ResortReconstructor
+    if isinstance(reco, ResortReconstructor):
+        return "Resort64c: " + reco.describe()
+    return ("PyCCAPT fallback reconstruction (roentdek_reco.py, roentdek_calibration.json); "
+            "Resort64c was not available")
 
 
-FIRST_HIT_VALUES = 12
-MCP_CHANNEL = 7
-HIT_DTYPES = {"hit_time_stamp": np.uint64, "hit_channel": np.uint32, "hit_time": np.uint64,
-              "hit_voltage": np.float64, "hit_voltage_pulse": np.float64, "hit_laser_pulse": np.float64}
-
-
-def packet_layout(tdc_lib):
-    """``(values_per_event, hits_per_channel)`` of the loaded wrapper DLL.
-
-    Builds from 2026-11 export both and send every hit (up to
-    ``hits_per_channel`` per channel); older builds send 12 first-hit values.
-    """
+def record_reconstruction(temp_dir, reco):
+    """write reconstruction_info() to temp_data; never stops the acquisition"""
     try:
-        values, hits = int(tdc_lib.values_per_event()), int(tdc_lib.hits_per_channel())
-    except (AttributeError, TypeError, ValueError, OSError):
-        return FIRST_HIT_VALUES, 0
-    if hits < 1 or values != FIRST_HIT_VALUES + 8 + 8 * hits:
-        raise ValueError(f"Unexpected RoentDek DLL packet layout: {values} values, {hits} hits per channel")
-    return values, hits
-
-
-def packet_hits(data, hits_per_channel):
-    """``(event, channel, bins)`` of every hit in an SDK packet.
-
-    Rows are ordered by event, channel and arrival. The MCP trigger of every
-    event is always included (bin 0), so each event keeps at least one row.
-    """
-    n = len(data)
-    if hits_per_channel:
-        counts = np.rint(data[:, FIRST_HIT_VALUES:FIRST_HIT_VALUES + 8]).astype(np.int64)
-        start = FIRST_HIT_VALUES + 8
-        block = np.rint(data[:, start:start + 8 * hits_per_channel]).astype(np.int64).reshape(n, 8, hits_per_channel)
-        present = np.arange(hits_per_channel)[None, None, :] < np.minimum(counts, hits_per_channel)[:, :, None]
-    else:
-        block = np.rint(data[:, :8]).astype(np.int64)[:, :, None]
-        present = block != 0
-    present[:, MCP_CHANNEL, 0] = True
-    event, channel, slot = np.nonzero(present)
-    return event, channel, block[event, channel, slot]
-
-
-def events_from_packet(data, params, correction=None, *, hits_per_channel=0):
-    """Detector columns for one SDK packet of ``(n, values_per_event)`` event rows.
-
-    Columns 0..7 are the first-hit TDC bins (0 = no hit); with a DLL that
-    sends every hit (``hits_per_channel > 0``) the hit counts and hits follow
-    from column 12 (see ``source/wrapper_read_TDC8HP.cpp``). x/y/t are the
-    first (MCP-referenced) particle of the multi-hit hexanode reconstruction,
-    which recovers ions whose first hit on a channel is a reflection or noise
-    pulse, instead of trusting the DLL's columns 8..10. Events without a
-    position get x = y = t = 0 (CoboldPC convention). Channel bins are signed
-    (the start channel precedes the MCP trigger) and are stored
-    two's-complement in the uint64 schema; read them back with
-    ``.view(np.int64)``.
-
-    Returns ``(arrays, valid, hit_arrays)``: the per-event columns, the mask of
-    events with a position and the per-hit columns of ``HIT_DTYPES`` (without
-    the voltage columns, which the caller fills per packet).
-    """
-    n = len(data)
-    channels = np.rint(data[:, :8]).astype(np.int64)
-    event, channel, value = packet_hits(data, hits_per_channel)
-    hits = RoentdekHits.from_rows(event, channel, value, n)
-    sum_walk = correction.sum_walk if correction is not None and correction.sum_walk is not None else False
-    result = first_particle(reconstruct_hexanode_multihit(hits, params, correction, sum_walk=sum_walk), n)
-    valid = result["valid"]
-    arrays = {"x": np.where(valid, result["x_mm"] / 10., 0.),
-              "y": np.where(valid, result["y_mm"] / 10., 0.),
-              "t": np.where(valid, np.nan_to_num(result["tof_ns"]), 0.),
-              "time_stamp": data[:, 11]}
-    arrays.update({f"ch{i}": channels[:, i].view(np.uint64) for i in range(8)})
-    hit_arrays = {"hit_time_stamp": data[event, 11], "hit_channel": channel.astype(np.uint32),
-                  "hit_time": value.view(np.uint64)}
-    return arrays, valid, hit_arrays
+        Path(temp_dir).mkdir(parents=True, exist_ok=True)
+        (Path(temp_dir)/RECONSTRUCTION_FILE).write_text(reconstruction_info(reco) + "\n")
+    except Exception as exc:
+        print(f"RoentDek: could not record the reconstruction type: {exc}")
 
 
 class TDC:
-    """
-    This class sets up the parameters for the TDC and allows users to read experiment TDC values.
-    """
+    """ctypes interface of the wrapper DLL (version >= 2: all hits per group)."""
 
-    def __init__(self, tdc_lib, buf_size=30000, time_out=300, values_per_event=FIRST_HIT_VALUES):
-        """
-        Constructor function which initializes function parameters.
+    DIAG_NAMES = ('read_calls', 'read_nonzero', 'read_negative', 'words', 'hit_words', 'hit_words_bad_channel',
+                  'hit_words_dropped_over_10', 'group_words', 'rollover_words', 'other_words', 'groups_ok',
+                  'groups_without_hit', 'driver_exceptions', 'lmf_events', 'state')
 
-        Args:
-                tdc_lib (ctypes.CDLL): The TDC library.
-                buf_size (int): Buffer size.
-                time_out (int): Timeout value.
-                values_per_event (int): Packet row length (see ``packet_layout``).
-        """
+    def __init__(self, tdc_lib, buf_size=MAX_EVENTS_PER_READ, time_out=READ_TIMEOUT_MS):
         self.tdc_lib = tdc_lib
-        self.buf_size = buf_size
-        self.time_out = time_out
+        self.buf_size = int(buf_size)
+        self.time_out = int(time_out)
         tdc_lib.Warraper_tdc_new.restype = ctypes.c_void_p
         tdc_lib.Warraper_tdc_new.argtypes = [ctypes.c_int, ctypes.c_int]
-        tdc_lib.init_tdc.argtypes = [ctypes.c_void_p]
-        tdc_lib.init_tdc.restype = ctypes.c_int
-        tdc_lib.run_tdc.restype = ctypes.c_int
-        tdc_lib.run_tdc.argtypes = [ctypes.c_void_p]
-        tdc_lib.stop_tdc.restype = ctypes.c_int
-        tdc_lib.stop_tdc.argtypes = [ctypes.c_void_p]
-        tdc_lib.get_data_tdc_buf.restype = ndpointer(dtype=ctypes.c_double,
-                                                     shape=(values_per_event * self.buf_size + 1,))
-        tdc_lib.get_data_tdc_buf.argtypes = [ctypes.c_void_p]
-
+        for name in ('init_tdc', 'run_tdc', 'stop_tdc'):
+            getattr(tdc_lib, name).argtypes = [ctypes.c_void_p]
+            getattr(tdc_lib, name).restype = ctypes.c_int
+        try:
+            self.version = int(tdc_lib.get_wrapper_version())
+        except AttributeError:
+            self.version = 1
+        if self.version < 2:
+            raise RuntimeError(f"{DLL_NAME} is an old wrapper DLL without get_data_tdc_raw; "
+                               "build it from source/wrapper_read_TDC8HP.cpp (source/build_wrapper.bat)")
+        tdc_lib.get_data_tdc_raw.argtypes = [ctypes.c_void_p, ndpointer(np.uint64, flags='C_CONTIGUOUS'),
+                                             ndpointer(np.uint32, flags='C_CONTIGUOUS'),
+                                             ndpointer(np.int32, flags='C_CONTIGUOUS'), ctypes.c_int, ctypes.c_int]
+        tdc_lib.get_data_tdc_raw.restype = ctypes.c_int
+        tdc_lib.get_bin_size_ns.argtypes = [ctypes.c_void_p]
+        tdc_lib.get_bin_size_ns.restype = ctypes.c_double
+        self.has_diag = self.version >= 3
+        if self.has_diag:
+            tdc_lib.get_diagnostics.argtypes = [ctypes.c_void_p, ndpointer(np.int64, flags='C_CONTIGUOUS'), ctypes.c_int]
+            tdc_lib.get_diagnostics.restype = ctypes.c_int
+            tdc_lib.get_last_words.argtypes = [ctypes.c_void_p, ndpointer(np.uint32, flags='C_CONTIGUOUS'), ctypes.c_int]
+            tdc_lib.get_last_words.restype = ctypes.c_int
+            tdc_lib.get_last_error.argtypes = [ctypes.c_void_p]
+            tdc_lib.get_last_error.restype = ctypes.c_char_p
+            tdc_lib.get_tdc_info.argtypes = [ctypes.c_void_p, ndpointer(np.float64, flags='C_CONTIGUOUS'), ctypes.c_int]
+            tdc_lib.get_tdc_info.restype = ctypes.c_int
         self.obj = tdc_lib.Warraper_tdc_new(self.buf_size, self.time_out)
-
-    def stop_tdc(self):
-        """
-        Stop the TDC.
-
-        Returns:
-                int: Return code.
-        """
-        return self.tdc_lib.stop_tdc(self.obj)
+        self._ts = np.zeros(self.buf_size, np.uint64)
+        self._cnt = np.zeros((self.buf_size, 8), np.uint32)
+        self._tdc = np.zeros((self.buf_size, 8, 10), np.int32)
 
     def init_tdc(self):
-        """
-        Initialize the TDC.
-
-        Returns:
-                int: Return code.
-        """
         return self.tdc_lib.init_tdc(self.obj)
 
     def run_tdc(self):
-        """
-        Run the TDC.
-        """
-        self.tdc_lib.run_tdc(self.obj)
+        return self.tdc_lib.run_tdc(self.obj)
 
-    def get_data_tdc_buf(self):
-        """
-        Get data from the TDC buffer.
+    def stop_tdc(self):
+        return self.tdc_lib.stop_tdc(self.obj)
 
-        Returns:
-                np.ndarray: Data from the TDC buffer.
-        """
-        data = self.tdc_lib.get_data_tdc_buf(self.obj)
-        return data
+    def bin_size_ns(self):
+        return float(self.tdc_lib.get_bin_size_ns(self.obj))
+
+    def read(self):
+        """(time_stamp[n], cnt[n, 8], tdc[n, 8, 10]) as copies, or None if no group arrived"""
+        n = self.tdc_lib.get_data_tdc_raw(self.obj, self._ts, self._cnt, self._tdc, self.buf_size, self.time_out)
+        if n <= 0:
+            return None
+        return self._ts[:n].copy(), self._cnt[:n].copy(), self._tdc[:n].copy()
+
+    def diagnostics(self):
+        if not self.has_diag:
+            return {}
+        out = np.zeros(len(self.DIAG_NAMES), np.int64)
+        n = self.tdc_lib.get_diagnostics(self.obj, out, len(out))
+        return dict(zip(self.DIAG_NAMES[:n], out[:n].tolist()))
+
+    def last_error(self):
+        if not self.has_diag:
+            return ''
+        error = self.tdc_lib.get_last_error(self.obj)
+        return error.decode(errors='replace') if error else ''
+
+    def tdc_info(self):
+        if not self.has_diag:
+            return {}
+        out = np.zeros(4, np.float64)
+        self.tdc_lib.get_tdc_info(self.obj, out, 4)
+        return {'resolution_ns': out[0] * 1e9, 'version': int(out[1]), 'serial': int(out[2]), 'channels': int(out[3])}
+
+
+def check_tdc_files(directory=MODULE_DIR):
+    """global.cfg and the LMF template must be in the DLL's working directory.
+
+    Missing files are restored from ``source/default_files`` with a warning.
+    """
+    directory = Path(directory)
+    ok = True
+    for name in (LMF_TEMPLATE, "global.cfg"):
+        path = directory / name
+        if path.is_file():
+            continue
+        backup = directory / "source" / "default_files" / name
+        if backup.is_file():
+            shutil.copy2(backup, path)
+            print(f"WARNING: {name} was missing in {directory}; restored from {backup}. Check that it is correct!")
+        else:
+            print(f"Error: {name} is missing in {directory}; the RoentDek TDC cannot start without it.")
+            ok = False
+    return ok
+
+
+def raw_hit_rows(time_stamp, cnt, hits):
+    """All hits of all groups as flat rows (group order, channel, hit)."""
+    mask = np.arange(10)[None, None, :] < np.minimum(cnt, 10)[:, :, None]
+    group, channel, _ = np.nonzero(mask)
+    times = hits[mask].astype(np.int64) + RAW_TIME_OFFSET
+    return group, channel.astype(np.uint32), times.astype(np.uint64)
+
+
+def _copy_lmf(experiment_path):
+    source = MODULE_DIR / "output.lmf"
+    if not source.is_file() or not experiment_path:
+        return None
+    target = Path(experiment_path) / "output.lmf"
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+        return target
+    except OSError as exc:
+        print(f"Warning: cannot copy {source} to the experiment folder: {exc}")
+        return None
 
 
 def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_event, conf=None):
-    """
-    Measurement function: This function is called in a process to read data from the queue.
-
-    Args:
-            variables: Variables object
-
-    Returns:
-            int: Return code.
-    """
+    """TDC process: read all hits, reconstruct ions, stream ions + raw hits to chunks."""
+    conf = conf or {}
+    old_cwd = os.getcwd()
+    tdc = None
+    tdc_ready = False
     try:
-        # Load the library
-        module_dir = Path(__file__).resolve().parent
-        tdc_lib = ctypes.CDLL(str(module_dir / "wrapper_read_TDC8HP_x64.dll"))
+        # The DLL reads global.cfg and the LMF template from the working directory and
+        # writes output.lmf there (same as all previous RoentDek wrappers).
+        os.chdir(MODULE_DIR)
+        if not check_tdc_files(MODULE_DIR):
+            raise FileNotFoundError("RoentDek TDC files missing (global.cfg / LMF template)")
+        tdc_lib = ctypes.CDLL(str(MODULE_DIR / DLL_NAME))
+        tdc = TDC(tdc_lib, buf_size=MAX_EVENTS_PER_READ, time_out=READ_TIMEOUT_MS)
+        ret_code = tdc.init_tdc()
+        if ret_code != 0:
+            raise RuntimeError(f"RoentDek TDC init failed (code {ret_code}): {tdc.last_error()}")
+        tdc_ready = True
     except Exception as exc:
-        print("TDC DLL was not found")
-        print(exc)
+        os.chdir(old_cwd)
+        print(f"RoentDek TDC could not be started: {exc}")
         variables.flag_finished_tdc = True
         if not getattr(variables, "access_override_enabled", False):
             variables.flag_tdc_failure = True
+            variables.detector_error = f"{type(exc).__name__}: {exc}"
             return 1
-        print("Access Override is active. Continuing without a RoentDek detector.")
-        variables.flag_tdc_failure = False
-        return 0
-
-    try:
-        hex_params, hex_correction = hexanode_setup(conf)
-    except Exception as exc:
-        print(f"RoentDek hexanode configuration is invalid: {exc}")
-        variables.detector_error = f"{type(exc).__name__}: {exc}"
-        variables.flag_tdc_failure = True
-        variables.flag_finished_tdc = True
-        return 1
-    try:
-        values_per_event, hits_per_channel = packet_layout(tdc_lib)
-    except ValueError as exc:
-        print(exc)
-        variables.detector_error = f"{type(exc).__name__}: {exc}"
-        variables.flag_tdc_failure = True
-        variables.flag_finished_tdc = True
-        return 1
-    tdc = TDC(tdc_lib, buf_size=30000, time_out=100, values_per_event=values_per_event)
-
-    ret_code = tdc.init_tdc()
-    if ret_code < 0:
-        print(f"Error initializing RoentDek TDC: {ret_code}")
-        variables.flag_finished_tdc = True
-        if not getattr(variables, "access_override_enabled", False):
-            variables.flag_tdc_failure = True
-            return ret_code
         print("Access Override is active. Continuing without a RoentDek detector.")
         variables.flag_tdc_failure = False
         return 0
 
     events_detected = raw_signal_detected = events_detected_tmp = 0
     start_time = time.monotonic()
+    status_time = start_time
     pulse_frequency = finite_rate_frequency_hz(experiment_frequency_hz(variables))
-    last_buf_error = None
-    writer = stream = hit_stream = None
+    writer = stream = raw_stream = reco = None
     failure = None
     from pyccapt.control.apt.laser_alignment_data import LaserAlignmentPublisher
     from pyccapt.control.apt.alignment_vision import AlignmentEventPublisher
     laser_alignment_publisher = LaserAlignmentPublisher(variables)
     alignment_publisher = AlignmentEventPublisher(variables, conf)
     try:
+        bin_ns = tdc.bin_size_ns()
+        reco = make_reconstructor(bin_ns=bin_ns if bin_ns > 0 else None,
+                                  config_file=conf.get("roentdek_resort_config"))
+        bin_ns = float(reco.bin_ns)
+        record_reconstruction(Path(variables.path)/"temp_data", reco)
         writer = ChunkWriter(Path(variables.path)/"temp_data"/"chunks", stop_event=stop_event)
-        dtypes = {name: np.float64 for name in
-                  ("x", "y", "t", "voltage", "voltage_pulse", "laser_pulse")}
-        dtypes.update({name: np.uint64 for name in ("time_stamp", *(f"ch{i}" for i in range(8)))})
-        stream = ChunkStream(writer, "roentdek", dtypes)
-        # Every TDC hit (one row per hit, MCP trigger included) for offline
-        # multi-hit reconstruction; finalized into the flat tdc/* table.
-        hit_stream = ChunkStream(writer, "roentdek_hits", HIT_DTYPES)
-        tdc.run_tdc()
+        stream = ChunkStream(writer, "roentdek", ION_DTYPES)
+        raw_stream = ChunkStream(writer, "roentdek_raw", RAW_DTYPES)
+        ret_code = tdc.run_tdc()
+        if ret_code != 0:
+            raise RuntimeError(f"RoentDek TDC start failed (code {ret_code}): {tdc.last_error()}")
+        print("RoentDek TDC is running")
         while not stop_event.is_set() and not variables.flag_stop_tdc:
             writer.check()
-            try:
-                return_value = tdc.get_data_tdc_buf()
-                last_buf_error = None
-            except Exception as exc:
-                if str(exc) != last_buf_error:
-                    last_buf_error = str(exc)
-                    print(f"RoentDek TDC read failed: {exc}")
-                return_value = np.zeros(1)
-                time.sleep(.05)
-            buffer_length = int(return_value[0])
-            if buffer_length < 0 or buffer_length > 30000:
-                raise ValueError(f"Invalid RoentDek SDK event count: {buffer_length}")
-            if buffer_length:
-                data = np.copy(return_value[1:buffer_length*values_per_event+1].reshape(buffer_length, values_per_event))
+            packet = tdc.read()
+            if packet is not None:
+                time_stamp, cnt, hits = packet
+                n_groups = len(time_stamp)
+                ions = reco.reconstruct(cnt, hits, time_stamp)
+                group, channel, raw_time = raw_hit_rows(time_stamp, cnt, hits)
                 try:
                     dc, pulse, laser = read_event_metadata(variables, pulse_energy_pj)
                 except Exception:
-                    preserve_unattributed_packet(Path(variables.path)/"temp_data", "roentdek", {"events": data})
+                    preserve_unattributed_packet(Path(variables.path)/"temp_data", "roentdek",
+                                                 {"time_stamp": time_stamp, "cnt": cnt, "tdc": hits})
                     raise
-                voltage = np.full(buffer_length, dc)
-                arrays, valid, hit_arrays = events_from_packet(data, hex_params, hex_correction,
-                                                               hits_per_channel=hits_per_channel)
-                arrays.update({"voltage": voltage,
-                               "voltage_pulse": np.full(buffer_length, pulse),
-                               "laser_pulse": np.full(buffer_length, laser)})
-                n_hits = len(hit_arrays["hit_channel"])
-                hit_arrays.update({"hit_voltage": np.full(n_hits, dc), "hit_voltage_pulse": np.full(n_hits, pulse),
-                                   "hit_laser_pulse": np.full(n_hits, laser)})
-                stream.append(arrays)
-                hit_stream.append(hit_arrays)
-                events_detected += buffer_length
-                raw_signal_detected += buffer_length
-                events_detected_tmp += buffer_length
-                if valid.any():
-                    publish_plot_events(x_plot, y_plot, t_plot, main_v_dc_plot, arrays["x"][valid],
-                                        arrays["y"][valid], arrays["t"][valid], voltage[valid])
-                    alignment_publisher.append(arrays["x"][valid], arrays["y"][valid])
-                    laser_alignment_publisher.append(arrays["t"][valid])
+                event = np.asarray(ions["event"], dtype=np.int64)
+                n_ions = len(event)
+                x_cm = np.asarray(ions["x"], dtype=np.float64) / MM_PER_CM
+                y_cm = np.asarray(ions["y"], dtype=np.float64) / MM_PER_CM
+                tof = np.asarray(ions["t"], dtype=np.float64)
+                voltage = np.full(n_ions, dc)
+                stream.append({"x": x_cm, "y": y_cm, "t": tof, "voltage": voltage,
+                               "voltage_pulse": np.full(n_ions, pulse), "laser_pulse": np.full(n_ions, laser),
+                               "time_stamp": time_stamp[event], "ro_reco_method": ions["method"]})
+                n_hits = len(group)
+                raw_stream.append({"ro_raw_channel": channel, "ro_raw_time": raw_time,
+                                   "ro_raw_time_stamp": time_stamp[group],
+                                   "ro_raw_voltage": np.full(n_hits, dc),
+                                   "ro_raw_voltage_pulse": np.full(n_hits, pulse),
+                                   "ro_raw_laser_pulse": np.full(n_hits, laser)})
+                events_detected += n_ions
+                raw_signal_detected += n_groups
+                events_detected_tmp += n_ions
+                if n_ions:
+                    publish_plot_events(x_plot, y_plot, t_plot, main_v_dc_plot, x_cm, y_cm, tof, voltage)
+                    alignment_publisher.append(x_cm, y_cm)
+                    laser_alignment_publisher.append(tof)
             else:
                 time.sleep(.01)
 
@@ -317,13 +310,18 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
                 variables.total_raw_signals = raw_signal_detected
                 events_detected_tmp = 0
                 start_time = current_time
+            if current_time - status_time >= STATUS_EVERY_S:
+                status_time = current_time
+                print(f"[RoentDek] {reco.stats_text()}")
+                for warning in reco.signal_warnings():
+                    print(f"[RoentDek] WARNING - check cable/CFD/laser trigger: {warning}")
     except Exception as exc:
         failure = exc
     finally:
-        for open_stream in (stream, hit_stream):
-            if open_stream is not None:
+        for closable in (stream, raw_stream):
+            if closable is not None:
                 try:
-                    open_stream.finish()
+                    closable.finish()
                 except Exception as exc:
                     failure = failure or exc
         if writer is not None:
@@ -331,10 +329,23 @@ def experiment_measure(variables, x_plot, y_plot, t_plot, main_v_dc_plot, stop_e
                 writer.close()
             except Exception as exc:
                 failure = failure or exc
-        try:
-            tdc.stop_tdc()
-        except Exception as exc:
-            failure = failure or exc
+        if tdc is not None and tdc_ready:
+            try:
+                tdc.stop_tdc()   # closes output.lmf
+            except Exception as exc:
+                failure = failure or exc
+            diag = tdc.diagnostics()
+            if diag:
+                print(f"[RoentDek] DLL counters: {diag}")
+            if tdc.last_error():
+                print(f"[RoentDek] last driver error: {tdc.last_error()}")
+        if reco is not None:
+            print(f"[RoentDek] final: {reco.stats_text()}")
+        os.chdir(old_cwd)
+        # only the LMF of THIS run (an old output.lmf must not be copied after a failed start)
+        copied = _copy_lmf(getattr(variables, "path", None)) if tdc_ready else None
+        if copied is not None:
+            print(f"RoentDek raw data (CoboldPC LMF) saved: {copied}")
         variables.total_ions = events_detected
         variables.total_raw_signals = raw_signal_detected
         if failure is not None:

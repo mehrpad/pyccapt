@@ -158,25 +158,30 @@ Raw time-to-digital converter stream. Exact channel schema depends on the TDC ba
 
 ### RoentDek backend
 
-Same flat layout as Surface Concept, one row per TDC hit (files written since 2026-11):
+Since 2026-11 (wrapper DLL v3 + Resort64c, see `pyccapt/control/tdc_roentdek/README.md`):
 
-- `channel` 0..5 = hexanode u1, u2, v1, v2, w1, w2; 6 = start (laser/pulse); 7 = MCP
-- `time_data`: TDC bin of the hit relative to the MCP group trigger. Bins are signed (the
-  start channel precedes the MCP) and stored two's-complement in `uint64`; read them with
-  `time_data.view(np.int64)`. Up to 4 hits per channel and group, in arrival order; the
-  MCP trigger row (bin 0) is always present, so every group has at least one row.
-- `start_counter`: TDC8HP absolute group timestamp (TDC bins); rows of one group are
-  consecutive and share it, and it equals `dld/start_counter` of that group
-- `high_voltage`, `voltage_pulse`, `laser_pulse`: per-group metadata repeated on each row
+`dld` has one row per reconstructed ion (several ions can share one TDC group):
+`x`, `y` (cm) and `t` (ns) come from RoentDek's Resort64c, configured from the CoboldPC DAn ccf.
+`t` is `NaN` for ions whose group had no laser start (x/y are valid).
+`start_counter` is the 64-bit TDC time stamp of the ion's group (TDC bins).
+`reco_method` `(n,)` (`1`, `int16`) is the Resort64c/CoboldPC reconstruction method.
+The `dld` attribute `roentdek_reconstruction` says which reconstruction was used: `Resort64c: …` (then
+`roentdek_resort_cfg` holds its configuration) or the PyCCAPT fallback, used when RoentDek's
+`resort64c_VS2010_x64.dll` was not installed (it is not part of the repository).
 
-Files written between 2026-10 and 2026-11 have exactly 8 rows per group (`channel` =
-0..7, first hit only, 0 = no hit); older files store `tdc/ch0..ch7` (`int32`) instead.
-`pyccapt.calibration.data_tools.roentdek_hexanode.load_roentdek_hits` reads all three.
-`dld/x`, `dld/y`, `dld/t` are the first (MCP-referenced) particle of
-`reconstruct_hexanode_multihit`; groups without a position (no start signal, or no
-combination of hits passing the time-sum gates and the hexanode check) have
-`x = y = t = 0`, as in CoboldPC exports. Later particles of a group are not in `dld`;
-`reconstruct_roentdek_hdf5(path, all_particles=True)` returns them from the stored hits.
+`tdc` has one row per TDC hit of every group (all hits, up to 10 per channel):
+
+- `channel` `(n,)` (`1`, `uint32`): TDC input 0..7 (Cobold channel = channel + 1; 0..5 anode, 6 laser start, 7 MCP/trigger)
+- `time_data` `(n,)` (`bin`, `uint64`): signed TDC bins relative to the group trigger **plus 2²³**
+  (attribute `roentdek_time_offset`). Subtract it before use: `time_data.astype(int64) - 2**23`
+- `start_counter` `(n,)` (`pulse`, `uint64`): TDC time stamp of the group (same value as `dld/start_counter`)
+- `high_voltage`, `voltage_pulse`, `laser_pulse` as for Surface Concept
+
+The complete raw data are also saved as `output.lmf` (CoboldPC format) in the experiment folder.
+Files written before 2026-11 have one `tdc` row per channel and group, with only the first hit
+(`channel`, `time_data` = first hit cast to uint64; negative start times are not recoverable there).
+`pyccapt.calibration.data_tools.roentdek_hexanode.load_roentdek_hits` reads every layout (including the
+2**23 offset) for the offline reconstruction `reconstruct_hexanode_multihit`, which needs no RoentDek library.
 
 ## Group `hsd`
 

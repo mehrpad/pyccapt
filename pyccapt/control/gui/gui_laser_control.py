@@ -3,6 +3,7 @@ import re
 import sys
 import threading
 import time
+from contextlib import contextmanager
 
 import serial.tools.list_ports
 from PyQt6 import QtCore, QtGui, QtWidgets
@@ -10,8 +11,10 @@ from PyQt6.QtCore import QThread
 from PyQt6.QtGui import QPixmap
 
 # Local module and scripts
+from pyccapt.control.gui import app_icon
 from pyccapt.control.gui.responsive import make_window_responsive
 from pyccapt.control.core import runtime
+from pyccapt.control.devices.nkt_native import NativeLaser
 from pyccapt.control.core.control_state import (
     CommandStatus, Connection, Evidence, commanded, complete, observe, publish, request, result,
 )
@@ -26,6 +29,8 @@ from pyccapt.control.nkt_photonics.state import LaserState, allowed_actions
 from pyccapt.control.gui.laser_readouts import LaserReadoutMixin
 from pyccapt.control.gui.laser_alignment_gui import LaserAlignmentGuiMixin
 from pyccapt.control.gui.laser_layout import LaserLayoutMixin
+from pyccapt.control.gui.laser_power_control import LaserPowerControlMixin
+from pyccapt.control.gui.laser_indicators import LaserIndicatorMixin
 from pyccapt.control.smaract_mcs2 import mcs2_stage
 
 
@@ -70,7 +75,7 @@ def _available_serial_ports_text():
 _parse_first_number = readback.scalar
 
 
-class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMixin):
+class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMixin, LaserPowerControlMixin, LaserIndicatorMixin):
     def __init__(self, variables, conf):
         """
         Initialize the Ui_Laser_Control class.
@@ -81,6 +86,8 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         """
         self.variables = variables
         self.conf = conf
+        self._laser_mode_switch_in_progress = False
+        self._laser_stopping = False
 
         self.listen_mode = False
         self.standby_mode = False
@@ -213,6 +220,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         self.laser_power = QtWidgets.QDoubleSpinBox(parent=Laser_Control)
         self.laser_power.setObjectName("doubleSpinBox")
         self.gridLayout_3.addWidget(self.laser_power, 1, 1, 1, 1)
+        self._setup_laser_power_controls(Laser_Control)
         self.gridLayout_5.addLayout(self.gridLayout_3, 0, 0, 2, 3)
         self.label_12 = QtWidgets.QLabel(parent=Laser_Control)
         font = QtGui.QFont()
@@ -287,6 +295,16 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         )
         self.laser_power_disp.setObjectName("laser_power_disp")
         self.horizontalLayout.addWidget(self.laser_power_disp)
+        self.laser_ir_power_label = QtWidgets.QLabel(parent=Laser_Control)
+        self.laser_ir_power_label.setObjectName('laser_ir_power_label')
+        self.laser_ir_power_label.setFont(self.label_9.font())
+        self.horizontalLayout.addWidget(self.laser_ir_power_label)
+        self.laser_ir_power_disp = QtWidgets.QLCDNumber(parent=Laser_Control)
+        self.laser_ir_power_disp.setObjectName('laser_ir_power_disp')
+        self.laser_ir_power_disp.setDigitCount(6)
+        self.laser_ir_power_disp.setFont(self.laser_power_disp.font())
+        self.laser_ir_power_disp.setStyleSheet(self.laser_power_disp.styleSheet())
+        self.horizontalLayout.addWidget(self.laser_ir_power_disp)
         self.label_10 = QtWidgets.QLabel(parent=Laser_Control)
         font = QtGui.QFont()
         font.setBold(True)
@@ -628,7 +646,9 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         self.retranslateUi(Laser_Control)
         QtCore.QMetaObject.connectSlotsByName(Laser_Control)
         tooltips.apply_tooltips(self, tooltips.LASER_TOOLTIPS)
-        Laser_Control.setTabOrder(self.laser_wavelegnth, self.laser_rate)
+        Laser_Control.setTabOrder(self.laser_wavelegnth, self.laser_ir_power_control)
+        Laser_Control.setTabOrder(self.laser_ir_power_control, self.laser_power)
+        Laser_Control.setTabOrder(self.laser_power, self.laser_rate)
         Laser_Control.setTabOrder(self.laser_rate, self.laser_enable)
         Laser_Control.setTabOrder(self.laser_enable, self.laser_on)
         Laser_Control.setTabOrder(self.laser_on, self.laser_standby)
@@ -656,6 +676,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         self.led_laser_on.setPixmap(self.led_red)
         self.led_laser_enable.setPixmap(self.led_red)
         self.led_laser_listen.setPixmap(self.led_red)
+        self._setup_laser_indicators(Laser_Control)
 
         self.laser_enable.setEnabled(False)
         self.laser_on.setEnabled(False)
@@ -684,13 +705,8 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         # Initialise the (nnnn nm) label now that the combo is populated.
         self._update_wavelength_nm_label()
 
-        # Try to open the CLI session. If it fails (most commonly because
-        # the laser is currently in NKTPBus mode) we do NOT pop a modal
-        # dialog -- the user previously found that auto-recovery on the
-        # same Python process did not actually restore communication
-        # without a full software restart. Instead we leave the laser
-        # disconnected, show a persistent red banner, and enable the
-        # "Switch to CLI" button (gated behind Override Access).
+        # A failed CLI connection leaves the port released and a persistent
+        # banner. The operator can switch modes without restarting PyCCAPT.
         self.com_port_laser = self.conf['COM_PORT_laser']
         self.laser_device = None
         # Do not present the UI designer's example rates as instrument readback.
@@ -698,7 +714,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         self.laser_rate.clear()
         self.laser_rate.blockSignals(False)
         self._invalidate_laser_readouts('Waiting for laser readback')
-        self._open_laser_cli(self.com_port_laser, initial_open=True)
+        startup_failed = self._open_laser_cli(self.com_port_laser, initial_open=True) is False
 
         # Laser status loop.
         #
@@ -721,6 +737,15 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         self._laser_status_timer.setInterval(1000)
         self._laser_status_timer.timeout.connect(self._poll_laser_status)
         self._laser_status_timer.start()
+        # Prepare the default watt connection after constructing the window.
+        # Only a confirmed Listen state permits the CLI -> native handover.
+        self._laser_startup_retry_timer = QtCore.QTimer(Laser_Control)
+        self._laser_startup_retry_timer.setSingleShot(True)
+        self._laser_startup_retry_timer.timeout.connect(self._complete_laser_startup)
+        self._laser_startup_watts_pending = True
+        self._laser_startup_watts_deadline = None
+        if startup_failed or self.laser_device is not None:
+            self._laser_startup_retry_timer.start(1000)
 
         # ----- SmarAct laser focusing stage --------------------------------
         self.stage_device = None
@@ -856,8 +881,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         Currently gates two operations:
           * Stage Reference button (moves all axes on its own to find the
             physical reference mark - dangerous if anything is in the way)
-          * Nktpbus mode switch (drops CLI control of the laser, requires
-            re-opening it from the NKT control software to come back)
+          * Protocol mode buttons (release/reconnect the laser serial port)
         """
         if not self.flag_super_user_stage:
             warning = QtWidgets.QMessageBox(parent=self.laser_stage_superuser)
@@ -866,7 +890,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             warning.setText(
                 "Override Access enables two potentially disruptive controls:\n"
                 "  - Stage Reference (moves all axes on their own)\n"
-                "  - Nktpbus mode (hands the laser over to NKT control software)"
+                "  - CLI and NKTPBus protocol switches (release/reconnect the laser port)"
             )
             warning.setInformativeText(
                 "Make sure nothing is in the way of the laser stage and you really want to switch laser modes. Continue?"
@@ -884,8 +908,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             self.laser_stage_superuser.setStyleSheet(self._original_laser_stage_superuser_style)
             self.error_message("!!! Override Access deactivated !!!")
         self.laser_stage_reference.setEnabled(self.flag_super_user_stage)
-        self.nktpbus_mode_switch.setEnabled(self.flag_super_user_stage)
-        self.switch_to_cli_button.setEnabled(self.flag_super_user_stage)
+        self._update_laser_mode_buttons()
 
     def _axis_velocity_m_s(self, axis):
         selector = (self.laser_speed_x, self.laser_speed_y, self.laser_speed_z)[axis]
@@ -1129,7 +1152,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         ###
         # Laser_Control.setWindowTitle(_translate("Laser_Control", "Form"))
         Laser_Control.setWindowTitle(_translate("Laser_Control", "PyCCAPT Laser Control"))
-        Laser_Control.setWindowIcon(QtGui.QIcon('./files/logo.png'))
+        app_icon.apply_application_icon(window=Laser_Control)
         ###
         Laser_Control.setToolTip(_translate("Laser_Control", "<html><head/><body><p>1</p></body></html>"))
         self.laser_wavelegnth.setItemText(0, _translate("Laser_Control", "IR"))
@@ -1144,7 +1167,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         self.laser_enable.setText(_translate("Laser_Control", "Output Enable"))
         self.led_laser_listen.setText(_translate("Laser_Control", "Listen"))
         self.led_laser_laser_standby.setText(_translate("Laser_Control", "Standby"))
-        self.label.setText(_translate("Laser_Control", "IR AOM setting (%)"))
+        self.label.setText(_translate("Laser_Control", "AOM (%)"))
         self.laser_listen.setText(_translate("Laser_Control", "Listen"))
         self.label_4.setText(_translate("Laser_Control", "Wavelength"))
         self.label_12.setText(_translate("Laser_Control", "Scan mode"))
@@ -1155,7 +1178,8 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         # 5 W laser shows "5.028" instead of "5028"), and µJ rather than nJ
         # (so a 12.5 µJ pulse shows "12.570" instead of "12570"). The
         # shared variables use mW / nJ; detector writers convert nJ to pJ.
-        self.label_9.setText(_translate("Laser_Control", "Selected output (W)"))
+        self.laser_ir_power_label.setText(_translate("Laser_Control", "Measured IR power (W)"))
+        self.label_9.setText(_translate("Laser_Control", "Selected output power (W)"))
         self.label_10.setText(_translate("Laser_Control", "Pulse energy (µJ)"))
         self.label_11.setText(_translate("Laser_Control", "Output rate (kHz)"))
         self.label_19.setText(_translate("Laser_Control", "x"))
@@ -1186,13 +1210,27 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         self.laser_power.setMinimum(0.0)
         # Display actual readback even when it exceeds a local command limit.
         self.laser_power.setMaximum(100.)
+        self.laser_power.setDecimals(2)
         self.laser_power.setSingleStep(0.1)
         self.laser_divition_factor.setMinimum(1)
         # Manual p123: integer divider 1..10,000,000.
         self._clamp_divider_to_min_output_rate()
 
-    def _request_laser_state(self, target):
+    def _request_laser_state(self, target, *, indicator=None):
+        if target != LaserState.LISTEN.value:
+            self._cancel_laser_startup_watts()
         self._control_laser_request = request(self.variables, "laser", "main", target)
+        self._clear_laser_indicator_requests()
+        if target == LaserState.LISTEN.value:
+            self._queue_laser_indicator('listen', (9,))
+        elif target == LaserState.STANDBY.value:
+            self._queue_laser_indicator('standby', (33,))
+        elif target == LaserState.ON_DISABLED.value:
+            self._queue_laser_indicator('output', (65,))
+        elif target == LaserState.ON_ENABLED.value:
+            if indicator != 'output':
+                self._queue_laser_indicator('on', (65, 129))
+            self._queue_laser_indicator('output', (129,))
 
     def laser_enable_clicked(self):
         """
@@ -1211,7 +1249,8 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         else:
             self.enable_ouput_mode = True
             self._laser_emission_pending = True
-        self._request_laser_state(LaserState.ON_DISABLED.value if getattr(self, "close_output_mode", False) else LaserState.ON_ENABLED.value)
+        self._request_laser_state(LaserState.ON_DISABLED.value if getattr(self, "close_output_mode", False) else LaserState.ON_ENABLED.value,
+                                  indicator='output')
         self._apply_button_locks_for_status(getattr(self, '_last_laser_status', None))
 
     def laser_on_clicked(self):
@@ -1223,14 +1262,14 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         Return:
             None
         """
-        if readback.scalar(getattr(self, '_last_laser_status', None)) == 129:
-            self.close_output_mode = True
-            self.on_mode = self.enable_ouput_mode = False
-            self._laser_emission_pending = False
-        else:
-            self.on_mode = True
-            self._laser_emission_pending = True
-        self._request_laser_state(LaserState.ON_DISABLED.value if getattr(self, "close_output_mode", False) else LaserState.ON_ENABLED.value)
+        code = readback.scalar(getattr(self, '_last_laser_status', None))
+        if code in (65, 129):
+            self.laser_standby_clicked()
+            self._queue_laser_indicator('on', (33,))
+            return
+        self.on_mode = True
+        self._laser_emission_pending = True
+        self._request_laser_state(LaserState.ON_ENABLED.value)
         self._apply_button_locks_for_status(getattr(self, '_last_laser_status', None))
 
     def laser_standby_clicked(self):
@@ -1242,6 +1281,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         Return:
             None
         """
+        self._laser_interlock_reset_deadline = None
         self.standby_mode = True
         if self.on_mode or self.enable_ouput_mode:
             self._laser_emission_pending = False
@@ -1259,12 +1299,16 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         Return:
             None
         """
+        self._laser_interlock_reset_deadline = None
+        self._laser_power_zero_pending = True
+        self._laser_watt_edit_pending = self.change_laser_power = False
         self.listen_mode = True
         self.standby_mode = self.on_mode = self.enable_ouput_mode = False
         self.close_output_mode = False
         self._laser_emission_pending = False
         self._laser_standby_pending = False
         self._request_laser_state(LaserState.LISTEN.value)
+        self._apply_button_locks_for_status(getattr(self, '_last_laser_status', None))
 
     def laser_wavelegnth_changed(self):
         """
@@ -1286,7 +1330,8 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         Return:
             None
         """
-        self.change_laser_power = True
+        if getattr(self, '_laser_power_control_mode', 'aom') == 'aom':
+            self.change_laser_power = True
 
     def laser_rate_changed(self):
         """
@@ -1318,28 +1363,50 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         swallows transient errors so a single failed read doesn't stop
         the timer (mirrors the old Worker.run try/except).
         """
-        if self._laser_status_in_progress:
+        self._update_laser_mode_buttons()
+        if (self._laser_status_in_progress or getattr(self, '_laser_mode_switch_in_progress', False)
+                or getattr(self, '_laser_stopping', False)):
             return
         self._laser_status_in_progress = True
         try:
             self.check_laser_status()
+            if (getattr(self, '_last_laser_poll_error', '') and self.laser_device is not None
+                    and readback.scalar(getattr(self, '_last_laser_status', None)) is not None):
+                self._last_laser_poll_error = ''
+                if getattr(self, '_last_optical_readback_error', '').startswith('Laser unavailable on '):
+                    # A fresh status reply ends the transport-loss episode;
+                    # optical values remain invalid until their own refresh.
+                    self._last_optical_readback_error = ''
+                logging.getLogger('pyccapt.laser').info(
+                    'Laser communication restored on %s', getattr(self, 'com_port_laser', '?'))
         except Exception as exc:
+            if getattr(self, '_laser_stopping', False):
+                return
             # Failed requests must not replay later when communication recovers.
             self._laser_standby_pending = False
             self._laser_emission_pending = False
+            self._laser_interlock_reset_deadline = None
+            self._clear_laser_indicator_requests()
             for flag in ('listen_mode', 'standby_mode', 'on_mode', 'enable_ouput_mode', 'close_output_mode',
                          'change_laser_wavelegnth', 'change_laser_power', 'change_laser_rate',
                          'change_laser_divition_factor'):
                 setattr(self, flag, False)
-            self._invalidate_laser_readouts(exc)
+            reason = self._laser_readback_failure_reason(exc)
+            self._invalidate_laser_readouts(reason)
             self._apply_button_locks_for_status(None)
-            publish(self.variables, "laser", "main", "fault", fault=str(exc), fail_command=True)
-            print(f"Laser status poll failed: {exc}")
+            fault = dict(fault=reason, fail_command=True)
+            if reason.startswith('Laser unavailable on '):
+                fault['connection'] = Connection.DISCONNECTED
+            publish(self.variables, "laser", "main", "fault", **fault)
+            if reason != getattr(self, '_last_laser_poll_error', ''):
+                self.error_message(f'Laser command/readback failed: {reason}')
+                logging.getLogger('pyccapt.laser').debug('First laser poll failure: %s', exc)
+            self._last_laser_poll_error = reason
         finally:
             self._laser_status_in_progress = False
 
     def check_laser_status(self):
-        if self.laser_device is None:
+        if self.laser_device is None or getattr(self, '_laser_stopping', False):
             return
         requested = False
         # A later lower-state request must cancel any queued emission request.
@@ -1354,8 +1421,13 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             self.laser_device.Listen()
             requested = True
         status = self.laser_device.StatusRead()
+        if getattr(self, '_laser_stopping', False):
+            return
         code = readback.scalar(status)
         actions = allowed_actions(LaserState.from_code(code), connected=True)
+        if getattr(self.laser_device, 'status_fault', '') and code == 9:
+            actions = frozenset({'listen', 'standby'} if
+                                getattr(self.laser_device, 'standby_available', False) else {'listen'})
         if standby and (code == 33 or (code == 17 and getattr(self, '_laser_emission_pending', False))):
             actions = actions | {'standby'}
         if not listen:
@@ -1367,6 +1439,8 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             if request == 'close_output' and code in (65, 129):
                 actions = actions | {'close_output'}
             if request is not None and request not in actions:
+                self._clear_laser_indicator_requests()
+                self._laser_standby_pending = self._laser_emission_pending = False
                 self.error_message(f'Laser command unavailable in {LaserState.from_code(code).value}; request cancelled.')
                 command = getattr(self, "_control_laser_request", None)
                 if command is not None:
@@ -1395,6 +1469,8 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
                 requested = True
             if requested:
                 status = self.laser_device.StatusRead()
+                if getattr(self, '_laser_stopping', False):
+                    return
                 code = readback.scalar(status)
         if code not in (9, 33, 65, 129):
             self._invalidate_laser_readouts(f'Laser status {code}: {LaserState.from_code(code).value}')
@@ -1403,6 +1479,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         if changed:
             status = self.laser_device.StatusRead()
         if requested:
+            self._mark_laser_indicators_sent()
             command = getattr(self, "_control_laser_request", None)
             if command is not None:
                 result(self.variables, "laser", "main", command.command_id, CommandStatus.SENT)
@@ -1416,50 +1493,22 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         # never silently restore full AOM output.
 
     def switch_to_nktpbus_mode(self):
-        """Switch the laser from CLI -> NKTPBus mode.
-
-        After this returns, the CLI session is gone. The operator can
-        either drive the laser from NKT Photonics CONTROL software (the
-        usual reason for switching) or click the "Switch to CLI" button
-        in this window to return to CLI mode.
-        """
-        if self.laser_device is not None:
-            try:
-                self.laser_device.InterbusEnable()
-            except Exception as exc:
-                self.error_message(f"Could not send NKTPBus switch command: {exc}")
+        """Send the same LF-terminated command as the standalone helper."""
+        if not getattr(self, 'flag_super_user_stage', False):
+            self.error_message('Enable Override Access before switching the laser protocol.')
+            return
+        already_native = getattr(self.laser_device, 'protocol', None) == 'nktpbus'
+        with self._laser_mode_transition('NKTPBus') as port:
+            if not port:
                 return
-            try:
-                self.laser_device.close_port()
-            except Exception:
-                pass
-            self.laser_device = None
-            # CLI is gone -- disable Listen / Standby / Laser On /
-            # Output Enable / wavelength immediately so the operator
-            # cannot send commands that would silently go nowhere. The
-            # buttons will re-enable automatically the next time
-            # _apply_button_locks_for_status runs after a successful
-            # CLI re-open via the "Switch to CLI" button.
-            self._apply_button_locks_for_status(None)
-            # Make the new state explicit on both the persistent banner
-            # and the auto-hide message line so the operator cannot miss
-            # what happened.
+            if not already_native:
+                nktpbus_switch.switch_to_nktpbus(port)
             self._set_laser_disconnected_banner(
-                "switched to NKTPBus mode -- use NKT Photonics software, or click 'Switch to CLI' to come back."
+                f"NKTPBus command sent on {port}; CLI port released for NKT Photonics CONTROL."
             )
             self.error_message(
-                "Switched to NKTPBus mode. You can now use the NKT "
-                "Photonics CONTROL software, or click 'Switch to CLI' "
-                "to come back to CLI control."
-            )
-        else:
-            # Either already in NKTPBus or never connected -- in both
-            # cases the state buttons should be disabled.
-            self._apply_button_locks_for_status(None)
-            self.error_message(
-                "The laser is already in NKTPBus mode (or the CLI "
-                "session is closed). Click 'Switch to CLI' to return "
-                "to CLI control."
+                f"NKTPBus command sent; {port} released. Connect in NKT CONTROL. "
+                "Disconnect there before clicking 'Switch to CLI'."
             )
 
     # ------------------------------------------------------------------
@@ -1472,14 +1521,25 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
 
     def _publish_laser_state(self, status_text):
         """Publish only real serial reads; cached UI refreshes are not new evidence."""
+        self._check_native_interlock_reset()
         code = readback.scalar(status_text)
+        device = self.laser_device
+        self._zero_laser_power_after_listen(status_text)
+        if getattr(self, '_laser_stopping', False) or self.laser_device is not device:
+            return
+        self._observe_laser_indicators(code)
         state = LaserState.from_code(code)
         actions = allowed_actions(state, connected=self.laser_device is not None)
+        fault = getattr(self.laser_device, 'status_fault', '') or (state.value if code in (3, 5) else '')
+        if fault and code == 9:
+            actions = frozenset({'listen', 'standby'} if
+                                getattr(self.laser_device, 'standby_available', False) else {'listen'})
         observed = observe(self.variables, "laser", "main", state.value, evidence=Evidence.READBACK,
                            valid=code in (1, 3, 5, 9, 17, 33, 65, 129),
                            connection=Connection.CONNECTED if self.laser_device is not None else Connection.DISCONNECTED,
-                           fault=state.value if code in (3, 5) else "",
-                           details={"status_code": code, "observed_state_actions": sorted(actions)})
+                           fault=fault,
+                           details={"status_code": code, "observed_state_actions": sorted(actions),
+                                    "native_status": getattr(self.laser_device, 'status_details', {})})
         if (observed is not None and observed.command_status == CommandStatus.SENT
                 and observed.valid and not observed.fault and observed.requested == state.value):
             result(self.variables, "laser", "main", observed.command_id, CommandStatus.CONFIRMED)
@@ -1488,12 +1548,18 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         code = readback.scalar(status_text) if self.laser_device is not None else None
         state = LaserState.from_code(code)
         actions = allowed_actions(state, connected=self.laser_device is not None)
-        if self.laser_device is None or code in (33, 65, 129):
+        fault = getattr(self.laser_device, 'status_fault', '')
+        if fault and code == 9:
+            actions = frozenset({'listen', 'standby'} if
+                                getattr(self.laser_device, 'standby_available', False) else {'listen'})
+        if self.laser_device is None or code == 33:
             self._laser_standby_pending = False
         if self.laser_device is None or code == 129:
             self._laser_emission_pending = False
         pending = bool(getattr(self, '_laser_standby_pending', False))
         emission_pending = bool(getattr(self, '_laser_emission_pending', False))
+        listen_pending = (self.laser_device is not None and
+                          'listen' in getattr(self, '_laser_indicator_requests', {}))
         if pending and code == 9:
             # Last observed Listen can persist briefly after a Standby request.
             actions = frozenset({'listen'})
@@ -1509,32 +1575,73 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             label = 'Standby requested / warming' if pending and code == 9 else state.value
             if emission_pending:
                 label = 'Emission requested / '+state.value
+            if listen_pending:
+                label = 'Listen requested / '+state.value
             self.laser_state_label.setText('Laser: '+(label if self.laser_device is not None else 'Disconnected'))
-        known = code in (9, 33, 65, 129) and not pending and not emission_pending
-        idle = code in (9, 33) and not pending and not emission_pending
+            if getattr(self.laser_device, 'protocol', None) == 'nktpbus':
+                self.laser_state_label.setText(self.laser_state_label.text()+' (NKTPBus)')
+                if fault:
+                    self.laser_state_label.setText(self.laser_state_label.text()+'; '+fault)
+                self.laser_state_label.setToolTip(str(getattr(self.laser_device, 'status_details', {})))
+            elif self.laser_device is not None:
+                self.laser_state_label.setText(self.laser_state_label.text()+' (CLI)')
+        known = code in (9, 33, 65, 129) and not pending and not emission_pending and not fault
+        idle = code in (9, 33) and not pending and not emission_pending and not fault
+        if listen_pending:
+            actions = frozenset({'listen'})
+            known = idle = False
         running = bool(self.variables.start_flag)
+        if getattr(self, '_laser_mode_switch_in_progress', False):
+            actions = frozenset()
+            known = idle = False
         self.laser_listen.setEnabled('listen' in actions)
         self.laser_standby.setEnabled('standby' in actions)
-        self.laser_on.setEnabled('on' in actions)
+        self.laser_on.setEnabled('standby' in actions if code in (65, 129) else 'on' in actions)
         self.laser_enable.setEnabled('output' in actions)
-        self.laser_on.setText('Close Output' if code == 129 else 'Laser On (emits)')
-        self.laser_enable.setText('Close Output' if code == 129 or (emission_pending and code == 65) else 'Output Enable')
+        self.laser_on.setText('Laser Off' if code in (65, 129) else 'Laser On (emits)')
+        self.laser_enable.setText('Close Output' if code == 129 or (emission_pending and code == 65) else
+                                  'Open Output' if code == 65 else 'Output Enable')
         self.laser_enable.setToolTip('Close AOM output.' if self.laser_enable.text() == 'Close Output'
                                      else 'Open AOM output only after the laser is on.')
         self.laser_listen.setToolTip('Request Listen (no emission), including while warming or after a status-read failure.')
-        self.laser_on.setToolTip('Close AOM output.' if code == 129 else 'Enable emission only after confirmed ready Standby.')
-        self.laser_wavelegnth.setEnabled(idle and not running)
+        self.laser_standby.setToolTip(
+            'Request Standby / warm-up on the current connection. Laser On remains a separate action.')
+        self.laser_on.setToolTip('Return the laser to Standby and stop output.' if code in (65, 129) else
+                                 'Enable emission only after confirmed ready Standby.')
+        native_wavelength_idle = (code == 9 and not pending and not emission_pending and not listen_pending
+            and not getattr(self, '_laser_mode_switch_in_progress', False)
+            and getattr(self.laser_device, 'wavelength_change_available', False))
+        self.laser_wavelegnth.setEnabled((idle or native_wavelength_idle) and not running
+            and not self._laser_alignment_busy()
+            and getattr(self.laser_device, 'supports_wavelength_changes', True)
+            and (getattr(self.laser_device, 'protocol', None) != 'nktpbus' or code == 9))
         self.laser_rate.setEnabled(idle and not running and bool(getattr(self, '_frequency_table', {})))
         self.laser_divition_factor.setEnabled(known and not running)
-        self.laser_power.setEnabled(known and not self._alignment_laser_settings_locked())
-        for widget, active in ((self.led_laser_listen, code == 9),
-                               (self.led_laser_laser_standby, code == 33),
-                               (self.led_laser_on, code in (65, 129)),
-                               (self.led_laser_enable, code == 129)):
-            if widget is self.led_laser_laser_standby and state == LaserState.SETUP:
-                widget.setPixmap(getattr(self, 'led_orange', self.led_red))
-            else:
-                widget.setPixmap(self.led_green if active else self.led_red)
+        # dev broadened the laser-power lock to cover sample alignment too
+        # (_alignment_laser_settings_locked = laser alignment OR running sample
+        # alignment); the watt setpoint is laser power as well, so both the AOM
+        # slider and the watt field use the broader lock.
+        self.laser_power.setEnabled(known and not self._alignment_laser_settings_locked()
+                                    and getattr(self, '_laser_power_control_mode', 'aom') == 'aom')
+        if hasattr(self, 'laser_ir_power_control'):
+            native = getattr(self.laser_device, 'protocol', None) == 'nktpbus'
+            watt_enabled = (native and known and not running and not self._alignment_laser_settings_locked()
+                            and getattr(self, '_laser_power_control_mode', 'watts') == 'watts')
+            self.laser_ir_power_control.setEnabled(watt_enabled)
+            if not watt_enabled:
+                self._laser_watt_edit_pending = False
+            tip = ('Press Enter or leave the field to set laser power on the existing connection. '
+                   'This adjusts the IR feeding the selected wavelength, not a Green/DUV watt setpoint. '
+                   'Operating state and shutter are not changed. Select Use AOM (%) for relative control.'
+                   if native else 'Watt control requires a native connection. Selecting Use watts (W) from AOM mode '
+                   'connects it explicitly and stops output once. This controls IR feeding the selected output.')
+            self.laser_ir_power_control.setToolTip(tip)
+        # Supersedes dev's inline LED loop: _render_laser_indicators drives the
+        # same four LEDs and additionally blinks pending requests (code 17
+        # warm-up included, which is what dev's LaserState.SETUP branch showed).
+        self._render_laser_indicators()
+        self._update_laser_power_mode_button()
+        self._update_laser_mode_buttons()
 
     # ------------------------------------------------------------------
     # CLI session lifecycle
@@ -1575,13 +1682,104 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         """Close the existing CLI port if any. Safe on already-closed/None."""
         dev = getattr(self, 'laser_device', None)
         if dev is None:
+            self._laser_last_stable_code = None
             return
-        try:
-            dev.close_port()
-        except Exception:
-            pass
+        dev.close_port()
         self.laser_device = None
+        self._laser_last_stable_code = None
         publish(self.variables, "laser", "main", "connection", connection=Connection.DISCONNECTED)
+
+    def _update_laser_mode_buttons(self):
+        enabled = (not getattr(self, '_laser_mode_switch_in_progress', False)
+                   and not getattr(self, '_laser_stopping', False)
+                   and not self.variables.start_flag and not self._laser_alignment_busy())
+        # Manual protocol switches require Override Access as well as idle I/O.
+        for name in ('nktpbus_mode_switch', 'switch_to_cli_button'):
+            button = getattr(self, name, None)
+            if button is not None:
+                button.setEnabled(enabled and getattr(self, 'flag_super_user_stage', False))
+        button = getattr(self, 'laser_native_control_button', None)
+        if button is not None:
+            native = (getattr(self.laser_device, 'protocol', None) == 'nktpbus'
+                      and getattr(self.laser_device, 'connected', True))
+            code = readback.scalar(getattr(self, '_last_laser_status', None))
+            stable = code in (9, 33, 65, 129) and not (
+                getattr(self, '_laser_standby_pending', False) or getattr(self, '_laser_emission_pending', False))
+            resetting = getattr(self, '_laser_interlock_reset_deadline', None) is not None
+            reset_available = native and getattr(self.laser_device, 'interlock_reset_available', False)
+            button.setText('Resetting interlock...' if resetting else 'Reset interlock' if reset_available else
+                           'W control connected' if native else
+                           'Connect W (stops output)' if code in (65, 129) else 'Connect W control')
+            if native:
+                button.setToolTip('Request interlock reset in Listen without enabling emission.' if reset_available or resetting
+                                  else 'Native watt control is connected. Power changes retain the current operating state.')
+            else:
+                button.setToolTip('Connect native watt control explicitly. This stops output and leaves the laser in Listen. '
+                                  'Then select Standby and Laser On; further watt changes keep that connection.')
+            button.setEnabled(enabled and self.laser_device is not None and stable and not resetting
+                              and (reset_available or not native))
+
+    @contextmanager
+    def _laser_mode_transition(self, target):
+        """Serialize handovers and suspend all CLI polling/queued writes."""
+        if (getattr(self, '_laser_mode_switch_in_progress', False)
+                or getattr(self, '_laser_stopping', False)):
+            yield None
+            return
+        self._cancel_laser_startup_watts()
+        if (self.variables.start_flag or self._laser_alignment_busy()
+                or getattr(self, '_laser_status_in_progress', False)):
+            self.error_message('Stop the experiment/alignment and wait for the laser poll before switching modes.')
+            yield None
+            return
+        port = getattr(self, 'com_port_laser', None) or self.conf.get('COM_PORT_laser', '')
+        if not port:
+            self.error_message('No COM port configured for the laser.')
+            yield None
+            return
+        self._laser_mode_switch_in_progress = True
+        timer = getattr(self, '_laser_status_timer', None)
+        if timer is not None:
+            timer.stop()
+        self._update_laser_mode_buttons()
+        yielded = False
+        try:
+            for flag in ('listen_mode', 'standby_mode', 'on_mode', 'enable_ouput_mode', 'close_output_mode',
+                         '_laser_standby_pending', '_laser_emission_pending', 'change_laser_wavelegnth',
+                         'change_laser_power', 'change_laser_rate', 'change_laser_divition_factor'):
+                setattr(self, flag, False)
+            self._last_laser_status = None
+            self._laser_interlock_reset_deadline = None
+            self._clear_laser_indicator_requests()
+            self._laser_watt_edit_pending = False
+            if getattr(self.laser_device, 'protocol', None) == 'nktpbus':
+                # An explicit mode handover releases ownership. Native watt
+                # edits never enter this context and retain their on state.
+                self.laser_device.Listen()
+            self._close_laser_device()
+            self._apply_button_locks_for_status(None)
+            self._set_laser_disconnected_banner(f'Switching to {target} on {port}...')
+            yielded = True
+            yield port
+        except Exception as exc:
+            if (yielded and self.laser_device is not None
+                    and getattr(self.laser_device, 'connected', True)):
+                # Keep a recovered connection owned if later validation fails.
+                # Report the failure without claiming that the port is lost.
+                self._set_laser_disconnected_banner('')
+            else:
+                self._set_laser_disconnected_banner(f'{target} handover failed: {exc}')
+            self.error_message(f'Could not switch to {target}: {exc}')
+            logging.getLogger('pyccapt.laser').exception('%s handover failed on %s', target, port)
+            if not yielded:
+                yield None
+        finally:
+            self._laser_mode_switch_in_progress = False
+            self._update_laser_mode_buttons()
+            if not getattr(self, '_laser_stopping', False):
+                self._apply_button_locks_for_status(getattr(self, '_last_laser_status', None))
+                if timer is not None:
+                    timer.start()
 
     def _open_laser_cli(self, com_port, *, initial_open=False):
         """Try to open a CLI session on ``com_port``.
@@ -1589,13 +1787,17 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         Returns True on success. On failure, sets the persistent
         disconnected banner and returns False without raising.
 
-        ``initial_open`` controls only the wording on the banner
-        (so we say "could not connect" the first time vs "still not
-        connected" after a manual reconnect attempt).
+        Initial application startup requests Listen on this connection.
+        Manual protocol reconnects preserve the observed state.
         """
+        self._laser_cli_query_failed = False
         # Always start from a known-good state -- close any previous
         # handle so reopening doesn't double-own the port.
-        self._close_laser_device()
+        try:
+            self._close_laser_device()
+        except Exception as exc:
+            self._set_laser_disconnected_banner(f'Could not release previous laser session: {exc}')
+            return False
         self._frequency_table = {}
 
         device = origamiClassCLI.origClass(com_port)
@@ -1616,10 +1818,19 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             self._apply_button_locks_for_status(None)
             return False
 
-        # A failed status query alone does not establish the interface mode.
+        # A failed first query can be a settling CLI stream, not a bus device.
+        # Retry queries on this owned handle before releasing it for recovery.
         try:
-            status = device.StatusRead()
+            for attempt in range(2):
+                try:
+                    status = device.StatusRead()
+                    break
+                except (TimeoutError, ValueError):
+                    if attempt:
+                        raise
+                    logging.getLogger('pyccapt.laser').info('Retrying startup CLI status on %s', com_port)
         except Exception as exc:
+            self._laser_cli_query_failed = isinstance(exc, (TimeoutError, ValueError))
             reason = (
                 f"Laser: {com_port} opened at 38400 baud, but the CLI status "
                 f"query failed ({exc}). Check the port, cable and other serial "
@@ -1628,12 +1839,17 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             print(reason)
             try:
                 device.close_port()
-            except Exception:
-                pass
+            except Exception as close_error:
+                self.laser_device = device
+                self._laser_cli_query_failed = False
+                reason += f' CLI session could not be released: {close_error}'
+            if initial_open and self._laser_cli_query_failed:
+                reason = f'Detecting laser interface on {com_port}; CLI has not responded yet. Checking the existing protocol.'
             self._set_laser_disconnected_banner(reason)
             self._apply_button_locks_for_status(None)
             return False
         if not status or 'ly_oxp2' not in status:
+            self._laser_cli_query_failed = True
             reason = (
                 f"Laser: {com_port} returned an unrecognised CLI status: {status!r}. "
                 f"Interface mode has not been determined."
@@ -1641,8 +1857,12 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             print(reason)
             try:
                 device.close_port()
-            except Exception:
-                pass
+            except Exception as close_error:
+                self.laser_device = device
+                self._laser_cli_query_failed = False
+                reason += f' CLI session could not be released: {close_error}'
+            if initial_open and self._laser_cli_query_failed:
+                reason = f'Detecting laser interface on {com_port}; no valid CLI status yet. Checking the existing protocol.'
             self._set_laser_disconnected_banner(reason)
             self._apply_button_locks_for_status(None)
             return False
@@ -1654,37 +1874,183 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         )
         self.laser_device = device
         try:
-            # Send the laser to Listen mode -- the lowest-power, safest
-            # state -- and read back the live settings into the GUI
-            # widgets. Do NOT call wavelength_change here: writing the
-            # wavelength register triggers an optical translation that
-            # takes the laser out of Listen and into Standby, which the
-            # operator did not ask for. The wavelength is whatever it
-            # was last set to and will be reflected in the dropdown by
-            # _sync_controls_from_device.
-            self.laser_device.Listen()
-            status_after = self.laser_device.StatusRead()
-            self._publish_laser_state(status_after)
-            self._sync_controls_from_device(initial=True)
-            if status_after.strip() == 'ly_oxp2_dev_status 9':
-                self.led_laser_listen.setPixmap(self.led_green)
+            if initial_open:
+                status = self._initialize_laser_listen(device, status)
+                if getattr(self, '_laser_stopping', False) or self.laser_device is not device:
+                    return False
+            self._publish_laser_state(status)
+            synchronized = self._sync_controls_from_device(initial=True, status_text=status)
+            if getattr(self, '_laser_stopping', False) or self.laser_device is not device:
+                return False
             # Apply button locks immediately so the new state's buttons
-            # become interactive without waiting for the next status poll.
-            self._apply_button_locks_for_status(status_after)
+            # become interactive even when the optical monitors are unavailable.
+            # A successful sync has already applied its newer status readback.
+            if not synchronized:
+                self._apply_button_locks_for_status(status)
         except Exception as exc:
             print(f"Laser CLI initial handshake failed: {exc}")
+            self._close_laser_device()
+            self._set_laser_disconnected_banner(f'CLI initialization failed: {exc}')
+            self._apply_button_locks_for_status(None)
+            return False
 
         self._set_laser_disconnected_banner("")  # clear
         return True
 
+    def _initialize_laser_listen(self, device, status):
+        """Start in Listen without changing protocol or assuming an ACK is state."""
+        self._laser_power_zero_pending = True
+        if readback.scalar(status) == 9:
+            return status
+        self._laser_standby_pending = self._laser_emission_pending = False
+        self.on_mode = self.standby_mode = self.enable_ouput_mode = self.close_output_mode = False
+        self.listen_mode = False
+        self._request_laser_state(LaserState.LISTEN.value)
+        device.Listen()
+        if getattr(self, '_laser_stopping', False) or self.laser_device is not device:
+            return None
+        self._mark_laser_indicators_sent()
+        command = getattr(self, '_control_laser_request', None)
+        if command is not None:
+            result(self.variables, 'laser', 'main', command.command_id, CommandStatus.SENT)
+        return device.StatusRead()
+
     # --- Tunables for the CLI switch retry loop --------------------------
-    # 3 attempts is a sensible default: the first attempt usually fails
-    # because the FTDI / Prolific virtual COM port is still cached at the
-    # old baud rate; the second attempt typically succeeds. Bumping to 3
-    # gives one more chance before we ask the user to restart pyccapt.
+    # Allow the USB serial driver and firmware time to settle after switching.
     CLI_SWITCH_NUM_ATTEMPTS = 3
     CLI_SWITCH_INITIAL_DELAY_S = 1.5  # after the register write
     CLI_SWITCH_RETRY_DELAY_S = 1.0  # between subsequent attempts
+
+    def _cancel_laser_startup_watts(self):
+        self._laser_startup_watts_pending = False
+        timer = getattr(self, '_laser_startup_retry_timer', None)
+        if timer is not None:
+            timer.stop()
+
+    def _complete_laser_startup(self):
+        """Connect native watts once, in Listen, without resetting an interlock."""
+        if not getattr(self, '_laser_startup_watts_pending', False):
+            return
+        if (getattr(self, '_laser_stopping', False)
+                or getattr(self, '_laser_mode_switch_in_progress', False)
+                or self.variables.start_flag or self._laser_alignment_busy()
+                or self._laser_power_control_mode != 'watts'):
+            self._cancel_laser_startup_watts()
+            return
+        if getattr(self, '_laser_status_in_progress', False):
+            self._laser_startup_retry_timer.start(250)
+            return
+        if self.laser_device is None:
+            self._recover_laser_startup()
+        if (self.laser_device is None or getattr(self, '_laser_stopping', False)
+                or not self._laser_startup_watts_pending):
+            self._cancel_laser_startup_watts()
+            return
+        # Existing native sessions already requested Listen at connection.
+        # Calling the manual connect action here could request an interlock reset.
+        if getattr(self.laser_device, 'protocol', None) == 'nktpbus':
+            self._cancel_laser_startup_watts()
+            return
+        if any(getattr(self, flag, False) for flag in (
+                'standby_mode', 'on_mode', 'enable_ouput_mode', 'close_output_mode',
+                'change_laser_power', 'change_laser_rate', 'change_laser_divition_factor',
+                'change_laser_wavelegnth')):
+            self._cancel_laser_startup_watts()
+            return
+        try:
+            status = self.laser_device.StatusRead()
+            self._publish_laser_state(status)
+            self._apply_button_locks_for_status(status)
+            if readback.scalar(status) != 9 or getattr(self, 'listen_mode', False):
+                if self._laser_startup_watts_deadline is None:
+                    self._laser_startup_watts_deadline = time.monotonic() + 10.
+                if time.monotonic() >= self._laser_startup_watts_deadline:
+                    raise TimeoutError('Listen was not confirmed; watt connection was not attempted.')
+                self._laser_startup_retry_timer.start(500)
+                return
+            # Consume before handover: a failure must not cause repeated resets
+            # or interfere with a later manual protocol/state selection.
+            self._cancel_laser_startup_watts()
+            self._use_native_ir_control(listen_only=True)
+        except Exception as exc:
+            self._cancel_laser_startup_watts()
+            logging.getLogger('pyccapt.laser').warning('Startup watt connection unavailable: %s', exc)
+            self.error_message(f'Startup watt connection unavailable: {exc}')
+
+    def _recover_laser_startup(self):
+        """Connect the active protocol and request the startup Listen state."""
+        if (self.laser_device is not None or getattr(self, '_laser_stopping', False)
+                or getattr(self, '_laser_mode_switch_in_progress', False)
+                or self.variables.start_flag or self._laser_alignment_busy()):
+            return
+        if self._open_laser_cli(self.com_port_laser, initial_open=True):
+            return
+        # A busy/unavailable serial port must not be opened again through the
+        # SDK. Only an owned CLI session with no usable status permits a bus
+        # discovery, which reads the already active protocol without selecting it.
+        if getattr(self, '_laser_cli_query_failed', False):
+            self._open_existing_laser_native(self.com_port_laser)
+
+    def _open_existing_laser_native(self, com_port):
+        """Attach an existing NKTPBus controller and request startup Listen."""
+        if (self.laser_device is not None or getattr(self, '_laser_stopping', False)
+                or getattr(self, '_laser_mode_switch_in_progress', False)
+                or getattr(self, '_laser_status_in_progress', False)
+                or self.variables.start_flag or self._laser_alignment_busy()):
+            return False
+        timer = getattr(self, '_laser_status_timer', None)
+        self._laser_mode_switch_in_progress = True
+        if timer is not None:
+            timer.stop()
+        self._update_laser_mode_buttons()
+        device = None
+        try:
+            device = NativeLaser(com_port, wavelength=None,
+                max_watts=self.conf.get('laser_ir_max_power_w', 5.2),
+                max_aom_percent=self.conf.get('laser_aom_max_percent', 100.))
+            self.laser_device = device  # Preserve ownership if SDK cleanup fails.
+            if device.open_port() != 0:
+                self._close_laser_device()
+                raise ConnectionError(f'Existing NKTPBus connection failed: {device.last_error}')
+            if getattr(self, '_laser_stopping', False) or self.laser_device is not device:
+                return False
+            status = device.StatusRead()
+            if getattr(self, '_laser_stopping', False) or self.laser_device is not device:
+                return False
+            status = self._initialize_laser_listen(device, status)
+            if getattr(self, '_laser_stopping', False) or self.laser_device is not device:
+                return False
+            self._frequency_table = {}
+            self._publish_laser_state(status)
+            synchronized = self._sync_controls_from_device(initial=True, status_text=status)
+            if getattr(self, '_laser_stopping', False) or self.laser_device is not device:
+                return False
+            if not synchronized:
+                self._apply_button_locks_for_status(status)
+            self._set_laser_disconnected_banner('')
+            logging.getLogger('pyccapt.laser').info(
+                'Connected to existing NKTPBus laser on %s; startup Listen requested without changing protocol', com_port)
+            return True
+        except Exception as exc:
+            if device is not None and self.laser_device is device:
+                try:
+                    self._close_laser_device()
+                except Exception as close_error:
+                    exc = ConnectionError(f'{exc}; SDK session could not be released: {close_error}')
+            if getattr(self, '_laser_stopping', False):
+                return False
+            self._set_laser_disconnected_banner(
+                f'No valid CLI or NKTPBus status on {com_port}: {exc}. '
+                'No protocol change or emission was requested. Check power, the cable and NKT CONTROL.')
+            self._apply_button_locks_for_status(None)
+            return False
+        finally:
+            self._laser_mode_switch_in_progress = False
+            self._update_laser_mode_buttons()
+            if not getattr(self, '_laser_stopping', False):
+                self._apply_button_locks_for_status(getattr(self, '_last_laser_status', None))
+                if timer is not None:
+                    timer.start()
 
     def _wait_with_gui_pump(self, total_s, chunk_s=0.1):
         """Sleep for ``total_s`` seconds while keeping the UI responsive.
@@ -1693,84 +2059,43 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         instead sleep in 100 ms chunks and pump the event loop after
         each one so the window keeps repainting.
         """
-        end = time.time() + max(0.0, float(total_s))
-        while time.time() < end:
-            remaining = end - time.time()
+        end = time.monotonic() + max(0.0, float(total_s))
+        while time.monotonic() < end and not getattr(self, '_laser_stopping', False):
+            remaining = end - time.monotonic()
             time.sleep(min(chunk_s, max(remaining, 0.0)))
             QtWidgets.QApplication.processEvents()
 
     def switch_to_cli_clicked(self):
-        """Operator-initiated NKTPBus -> CLI switch.
-
-        Wired to the "Switch to CLI" button (gated behind Override Access).
-        After writing register 0x39 := 1 we try to re-open the CLI session
-        up to ``CLI_SWITCH_NUM_ATTEMPTS`` times with
-        ``CLI_SWITCH_RETRY_DELAY_S`` between attempts. The first attempt
-        fairly often fails because the host-side serial driver hasn't
-        cleanly flipped from 115 200 baud (Interbus) to 38 400 baud
-        (CLI); the second attempt usually succeeds.
-        """
-        port = getattr(self, 'com_port_laser', None) or self.conf.get('COM_PORT_laser', '')
-        if not port:
-            self.error_message("No COM port configured for the laser.")
+        """Release CLI/SDK handles, select CLI if necessary, then reconnect."""
+        if not getattr(self, 'flag_super_user_stage', False):
+            self.error_message('Enable Override Access before switching the laser protocol.')
             return
-
-        # Release our handle before probing; otherwise the probe would fail
-        # on our own working session and incorrectly attempt a bus switch.
-        self._close_laser_device()
-
-        # If CLI already works there is nothing to do; just try to
-        # (re)open the session.
-        if nktpbus_switch.is_cli_responding(port):
-            self.error_message("CLI already responding -- reopening session...")
-            if self._open_laser_cli(port):
-                self.error_message("Laser CLI session opened.")
-            return
-
-        self.error_message(f"Switching to CLI on {port}... please wait.")
-        QtWidgets.QApplication.processEvents()
-
-        try:
-            nktpbus_switch.switch_to_cli(port)
-        except nktpbus_switch.NKTPSwitchError as exc:
-            self._set_laser_disconnected_banner(f"switch to CLI failed: {exc}")
-            self.error_message(f"Could not switch laser to CLI: {exc}")
-            return
-        except Exception as exc:
-            self._set_laser_disconnected_banner(f"switch to CLI failed: {exc}")
-            self.error_message(f"Unexpected error switching to CLI: {exc}")
-            return
-
-        # Give the laser firmware a moment to flip its UART driver from
-        # 115 200 (Interbus) down to 38 400 (CLI). Keep the GUI alive.
-        self.error_message("Register written. Waiting for the laser UART to flip to 38 400 baud...")
-        self._wait_with_gui_pump(self.CLI_SWITCH_INITIAL_DELAY_S)
-
-        # Up to N tries with a delay in between. The status line gets
-        # rewritten on each attempt so the operator can see progress
-        # rather than staring at an unchanging banner.
-        for attempt in range(1, self.CLI_SWITCH_NUM_ATTEMPTS + 1):
-            self.error_message(f"Switching to CLI -- connection attempt {attempt} of {self.CLI_SWITCH_NUM_ATTEMPTS}...")
-            QtWidgets.QApplication.processEvents()
-            if self._open_laser_cli(port):
-                self.error_message(
-                    f"Laser switched to CLI and reconnected (attempt {attempt} of {self.CLI_SWITCH_NUM_ATTEMPTS})."
-                )
+        with self._laser_mode_transition('CLI') as port:
+            if not port:
                 return
-            if attempt < self.CLI_SWITCH_NUM_ATTEMPTS:
-                self.error_message(
-                    f"Attempt {attempt} did not respond yet. Retrying in {self.CLI_SWITCH_RETRY_DELAY_S:.1f} s..."
+            if not nktpbus_switch.is_cli_responding(port, raise_on_port_error=True):
+                self.error_message(f'Switching {port} from NKTPBus to CLI...')
+                # SDK closes its own handle before any CLI reconnect attempt.
+                nktpbus_switch.switch_to_cli(
+                    port, settle_seconds=self.CLI_SWITCH_INITIAL_DELAY_S,
+                    wait=self._wait_with_gui_pump,
+                    cancelled=lambda: getattr(self, '_laser_stopping', False),
                 )
-                self._wait_with_gui_pump(self.CLI_SWITCH_RETRY_DELAY_S)
-
-        # All attempts exhausted.
-        self._set_laser_disconnected_banner("switch to CLI completed but the laser still does not reply")
-        self.error_message(
-            f"Switch register was written but CLI is still not "
-            f"responding after {self.CLI_SWITCH_NUM_ATTEMPTS} attempts. "
-            "If this persists, restart pyccapt; some USB serial "
-            "drivers need a clean re-open after a baud-rate change."
-        )
+            for attempt in range(1, self.CLI_SWITCH_NUM_ATTEMPTS + 1):
+                if getattr(self, '_laser_stopping', False):
+                    return
+                self.error_message(
+                    f'Connecting CLI on {port}, attempt {attempt} of {self.CLI_SWITCH_NUM_ATTEMPTS}...'
+                )
+                if self._open_laser_cli(port):
+                    self.error_message('CLI connected; current state and settings read from the device.')
+                    return
+                if attempt < self.CLI_SWITCH_NUM_ATTEMPTS:
+                    self._wait_with_gui_pump(self.CLI_SWITCH_RETRY_DELAY_S)
+            raise nktpbus_switch.NKTPSwitchError(
+                f'CLI did not reconnect after {self.CLI_SWITCH_NUM_ATTEMPTS} attempts. '
+                'Disconnect NKT CONTROL/serial terminals, check the connection, then click Switch to CLI again.'
+            )
 
     def error_message(self, message):
         """
@@ -1824,6 +2149,12 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         without this the laser status loop keeps running and prevents the
         Python process from exiting cleanly.
         """
+        self._laser_stopping = True
+        self._laser_interlock_reset_deadline = None
+        startup_timer = getattr(self, '_laser_startup_retry_timer', None)
+        if startup_timer is not None:
+            startup_timer.stop()
+        self._clear_laser_indicator_requests()
         # Stop the laser-status QTimer (now a main-thread timer instead of
         # a Worker QThread; see _poll_laser_status). Stopping the timer is
         # synchronous so there's no thread to join.
@@ -1883,7 +2214,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
         # stayed in whatever state the operator had set (potentially
         # state 129 = output enabled) until the rig was power-cycled.
         # We disable the AOM (kills the output gate), set its level to
-        # zero, then issue Standby (firmware moves to state 33). Each
+        # zero, then issue Listen. Each
         # call is wrapped individually so a stuck command doesn't
         # block the rest of the safe-off sequence.
         laser_dev = getattr(self, 'laser_device', None)
@@ -1891,7 +2222,7 @@ class Ui_Laser_Control(LaserReadoutMixin, LaserAlignmentGuiMixin, LaserLayoutMix
             for safe_call, label in (
                 (lambda: laser_dev.AOMDisable(), 'AOMDisable'),
                 (lambda: laser_dev.AOM(0), 'AOM(0)'),
-                (lambda: laser_dev.Standby(), 'Standby'),
+                (lambda: laser_dev.Listen(), 'Listen'),
             ):
                 try:
                     with commanded(self.variables, "laser", "main", label):

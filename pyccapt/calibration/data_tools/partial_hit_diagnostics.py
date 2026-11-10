@@ -367,7 +367,10 @@ def matched_dld_tdc_residuals(
     ch_sorted = np.take_along_axis(ch4, order, axis=1)
     t_sorted = np.take_along_axis(t4, order, axis=1)
     is_quad = np.all(ch_sorted == np.array([0, 1, 2, 3]), axis=1)
-    matched_pulse = hm4.any(axis=1)
+    # A negative event_group_id never denotes a real link: orphan tdc pulses all
+    # carry -1, and so does the first unmatched dld run. Comparing them would
+    # pair unrelated pulses (when has_dld_match is absent).
+    matched_pulse = hm4.any(axis=1) & (gid4[:, 0] >= 0)
     sel = is_quad & matched_pulse
     if not np.any(sel):
         return _empty("no matched 4-channel (ch0..ch3) pulses")
@@ -393,7 +396,7 @@ def matched_dld_tdc_residuals(
 
     pos = np.arange(gid_dld.shape[0])
     rows_per_gid = pd.Series(pos).groupby(gid_dld).transform("size").to_numpy()
-    eligible = (rows_per_gid == 1) & native
+    eligible = (rows_per_gid == 1) & native & (gid_dld >= 0)
     if not np.any(eligible):
         return _empty("no single-row native DLD events to compare against")
     gid_to_pos = pd.Series(pos[eligible], index=gid_dld[eligible])
@@ -407,8 +410,20 @@ def matched_dld_tdc_residuals(
     dx = np.abs(det_x_tdc[valid] - x_dld[dld_pos])
     dy = np.abs(det_y_tdc[valid] - y_dld[dld_pos])
     dtof = np.abs(tof_tdc[valid] - t_dld[dld_pos])
+    # The raw-stop positions use the firmware's own pixel formula (sc_geometry),
+    # so a correct match agrees exactly up to how dld x/y/t were stored. Older
+    # files store them as float32; allow the rounding of the stored dtype
+    # (relative to the stored value) on top of the tolerance.
+    def _storage_eps(column):
+        dtype = np.asarray(dld_df[column].to_numpy()[:1]).dtype
+        return float(np.finfo(dtype).eps) if np.issubdtype(dtype, np.floating) else float(np.finfo(np.float64).eps)
+
+    slack_x = 4.0 * _storage_eps("x_det (cm)") * np.abs(x_dld[dld_pos])
+    slack_y = 4.0 * _storage_eps("y_det (cm)") * np.abs(y_dld[dld_pos])
+    slack_t = 4.0 * _storage_eps("t (ns)") * np.abs(t_dld[dld_pos])
     finite = np.isfinite(dx) & np.isfinite(dy) & np.isfinite(dtof)
     dx, dy, dtof = dx[finite], dy[finite], dtof[finite]
+    slack_x, slack_y, slack_t = slack_x[finite], slack_y[finite], slack_t[finite]
     if dx.size == 0:
         return _empty("no finite residuals after matching")
 
@@ -426,9 +441,9 @@ def matched_dld_tdc_residuals(
         "dtof_median_ns": float(np.median(dtof)),
         "dtof_p99_ns": float(np.percentile(dtof, 99)),
         "dtof_max_ns": float(np.max(dtof)),
-        "frac_x_within_tol": float(np.mean(dx <= pos_tol_cm)),
-        "frac_y_within_tol": float(np.mean(dy <= pos_tol_cm)),
-        "frac_tof_within_tol": float(np.mean(dtof <= tof_tol_ns)),
+        "frac_x_within_tol": float(np.mean(dx <= pos_tol_cm + slack_x)),
+        "frac_y_within_tol": float(np.mean(dy <= pos_tol_cm + slack_y)),
+        "frac_tof_within_tol": float(np.mean(dtof <= tof_tol_ns + slack_t)),
         "pos_tol_cm": float(pos_tol_cm),
         "tof_tol_ns": float(tof_tol_ns),
         "reason": "",
@@ -725,7 +740,10 @@ def _per_pulse_aggregate(
     ).reset_index()
 
     if tdc_df is not None and EVENT_GROUP_ID_COL in tdc_df.columns:
-        tdc_counts = tdc_df.groupby(EVENT_GROUP_ID_COL).size().rename("n_tdc_ticks").reset_index()
+        # Negative ids are not links (all orphan tdc pulses share -1, as does
+        # the first unmatched dld run): count ticks of real links only.
+        linked_tdc = tdc_df[tdc_df[EVENT_GROUP_ID_COL] >= 0]
+        tdc_counts = linked_tdc.groupby(EVENT_GROUP_ID_COL).size().rename("n_tdc_ticks").reset_index()
         merged = dld_pulse_stats.merge(tdc_counts, on=EVENT_GROUP_ID_COL, how="left")
         merged["n_tdc_ticks"] = merged["n_tdc_ticks"].fillna(0).astype(int)
         return merged

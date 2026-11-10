@@ -246,6 +246,33 @@ def test_unmatched_and_ambiguous_pulses_excluded():
     assert matched_dld_tdc_residuals(dld_a, tdc_a)["n_compared"] == 0
 
 
+def test_firmware_match_stored_as_float32_is_within_tolerance():
+    # Odd ch1-ch0 difference: the firmware floors the half bin. The raw-stop
+    # position uses the same pixel formula, so a correct match differs only by
+    # how dld x/y/t were stored; old files store them as float32 (real 2023 SC
+    # data: 72 % "within tolerance" before storage rounding was allowed).
+    times = [159847, 157940, 158436, 159372]  # ch0..ch3, x difference odd
+    x, y, t = _hit4(times)
+    pulses = [dict(sc=5, gid=0, channels=[0, 1, 2, 3], times=times, has_match=True)]
+    dld, tdc = _make_frames(pulses, [dict(gid=0, x=x, y=y, t=t, quality="native")])
+    dld = dld.astype({"x_det (cm)": np.float32, "y_det (cm)": np.float32, "t (ns)": np.float32})
+    res = matched_dld_tdc_residuals(dld, tdc)
+    assert res["n_compared"] == 1
+    assert 0 < res["dx_max_cm"] < 1e-6  # float32 storage rounding only
+    assert res["frac_x_within_tol"] == 1.0
+    assert res["frac_y_within_tol"] == 1.0
+    assert res["frac_tof_within_tol"] == 1.0
+
+
+def test_negative_event_group_ids_are_never_compared():
+    # Without has_dld_match, an orphan tdc pulse (gid -1) must not be compared
+    # with the first unmatched dld run, which also carries gid -1.
+    pulses = [dict(sc=5, gid=-1, channels=[0, 1, 2, 3], times=[100, 140, 130, 110], has_match=True)]
+    dld, tdc = _make_frames(pulses, [dict(gid=-1, x=2.0, y=-2.0, t=999.0, quality="native")])
+    tdc = tdc.drop(columns=["has_dld_match"])
+    assert matched_dld_tdc_residuals(dld, tdc)["n_compared"] == 0
+
+
 def test_missing_inputs_report_reason():
     res = matched_dld_tdc_residuals(pd.DataFrame(), None)
     assert res["n_compared"] == 0

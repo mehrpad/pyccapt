@@ -130,8 +130,17 @@ class CalibrationDataset:
         return (~self.finite_masks[column]).astype(np.uint8)
 
     def values(self, column: str, *, missing: float = 0.0) -> np.ndarray:
+        """Return a column as an independent, writable array.
+
+        The shared ``Variables`` working arrays are built from these values and
+        are mutated in place by the calibration steps, so a view is wrong twice
+        over: pandas copy-on-write (always on from pandas 3.0) hands out
+        read-only views from ``Series.to_numpy()``, and a writable view would
+        write through into ``frame`` and silently change the dataset that
+        ``source_hash`` was computed over.
+        """
         if column in self.frame.columns:
-            return self.frame[column].to_numpy()
+            return self.frame[column].to_numpy(copy=True)
         return np.full(self.row_count, missing, dtype=float)
 
     def finite_mask(self, *columns_or_capabilities: str) -> np.ndarray:

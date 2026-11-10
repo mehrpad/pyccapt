@@ -594,6 +594,7 @@ def find_nth_max_repeated_indices(nums, n):
     """
     if n < 1:
         raise ValueError("n must be >= 1")
+    nums = list(nums)  # longer runs are masked with -1 below; never modify the caller's data
 
     while n > 0:
         max_count = 0
@@ -605,7 +606,11 @@ def find_nth_max_repeated_indices(nums, n):
         current_number = None
 
         for i, num in enumerate(nums):
-            if num != -1:
+            if num == -1:
+                # a masked (already reported) run ends the current run
+                current_number = None
+                current_count = 0
+            else:
                 if num != current_number:
                     current_number = num
                     current_count = 1

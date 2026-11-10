@@ -28,6 +28,7 @@ class LaserLayoutMixin:
         settings_layout.addLayout(self.gridLayout_3)
         self.laser_state_label = QtWidgets.QLabel('Laser: Status unavailable', settings)
         self.laser_state_label.setObjectName('laser_state_label')
+        self.laser_state_label.setWordWrap(True)
         settings_layout.addWidget(self.laser_state_label)
         self._apply_button_locks_for_status(getattr(self, '_last_laser_status', None))
         for field in (self.laser_power, self.laser_rate, self.laser_divition_factor):
@@ -45,10 +46,13 @@ class LaserLayoutMixin:
         readouts.setSpacing(3)
         for column, (label, lcd) in enumerate((
             (self.label_9, self.laser_power_disp),
+            (self.laser_ir_power_label, self.laser_ir_power_disp),
             (self.label_10, self.laser_pulse_energy_disp),
             (self.label_11, self.laser_repetion_rate_disp),
         )):
             label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            label.setWordWrap(True)
+            label.setMaximumWidth(130)
             lcd.setFixedSize(100, 40)
             readouts.addWidget(label, 0, column)
             readouts.addWidget(lcd, 1, column, alignment=QtCore.Qt.AlignmentFlag.AlignCenter)

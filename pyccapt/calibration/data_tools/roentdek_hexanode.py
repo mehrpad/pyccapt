@@ -2,10 +2,12 @@
 
 This is a vectorised NumPy port of the position calculation CoboldPC/DAn
 performs for a hexanode detector, so ``det_x``/``det_y``/``tof`` can be
-recomputed from the raw first-hit TDC values that pyccapt stores in the HDF5
-``tdc`` group. It is shared by the live acquisition loop
-(:mod:`pyccapt.control.tdc_roentdek.tdc_roentdek`) and offline re-processing,
-so only NumPy is imported at module level.
+recomputed from the raw TDC values that pyccapt stores in the HDF5 ``tdc``
+group, or from CoboldPC ``lmf2txt`` dumps. Live acquisition reconstructs with
+RoentDek's Resort64c (:mod:`pyccapt.control.tdc_roentdek.roentdek_resort`);
+this module is an independent offline reconstruction (no RoentDek library
+needed) for re-processing and cross-checking. Only NumPy is imported at
+module level.
 
 Channel layout (0-based, as stored in ``tdc/ch0..ch7`` or the flat
 ``tdc/time_data`` table)::
@@ -163,8 +165,8 @@ class HexanodeCorrection:
     """Smooth 2-D polynomial map from analytic to CoboldPC positions (mm).
 
     ``sum_walk`` optionally carries the time-sum walk of the same detector
-    (:func:`fit_sum_walk`), so live acquisition can gate on walk-corrected
-    sums without fitting it per packet.
+    (:func:`fit_sum_walk`), so small data sets can gate on walk-corrected
+    sums without fitting it themselves.
     """
 
     degree: int
@@ -836,7 +838,13 @@ def _read_tdc_group(path: str | Path):
             return 'per_channel', np.stack([_as_signed(column) for column in columns], axis=1), {}
         if 'tdc/time_data' not in handle or 'tdc/channel' not in handle:
             raise KeyError(f'{path} has no RoentDek tdc channels (tdc/ch0..ch7 or tdc/time_data)')
-        time_data = _as_signed(np.asarray(handle['tdc/time_data'][:]))
+        dataset = handle['tdc/time_data']
+        offset = dataset.attrs.get('roentdek_time_offset')
+        if offset is not None:
+            # Reader v3 (2026-11): signed bins + offset, every row is one real hit.
+            time_data = np.asarray(dataset[:]).astype(np.int64) - int(offset)
+        else:
+            time_data = _as_signed(np.asarray(dataset[:]))
         channel = np.asarray(handle['tdc/channel'][:]).astype(np.int64)
         extras = {name: np.asarray(handle[f'tdc/{name}'][:])
                   for name in ('start_counter', 'high_voltage', 'voltage_pulse', 'laser_pulse')
@@ -862,8 +870,10 @@ def load_roentdek_tdc_channels(path: str | Path) -> dict[str, np.ndarray]:
     * the flat ``tdc/channel`` + ``tdc/time_data`` table, either 8 rows per
       event (first hits, 0 = no hit) or one row per hit grouped by
       ``start_counter`` (all hits, see :func:`load_roentdek_hits`).
-      ``time_data`` is stored as uint64; negative TDC bins (the start channel
-      precedes the MCP trigger) are recovered by reinterpreting it as int64.
+      ``time_data`` is stored as uint64. The RoentDek reader v3 (Resort64c,
+      attribute ``roentdek_time_offset``) stores signed bins + 2**23; older
+      files stored negative bins (the start channel precedes the MCP
+      trigger) two's-complement, recovered by reinterpreting as int64.
 
     Returns:
         ``channels`` as an ``(n, 8)`` int64 array plus any per-event

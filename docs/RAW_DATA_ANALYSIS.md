@@ -334,12 +334,21 @@ exactly one DLD row. Multi-hit, unmatched, recovered, and ambiguous
 
 Interpretation:
 
-- **Near-zero residuals** (within one detector bin ≈ 0.0016 cm and one TDC
-  bin ≈ 0.0069 ns) confirm both the `event_group_id` link and that the
-  reconstruction formula matches the firmware's. On correctly matched data
-  the residuals are numerically zero.
-- **Large residuals** flag a mis-link: the stops associated with a DLD event
-  are not the stops that produced it.
+- **Zero residuals** (within float32 storage rounding for old files) confirm
+  both the `event_group_id` link and the reconstruction formula: raw-stop
+  positions use the firmware's own pixel formula,
+  `floor((t_ch0 - t_ch1 - TimeDif1Min) / 2)` with the detector geometry of
+  `sc_geometry` (and legacy dld coordinates are converted to it on load), and
+  the ToF is the plain stop sum. Before 2026-11-05 the raw-stop formula ignored
+  the firmware's floor and window centre, which gave residuals of up to one
+  detector bin plus a constant 0.8 / 1.15 mm offset.
+- **Large residuals** mean the firmware's hit was not built from exactly
+  these four stops. On the Al test dataset below this is the case for about
+  4 % of the clean pulses, and the links themselves are correct: typically
+  one coordinate and the ToF are reproduced exactly when one stop is replaced
+  by a stop of the same channel that the raw stream assigns to a neighbouring
+  `start_counter` (the two streams are not stop-for-stop identical). A
+  systematic mis-link would instead show large residuals for most pulses.
 
 The check reports the mean / median / 99th-percentile / max of `|Δx_det|`,
 `|Δy_det|`, `|Δtof|` and the fraction within tolerance. It is printed
@@ -388,17 +397,20 @@ Event statistics
   Partial pulses in raw TDC (<4 ch)       : 4,865,601
   Raw TDC pulses linked to a DLD event    : 12,197,571
   Match check (TDC-derived vs DLD recorded, clean 4-ch single-hit pulses):
-      pulses cross-checked                : 11,9xx,xxx
-      |dx_det| median / max (cm)          : 0.00e+00 / 0.00e+00
-      |dy_det| median / max (cm)          : 0.00e+00 / 0.00e+00
-      |dtof|   median / max (ns)          : 0.00e+00 / 0.00e+00
-      within tol (x/y=1.63e-03 cm, tof=6.86e-03 ns)  : 100.0% / 100.0% / 100.0%
+      pulses cross-checked                : 11,856,720
+      |dx_det| median (cm)                : 1.63e-03
+      |dtof|   median (ns)                : 1.6e-05
+      within tol (x/y=1.63e-03 cm, tof=6.86e-03 ns)  : 96.5% / 97.3% / 95.6%
 ```
 
-The zero residuals and 100 % within-tolerance shown here are the verified
-behaviour for correctly matched pulses (the re-derived position and ToF are
-identical to the firmware's because they use the same stops and formula);
-non-zero values would indicate a problem with the link.
+(Match-check values measured on the whole Al test file, all 12.3 M DLD rows
+linked; measured with the pre-2026-11-05 raw-stop formula, whose median position
+residual of one detector bin came from not reproducing the firmware's pixel
+rounding — with the firmware formula it is 0). The ~4 % outside the tolerance are firmware hits built
+from one stop that the raw stream assigns to a neighbouring pulse (Section 7).
+A wrong `event_group_id` link would push most pulses outside the tolerance.
+Files written before the 2026 schema store `/dld` as float32; the check allows
+for that storage rounding.
 
 (The "Partial pulses in raw TDC" count being larger than the recovered-atom
 count is expected: not every partial pulse is physically reconstructable,

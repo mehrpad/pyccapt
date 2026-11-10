@@ -282,6 +282,37 @@ class _MemoryWriter:
         pass
 
 
+def _roentdek_groups(n, first_ts=100):
+    """n TDC groups: every channel has one hit, ch7 (MCP trigger) at 0, start (ch6) before it."""
+    ts = np.arange(first_ts, first_ts + n, dtype=np.uint64)
+    cnt = np.ones((n, 8), np.uint32)
+    tdc = np.zeros((n, 8, 10), np.int32)
+    tdc[:, :6, 0] = (np.arange(n)[:, None] + 1) * np.arange(1, 7)[None, :]
+    tdc[:, 6, 0] = -1000 - np.arange(n)
+    return ts, cnt, tdc
+
+
+def _roentdek_fake_sdk(read):
+    sdk = Mock()
+    sdk.init_tdc.return_value = 0
+    sdk.run_tdc.return_value = 0
+    sdk.bin_size_ns.return_value = .025
+    sdk.diagnostics.return_value = {}
+    sdk.last_error.return_value = ''
+    sdk.read.side_effect = read
+    return sdk
+
+
+def _roentdek_fake_reco(*_args, **_kwargs):
+    """one ion per group: x = first u1 hit [mm], y = first v1 hit [mm], t = MCP - start [bins]"""
+    def reconstruct(cnt, tdc, time_stamp=None):
+        n = len(cnt)
+        return {"event": np.arange(n), "hit": np.zeros(n, np.int8), "x": tdc[:, 0, 0].astype(float),
+                "y": tdc[:, 2, 0].astype(float), "t": (tdc[:, 7, 0] - tdc[:, 6, 0]).astype(float),
+                "method": np.zeros(n, np.int8), "time_stamp": time_stamp}
+    return SimpleNamespace(bin_ns=.025, reconstruct=reconstruct, stats_text=lambda: "", signal_warnings=lambda: [])
+
+
 def test_roentdek_nan_laser_frequency_keeps_rate_finite_and_passes_alignment_conf(monkeypatch, tmp_path):
     from pyccapt.control.apt import alignment_vision
     from pyccapt.control.tdc_roentdek import tdc_roentdek as roentdek
@@ -289,16 +320,14 @@ def test_roentdek_nan_laser_frequency_keeps_rate_finite_and_passes_alignment_con
                                 pulse_mode="Laser", flag_stop_tdc=False, stop_flag=False, total_ions=0,
                                 total_raw_signals=0, automatic_alignment_enabled=False, laser_alignment_epoch="")
     clock = [0.]
-    data = np.arange(60, dtype=float).reshape(5, 12)
-    packets = deque([(.5, np.concatenate(([5], data.ravel()))), (1., np.zeros(1))])
-    sdk = Mock()
-    sdk.init_tdc.return_value = 0
+    packets = deque([(.5, _roentdek_groups(5)), (1., None)])
 
     def packet():
         clock[0], buffer = packets.popleft()
         return buffer
 
-    sdk.get_data_tdc_buf.side_effect = packet
+    sdk = _roentdek_fake_sdk(packet)
+    monkeypatch.setattr(roentdek, "make_reconstructor", _roentdek_fake_reco)
     seen_conf = []
 
     class Publisher:

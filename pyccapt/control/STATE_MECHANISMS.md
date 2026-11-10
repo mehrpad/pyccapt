@@ -11,13 +11,18 @@ sequences while providing consistent state records for monitoring and diagnosis.
 Each resource has one registered observation owner and an explicit list of
 requesting roles in `STATE_SPECS`. Roles describe logical ownership; `main` and
 `pump` can be separate threads in the same process. `Variables._OWNERSHIP`
-registers every shared record. Updates use a dedicated multiprocessing lock and
-an atomic read/reduce/write transaction, including on Windows with spawned
-processes. State-lock acquisition is bounded: best-effort publications wait at
-most 10 ms, snapshots at most 50 ms. An exited publisher holding that lock
-cannot trap subsequent physical stop commands. State publication failures are
-logged while existing hardware operations continue. Records and returned
-metadata are detached from their publisher.
+registers every shared record. Each resource has its own multiprocessing lock
+for atomic read/reduce/write transactions, including on Windows with spawned
+processes. Best-effort publications wait at most 10 ms for that resource's lock.
+Readers fetch complete immutable records without acquiring update locks; a full
+diagnostic snapshot contains records read at potentially different instants.
+Slow diagnostic reads and updates to other devices cannot hold up stage
+publication. An exited publisher holding its lock affects only updates to that
+resource; its last record remains readable and existing physical stop commands
+continue. Freshness checks identify aged readbacks. A timeout identifies the
+resource and wait limit; it does not establish whether a publisher exited.
+State publication failures are logged while existing hardware operations
+continue. Records and returned metadata are detached from their publisher.
 
 | Field | Meaning |
 | --- | --- |

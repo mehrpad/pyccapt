@@ -212,18 +212,20 @@ LASER_TOOLTIPS = {
     "For example, 400 kHz / 4 = 100 kHz. Firmware readback confirms the accepted value.",
     # --- Mode buttons + LEDs ---------------------------------------------
     "laser_listen": "Put the laser into Listen mode (lowest activity, safe).  No emission, ready to receive commands.",
-    "laser_standby": "Warm up in Standby. Residual seed emission remains Class 4 (manual p116).",
+    "laser_standby": "Warm up in Standby using the current connection. "
+    "The LED blinks red/orange until ready. Residual seed emission remains Class 4 (manual p116).",
     "laser_on": "From Standby: enables emission and opens output (manual pp116-117). "
-    "From Output Enabled: closes the output gate while leaving the amplifier on.",
+    "While on: Laser Off returns to Standby and stops output.",
     "laser_enable": "Enable / disable the AOM output gate.  "
     "Toggles the actual output at the sample "
     "without changing the laser's emission "
     "state.",
-    "led_laser_listen": "Listen-mode indicator.  Green = active.",
-    "led_laser_laser_standby": "Standby-mode indicator.  Green = active, orange = transitioning.",
-    "led_laser_on": "Emission indicator.  Green = laser is emitting, orange = transitioning.",
-    "led_laser_enable": "Output-enable indicator.  Green = AOM open.",
+    "led_laser_listen": "Listen indicator: red/orange blinking = request pending; green = confirmed Listen.",
+    "led_laser_laser_standby": "Standby indicator: red/orange blinking = request pending/warming; green = confirmed ready.",
+    "led_laser_on": "Laser On indicator: red/orange blinking = transition pending; green = confirmed on.",
+    "led_laser_enable": "Output indicator: red/orange blinking = opening/closing pending; green = confirmed open, red = closed.",
     # --- Live readouts ---------------------------------------------------
+    "laser_ir_power_disp": "IR internal-monitor power (W), separate from the selected harmonic. Unknown readings show dashes.",
     "laser_power_disp": "Selected output internal-monitor power (W). Unknown readings show dashes.",
     "laser_pulse_energy_disp": "Selected output pulse energy (microjoules). Internal-monitor estimate, not specimen energy.",
     "laser_repetion_rate_disp": "Laser output repetition rate (kHz), computed from actual base rate / divider. "
@@ -233,11 +235,12 @@ LASER_TOOLTIPS = {
     "laser_focus_mode": "Focus-mode selector.  Currently only 'Standard' is implemented.",
     "scanning_disp": "Visualisation of the active scanning pattern.",
     "start_scanning": "Start / stop the scanning routine using the selected scan and focus modes.",
-    "nktpbus_mode_switch": "Switch the laser from CLI to NKTPBus mode - "
-    "hands control over to NKT's own software.  "
-    "Once switched, you must use the NKT control "
-    "tool to bring it back to CLI mode.  Disabled "
-    "until Override Access is granted.",
+    "nktpbus_mode_switch": "Send the NKTPBus mode command and release the port for NKT CONTROL. "
+    "PyCCAPT can stay open. Disconnect in CONTROL before using Switch to CLI. "
+    "Requires Override Access and a stopped experiment/alignment.",
+    "switch_to_cli_button": "Disconnect the laser in NKT CONTROL first, then switch to CLI "
+    "and reconnect in PyCCAPT. Reads the current controller state and settings. "
+    "Requires Override Access and a stopped experiment/alignment.",
     # --- SmarAct laser focusing stage: position display ------------------
     "laser_x_mm": "Laser-stage X position, millimetres digit.  Read-only.  "
     "Combined with µm and nm columns: total X = mm.µm.nm.",
@@ -270,9 +273,8 @@ LASER_TOOLTIPS = {
     "power-on.  Disabled until Override Access "
     "is granted.",
     "laser_stage_stop": "Immediately stop all laser-stage axes.  Always clickable.",
-    "laser_stage_superuser": "Enable potentially disruptive controls: "
-    "the stage Reference button and the Nktpbus "
-    "mode switch.  Click to grant access (a "
+    "laser_stage_superuser": "Enable potentially disruptive stage controls, including "
+    "the stage Reference button. Click to grant access (a "
     "confirmation dialog appears); the button "
     "turns green while active.",
     "Error": "Status / error messages from both the laser and the laser "

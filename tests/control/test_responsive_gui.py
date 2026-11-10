@@ -437,6 +437,70 @@ def test_camera_compact_layout_preserves_views_and_all_controls(instrument_windo
 
 
 @pytest.mark.parametrize('instrument_window', ['cameras'], indirect=True)
+def test_camera_startup_exposure_reaches_hardware_and_modes_remain_selectable(
+    instrument_window, monkeypatch,
+):
+    _, ui, _ = instrument_window
+    camera = gui_cameras.camera
+    monkeypatch.setattr(camera, 'check_camera_backend', lambda: (False, 'Simulated cameras'))
+    worker = camera.CameraWorker(ui.variables, ui.emitter, ui.conf)
+    monkeypatch.setattr(worker, '_apply_quality_settings', lambda cam: None)
+    monkeypatch.setattr(worker, '_lock_gain_low', lambda cam: None)
+
+    class Node:
+        def __init__(self):
+            self.value = None
+
+        def SetValue(self, value):
+            self.value = value
+
+    cameras = [SimpleNamespace(
+        ExposureAuto=Node(), ExposureTime=Node(),
+        Open=lambda: None, StartGrabbing=lambda strategy: None,
+    ) for _ in range(2)]
+    monkeypatch.setattr(camera, 'pylon', SimpleNamespace(
+        InstantCamera=lambda device: cameras[device], GrabStrategy_LatestImageOnly=0,
+    ))
+    worker._tl_factory = SimpleNamespace(CreateDevice=lambda info: info.slot)
+    for slot in range(2):
+        info = SimpleNamespace(slot=slot, GetSerialNumber=lambda: 'simulated')
+        assert worker._attach_slot(slot, info)
+
+    fields = (ui.exposure_time_cam_1, ui.exposure_time_cam_2)
+    assert not ui.auto_exposure_time_flag and ui.manual_exposure_flag
+    assert ui.auto_exposure_time.styleSheet() == ui.original_button_style
+    assert ui.default_exposure_time.styleSheet() != ui._original_manual_exposure_style
+    assert [field.text() for field in fields] == ['100000', '300000']
+    assert [cam.ExposureAuto.value for cam in cameras] == ['Off', 'Off']
+    assert [cam.ExposureTime.value for cam in cameras] == [100_000, 300_000]
+    for light in (True, False):
+        ui.variables.light = light
+        worker.light_switch()
+        worker._apply_exposure_changes()
+        assert [cam.ExposureTime.value for cam in cameras] == [100_000, 300_000]
+
+    # Override Access still gates editing; auto and presets remain selectable.
+    assert all(not field.isEnabled() for field in fields)
+    ui.flag_super_user = True
+    ui._refresh_exposure_widgets()
+    assert all(field.isEnabled() for field in fields)
+    ui.auto_exposure_time.click()
+    worker._apply_exposure_changes()
+    assert [cam.ExposureAuto.value for cam in cameras] == ['Continuous', 'Continuous']
+    assert not worker.manual_user_mode
+    assert all(not field.isEnabled() for field in fields)
+    ui.auto_exposure_time.click()
+    worker._apply_exposure_changes()
+    assert [cam.ExposureTime.value for cam in cameras] == [2_000_000, 1_000_000]
+    ui.default_exposure_time.click()
+    fields[0].setText('150000')
+    fields[0].editingFinished.emit()
+    worker._apply_exposure_changes()
+    assert worker.manual_user_mode
+    assert [cam.ExposureTime.value for cam in cameras] == [150_000, 300_000]
+
+
+@pytest.mark.parametrize('instrument_window', ['cameras'], indirect=True)
 def test_camera_notification_expires_without_refresh_restoring_it(instrument_window):
     window, ui, app = instrument_window
     window.show()
@@ -484,11 +548,18 @@ def test_laser_compact_layout_preserves_controls_and_readouts(instrument_window,
         app.processEvents()
     print(f'Laser GUI size: {window.size()}, preview: {tmp_path}')
     assert window.width() <= 1000
-    assert window.height() <= 700
+    # Watt/AOM controls and the optical readouts fit in the compact window.
+    assert window.height() <= 780  # Three readable alignment lines need vertical space.
     viewport = window._responsive_window.scroll.viewport()
     assert window._responsive_window.scroll.horizontalScrollBar().maximum() == 0
     assert window._responsive_window.scroll.verticalScrollBar().maximum() == 0
-    controls = [ui.laser_wavelegnth, ui.laser_wavelegnth_nm_label, ui.laser_power,
+    status = ui.laser_alignment_label
+    assert status.text().count('\n') == 2
+    assert status.height() >= status.heightForWidth(status.width())
+    assert status.height() >= 3 * status.fontMetrics().lineSpacing()
+    assert ui.laser_alignment_panel.rect().contains(status.geometry())
+    controls = [ui.laser_wavelegnth, ui.laser_wavelegnth_nm_label, ui.label, ui.laser_power,
+                ui.laser_ir_power_control_label, ui.laser_ir_power_control, ui.laser_power_mode_button,
                 ui.laser_rate, ui.laser_divition_factor, ui.laser_enable, ui.laser_on,
                 ui.laser_standby, ui.laser_listen, ui.laser_state_label, ui.laser_auto_alignment, ui.laser_tracking,
                 *ui.laser_alignment_fields.values(), *ui.laser_alignment_buttons,
@@ -496,7 +567,7 @@ def test_laser_compact_layout_preserves_controls_and_readouts(instrument_window,
                 ui.laser_home, ui.laser_stage_reference, ui.laser_stage_stop, ui.laser_stage_superuser,
                 ui.switch_to_cli_button, ui.nktpbus_mode_switch, ui.laser_message_area,
                 ui.laser_up, ui.laser_down, ui.laser_left, ui.laser_right,
-                ui.laser_forward, ui.laser_backward, ui.laser_power_disp,
+                ui.laser_forward, ui.laser_backward, ui.laser_ir_power_label, ui.laser_ir_power_disp, ui.laser_power_disp,
                 ui.laser_pulse_energy_disp, ui.laser_repetion_rate_disp]
     for axis in ('x', 'y', 'z'):
         controls.extend(getattr(ui, f'laser_{axis}_{unit}') for unit in ('mm', 'um', 'nm'))
@@ -517,7 +588,20 @@ def test_laser_compact_layout_preserves_controls_and_readouts(instrument_window,
         assert field.width() >= field.fontMetrics().horizontalAdvance(field.text()) + 30
     assert not ui.laser_stage_reference.isEnabled()
     assert not ui.switch_to_cli_button.isEnabled()
-    assert ui.label_9.text() == 'Selected output (W)'
+    assert not ui.nktpbus_mode_switch.isEnabled()
+    assert not hasattr(ui, 'laser_native_control_button')
+    assert ui._laser_power_control_mode == 'watts'
+    assert ui.laser_power_mode_button.text() == 'Use AOM (%)'
+    assert not ui.laser_power.isEnabled()
+    assert not ui.laser_ir_power_control.isEnabled()  # No device readback yet.
+    assert not hasattr(ui, 'laser_aom_advanced_button')
+    assert not hasattr(ui, 'laser_ir_power_apply')
+    assert ui.laser_power.isVisible() and ui.label.isVisible()
+    assert ui.gridLayout_3.itemAtPosition(1, 1).widget() is ui.laser_ir_power_control
+    assert ui.gridLayout_3.itemAtPosition(4, 1).widget() is ui.laser_power
+    assert ui.label.text() == 'AOM (%)'
+    assert ui.laser_ir_power_label.text() == 'Measured IR power (W)'
+    assert ui.label_9.text() == 'Selected output power (W)'
     assert ui.label_10.text() == 'Pulse energy (µJ)'
     assert ui.label_2.text() == 'Base rate (kHz)'
     assert ui.label_11.text() == 'Output rate (kHz)'
@@ -550,6 +634,44 @@ def test_laser_compact_layout_preserves_controls_and_readouts(instrument_window,
     assert ui.laser_connection_banner.isVisible()
     assert area.verticalScrollBar().value() == 0
     window.grab().save(str(tmp_path/'laser.png'))
+
+
+@pytest.mark.parametrize('instrument_window', ['laser'], indirect=True)
+@pytest.mark.parametrize('protocol', ['cli', 'nktpbus'])
+def test_primary_aom_controls_live_output_and_readback_never_replays_edits(instrument_window, protocol):
+    from unittest.mock import Mock
+    window, ui, app = instrument_window
+    target = SimpleNamespace(aom=800)
+    setter = Mock(side_effect=lambda value: setattr(target, 'aom', value))
+    ui.laser_device = SimpleNamespace(
+        protocol=protocol, supports_wavelength_changes=False,
+        wavelength_basis='IR selection read back from device',
+        freq_avaliable=lambda: 'e_freq=4 --> 400000 Hz',
+        FreqRead=lambda: 'Frequency index parameter: 4', DivRead=lambda: 'Division factor: 1',
+        AOMRead=lambda: f'AOM relative setting: {target.aom}', wavelength_read=lambda: 'Current position=IR',
+        read_average_power=lambda: '1.0 W', ModeRead=lambda: 'e_mode of AOM: 2', AOM=setter,
+        StatusRead=lambda: 'ly_oxp2_dev_status 129',
+    )
+    ui._sync_controls_from_device(initial=True)
+    window.show()
+    app.processEvents()
+    assert ui._laser_power_control_mode == 'watts' and not ui.laser_power.isEnabled()
+    ui.laser_power_mode_button.click()
+    app.processEvents()
+    field = ui.laser_power
+    assert field.isVisible() and field.isEnabled() and field.value() == 20.
+    field.setValue(25.)
+    setter.assert_not_called()  # The GUI queues the request for the status loop.
+    ui.check_laser_status()
+    setter.assert_called_once_with(1000)
+    assert not ui.change_laser_power
+    target.aom = 1200
+    ui._sync_controls_from_device()
+    assert field.value() == 30.
+    ui.check_laser_status()
+    assert setter.call_count == 1
+    assert not ui.change_laser_power
+    assert not hasattr(ui, 'laser_aom_advanced_button')
 
 
 @pytest.mark.parametrize('instrument_window', ['visualization'], indirect=True)

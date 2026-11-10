@@ -7,6 +7,7 @@ import pandas as pd
 
 from pyccapt.calibration.core.correction_models import PolynomialCorrectionModel
 from pyccapt.calibration.core.dataset import CalibrationDataset
+from pyccapt.calibration.core.share_variables import Variables
 
 
 def test_calibration_dataset_publishes_units_masks_and_stable_hash():
@@ -45,3 +46,38 @@ def test_voltage_model_honors_requested_polynomial_degree():
 
     np.testing.assert_allclose(model.predict_factor(voltage), factor, atol=1e-12)
     assert len(model.provenance()["coefficients"]) == 4
+
+
+def test_working_arrays_are_writable_and_detached_from_the_loaded_frame():
+    """The calibration steps mutate the working arrays in place.
+
+    ``Series.to_numpy()`` returns a read-only view under pandas copy-on-write,
+    and a writable view would write through into the loaded dataframe the
+    source hash was computed over, so both accessors must copy.
+    """
+    frame = pd.DataFrame(
+        {
+            "t (ns)": [1.0, 2.0, 3.0],
+            "high_voltage (V)": [4000.0, 4100.0, 4200.0],
+            "pulse_v (V)": [0.0, 0.0, 0.0],
+            "x_det (cm)": [0.1, 0.2, 0.3],
+            "y_det (cm)": [0.4, 0.5, 0.6],
+            "mc (Da)": [10.0, 11.0, 12.0],
+            "mc_uc (Da)": [10.0, 11.0, 12.0],
+        }
+    )
+    dataset = CalibrationDataset.from_frame(frame)
+    column = dataset.values("t (ns)")
+    column[0] = -1.0
+    assert dataset.frame["t (ns)"].iloc[0] == 1.0
+
+    variables = Variables()
+    variables.sync_from_data(frame)
+    source_hash = variables.dataset.source_hash
+    for name in ("dld_t", "dld_high_voltage", "dld_pulse_v", "dld_x_det",
+                 "dld_y_det", "mc", "mc_uc"):
+        array = getattr(variables, name)
+        assert array.flags.writeable, name
+        array[0] += 1.0
+    assert variables.data["t (ns)"].iloc[0] == 1.0
+    assert variables.dataset.source_hash == source_hash

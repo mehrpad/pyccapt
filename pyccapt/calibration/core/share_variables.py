@@ -13,6 +13,11 @@ function. It holds, for the dataset currently loaded:
   auto-calibration buttons whether the global t0/flight-path step has
   already run on THIS dataset.
 
+Every array above is an independent, writable copy of its dataframe
+column, never a view into ``data``: the calibration steps mutate the
+working arrays in place, and a view would both be read-only under
+pandas copy-on-write and write through into the loaded dataframe.
+
 ``sync_from_data`` rebuilds all of the above from a dataframe after a
 load / crop / reset; it resets the per-dataset flags so a freshly loaded
 dataset is not mistaken for an already-calibrated one. State/validation
@@ -232,7 +237,7 @@ class SharedVariablesBase:
     def _column_or_zeros(dataframe: pd.DataFrame, column: str, *, like: str | None = None) -> np.ndarray:
         """Return a dataframe column as ndarray, or zeros matched to another column length."""
         if column in dataframe.columns:
-            return dataframe[column].to_numpy()
+            return dataframe[column].to_numpy(copy=True)
         if like is not None and like in dataframe.columns:
             return np.zeros(len(dataframe[like].to_numpy()))
         return np.zeros(len(dataframe))
@@ -241,7 +246,7 @@ class SharedVariablesBase:
     def _column_or_nan(dataframe: pd.DataFrame, column: str) -> np.ndarray:
         """Return positional data, using NaN when the capability is absent."""
         if column in dataframe.columns:
-            return dataframe[column].to_numpy()
+            return dataframe[column].to_numpy(copy=True)
         return np.full(len(dataframe), np.nan, dtype=float)
 
     def sync_from_data(
@@ -265,9 +270,9 @@ class SharedVariablesBase:
 
         self.dld_high_voltage = dataset.values("high_voltage (V)")
         if "pulse_v (V)" in frame.columns:
-            self.dld_pulse_v = frame["pulse_v (V)"].to_numpy()
+            self.dld_pulse_v = frame["pulse_v (V)"].to_numpy(copy=True)
         elif "pulse" in frame.columns:
-            self.dld_pulse_v = frame["pulse"].to_numpy()
+            self.dld_pulse_v = frame["pulse"].to_numpy(copy=True)
         else:
             self.dld_pulse_v = np.zeros(len(frame))
         self.dld_pulse_l = dataset.values("pulse_l (pJ)")
@@ -279,7 +284,7 @@ class SharedVariablesBase:
 
         self.mc = self._column_or_zeros(frame, "mc (Da)", like="t (ns)")
         if "mc_uc (Da)" in frame.columns:
-            self.mc_uc = frame["mc_uc (Da)"].to_numpy()
+            self.mc_uc = frame["mc_uc (Da)"].to_numpy(copy=True)
         else:
             self.mc_uc = self.mc.copy()
 

@@ -8,7 +8,7 @@ no serial port, laser emission or stage motion was operated during the audit.
 
 | Area | Manual evidence | Implemented correction |
 | --- | --- | --- |
-| Power setting | 800-621-01 p119: `ly_oxp2_power` is legacy pre-5.0 pulse energy in nJ; p120: `e_power` is relative AOM amplitude 0–4000 | Modern GUI uses **IR AOM setting (%)**, converted to 0–4000. Never presents this as W or mW. `laser_aom_max_percent` limits commands; old `max_laser_power` is not reused. |
+| Power setting | 800-621-01 p119: `ly_oxp2_power` is legacy pre-5.0 pulse energy in nJ; p120: `e_power` is relative AOM amplitude 0–4000 | Primary **Laser power (W)** uses native calibrated register 0x20. **Advanced AOM (%)** converts percent to 0–4000; it is never presented as W. `laser_aom_max_percent` limits commands; old `max_laser_power` is not reused. |
 | IR monitor | p119 `e_mlp?` description mentions average power and a factory energy option; both examples explicitly return nJ | Parse the response unit (W/mW/µW or J/mJ/µJ/nJ/pJ). Unitless or ambiguous readings are unavailable. |
 | Harmonic monitor | pp139–140 `ls_output_power?` returns selected harmonic average power in W | Green/UV/DUV use this monitor, never substitute the IR monitor. Unsupported FHG replies remain unavailable. FHG firmware compatibility still needs a real readback. |
 | Energy arithmetic | E=P/f, with f=base/divider | Monitor power produces energy in nJ; energy replies produce estimated power. GUI shows W and µJ. These are internal-monitor estimates, not measured energy at the specimen. |
@@ -140,6 +140,14 @@ The real DUV reply is needed before deciding whether to extend the parser.
 An attempted read-only diagnostic on 2026-10-05 could not open COM9 because it
 was already owned by another process; no live DUV reply was captured.
 
+The user-supplied log on 2026-10-21 establishes a combined CLI response:
+`NKT SHG\tOutput power=0mW` and `NKT FHG\tOutput power=0mW`, sometimes followed
+by `Listen=ok`. The parser now selects the SHG line for Green, THG for UV and
+FHG for DUV before parsing its explicit unit. Both the full reply and selected
+line are recorded. A missing, invalid or duplicate selected line remains
+unavailable; another module's reading is never substituted. This establishes
+the CLI reply format, not native harmonic register scaling or accuracy.
+
 The optical LCD tooltips now show the reason and a bounded raw monitor reply.
 `laser_telemetry.error` preserves the diagnostic alongside the existing raw
 replies, and the GUI log records changed failures once and subsequent recovery.
@@ -148,9 +156,183 @@ frequency alone is insufficient. A valid `0.00W` reply displays numeric zero;
 unsupported, ambiguous or missing monitor readings display dashes. IR monitor
 values retain their IR meaning and are not presented as measured DUV output.
 
+The laser GUI displays **Measured IR power (W)** separately from **Selected
+output power (W)**, **Pulse energy (µJ)** and **Output rate (kHz)**. The AOM
+control remains a relative percentage. The IR readout uses the existing
+`e_mlp?` query and stays available when the selected harmonic monitor is
+unsupported or times out. Conversely, an IR-monitor failure does not hide a
+valid selected-harmonic reading. Missing, disconnected or stale readings show
+dashes; an explicit zero remains zero. When `e_mlp?` returns energy units, the
+IR label changes to **IR power estimate (W)** and its tooltip explains the
+energy/rate conversion. These values describe internal monitors, not specimen
+power or pulse energy.
+
 The local `Oxcart Laser Safty Turn On.docx` describes the external curtain,
 cover/key/arm interlocks and physical shutter. Software status is not a readback
 of those external interlocks; this audit does not claim they are instrumented.
+
+## Switching between PyCCAPT and NKT CONTROL
+
+In the Laser Control window, click **Nktpbus mode** to hand the laser to
+NKT Photonics CONTROL. Laser communication controls do not require the stage's
+Override Access; experiments and alignment must be stopped. PyCCAPT suspends CLI polling,
+clears pending laser actions, closes its current session, then sends the same
+`ly_oxp2_nktpbus=1\n` command as `python -m
+pyccapt.control.nkt_photonics.nktpbus_activate`. The command is flushed and the
+port closed without waiting for a CLI reply: this instrument can switch
+protocols without acknowledging it. The banner reports that the command was
+sent and the port released; it does not claim a verified NKTPBus readback.
+
+PyCCAPT can remain open while CONTROL operates the laser. Disconnect the laser
+in CONTROL (or close CONTROL) before clicking **Switch to CLI**. Windows permits
+only one serial-port owner. If another application holds the port, PyCCAPT
+reports that and allows another attempt without restarting. Switching is
+blocked during an experiment or laser alignment.
+
+The CLI button first releases any previous PyCCAPT session and probes CLI. If
+CLI does not respond, it uses the NKT SDK to write OXPS register `0x39 = 1`
+(documented in the installed SDK's `Register Files/95.txt`). The SDK port is
+closed before the GUI reconnects at 38400 baud. Reconnection requests Listen
+and refreshes device readbacks; failed handshakes close their port before a
+retry. Polling resumes after the transition, and repeated mode clicks cannot
+overlap. Failed SDK imports are removed from the cache so a later click can
+retry loading the SDK.
+
+Restart PyCCAPT once after installing this code to load the updated handlers.
+Subsequent mode switches do not require a software restart. Hardware round-trip
+verification remains necessary; regression tests use simulated serial ports.
+
+The 2026-10-20 GUI log found OXPS at `0x0F` on COM9 but returned SDK result
+`6:RegResultTimeout` from the `0x39 = 1` write. The protocol change resets the
+mainboard (manual p166), so an absent bus acknowledgement is ambiguous. Both
+the CLI button and IR-watt restore now close the SDK port first, wait for the
+reset, and retry read-only CLI status queries. SDK result 6 is accepted only
+when a valid numeric CLI status is subsequently received; NACK/CRC/type errors
+still fail. Even an acknowledged write is not reported as a completed switch
+without CLI verification. Probes close their serial handles after each attempt,
+and a shutdown cancels further retries.
+
+A separate live diagnostic process encountered a native SDK access violation
+in `deviceGetType` during address probing. Discovery now reads the SDK's
+auto-scan table through `deviceGetAllTypes`, whose byte indexes are the module
+addresses. It does not issue type queries to absent addresses. Read-only COM9
+and SDK checks initially did not establish communication; the operator then
+confirmed the controller had been powered on. At 38400 baud a read-only status
+query returned status 11 after a standalone newline cleared partial input.
+New CLI sessions now terminate partial ASCII input and drain boot/help output
+until a quiet interval before their first query. Clearing only the host RX
+buffer cannot clear a partial command buffered by the laser itself.
+
+With the controller powered, a live CLI -> NKTPBus -> CLI cycle found module
+`0x0F`, reproduced SDK result `6:RegResultTimeout`, then verified CLI status on
+the first probe after closing the SDK port. The final status was 17 (setup).
+No emission-enable, interlock-reset or stage-motion commands were issued.
+Two further complete cycles succeeded in one process using the same cached
+SDK module. Each reproduced result 6 and verified CLI on the first status
+probe; the laser was left in CLI mode with all diagnostic port handles closed.
+Regression tests cover the reported reset timeout, boot delays, partial input,
+help output, absent CLI replies and exclusive port ownership.
+
+## Primary laser power control in watts
+
+### Persistent native IR control
+
+For watt adjustment while emitting, select IR, Green or DUV through CLI, then
+press **Standby** from Listen. Standby automatically prepares native watt
+control before warming, so Laser On no longer starts an AOM-only CLI session.
+Preparation performs one CLI -> NKTPBus handover, confirms Listen, restores
+and verifies the previous base-rate index/divider, then queues Standby.
+Power/AOM values are never automatically restored. If preparation or timing
+verification fails, no warm-up or emission is queued. Once Standby is confirmed
+ready, an explicit **Laser On** request enables emission with watt control
+already connected. Watt edits retain the connection and operating state.
+
+If Laser On is pressed from an existing CLI-ready Standby, preparation first
+returns to Listen and queues a new warm-up; the operator presses Laser On
+again after ready confirmation. Emission is never automatically resumed after
+the handover. **Connect W control** remains as manual recovery; while already
+on it explicitly says **Connect W (stops output)**. Stage Override Access is
+not required. Wait for queued wavelength edits to be read back before preparing
+power control. Lower-state requests from an already-on laser remain available
+without depending on SDK setup.
+The state label identifies native watt control. **Laser power (W)** is the
+primary power field; press Enter or leave the field to commit an edited value.
+There is no separate Apply button or GUI watt conversion through CLI/Listen.
+Typing waits for commit; readback refreshes and repeated focus-out events do
+not send another request. A refused edit is discarded rather than replayed.
+The request writes only the native `0x20` power setpoint and verifies its
+readback; repeated watt
+changes do not write the FSM, shutter, modulation mode or protocol registers.
+The original relative AOM control remains available in **Advanced AOM (%)**,
+using `0x05`; alignment and existing percentage controls retain their units.
+Telemetry refreshes the firmware
+watt setpoint as well as the relative AOM setting without issuing new writes.
+The requested watts always refer to the fundamental IR power feeding the
+converter, including while Green or DUV is selected. They are not a calibrated
+Green/DUV output-power target and do not use a fixed conversion efficiency.
+The watt ceiling is `laser_ir_max_power_w` (5.2 W for this instrument), with
+0.001 W resolution. The installed NKT SDK is required for native control.
+In CLI mode, the primary watt field is disabled until native control is
+explicitly connected; advanced relative AOM remains available as before.
+
+The persistent adapter maps the documented main-board FSM, interlock, fault,
+frequency, divider, IR monitor and power registers into the existing GUI
+state contract. Connection and polling never reset an interlock or enable
+emission. Explicit Laser On/Output Enable buttons retain their emission
+semantics. Manual watt requests remain blocked during experiments/alignment,
+warmup, external modulation and faults. A relative AOM ceiling below 100%
+blocks nonzero native watt requests because its amplitude cannot be predicted
+before the firmware applies its calibration; a watt ceiling is enforced
+independently.
+
+The native adapter retains the wavelength index actually read back through CLI
+before handover; it never defaults a Green/DUV selection to IR. This is cached
+selection provenance, not a new native harmonic-position measurement. The raw
+reply is marked `CLI-verified`, telemetry records this basis, and the wavelength
+tooltips identify it. Wavelength editing is locked until returning to CLI.
+The installed harmonic register map does not establish FHG/DUV scaling, so no
+harmonic watt values are guessed: selected harmonic power and pulse energy
+remain unavailable in native mode while the measured IR monitor remains live.
+Existing CLI harmonic controls remain available. **Switch to CLI**
+and **Nktpbus mode** release the SDK session; these explicit ownership handovers
+request Listen, unlike watt-only changes. Native shutdown uses the existing
+safe-off sequence before closing the handle. No live emission was enabled to
+test this feature; repeated updates in emitting FSM states with IR, Green and
+DUV selected are simulated. Physical wavelength retention across the initial
+protocol reset and harmonic conversion efficiency still need instrument
+verification; individual watt updates perform no protocol reset.
+
+### Distinct state buttons and pending LEDs
+
+**Open/Close Output** toggles only the AOM gate while the amplifier remains on.
+The separate **Laser Off** button requests Standby from either output-open or
+output-closed On states; it no longer duplicates Close Output. From ready
+Standby, **Laser On (emits)** retains the documented emission-enable behavior.
+
+The Listen, Standby, Laser On and Output LEDs alternate red/orange every
+500 ms while their requested transitions are pending. Standby warm-up also
+blinks instead of displaying a fixed orange light. Green always represents
+an observed active state; closing output or turning the laser off settles
+the corresponding indicator to red. A command must be sent and confirmed by
+a fresh status read before its pending indicator settles. Cached UI refreshes
+do not acknowledge commands. New lower-state requests cancel superseded
+indicators; faults, lost status, handovers and shutdown clear pending requests.
+The animation timer updates only pixmaps and never performs hardware I/O.
+
+### CLI compatibility helper
+
+The previous **Apply W (Listen)** GUI workflow has been removed. The standalone
+`devices.nkt_ir_power.calibrated_aom` helper remains for compatibility, with its
+own simulated serial/SDK tests. It converts via the firmware and restores CLI;
+it is not called by the laser GUI. The CLI's relative `e_power` setting is
+never interpreted as watts or scaled by the configured maximum.
+
+The watt request is not a continuous power feedback loop. Subsequent manual
+AOM edits and firmware resets/settings changes can override it. Readbacks
+remain authoritative; the GUI never automatically restores a previous power
+request after a state or frequency change. Live watt accuracy and round-trip
+behavior still require instrument verification; automated tests use simulated
+SDK and serial responses.
 
 ## Verification
 

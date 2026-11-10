@@ -1,0 +1,303 @@
+; --------------------------------------
+; DAn Cobold Command File (CCF)
+;
+; for measurements with up to 4 (DLD and/or HEX) detectors
+;
+; --------------------------------------
+; written by Achim Czasch (RoentDek Handels GmbH)
+;
+; --------------------------------------
+
+;maskcal,load,W:\calib.txt;
+;maskcal,set_mode,1;
+
+Parameter 1000,202002031050; check-ID (tests compatibility of CCF/DAn)
+
+Parameter 1001, 0		; reserved for the event counter (will be incremented by the DAn)
+Parameter 1002, 0.25		; rate integration time in seconds (default = 1)
+Parameter 1003, 100		; ADC only: show raw traces every n displayed events (Attention: slows down the event rate!), 0 = disabled
+               	        	; please also check parameter 53
+Parameter 1004, 1		; 1 = Anti-Moire randomization
+Parameter 1005, -1		; Start of DAq Data for DAn (Start Coordinate)	-1 = automatic (always use -1)
+Parameter 1006, -1		; Start of DAn Data (Start Coordinate)		-1 = automatic (always use -1)
+
+Parameter 1007, 0		; Reset event counter at the beginning of each LMF (1 = yes, 0 = no (default))
+Parameter 1008, 3		; Write data back to hard drive (0=no, 1=yes ASCII, 2=yes LMF, 3=ASCII special, 4=binary)
+
+Parameter 1009, 1400		; Index of first user defined parameter (after the parameters for the detectors)
+
+
+;////////////////////////////////////////////////////
+; ION detector:
+
+Parameter 1100, 1		; use this detector (0 = no, 1 = yes)
+Parameter 1101, 1		; Data comes from a HEX-detector or squared (DLD) detector (0=DLD, 1=HEX)
+Parameter 1102, 0.890000	; Time to mm calibration factor for u (mm/ns)
+Parameter 1103, 0.917500	; Time to mm calibration factor for v (mm/ns)
+Parameter 1104, 0.888000	; Time to mm calibration factor for w (mm/ns)
+Parameter 1105, -0.825000	; Offset for w layer (units: nanoseconds)
+
+
+; How to convert the w offset the Standard-CCF  to this Pro version :
+; w_offset_standard = 0.5 * w_offset_pro * fw
+
+Parameter 1106, -1.1		; Position offset X (so that the MCP is centered around x=0)
+Parameter 1107, 1.35		; Position offset Y (so that the MCP is centered around y=0)
+
+Parameter 1108, -114.9291	; Offset for time sum of U (to shift the time sum to zero)
+Parameter 1109, -114.041		; Offset for time sum of V
+Parameter 1110, -116.16		; Offset for time sum of W
+
+Parameter 1111, 40		; radius of active MCP area in mm
+
+Parameter 1112, 0		; Rotation Offset Center for x (after applying parameter xx06 and xx07)
+Parameter 1113, 0		; Rotation Offset Center for y (after applying parameter xx06 and xx07)
+Parameter 1114, 0		; Rotation Angle (in mathematical direction) (unit: DEG)
+
+Parameter 1115, 1.5		; half width of time sum gate for layer u (units: nanoseconds)
+Parameter 1116, 1.2		; half width of time sum gate for layer v (units: nanoseconds)
+Parameter 1117, 2.3		; half width of time sum gate for layer w (units: nanoseconds)
+
+Parameter 1118, 88		; Maximum runtime (nanoseconds) of signals across u layer
+Parameter 1119, 86		; Maximum runtime (nanoseconds) of signals across v layer (0 = same as u)
+Parameter 1120, 88		; Maximum runtime (nanoseconds) of signals across w layer (0 = same as u)
+
+Parameter 1121, 25.		; Deadtime of anode electronics (nanoseconds) (Always use 25 ns)
+Parameter 1122, 25.		; Deadtime of MCP electronics (nanoseconds) (Always use 25 ns)
+
+Parameter 1123, 1		; Use advanced reconstruction routine (0=no, 1=yes)
+Parameter 1124, 1      		; (only needed if the advanced reconstruction routine is used)
+Parameter 1125, 1		; use HEX non-linearity correction (0=no, 1=yes)
+Parameter 1126, 0		; radius correction: 0 = off, n = number of used points (see parameters xx65++)
+Parameter 1127, 0		; use tail correction (0=no, 1=yes) (not yet supported)
+Parameter 1128, 0		; auto calibration    (0=no, 1=yes) (not possible if advanced reconstruction is running)
+
+Parameter 1129, 1		; TDC channel of u1 on detector
+Parameter 1130, 2		; TDC channel of u2 on detector
+Parameter 1131, 3		; TDC channel of v1 on detector
+Parameter 1132, 4		; TDC channel of v2 on detector
+Parameter 1133, 5		; TDC channel of w1 on detector
+Parameter 1134, 6		; TDC channel of w2 on detector
+Parameter 1135, 8		; TDC channel of mcp on detector (please set to -1 if MCP signal is not used)
+
+Parameter 1136, 0		; time zero offset (will be added to all times on this detector)
+
+Parameter 1137, 0		; 1 = use MCP signal, 0 = discard all MCP signals and reconstruct using anode signals
+
+Parameter 1138, 0		; display calibration warnings (1 = enabled, 0 = disabled)
+
+Parameter 1139, 0		; DLD linearity correction (0 = off, 1 = use only on x-layer, 2 = use only on y-layer, 3 = use on both layers
+
+Parameter 1140, 60		; number of points to write into the calibration tables (default is 60)
+Parameter 1143, 150		; number of bins in each dimension in 2D deviation and resolution plots (default is 150)
+
+Parameter 1150, 0		; insert gaps in anode layers (0 = no, 1 = yes)
+
+
+Parameter 1165,18;     1st point measured radius  (see parameter xx26)
+Parameter 1166,18.805;     1st point real radius
+Parameter 1167,32.4;     2nd point measured radius
+Parameter 1168,35.259;     2nd point real radius
+Parameter 1169,37.5;     3rd point measured radius
+Parameter 1170,42.31;     3rd point real radius
+
+Parameter 1190,0 		; Condition flag: value will appear as value in coordinate "condition1"
+
+
+
+; XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+Parameter 1191,0		; use special sort algorithm for truly simultaneous double impacts (with only 1 MCP signal)
+; XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+
+
+Parameter 1199,0		; first parameter for the next detector (0 if this was the last detector)
+
+; end of ION detector
+;///////////////////////////////////////////////////
+
+
+
+
+; //////////////////////////////////////////////////
+; Parameters for the analysis:
+
+Parameter 1400,0.		; time zero offset (will be added to all times on all detectors)
+Parameter 1421,7		; channel number of start signal (0 if not used)
+
+Parameter 1450,0		; 1 = enable the following filters:
+Parameter 1451,1		; discard all events with more than n measured MCP signals  (0 = disabled)
+;Parameter 1452,60		; discard all events with at least one MCP signal > x ns    (0 = disabled)
+Parameter 1452,125		; discard all events with at least one MCP signal > x ns    (0 = disabled)
+						; (TDC channel 7 must contain the external timing signal!)
+Parameter 1453,0.		; discard all events with at least one MCP signal < x ns    (0 = disabled)
+						; (TDC channel 7 must contain the external timing signal!)
+;///////////////////////////////////////////////////
+
+
+
+
+
+
+;///////////////////////////////////////////////////
+; --------
+; DAn-output data:
+; --------
+
+Coordinate START_OF_DAN_COORDINATES;
+
+Coordinate AbsoluteEventTime;
+Coordinate DeltaEventTime;
+Coordinate seconds_since_midnight;
+Coordinate EventCounter;
+Coordinate True;
+Coordinate rate;
+
+Coordinate n01,n02,n03,n04,n05,n06,n07,n08,n09,n10;
+Coordinate n11,n12,n13,n14,n15,n16,n17,n18,n19,n20;
+
+SetHitMatrixCoordinatesAndSpectrum,Const??,ch??n,n_matrix_x,n_matrix_y;		Defines HitMatrix Coordinates (ConstXX, n_matrix_x, n_matrix_y) and HitMatrix Spectrum according to parameter 32 and 33;
+
+;//////////////////////////////////////
+; // ION detector:
+Coordinate i_det_number_of_particles;
+Coordinate i_det_rate;
+Coordinate i_ConsistenceIndicator;
+
+Coordinate i_amplitude;
+
+Coordinate i_u_ns,i_v_ns,i_w_ns;
+Coordinate i_u_from_vw_ns,i_v_from_uw_ns,i_w_from_uv_ns;
+Coordinate i_u_perp_from_vw_ns,i_v_perp_from_uw_ns,i_w_perp_from_uv_ns;
+Coordinate i_delta_u_vw_ns,i_delta_v_uw_ns,i_delta_w_uv_ns;
+Coordinate i_sumu,i_sumv,i_sumw;
+
+SetCoordinatesArray,i_??_X_mm,p33;
+SetCoordinatesArray,i_??_Y_mm,p33;
+SetCoordinatesArray,i_??_r_mm,p33;
+SetCoordinatesArray,i_??_TOF_ns,p33;
+SetCoordinatesArray,i_??_raw_TOF_ns,p33;
+SetCoordinatesArray,i_??_used_reconstruction_method,p33;
+
+Coordinate i_Xuv_mm,i_Yuv_mm,i_Xuw_mm,i_Yuw_mm,i_Xvw_mm,i_Yvw_mm;
+
+Coordinate i_corrected_sum_U;
+Coordinate i_corrected_sum_V;
+Coordinate i_corrected_sum_W;
+Coordinate i_reflection_u1,i_reflection_u2;
+Coordinate i_reflection_v1,i_reflection_v2;
+Coordinate i_reflection_w1,i_reflection_w2;
+
+Coordinate i_condition1;
+
+
+;///////////////////////////////////////////////////
+; // Physics results:
+
+Coordinate START_OF_USER_COORDINATES;
+
+Coordinate example_value1;
+Coordinate example_value2;
+
+;DAnModule,write_ASCII_file,use_LMF_name,multi_file,p1001,i_det_number_of_particles,i_01_X_mm,i_01_Y_mm,i_01_TOF_ns;
+;DAnModule,write_ASCII_file,w:\data.txt,one_file,p1001,i_det_number_of_particles,i_01_X_mm,i_01_Y_mm,i_01_TOF_ns;
+
+condition i_det_number_of_particles,1.5,600,con_double;
+condition i_det_number_of_particles,0.5,1.5,con_single;
+
+
+;///////////////////////////////////////////////////
+; Histogram definitions
+
+
+try define1 0.,6.,1,i_det_number_of_particles,n,none,always,number of particles;
+
+;try define2 -22.,22.,.1,none,X [mm],-22.,22.,.1,none,Y [mm],none,always,xy_fast_ion;
+;DAnModule,init_fast_hist,xy_fast_ion,p1101,p1129,p1130,p1131,p1132,p1102,p1103;
+try define1 0.,4000.,1,i_All_TOF_ns,TOF [ns],none,always,all ions TOF [ns];
+try define1 50.,60.,0.01,i_All_raw_TOF_ns,TOF [ns],none,always,raw (unfiltered) TOFs [ns];
+try define1 50.,100.,0.05,i_01_TOF_ns,TOF1 [ns],none,always,TOF1 [ns];
+try define1 50.,100.,0.05,i_02_TOF_ns,TOF2 [ns],none,always,TOF2 [ns];
+
+try define2 -45,45,0.15,i_All_X_mm,X [mm],-45,45,.5,i_All_Y_mm,Y [mm],none,always,all ions xy [mm];
+
+try define2 34.,70.,0.05,i_01_TOF_ns,TOF1 [ns],34,70.,0.05,i_02_TOF_ns,TOF2 [ns],none,always,pipico;
+
+
+
+; definition of useful spectra for
+; DAn-Standard Analysis
+
+;define1 0,300,1,AbsoluteEventTime,AbsoluteEventTime [s],none,always,Time since Start;
+define1 0,0.0015,0.00001,DeltaEventTime,DeltaEventTime [s],none,always,Time between Events;
+;define1 0,65000,1,EventCounter,EventCounter [#],none,always,EventCounter;
+
+
+; // Histograms for ION detector:
+define1 -1.,66.,1,i_ConsistenceIndicator,ConsistenceIndicator,none,always,i_ConsistenceIndicator;
+define2 -45,45,0.15,i_01_X_mm,X [mm],-45,45,0.15,i_01_Y_mm,Y [mm],none,always,i_01 xy [mm];
+define2 -45,45,0.15,i_01_X_mm,X [mm],-45,45,0.15,i_01_Y_mm,Y [mm],none,con_double,i_01 xy [mm];
+define2 -45,45,0.15,i_02_X_mm,X [mm],-45,45,0.15,i_02_Y_mm,Y [mm],none,always,i_02 xy [mm];
+define2 -45,45,0.15,i_02_X_mm,X [mm],-45,45,0.15,i_02_Y_mm,Y [mm],none,con_double,i_02 xy [mm];
+define2 -45,45,0.15,i_Xuv_mm,Xuv [mm],-45,45,0.15,i_Yuv_mm,Yuv [mm],none,always,i_XYuv [mm];
+define2 -45,45,0.15,i_Xuw_mm,Xuw [mm],-45,45,0.15,i_Yuw_mm,Yuw [mm],none,always,i_XYuw [mm];
+define2 -45,45,0.15,i_Xvw_mm,Xvw [mm],-45,45,0.15,i_Yvw_mm,Yvw [mm],none,always,i_XYvw [mm];
+
+;define2 -100,100,0.5,i_u_ns,i_u [ns],-15,15,0.1,i_delta_u_vw_ns,i_delta_u [ns],none,always,delta_u_vw [ns];
+;define2 -100,100,0.5,i_v_ns,i_v [ns],-15,15,0.1,i_delta_v_uw_ns,i_delta_v [ns],none,always,delta_v_uw [ns];
+;define2 -100,100,0.5,i_w_ns,i_w [ns],-15,15,0.1,i_delta_w_uv_ns,i_delta_w [ns],none,always,delta_w_uv [ns];
+
+define1 -300,300,0.1,i_sumu,sum u [ns],none,always,time i_sum U [ns];
+define1 -300,300,0.1,i_sumv,sum v [ns],none,always,time i_sum V [ns];
+define1 -300,300,0.1,i_sumw,sum w [ns],none,always,time i_sum W [ns];
+
+define2 -40.,40,.05,i_sumu,sum_u,-40.,40,.05,i_sumv,sum_v,none,always,sum_u vs sum_v [ns];
+define1 -220,220,1,i_u_ns,u [ns],none,always,i_u [ns],,true;
+define1 -220,220,1,i_v_ns,v [ns],none,always,i_v [ns],,true;
+define1 -220,220,1,i_w_ns,w [ns],none,always,i_w [ns],,true;
+define2 -200.,200.,1.,i_u_ns,u [ns],-15.,15.,0.05,i_sumu,sumu [ns],none,always,i_sumu vs. i_u;
+define2 -200.,200.,1.,i_u_ns,u [ns],-15.,15.,0.05,i_corrected_sum_U,corrected sumu [ns],none,always,corrected i_sumu vs. i_u;
+define2 -200.,200.,1.,i_v_ns,v [ns],-15.,15.,0.05,i_sumv,sumv [ns],none,always,i_sumv vs. i_v;
+define2 -200.,200.,1.,i_v_ns,v [ns],-15.,15.,0.05,i_corrected_sum_V,corrected sumv [ns],none,always,corrected i_sumv vs. i_v;
+define2 -200.,200.,1.,i_w_ns,w [ns],-15.,15.,0.05,i_sumw,sumw [ns],none,always,i_sumw vs. i_w;
+define2 -200.,200.,1.,i_w_ns,w [ns],-15.,15.,0.05,i_corrected_sum_W,corrected sumw [ns],none,always,corrected i_sumw vs. i_w;
+;define2 -50,50,1,none,x [mm],-50,50,1,none,y [mm],none,always,i_det_PHD;
+define1 -1,23,0.5,i_01_used_reconstruction_method,method,none,always,used reconstruction method i_(Hit 1);
+;try define2 -100.,150.,0.5,i_All_TOF_ns,TOF [ns],-1.,21.,1,i_All_used_reconstruction_method,m,none,always,TOFs [ns] vs method;
+;define1 -200,200,0.5,i_reflection_u1,[ns],none,always,i_reflection_u1;
+;define1 -200,200,0.5,i_reflection_u2,[ns],none,always,i_reflection_u2;
+;define1 -200,200,0.5,i_reflection_v1,[ns],none,always,i_reflection_v1;
+;define1 -200,200,0.5,i_reflection_v2,[ns],none,always,i_reflection_v2;
+;define1 -200,200,0.5,i_reflection_w1,[ns],none,always,i_reflection_w1;
+;define1 -200,200,0.5,i_reflection_w2,[ns],none,always,i_reflection_w2;
+
+
+
+
+;///////////////////////////////////////
+; Raw data histograms
+
+; hit number spectra
+try define1 -0.5,17.5,0.5,n01,,none,always,n01;
+try define1 -0.5,17.5,0.5,n02,,none,always,n02;
+try define1 -0.5,17.5,0.5,n03,,none,always,n03;
+try define1 -0.5,17.5,0.5,n04,,none,always,n04;
+try define1 -0.5,17.5,0.5,n05,,none,always,n05;
+try define1 -0.5,17.5,0.5,n06,,none,always,n06;
+try define1 -0.5,17.5,0.5,n07,,none,always,n07;
+try define1 -0.5,17.5,0.5,n08,,none,always,n08;
+
+
+; raw tdc data spectra
+try define1 0,2500,1,ch01s01,,none,always,Channel 1 Hit1 [channels];
+try define1 0,2500,1,ch02s01,,none,always,Channel 2 Hit1 [channels];
+try define1 0,2500,1,ch03s01,,none,always,Channel 3 Hit1 [channels];
+try define1 0,2500,1,ch04s01,,none,always,Channel 4 Hit1 [channels];
+try define1 0,2500,1,ch05s01,,none,always,Channel 5 Hit1 [channels];
+try define1 0,2500,1,ch06s01,,none,always,Channel 6 Hit1 [channels];
+try define1 0,2500,1,ch07s01,,none,always,Channel 7 Hit1 [channels];
+
+;try define1 0.1,50,0.2,example_value1,,none,always,example_value1;
+;try define1 -100,100,0.5,example_value2,,none,always,example_value2;
+
+define2 -45,45,0.5,i_01_X_mm,X [mm],-45,45,2,i_01_Y_mm,Y [mm],none,always,TOF_map;

@@ -5,6 +5,7 @@ import time
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
+from pyccapt.control.gui import app_icon
 from pyccapt.control.gui.responsive import make_window_responsive
 from pyccapt.control.core import runtime
 from pyccapt.control.core.control_state import Connection, Evidence, commanded, complete, publish
@@ -338,7 +339,7 @@ class Ui_Stage_Control(object):
     def retranslateUi(self, Stage_Control):
         _translate = QtCore.QCoreApplication.translate
         Stage_Control.setWindowTitle(_translate("Stage_Control", "PyCCAPT Stage Control"))
-        Stage_Control.setWindowIcon(QtGui.QIcon('./files/logo.png'))
+        app_icon.apply_application_icon(window=Stage_Control)
 
     # ------------------------------------------------------------------ wiring
 

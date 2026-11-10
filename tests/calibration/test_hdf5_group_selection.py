@@ -99,3 +99,24 @@ def test_public_eager_default_and_lazy_reads_retain_all_groups(tmp_path):
         np.testing.assert_array_equal(table["tdc/t"][:], np.arange(3.))
     with pytest.raises(ValueError, match="eager"):
         data_tools.read_hdf5(path, groups=("dld",), lazy=True)
+
+
+@pytest.mark.parametrize("unit, factor", [("mm", 0.1), ("cm", 1.0), (None, 1.0)])
+def test_dld_xy_unit_attribute_is_converted_to_cm(tmp_path, unit, factor):
+    # RoentDek runs 283/284 (2026-11) wrote dld/x, dld/y in mm with unit = 'mm'.
+    path = tmp_path / "run.h5"
+    x = np.array([-39.4, 12.5, 39.9])
+    y = np.array([-40.8, -3.0, 39.9])
+    with h5py.File(path, "w") as handle:
+        handle["dld/high_voltage"] = np.full(3, 5000.0)
+        handle["dld/t"] = np.array([100.0, 200.0, 300.0])
+        for name, values in (("x", x), ("y", y)):
+            dataset = handle.create_dataset(f"dld/{name}", data=values)
+            if unit is not None:
+                dataset.attrs["unit"] = unit
+    frame = data_loadcrop.fetch_dataset_from_dld_grp(str(path), "dld")
+    np.testing.assert_allclose(frame["x_det (cm)"], x * factor)
+    np.testing.assert_allclose(frame["y_det (cm)"], y * factor)
+    with data_loadcrop.fetch_dataset_from_dld_grp(str(path), "dld", lazy=True) as table:
+        np.testing.assert_allclose(table["x_det (cm)"][:], x * factor)
+        np.testing.assert_allclose(np.asarray(table["y_det (cm)"]), y * factor)

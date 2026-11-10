@@ -199,6 +199,51 @@ def filter_tdc_by_dld(dld_df: pd.DataFrame, tdc_df: pd.DataFrame) -> pd.DataFram
     keep = orphan | matched_keep
     return tdc_df.loc[keep].reset_index(drop=True).copy()
 
+_LENGTH_TO_CM = {'cm': 1.0, 'mm': 0.1, 'm': 100.0, 'um': 1e-4, 'µm': 1e-4}
+
+
+def _dld_xy_to_cm_factors(filename: str) -> dict[str, float]:
+    """Factor converting ``/dld/x`` and ``/dld/y`` to cm, from their ``unit`` attribute.
+
+    pyccapt writes cm without a unit attribute; some RoentDek acquisitions
+    (e.g. runs 283/284, 2026-11) wrote mm with ``unit = 'mm'``. A missing
+    attribute means cm; an unknown unit is reported and left unscaled.
+    """
+    factors = {'x_det (cm)': 1.0, 'y_det (cm)': 1.0}
+    try:
+        import h5py
+
+        with h5py.File(filename, 'r') as handle:
+            for column, name in (('x_det (cm)', 'dld/x'), ('y_det (cm)', 'dld/y')):
+                unit = handle[name].attrs.get('unit') if name in handle else None
+                if unit is None:
+                    continue
+                unit = (unit.decode() if isinstance(unit, bytes) else str(unit)).strip()
+                if unit in _LENGTH_TO_CM:
+                    factors[column] = _LENGTH_TO_CM[unit]
+                else:
+                    print(f"[*] {name} has unknown unit {unit!r}; loaded without conversion")
+    except OSError:
+        pass
+    return factors
+
+
+class _ScaledSource:
+    """Lazy column source multiplying values by a constant on read."""
+
+    dtype = np.dtype(np.float64)
+
+    def __init__(self, column, factor: float):
+        self._column = column
+        self._factor = factor
+
+    def __len__(self) -> int:
+        return len(self._column)
+
+    def __getitem__(self, item):
+        return np.asarray(self._column[item], dtype=np.float64) * self._factor
+
+
 def _uses_legacy_sc_geometry(filename: str, x_cm, y_cm) -> bool:
     """True when ``/dld`` x/y use the pre-2026-11-05 Surface Concept convention.
 
@@ -308,6 +353,10 @@ def fetch_dataset_from_dld_grp(
             dld_group_storage = create_pandas_dataframe(
                 dld_group_array, mode='dld', flag_old_pyccpat_data=flag_old_pyccpat_data
             )
+            if not flag_old_pyccpat_data:
+                for column, factor in _dld_xy_to_cm_factors(filename).items():
+                    if factor != 1.0:
+                        dld_group_storage[column] = dld_group_storage[column] * factor
             if (
                 convert_legacy_sc_geometry
                 and not flag_old_pyccpat_data
@@ -424,6 +473,10 @@ def _fetch_dataset_from_dld_grp_lazy(filename: str, extract_mode: str, convert_l
 
     from pyccapt.calibration.data_tools.lazy_io import LazyColumn, LazyTable
 
+    if group == 'dld':
+        for column, factor in _dld_xy_to_cm_factors(filename).items():
+            if factor != 1.0 and column in selected:
+                selected[column] = LazyColumn(_ScaledSource(selected[column], factor), name=column, native_dtype=np.float64)
     if (
         convert_legacy_sc_geometry
         and group == 'dld'
